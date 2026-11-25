@@ -223,16 +223,22 @@ func hostSteps(sc *godog.ScenarioContext, t *testing.T, bin string) {
 }
 
 func switchFakeArgs(vendor, id string, i int) []string {
-	switch {
-	case vendor == "claude" && i == 0:
-		return []string{"-p", "--session-id", id}
-	case vendor == "claude" && i%2 == 0:
-		return []string{"-p", "--resume", id}
-	case vendor == "claude":
-		return []string{"--resume", id}
-	case i%2 == 1:
+	if vendor == "claude" {
+		return switchClaudeArgs(id, i)
+	}
+	if i%2 == 1 {
 		return []string{"resume", id}
+	}
+	return []string{"app-server"}
+}
+
+func switchClaudeArgs(id string, i int) []string {
+	switch {
+	case i == 0:
+		return []string{"-p", "--session-id", id}
+	case i%2 == 0:
+		return []string{"-p", "--resume", id}
 	default:
-		return []string{"app-server"}
+		return []string{"--resume", id}
 	}
 }

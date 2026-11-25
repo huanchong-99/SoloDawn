@@ -296,6 +296,11 @@ func (timeoutRequester) Request(ctx context.Context, build func(int64) any) (jso
 }
 
 func TestRequestBriefAndCtxCallErr(t *testing.T) {
+	checkRequestBrief(t)
+	checkCtxCallErr(t)
+}
+
+func checkRequestBrief(t *testing.T) {
 	cases := []struct {
 		sent any
 		want string
@@ -310,6 +315,9 @@ func TestRequestBriefAndCtxCallErr(t *testing.T) {
 			t.Errorf("requestBrief(%#v) = %q, want %q", tc.sent, got, tc.want)
 		}
 	}
+}
+
+func checkCtxCallErr(t *testing.T) {
 	var seen trail
 	seen.see("t=rows seq=1")
 	late, cancelLate := context.WithTimeout(t.Context(), 10*time.Millisecond)
