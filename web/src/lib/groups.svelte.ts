@@ -261,10 +261,12 @@ export class Group {
   }
 }
 
-/** What the person fills in to create a project group (contracts/commands.md 1.1). */
+/** What the person fills in to create a group (contracts/commands.md 1.1). A team group leaves
+ *  `repo` out (contracts/step-2/watch-team.md section 7). */
 export interface NewGroup {
   name: string;
-  repo: string;
+  kind: 'project' | 'team';
+  repo?: string;
   base: string;
   forge: string;
   checks: string[];
@@ -376,12 +378,11 @@ export class Home {
     if (destination.ctl) void group.sync(destination.ctl);
   }
 
-  /** Makes this node the home of a new project group, whose id is the command's nonce. Answers
-   *  with that id and what the node said; the group itself arrives in a `groups` push. */
-  async create({ name, ...rest }: NewGroup) {
+  /** Makes this node the home of a new group, whose id is the command's nonce. Answers with that
+   *  id and what the node said; the group itself arrives in a `groups` push. */
+  async create(group: NewGroup) {
     const g = newId();
-    const fields = { t: 'group', g, op: 'create', name, kind: 'project', ...rest };
-    return { g, answer: await this.command(fields, g) };
+    return { g, answer: await this.command({ t: 'group', g, op: 'create', ...group }, g) };
   }
 
   #find(g: string) {

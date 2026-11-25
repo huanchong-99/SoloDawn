@@ -180,6 +180,12 @@ it('retains a revision draft across a temporary loss of permission', async () =>
   expect(one<HTMLTextAreaElement>('textarea').value).toBe('Draft');
 });
 
+it('shows no presets in a team group, which has no briefs', () => {
+  group.apply([row('row-group-team', { id: group.g, seq: 10000 })]);
+  show(PresetPanel, { group });
+  expect(document.querySelector('.preset')).toBeNull();
+});
+
 it('returns focus to the brief when membership disappears during an act', async () => {
   const msg = decode(Row, goldens['row-msg-brief-pending']) as Extract<MsgRow, { kind: 'brief' }>;
   request.mockImplementation(async () => {

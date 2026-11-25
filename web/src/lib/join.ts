@@ -79,8 +79,9 @@ export function presentLog(ctl: { send?(frame: Devlog): void }, log: DeviceLog) 
   ctl.send!(frame);
 }
 
-function homeNotice(node: Home, invitation: Invitation, name: string, url: string) {
-  const { g, home } = invitation;
+type GroupHome = Pick<Invitation, 'g' | 'home'>;
+
+function homeNotice(node: Home, { g, home }: GroupHome, name: string, url: string) {
   return node.me.sign(
     JSON.stringify({
       t: 'home.add',
@@ -101,9 +102,18 @@ async function sendNotice(node: Home, env: Envelope) {
   if (answer.err) return { node: node.device, error: new JoinError('home.add', answer.err.code) };
 }
 
+const homeNotices = (nodes: Home[], group: GroupHome, name: string, url: string) =>
+  Promise.all(nodes.map((node) => homeNotice(node, group, name, url)));
+
 async function notify(nodes: Home[], envelopes: Envelope[]) {
   const results = await Promise.all(nodes.map((node, i) => sendNotice(node, envelopes[i])));
   return results.filter((result) => result !== undefined);
+}
+
+/** Tells nodes of the person the home of a group (contracts/step-2/people.md section 7, point 2),
+ *  and answers with those that did not take it. */
+export async function addHome(nodes: Home[], group: GroupHome, name: string, url: string) {
+  return notify(nodes, await homeNotices(nodes, group, name, url));
 }
 
 function abortPending(signal: AbortSignal, failed: (code: string) => void) {
@@ -243,9 +253,7 @@ export async function joinGroup(invitation: Invitation, name: string, options: J
     const group = groups.groups.find((group) => group.g === invitation.g)!.name;
     const nodes = options.ownNodes();
     connection.next('home.add');
-    const envelopes = await Promise.all(
-      nodes.map((node) => homeNotice(node, invitation, group, options.url)),
-    );
+    const envelopes = await homeNotices(nodes, invitation, group, options.url);
     checkCancel(signal, 'home.add');
     const notices = notify(nodes, envelopes);
     connection.serve(ctl, welcome, groups);

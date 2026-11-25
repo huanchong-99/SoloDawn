@@ -140,6 +140,50 @@ describe('step 2 in the browser', () => {
     expect(await p.getByRole('button', { name: 'Add AI' }).count()).toBe(0);
   });
 
+  test('A9.23 P creates a team group in the dialog, and a bulletin shows there', async () => {
+    const p = await open('P', '#/groups');
+    await p.getByRole('button', { name: 'New group' }).click();
+    await p.getByRole('radio', { name: 'Team group' }).check();
+    const dialog = p.getByRole('dialog', { name: 'New group' });
+    expect(await dialog.getByLabel('Git repository').count()).toBe(0);
+    await dialog.getByLabel('Group name').fill('Studio');
+    await dialog.getByLabel('Your name in the group').fill('Alex');
+    await dialog.getByLabel('Home computer').selectOption('P1');
+    await dialog.getByRole('button', { name: 'Create group' }).click();
+    await texts(p, '.chat-head h2').toEqual(['Studio']);
+    const g = new URL(p.url()).hash.split('/')[2];
+    expect(await sent(p)).toEqual([
+      {
+        t: 'group',
+        g,
+        op: 'create',
+        name: 'Studio',
+        kind: 'team',
+        base: '',
+        forge: 'none',
+        checks: [],
+        member_name: 'Alex',
+      },
+    ]);
+    const { p2 } = await ids(p);
+    const { host } = new URL(p.url());
+    const told = await p.evaluate(() => window.s2.told());
+    expect(told).toEqual([
+      {
+        t: 'home.add',
+        to: p2,
+        g,
+        home: expect.any(String),
+        name: 'Studio',
+        addrs: [`ws://${host}/rv`],
+      },
+    ]);
+    await p.evaluate((g) => window.s2.bulletin(g), g);
+    await texts(p, '[aria-label="Bulletin"] p:last-child').toEqual(['The website is ready.']);
+    await p.getByRole('button', { name: 'Invite', exact: true }).waitFor();
+    expect(await p.getByRole('button', { name: 'Add AI' }).count()).toBe(0);
+  });
+
   test('A9.24 the dialog that joins an AI shows the check commands and each template', async () => {
     const p = await open('P', '#/groups/{g}');
     await p.getByRole('button', { name: 'Add AI' }).click();

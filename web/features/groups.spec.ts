@@ -3,9 +3,9 @@ import { flushSync } from 'svelte';
 import { expect, vi } from 'vitest';
 import { homes, type Group } from '../src/lib/groups.svelte';
 import * as p from '../src/lib/proto';
-import { browser, example, owner, TestHome, user } from './home';
+import { browser, example, ownedNode, owner, TestHome, user, type OwnedNode } from './home';
 import CreateGroup from '../src/components/groups/CreateGroup.svelte';
-import { all, choose, closePage, field, fill, go, one, openPage, show, texts } from './page';
+import { all, choose, closePage, field, fill, go, one, openPage, show, text, texts } from './page';
 
 const feature = await loadFeature('../features/web_groups.feature');
 
@@ -152,7 +152,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           one('.head button').click();
           flushSync();
           expect(one<HTMLDialogElement>('dialog').open).toBe(true);
-          const [name, repo, , member] = all<HTMLInputElement>('dialog input');
+          const [name, repo, , member] = all<HTMLInputElement>('dialog input.input');
           fill(name, ' Handbook ');
           fill(repo, 'https://git.example/team/handbook.git');
           fill(member, 'Alex');
@@ -199,6 +199,168 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     },
   );
 
+  Scenario(
+    'The last message of a team group names the AI of a bulletin',
+    ({ Given, When, Then }) => {
+      Given(
+        'the home also holds the team group "Studio" with a bulletin of "Claude Code", sent from the computer of "Alex"',
+        () => {
+          home.add(docs, 'Studio', 'row-group-team');
+          home.write(docs, example('row-msg-bulletin', { by: owner }));
+        },
+      );
+      When('the browser has read both groups', async () => {
+        first.drop();
+        await read();
+        openPage();
+      });
+      Then('the list reads "Claude Code: The website is ready." under "Studio"', () => {
+        const at = texts('.glist a b').indexOf('Studio');
+        expect(texts('.glist .gprev')[at]).toBe('Claude Code: The website is ready.');
+      });
+    },
+  );
+
+  let desk: OwnedNode;
+  let studio: string;
+  const signed = (req: object) => JSON.parse((req as { env: p.Envelope }).env.p);
+
+  async function secondNode(answer: object) {
+    desk = ownedNode('desk', 'desk-device');
+    desk.home.reply = () => answer;
+    homes.push(desk.store);
+    await desk.connect();
+  }
+
+  function openDialog() {
+    one('.head button').click();
+    flushSync();
+  }
+
+  /** The person makes the team group "Studio" in the dialog. */
+  function createTeam() {
+    openPage();
+    openDialog();
+    const asks = () => texts('dialog .field > span:first-child');
+    const project = asks();
+    one('dialog input[value=team]').click();
+    flushSync();
+    expect(asks()).toEqual(['Group name', 'Your name in the group', 'Home computer']);
+    one('dialog input[value=project]').click();
+    flushSync();
+    expect(asks()).toEqual(project);
+    one('dialog input[value=team]').click();
+    flushSync();
+    const [name, member] = all<HTMLInputElement>('dialog input.input');
+    fill(name, ' Studio ');
+    fill(member, ' Alex ');
+    one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  }
+
+  function startsWithProject() {
+    openDialog();
+    expect(all<HTMLInputElement>('dialog input[type=radio]').map((el) => el.checked)).toEqual([
+      true,
+      false,
+    ]);
+    expect(texts('dialog [role=status]')).toEqual([]);
+  }
+
+  const creates =
+    'the person chooses "Team group" in the dialog, which then asks only for the names and the home, and creates "Studio"';
+
+  Scenario('A team group is created without a repository', ({ Given, When, Then, And }) => {
+    Given('the person owns a second computer, "desk", which is connected', () =>
+      secondNode({ ok: true }),
+    );
+    When(creates, async () => {
+      createTeam();
+      await vi.waitFor(() => expect(location.hash).toMatch(/^#\/groups\/.{22}$/));
+      studio = location.hash.split('/')[2];
+    });
+    Then('the home has made the team group "Studio" without a repository, checks or forge', () => {
+      const { n, ts, ...command } = signed(home.asked.findLast((req) => req.t === 'cmd')!);
+      expect(command).toEqual({
+        t: 'group',
+        g: studio,
+        op: 'create',
+        name: 'Studio',
+        kind: 'team',
+        base: '',
+        forge: 'none',
+        checks: [],
+        member_name: 'Alex',
+      });
+      expect(n).toBe(studio);
+      expect(home.groups.get(studio)!.name).toBe('Studio');
+    });
+    And('"desk" has been told which computer is the home of "Studio"', () => {
+      const notices = desk.home.asked.filter((req) => req.t === 'cmd').map(signed);
+      expect(notices).toEqual([
+        {
+          t: 'home.add',
+          n: expect.any(String),
+          ts: expect.any(Number),
+          to: 'desk-device',
+          g: studio,
+          home: first.store.device,
+          name: 'Studio',
+          addrs: [`ws://${location.host}/rv`],
+        },
+      ]);
+    });
+    And(
+      'its chat opens as a team group, ready for the first message and for inviting people, and without AIs',
+      async () => {
+        await vi.waitFor(() => expect(first.store.groups.at(-1)!.info?.kind).toBe('team'));
+        go(location.hash);
+        expect(text('.chat-head h2')).toBe('Studio');
+        expect(text('.chat-head p')).toBe('Team group · Members 1 · workstation');
+        expect(field().disabled).toBe(false);
+        expect(texts('.members button')).toEqual(['Invite']);
+        expect(texts('.people .person-name')).toEqual(['Alex · You · Owner']);
+        expect(all('.preset, .nosec')).toEqual([]);
+      },
+    );
+    And('the dialog starts again with a project group', startsWithProject);
+  });
+
+  Scenario(
+    'A team group is created while another computer does not take its home',
+    ({ Given, When, Then, And }) => {
+      Given('the person owns a second computer, "desk", which refuses to be told a home', () =>
+        secondNode({ err: { code: 'bad_request', msg: 'refused' } }),
+      );
+      When(creates, async () => {
+        createTeam();
+        await vi.waitFor(() => {
+          flushSync();
+          expect(all('dialog [role=status]')).toHaveLength(1);
+        });
+        studio = [...home.groups.keys()].at(-1)!;
+      });
+      Then(
+        'the dialog says "The group was created, but not all of your connected computers were notified."',
+        () => {
+          expect(texts('dialog [role=status]')).toEqual([
+            'The group was created, but not all of your connected computers were notified.',
+          ]);
+          expect(location.hash).toBe('#/groups');
+        },
+      );
+      When('the person presses "Open group"', () => {
+        expect(texts('dialog button')).toEqual(['Open group']);
+        one('dialog button').click();
+        flushSync();
+      });
+      Then('the dialog is closed and the address is that of "Studio"', () => {
+        expect(one<HTMLDialogElement>('dialog').open).toBe(false);
+        expect(location.hash).toBe(`#/groups/${studio}`);
+      });
+      And('the dialog starts again with a project group', startsWithProject);
+    },
+  );
+
   let laptop: TestHome;
   let onLaptop: ReturnType<typeof browser>;
   const commands = (of: TestHome) => of.asked.filter((req) => req.t === 'cmd');
@@ -215,7 +377,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     openPage();
     one('.head button').click();
     flushSync();
-    const [name, repo, , member] = all<HTMLInputElement>('dialog input');
+    const [name, repo, , member] = all<HTMLInputElement>('dialog input.input');
     fill(name, 'Notes');
     fill(repo, 'https://git.example/team/notes.git');
     fill(member, 'Alex');
@@ -302,7 +464,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       });
       When('the computer connects and the person creates the group "Notes"', async () => {
         await read();
-        const [name, repo, , member] = all<HTMLInputElement>('dialog input');
+        const [name, repo, , member] = all<HTMLInputElement>('dialog input.input');
         fill(name, 'Notes');
         fill(repo, 'https://git.example/team/notes.git');
         fill(member, 'Alex');

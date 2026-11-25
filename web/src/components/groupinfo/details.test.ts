@@ -270,6 +270,22 @@ it('saves only a secretary for a built-in forge, and can cancel without a comman
   expect(command).toEqual({ t: 'group', g: group.g, op: 'set', secretary: ai.id });
 });
 
+it('never offers an external AI as secretary', () => {
+  const { group, info, ai } = setup('github');
+  group.apply([{ ...ai, id: 'external', name: 'Scout', cli: 'external' }]);
+  show(EditGroup, { group, info, onclose: vi.fn() });
+  expect(all('dialog option').map((el) => el.textContent)).toEqual(['Choose an AI', ai.name]);
+});
+
+it('offers no settings when an external AI is the only one', () => {
+  const { group, ai } = setup('github');
+  show(GroupDetails, { group });
+  expect(one('section > button').textContent!.trim()).toBe('Edit group settings');
+  group.apply([{ ...ai, seq: 10000, cli: 'external' }]);
+  flushSync();
+  expect(document.querySelector('section > button')).toBeNull();
+});
+
 it('edits templates with no AI members and sends no secretary field', async () => {
   const { group, info, ai, request } = setup();
   group.rows.delete(`member ${ai.id}`);
