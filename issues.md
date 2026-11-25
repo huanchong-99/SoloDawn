@@ -9,7 +9,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-26 · bug · A denied `ask` does not tell the caller
 
 - Symptom: A9.18 wants the denial of a call as the caller's turn, and as `{"denied":true}` in an open `ask` (`planning/contracts/step-2/confirm.md` section 5). Enabled, the deny example fails at that turn: P-work gets a `reply` turn with an empty body, and an open `ask` is not ended.
-- Cause: the home queues the denial as a `reply` item that carries the confirm card (`internal/home/cmd_confirm.go`, `cfmDeniedResult`). The host takes only a `reply` message as the answer of an open call (`internal/host/deliver.go:571`, `replyCallID`), reads only an answer from it (`internal/host/tools_ask.go`, `decodeReplyItem`), and the turn shows the card's `text`, which is empty (`internal/host/turn.go:419`, `buildReply`).
+- Cause: the home queues the denial as a `reply` item that carries the confirm card (`internal/home/cmd_confirm.go`, `cfmDeniedResult`). The host takes only a `reply` message as the answer of an open call (`internal/host/deliver.go:576`, `replyCallID`), reads only an answer from it (`internal/host/tools_ask.go`, `decodeReplyItem`), and the turn shows the card's `text`, which is empty (`internal/host/turn.go:426`, `buildReply`).
 - Status: open, for the queued host unit. The deny example of A9.18 stays `@pending`; the confirm example and the two callers of the open `ask` run.
 
 ### 2026-11-26 · bug · A changed secretary gets no secretary tools on its host
