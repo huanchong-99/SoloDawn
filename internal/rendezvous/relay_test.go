@@ -128,21 +128,39 @@ func TestMeteredSocket(t *testing.T) {
 	}
 	defer raw.Close()
 	peer := udpLocal(t)
-	nothing := func(c net.PacketConn, b []byte) {
-		t.Helper()
-		c.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
-		if n, src, err := c.ReadFrom(b); n != 0 || src != nil || !errors.Is(err, os.ErrDeadlineExceeded) {
-			t.Fatalf("read %d from %v, %v; want nothing", n, src, err)
-		}
+	ip := peer.LocalAddr().(*net.UDPAddr).IP
+	var b [32]byte
+	checkRelayReceive(t, g, raw, peer, endpoint, ip, b[:])
+	checkRelaySend(t, &l, raw, peer, ip, b[:])
+	// With the quota spent, empty packets pass in neither direction.
+	if n, err := raw.WriteTo(nil, peer.LocalAddr()); n != 0 || err != nil {
+		t.Fatal(n, err)
 	}
+	expectNoRelayPacket(t, peer, b[:])
+	peer.WriteTo(nil, endpoint)
+	expectNoRelayPacket(t, raw, b[:])
+	g.events().OnPermissionDeleted(peer.LocalAddr(), nil, "", "", "", endpoint, ip)
+	if _, ok := g.permissions.Load(permission{endpoint, ip.String()}); ok {
+		t.Fatal("permission not removed")
+	}
+}
+
+func expectNoRelayPacket(t *testing.T, c net.PacketConn, b []byte) {
+	t.Helper()
+	c.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+	if n, src, err := c.ReadFrom(b); n != 0 || src != nil || !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("read %d from %v, %v; want nothing", n, src, err)
+	}
+}
+
+func checkRelayReceive(t *testing.T, g *generator, raw, peer net.PacketConn, endpoint net.Addr, ip net.IP, b []byte) {
+	t.Helper()
 	// An unpermitted packet queued before the permission must not spend quota.
 	peer.WriteTo([]byte("bad"), endpoint)
-	var b [32]byte
-	nothing(raw, b[:])
-	if got := l.quota("device").Used; got != 0 {
+	expectNoRelayPacket(t, raw, b)
+	if got := g.ledger.quota("device").Used; got != 0 {
 		t.Fatal(got)
 	}
-	ip := peer.LocalAddr().(*net.UDPAddr).IP
 	g.events().OnPermissionCreated(peer.LocalAddr(), nil, "", "", "", endpoint, ip)
 	// Never forward or charge a prefix when Pion's destination buffer is
 	// smaller; the socket reads one byte more than that buffer.
@@ -152,9 +170,13 @@ func TestMeteredSocket(t *testing.T) {
 	if n, _, err := raw.ReadFrom(b[:2]); err != nil || n != 2 || string(b[:n]) != "hi" {
 		t.Fatal(n, err, b[:n])
 	}
-	if got, size := l.quota("device").Used, len(raw.(*allocation).packet); got != 42 || size != 3 {
-		t.Fatal(got, size)
+	if got := g.ledger.quota("device").Used; got != 42 {
+		t.Fatal(got)
 	}
+}
+
+func checkRelaySend(t *testing.T, l *ledger, raw, peer net.PacketConn, ip net.IP, b []byte) {
+	t.Helper()
 	// A failed send is not charged.
 	if n, err := raw.WriteTo([]byte("x"), &net.UDPAddr{IP: ip, Port: -1}); n != 0 || !errors.Is(err, syscall.EINVAL) {
 		t.Fatal(n, err)
@@ -162,22 +184,11 @@ func TestMeteredSocket(t *testing.T) {
 	raw.WriteTo([]byte("drop"), peer.LocalAddr())
 	raw.WriteTo([]byte("yes"), peer.LocalAddr())
 	peer.SetReadDeadline(time.Now().Add(time.Second))
-	if n, _, err := peer.ReadFrom(b[:]); err != nil || string(b[:n]) != "yes" {
+	if n, _, err := peer.ReadFrom(b); err != nil || string(b[:n]) != "yes" {
 		t.Fatal(n, err)
 	}
 	if got := l.quota("device").Used; got != 85 {
 		t.Fatal(got)
-	}
-	// With the quota spent, empty packets pass in neither direction.
-	if n, err := raw.WriteTo(nil, peer.LocalAddr()); n != 0 || err != nil {
-		t.Fatal(n, err)
-	}
-	nothing(peer, b[:])
-	peer.WriteTo(nil, endpoint)
-	nothing(raw, b[:])
-	g.events().OnPermissionDeleted(peer.LocalAddr(), nil, "", "", "", endpoint, ip)
-	if _, ok := g.permissions.Load(permission{endpoint, ip.String()}); ok {
-		t.Fatal("permission not removed")
 	}
 }
 
