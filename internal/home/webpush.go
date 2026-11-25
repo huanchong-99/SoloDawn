@@ -59,8 +59,8 @@ type wpushSub struct {
 }
 
 type wpushEvent struct {
-	kind, who, title string
-	users            []string
+	kind, who, title, code string
+	users                  []string
 }
 
 type wpushPut struct{ sub wpushSub }
@@ -178,10 +178,19 @@ func wpushNotify(s *State, msg proto.MsgRow) {
 	// slices.Clip sets cap == len so webpush-go allocates its own buffer
 	// instead of writing the padding delimiter into shared spare capacity.
 	payload := slices.Clip([]byte(briefJSON(proto.Reminder{
-		Group: proto.ID(s.ID), Msg: proto.ID(msg.ID), GroupName: s.Group.Name,
-		Kind: ev.kind, Who: ev.who, Title: ev.title,
+		Group: proto.ID(s.ID), Msg: proto.ID(wpushTarget(msg)), GroupName: s.Group.Name,
+		Kind: ev.kind, Who: ev.who, Title: ev.title, Code: ev.code,
 	})))
 	wpushSend(s, ev, payload)
+}
+
+// wpushTarget is what a click opens: the message, or the task, whose card
+// opens its thread, when the message is in that thread alone.
+func wpushTarget(msg proto.MsgRow) string {
+	if msg.Thread != nil && !msg.Main {
+		return *msg.Thread
+	}
+	return msg.ID
 }
 
 func wpushExtract(s *State, msg proto.MsgRow) wpushEvent {
@@ -230,11 +239,12 @@ func wpushSummary(s *State, msg proto.MsgRow) wpushEvent {
 // wpushSystem is a mention by a row of the home: about the AI its body names,
 // or the assignee of the task its body names.
 func wpushSystem(s *State, msg proto.MsgRow) wpushEvent {
-	var b struct{ AI, Task string }
+	var b struct{ AI, Task, Code string }
 	json.Unmarshal(msg.Body, &b)
 	task := s.Tasks[b.Task]
 	ev := wpushMention(s, msg)
 	ev.who, ev.title = wpushWho(s, cmp.Or(b.AI, task.Assignee)), wpushTitle(task.Title)
+	ev.code = b.Code
 	return ev
 }
 

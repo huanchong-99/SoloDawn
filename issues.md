@@ -215,7 +215,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · Task participation history is inferred from current fields
 
 - Symptom: a final task cancelled before its first role item was queued can qualify for the thread exception after its expired card is pruned, as can an assignee newly named by row 11 before its first activation. A reviewer's earlier participation can be lost after a later reassignment/review overwrites its evidence.
-- Cause: `internal/home/cmd_confirm.go:48-80` derives participation from current roles, state, step and latest review, excluding unconfirmed role cards. Acknowledged inbox items are deleted; task rows contain no durable participation history. Row 11 also cannot durably distinguish an owner's reassignment that overrides an earlier closed card from that card; a foreign reassignment to the same AI after expiry needs a new request, since the request's one card is closed (`internal/home/cmd_confirm_task.go:109-123,138-154`).
+- Cause: `internal/home/cmd_confirm.go:48-80` derives participation from current roles, state, step and latest review, excluding unconfirmed role cards. Acknowledged inbox items are deleted; task rows contain no durable participation history. A foreign reassignment to the same AI after expiry needs a new request, since the request's one card is closed.
 - Status: open, accepted for T2-2b pending the owner's review: no new table, export format or wire shape. Held role cards no longer qualify; known participation survives finalization while its current fields still show it.
 
 ### 2026-11-22 · limitation · A late watch item can outlive hand-back
@@ -963,6 +963,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `jump` on an older message moved the author's newest waiting message of that thread, and one AI only when the message mentioned several.
 - Cause: the rule of [commands](planning/contracts/commands.md) 1.4, implemented by `rndRequeueJump` (`internal/home/rounds.go:60` before the fix), which read of `msg` only its author and thread.
 - Status: resolved in branch `fix/home-items` (coordinator's decision of 2026-11-25): every unacknowledged `mention` item that `msg` produced is sent again with `jump: true`. Test: `TestRoundsJumpRequeuesTheItemsOfItsMessage`.
+
+### 2026-11-26 · bug · A role that its owner gave in spite of a card stayed held
+
+- Symptom: the owner of an AI denied a role and later gave it that task with their own `task assign`: the first `assign` reached the AI, the later `checks`, `reviewed`, `review` and `resume` items were dropped. In the same way a card written for one task of a brief held the items of another task of it that the AI already did by its owner's word, and gave it the wait `confirm`.
+- Cause: `cftHoldItem` (`internal/home/cmd_confirm_task.go:138` before the fix) saw the exception of [confirm](planning/contracts/step-2/confirm.md) section 6 only in the command that changed the role; for every other command it looked at the request's one card, and nothing on disk said who had given the role.
+- Status: resolved in branch `fix/home-items-3`: the task row's optional `asked` names the AIs whose role needs the card ([rows](planning/contracts/rows.md) section 4). A role given before the fix has none: nothing holds it, and a card still pending for it starts nothing, so the role is given again. Tests: `TestRoleDeniedThenGivenByTheOwner`, `TestRoleThatAsksNobodyIgnoresTheCardOfItsRequest`.
+
+### 2026-11-26 · bug · A jump that crossed the delivery of its message was delivered twice
+
+- Symptom: a host that was delivering a message when its `jump` came got the message again as a jump item and gave it to the AI a second time.
+- Cause: `rndRequeueJump` (`internal/home/rounds.go:58` before the fix) retired the item and queued a new one; the host knows what it has delivered by the item's number.
+- Status: resolved in branch `fix/home-items-3`: the item jumps under its number (`Result.Jump`, `store.Tx.Jump`). Tests: `TestRoundsLoopJumpAndQuiet`, `TestHomeReadsJumpsAndRetiresTheQueue`, `features/home_rounds.feature`. That a resent jump does not interrupt its own turn is the host's part (`feat/host-jump`). The limitation that branch records for this is closed with it.
+
+### 2026-11-26 · deviation · A reminder did not say what happened and its click opened nothing in a thread
+
+- Symptom: the push of a stopped task and of a failed sign-in both read as a mention, and a click on the reminder of a row in a task's thread looked for a message that the main line never shows.
+- Cause: `proto.Reminder` had no code, and `wpushNotify` (`internal/home/webpush.go:180` before the fix) always sent the row's id.
+- Status: home part resolved in branch `fix/home-items-3`: `code` for a `system` row, and the task's id as `msg` for a row in a thread alone ([commands](planning/contracts/commands.md) 1.7). Tests: `TestWebPushReminderKindsTitlesAndNoLeak`, `features/home_webpush.feature`. Open: the service worker's words for `code`, another unit.
 
 ### 2026-11-25 · bug · Removing a person left their connections open
 

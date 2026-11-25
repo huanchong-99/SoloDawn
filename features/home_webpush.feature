@@ -33,4 +33,4 @@ Feature: Encrypted Web Push reminders from the home
     And the first browser disconnects while the second browser and the owner's node stay connected
     And the owner's node reports "Codex" in "Website" with "login_invalid" and detail "Token expired."
     Then the push endpoint of the first browser receives 1 encrypted notification
-    And decrypted by the first browser, the reminder is for group "Website", kind "mention", who "Codex" and title "", with none of "Token expired."
+    And decrypted by the first browser, the reminder is for group "Website", kind "mention", who "Codex" and title "" and code "login_invalid", with none of "Token expired."

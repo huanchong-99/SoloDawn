@@ -11,7 +11,7 @@ func cftFixture() (*State, cftDisk, proto.TaskRow, proto.MsgRow, Command) {
 	s.AIs["a"] = proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{ID: "a"}, User: "q"}}
 	s.AIs["r"] = proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{ID: "r"}, User: "q"}}
 	s.Group.Secretary = "sec"
-	task := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: "t"}, State: taskActive, Step: stepBranch, Assignee: "a", Reviewer: "r", Brief: "b"}
+	task := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: "t"}, State: taskActive, Step: stepBranch, Assignee: "a", Reviewer: "r", Asked: []string{"a", "r"}, Brief: "b"}
 	s.Tasks["t"] = task
 	req := "b"
 	card := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: cfmCardID("b", "a")}, Kind: cfmKind, Re: &req,
@@ -127,28 +127,36 @@ func TestRoleDecisionsAndItemsLeaveUnchangedTasksAlone(t *testing.T) {
 func TestNewRoleAuthorityAndDuplicates(t *testing.T) {
 	s, d, task, card, c := cftFixture()
 	res := Result{}
-	s.cftNewRole(c, task, s.AIs["a"], false, d, &res)
+	s.cftAsk(c, task, s.AIs["a"], d, &res)
+	cardTestSame(t, len(res.Rows), 0)
+	given := task
+	given.Asked = nil
+	s.Tasks[task.ID] = given
+	s.cftAsk(c, task, s.AIs["a"], d, &res)
 	cardTestSame(t, len(res.Rows), 0)
 	delete(d.msgs, card.ID)
-	c.Who.User = "q"
-	c.Who.AI = "owners-ai"
-	s.cftNewRole(c, task, s.AIs["a"], false, d, &res)
-	cardTestSame(t, len(res.Rows), 0)
+	s.cftAsk(c, task, s.AIs["a"], d, &res)
+	cardTestSame(t, res.Rows[0].Value().(proto.MsgRow).ID, card.ID)
 	ai := s.AIs["a"]
 	ai.Account, ai.Allow = "team", []string{"p"}
-	c.Who.User = "p"
-	s.cftNewRole(c, task, ai, true, d, &res)
-	cardTestSame(t, len(res.Rows), 0)
-	s.cftNewRole(c, task, ai, false, d, &res)
-	cardTestSame(t, len(res.Rows), 1)
-	old := task
-	old.Assignee = "old"
-	c.Who.User = "q"
-	cardTestSame(t, s.cftHoldItem(c, d, Item{AI: "a", Task: "t", Why: itemAssign}, old), false)
-	cardTestSame(t, cftOwnerChange(c, task, task, "r", "q"), false)
-	old = task
-	old.Reviewer = "old"
-	cardTestSame(t, cftOwnerChange(c, old, task, "r", "q"), true)
+	s.AIs["a"] = ai
+	cardTestSame(t, s.cftAsks("q", task, "a", "old", false), false)
+	cardTestSame(t, s.cftAsks("p", task, "a", "old", true), false)
+	cardTestSame(t, s.cftAsks("p", task, "a", "old", false), true)
+	cardTestSame(t, s.cftAsks("x", task, "a", "old", true), true)
+	cardTestSame(t, s.cftAsks("q", task, "a", "a", false), true)
+	cardTestSame(t, s.cftAsks("p", proto.TaskRow{}, "a", "a", false), false)
+}
+
+// A text in the thread of a finished task, whose decided cards retention has
+// deleted, asks nobody again.
+func TestFinishedTaskWritesNoCardAgain(t *testing.T) {
+	s, d, task, card, c := cftFixture()
+	task.State = taskMerged
+	s.Tasks[task.ID] = task
+	delete(d.msgs, card.ID)
+	task.Thread.Count++
+	cardTestSame(t, s.cftFinish(c, Result{Rows: []Row{RowOf(task)}}).Rows, []Row{RowOf(task)})
 }
 
 func TestTaskItemWithoutRowsIsGated(t *testing.T) {
@@ -157,6 +165,18 @@ func TestTaskItemWithoutRowsIsGated(t *testing.T) {
 	cardTestSame(t, res.Items, []Item{})
 	task.Wait = &proto.TaskWait{Kind: waitConfirm, Msg: card.ID, Who: []string{"q"}}
 	cardTestSame(t, res.Rows, []Row{RowOf(task)})
+}
+
+// A card for another task of the request neither holds nor, confirmed, starts
+// again a role that asks nobody.
+func TestRoleThatAsksNobodyIgnoresTheCardOfItsRequest(t *testing.T) {
+	s, _, task, card, c := cftFixture()
+	task.Asked = nil
+	s.Tasks[task.ID] = task
+	resume := Result{Items: []Item{{AI: "a", Task: "t", Why: itemResume}}}
+	cardTestSame(t, s.cftFinish(c, resume), resume)
+	card.State = &proto.CardState{Status: briefConfirmed}
+	cardTestSame(t, s.cftDecide(c, card, proto.ConfirmBody{AI: "a"}).Items, []Item(nil))
 }
 
 func TestRoleGrantOnDependencyActivationAndMultipleActiveTasks(t *testing.T) {

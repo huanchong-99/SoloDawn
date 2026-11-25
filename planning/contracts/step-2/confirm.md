@@ -161,6 +161,9 @@ needs its owner's word**:
   `task assign` that gives a role to another AI asks that AI's owner by a
   card, whoever confirmed the brief. One exception: the owner of that AI
   sent the `task assign`, as a person or through one of their AIs.
+- `asked` of the task row (`contracts/rows.md` section 4) names the AIs whose
+  role in that task needs the card. A role that asks nobody is neither held
+  back nor started by a card of the request, whatever was decided on it.
 - Row 2 asks nothing: the task's AI started it through its own host. Its
   `assign` is queued as in step 1.
 - The home writes the missing card when the role is given: at row 1 for

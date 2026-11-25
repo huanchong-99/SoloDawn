@@ -80,6 +80,13 @@ func (tx *Tx) Retire(group string, id int64) error {
 	return err
 }
 
+// Jump has a queued item of a group jump the queue under its number, held back
+// no longer. An item that is gone already is no error.
+func (tx *Tx) Jump(group string, id int64) error {
+	_, err := tx.Exec("UPDATE inbox SET env=json_set(env,'$.jump',json('true')), not_before=0 WHERE g=? AND id=?", group, id)
+	return err
+}
+
 // data reads the one JSON column of a query on the row table.
 func (tx *Tx) data(query string, args ...any) ([]json.RawMessage, error) {
 	rows, err := tx.Query(query, args...)
