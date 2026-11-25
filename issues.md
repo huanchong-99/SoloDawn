@@ -535,6 +535,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Workaround: the connection works over the relay, and the probe of `planning/flows/connect.md` section B moves it to a direct path.
 - Status: open, external; not reported upstream for now.
 
+### 2026-11-26 · limitation · A7.9 mostly fails on a Mac with its firewall on
+
+- Symptom: on macOS with the application firewall enabled, A7.9 fails most runs at "direct UDP is cut" with no selected-pair change (9 of 12 runs of the fixture of #373 after the merge of #374, 3 of 4 before it). It passes in CI on all three systems.
+- Cause: the cut needs the pair from the TURN relay to the node's host candidate, both on the machine's LAN address, and the firewall drops UDP to that address for the unsigned test binary. In a traced failure pion sent 9 checks on that pair and none reached the node; a two-socket UDP program loses every packet the same way. Why some runs pass was not traced.
+- Status: open, accepted; CI decides.
+
 ### 2026-11-20 · limitation · Three peer scenarios time out on a Mac with its firewall on
 
 - Symptom: "Both nodes can offer over the same two signalling paths", "A replayed offer is not processed" and "Early and repeated candidates" fail with `context deadline exceeded` after 20 s on macOS with the application firewall enabled, on `rebuild` as merged (815c52aa6) and with the audit fixes; the other 77 scenarios pass. They pass on Linux in CI, and on GitHub's `macos-latest` runner (#145).
