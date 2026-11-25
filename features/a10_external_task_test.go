@@ -195,11 +195,12 @@ func (w *externalWorld) setHold(kind, op string) error {
 }
 
 func (w *externalWorld) queueJump() error {
-	return s3Run(func() error { return w.whenOwnerMentionsAI("X", "Older item") },
+	return s3Run(func() error { return w.setHold("group", "pause") },
+		func() error { return w.whenOwnerMentionsAI("X", "Older item") },
 		func() error { return w.whenOwnerMentionsAI("X", "Jump this item") },
 		func() error { return w.waitState(w.findJumpMsg) }, func() error {
 			return w.hostCommand(proto.Jump{HomeCommand: w.homeHeader("jump"), Msg: w.heldMsg})
-		})
+		}, func() error { return w.setHold("group", "resume") })
 }
 
 func (w *externalWorld) findJumpMsg() bool {
@@ -250,20 +251,14 @@ func (w *externalWorld) restartNode() error {
 }
 
 func (w *externalWorld) awaitNodeStopped() error {
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			conn, err := net.Dial("unix", filepath.Join(w.homeNode.data, "sock"))
-			if err != nil {
-				return nil
-			}
-			conn.Close()
-		case <-w.ctx.Done():
-			return w.ctx.Err()
+	return waitUntilCtx(w.ctx, 25*time.Millisecond, "the node to stop", func() error {
+		conn, err := net.Dial("unix", filepath.Join(w.homeNode.data, "sock"))
+		if err != nil {
+			return nil
 		}
-	}
+		conn.Close()
+		return errors.New("socket accepts")
+	})
 }
 
 func (w *externalWorld) reconnectNode() error {
@@ -275,7 +270,14 @@ func (w *externalWorld) reconnectNode() error {
 		return err
 	}
 	w.homeLink = link
-	return w.requestGroupSync()
+	raw, err := link.conn.Request(w.ctx, func(id int64) any {
+		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(w.groupID), Since: w.currentTask().Seq}
+	})
+	if err != nil {
+		return err
+	}
+	var synced proto.Synced
+	return proto.Decode(raw, &synced)
 }
 
 func (w *externalWorld) interrupted(reason string) error {
@@ -371,12 +373,11 @@ func (w *externalWorld) decideApproval(action string) error {
 	if err := w.hostCommand(proto.Act{HomeCommand: w.homeHeader("act"), Msg: proto.ID(card.ID), Action: action}); err != nil {
 		return err
 	}
-	select {
-	case err := <-w.approval:
+	result, err := recvCtx(w.ctx, w.approval, "the approval to finish", nil)
+	if err != nil {
 		return err
-	case <-w.ctx.Done():
-		return w.ctx.Err()
 	}
+	return result
 }
 
 func (w *externalWorld) expirePresence() error {

@@ -366,14 +366,10 @@ func (w *approveAccWorld) armPostSignal() <-chan proto.ID {
 }
 
 func awaitPostedCard(posted <-chan proto.ID) error {
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-posted:
-		return nil
-	case <-timer.C:
-		return fmt.Errorf("timed out waiting for card post")
-	}
+	w := newWait(5*time.Second, "the approval card to be posted", nil)
+	defer w.stop()
+	_, err := recvWait(w, posted)
+	return err
 }
 
 func (w *approveAccWorld) startAsyncAsk(cli, cmd, why string, level int) error {
@@ -418,14 +414,11 @@ func (w *approveAccWorld) startCodexApprovalAsk(cmd, why string) {
 }
 
 func (w *approveAccWorld) collectResult() error {
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	select {
-	case w.lastResult = <-w.waitOutcome:
-		return nil
-	case <-timer.C:
-		return fmt.Errorf("timed out waiting for approval result")
-	}
+	wt := newWait(5*time.Second, "the approval result", nil)
+	defer wt.stop()
+	var err error
+	w.lastResult, err = recvWait(wt, w.waitOutcome)
+	return err
 }
 
 func (w *approveAccWorld) callSyncBash(cmd, why string, level int) error {

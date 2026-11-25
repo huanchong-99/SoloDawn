@@ -82,7 +82,7 @@ Every tool file registers its tools in the table of HS-0.
 | HS-15 | 2 | Session runtime: start and resume, dormancy, `max_open`, crash and failed resume, the switch under C-6; the host half of `jump`: interrupt and resume (backend list, B-27) | A3.4, A3.5, A3.6, A7.4 (ordering) | `host/run.go` | HS-0 | F | M |
 | HS-16a | 2 | Approvals: the `approve` tool and Codex requests behind one handler, records, the wait, the late decision (`mcp-tools.md` 3; `flows/approval.md`) | A4.1 to A4.3, A4.6 (host half) | `host/approve.go` | HS-0, P-1 | F | M |
 | HS-16b | 3 | Levels by session kind for both CLIs, what the node offers at each level, `perm.set` (`drivers.md` 2) | A4.4, A4.5 | `host/level.go` | HS-1, HS-2, P-2 | F | M |
-| HS-17 | 3 | The `audit` request (`datachannel.md` 7) | A4.1 (audit sentence) | `host/audit_read.go` | HS-0, P-2 | A | S |
+| HS-17 | 3 | Not in version 1 (R-139): the `audit` request has no reader | — | `host/audit_read.go` | HS-0, P-2 | A | S |
 | HS-18 | 3 | Usage and caps, the turn time limit, `host.offline` and `host.online` | A4.8, A4.9 | `host/limits.go` | HS-15, P-2 | A | M |
 | HS-19 | 2 | Pseudo-terminal: interactive start (`drivers.md` 1.3), bridge with back-pressure, resize; Unix and ConPTY through go-pty v0.2.3. Interrupt uses the driver's structured protocol, not Ctrl+C bytes. The bridge works on the terminal stream interface of HS-0, which `peer.Stream` satisfies; N-4 gives it to each `Peer` as the handler of `pty:` channels | unit on Linux; on a Windows machine with go-pty v0.2.3 itself, because S-5 measured ConPTY with pywinpty, not go-pty | `host/pty.go`, `host/pty_unix.go`, `host/pty_windows.go` | HS-0, X-1, PR-0 | A | M |
 | HS-20 | 3 | Takeover: choice of session, a task for a working AI without one, the state switch, hand-back facts and turn, `direct` only, a repeated start (`flows/takeover.md`) | A7.3 to A7.7 (host half), A7.9 (host half) | `host/takeover.go` | HS-15, HS-19, P-2 | F | M |
@@ -129,7 +129,7 @@ its components through the mounting points of U-0.
 | U-3 | 2 | F-08: AI member panel and cards, add an AI | A3.1, A3.4 as seen | `cmp/member/` | U-0 | F | M |
 | U-4 | 2 | F-09a: approval card in all states; "waiting for you" bar | A4.1, A4.2 as seen | `cmp/approval/` | U-0 | F | M |
 | U-5 | 3 | F-09b: permission control, emergency stop dialog, paused banner | A4.7, A4.8 as seen | `cmp/permission/` | U-0, P-2 | F | M |
-| U-6 | 3 | F-09c: audit list, in-page notifications | A4.1 (audit) as seen | `cmp/audit/`, `cmp/notify/` | U-0, P-2 | F | S |
+| U-6 | 3 | F-09c: in-page notifications (no audit list in version 1, R-139) | — | `cmp/audit/`, `cmp/notify/` | U-0, P-2 | F | S |
 | U-7 | 2 | F-10a: brief, decision and summary cards | A5.1 as seen | `cmp/brief/`, `cmp/decision/`, `cmp/summary/` | U-0 | F | M |
 | U-8 | 2 | F-10b: task card with the six-step bar, badges, checks, review lines, the waits, "jump the queue" | A5.1, A5.11 as seen | `cmp/task/` | U-0 | F | M |
 | U-9 | 2 | F-10c: thread with every message kind, review block, `task_merged` | every golden state reachable | `cmp/thread/` | U-0 | F | M |

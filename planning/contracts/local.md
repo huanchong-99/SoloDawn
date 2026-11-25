@@ -18,6 +18,7 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 | `solodawn pair <secret> [--name <label>] [--rendezvous <url>]` | starts the node if needed, pairs it, prints the result (`flows/pairing.md` A). Without `--name` the label is the computer's host name; without `--rendezvous` the node uses its configured rendezvous, or the official one. A node that already has an owner refuses, and its one line points to `solodawn pair-browser` |
 | `solodawn pair-browser` | prints a pairing link for a new browser |
 | `solodawn open` | pairs and opens the local browser on the node's own web client |
+| `solodawn group export <group id> <file> [--to <device id>]`, `solodawn group import <file>` | step 2: write a group to a file, as a move (`--to`) or a copy, or install one (`contracts/step-2/export.md` section 1) |
 | `solodawn status` | prints version, device fingerprint, connections and their paths, open sessions |
 | `solodawn service install`, `service remove` | registers or removes start-at-login for the current user (launchd agent, systemd user unit, Windows scheduled task) |
 | `solodawn mcp --token <t>` | the MCP shim; started by a CLI, not by people |
@@ -320,6 +321,10 @@ is not applied to what people type.
 
 ## 9. Self-update (R-151)
 
+Postponed after 1.0: the node does not check for releases or replace its
+program, and `host.info.update` stays `null`. A user updates by hand
+(`install.md`). What follows is the design for later.
+
 - **Source**: the releases of this repository. Each release holds one file
   per target named `solodawn_<version>_<os>_<arch>` (with `.exe` on
   Windows) and one `SHA256SUMS`.
@@ -340,7 +345,9 @@ is not applied to what people type.
 
 ## 10. Local web client
 
-`http://localhost:47800/` serves the embedded web client. `/rv` on the same
+`http://localhost:47800/` serves the embedded web client; when that port is
+taken, the node serves it on a free one, and `solodawn open` uses the actual
+address. `/rv` on the same
 port is served on the node's network addresses too and is authenticated by
 its challenge (`contracts/rendezvous.md` section 1). The page gets no
 special trust: it pairs like any browser (`solodawn open`).

@@ -7,7 +7,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -245,17 +244,16 @@ func (w *m3World) drainBrowserUntil(timeout time.Duration, stop func() bool, onF
 // drainFramesUntil reads client until stop reports true, passing each frame to
 // apply and then to onFrame (when set); it fails after timeout.
 func drainFramesUntil(client homeFrameClient, timeout time.Duration, stop func() bool, apply, onFrame func(json.RawMessage)) error {
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
+	w := newWait(timeout, "home pushes", client.saw)
+	defer w.stop()
 	for !stop() {
-		select {
-		case raw := <-client.ch:
-			apply(raw)
-			if onFrame != nil {
-				onFrame(raw)
-			}
-		case <-deadline.C:
-			return errors.New("timed out waiting on home pushes")
+		raw, err := recvWait(w, client.ch)
+		if err != nil {
+			return err
+		}
+		apply(raw)
+		if onFrame != nil {
+			onFrame(raw)
 		}
 	}
 	return nil
@@ -595,18 +593,16 @@ func (w *m3World) thenSecondProcessHeld(aiName, workingAI string) error {
 }
 
 func (w *m3World) awaitDeliveredCount(agent string, want int) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	return waitUntil(5*time.Second, fmt.Sprintf("%d delivered items for %s", want, agent), func() error {
 		n, err := w.deliveredCount(agent)
 		if err != nil {
-			return err
+			return abort(err)
 		}
-		if n >= want {
-			return nil
+		if n < want {
+			return fmt.Errorf("%d delivered", n)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for %d delivered items for %s", want, agent)
+		return nil
+	})
 }
 
 func (w *m3World) deliveredCount(agent string) (int, error) {
@@ -996,15 +992,15 @@ func (l *m3HoldLink) Send(frame any) error {
 }
 
 func (l *m3HoldLink) awaitAcks(want int) error {
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
+	w := newWait(5*time.Second, fmt.Sprintf("%d acks", want), nil)
+	defer w.stop()
 	for len(l.acks) < want {
-		select {
-		case ack := <-l.ackCh:
-			l.acks = append(l.acks, ack)
-		case <-deadline.C:
-			return fmt.Errorf("timed out waiting for %d acks, got %d", want, len(l.acks))
+		ack, err := recvWait(w, l.ackCh)
+		if err != nil {
+			return err
 		}
+		l.acks = append(l.acks, ack)
+		w.saw.see(fmt.Sprint(ack))
 	}
 	return nil
 }

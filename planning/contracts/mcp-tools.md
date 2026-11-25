@@ -53,7 +53,7 @@ Conventions:
 | `run_checks` | — | `{"ok":false,"commit":"9f2c1ab","items":[{"name":"go test ./...","ok":false,"detail":"…last 4 KiB of output…"}]}`, `detail` as on the wire (`contracts/messages.md` 2.8) | runs locally on the head commit, then `task checked`. Fails with `conflict` if the worktree has uncommitted changes. Task sessions only |
 | `submit_task` | `summary` | `{"ok":true,"commit":"9f2c1ab","pr":31}` | the node pushes the branch and opens the pull request if there is none (with a remote), then `post` kind `report` and `task submitted` with the commit. Task sessions only |
 | `submit_review` | `score` (0 to 100); `items`: list of `{text, file, line, veto}` | `{"passed":false,"round":1}`, the command's result | `post` kind `review`; the node adds the commit of the review checkout. Review sessions only |
-| `request_decision` | `question`; `options`: list of `{label, effect}`; `recommended` (index); `context`; `to` (names of people, default the requester of the task's brief) | `{"id":"…"}`; the answer arrives later as a turn | `post` kind `decision` |
+| `request_decision` | `question`; `options`: list of `{label, effect}`; `recommended` (index); `context`; `to` (names of people, default the group's people) | `{"id":"…"}`; the answer arrives later as a turn | `post` kind `decision` |
 | `net_status` | — | `{"paths":[{"peer":"…","path":"relay","rtt_ms":210}],"nat":{"udp":true,"mapped_ports":false,"ipv6":false},"rendezvous":[{"url":"…","ok":true}]}` | local |
 
 Notes:
@@ -106,8 +106,8 @@ role and an action are given (noting that `task assign` succeeded if
 in list order, maps `recommended` from its 0-based index to that option's
 `id` (else `bad_request`), sets `mentions` to the member ids of the
 addressed people (refusing an empty `to` with `bad_request` and a non-person
-or unknown name with `not_found` listing the group's people), and in a task
-or review session defaults an omitted `to` to the group's people.
+or unknown name with `not_found` listing the group's people), and defaults
+an omitted `to` to the group's people.
 
 The secretary has the tools of section 1 too, except `start_task`,
 `push_branch`, `run_checks`, `submit_task` and `submit_review` (R-21).

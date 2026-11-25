@@ -187,7 +187,7 @@ func (st *codexAcceptanceState) startAndBeginTurn(session, token, prompt string)
 	}
 	st.proc = proc
 	st.undo(func() { proc.Close() })
-	ready, err := readNextHostEvent(proc.Events())
+	ready, err := readNextHostEvent(newWait(10*time.Second, "the ready event", nil), proc.Events())
 	if err != nil || ready.Kind != host.Ready || ready.Session == "" {
 		return fmt.Errorf("ready event = %+v (%v)", ready, err)
 	}
@@ -306,21 +306,24 @@ func readCompletedTurn(ch <-chan host.Event) error {
 	return nil
 }
 
-func readNextHostEvent(ch <-chan host.Event) (host.Event, error) {
+func readNextHostEvent(w *wait, ch <-chan host.Event) (host.Event, error) {
 	select {
 	case ev, ok := <-ch:
 		if !ok {
 			return host.Event{}, errors.New("events channel closed")
 		}
+		w.saw.see(strings.TrimSpace(fmt.Sprintf("%s %s", ev.Kind, ev.Status)))
 		return ev, nil
-	case <-time.After(10 * time.Second):
-		return host.Event{}, errors.New("timed out reading event")
+	case <-w.timer.C:
+		return host.Event{}, w.fail()
 	}
 }
 
 func readUntilSignificant(ch <-chan host.Event) (host.Event, error) {
+	w := newWait(10*time.Second, "a host event that is not usage", nil)
+	defer w.stop()
 	for {
-		ev, err := readNextHostEvent(ch)
+		ev, err := readNextHostEvent(w, ch)
 		if err != nil || (ev.Kind != host.Active && ev.Kind != host.Used) {
 			return ev, err
 		}
@@ -328,15 +331,17 @@ func readUntilSignificant(ch <-chan host.Event) (host.Event, error) {
 }
 
 func waitChannelClosed(ch <-chan host.Event) error {
-	timeout := time.After(10 * time.Second)
+	w := newWait(10*time.Second, "the events channel to close", nil)
+	defer w.stop()
 	for {
 		select {
-		case _, ok := <-ch:
+		case ev, ok := <-ch:
 			if !ok {
 				return nil
 			}
-		case <-timeout:
-			return errors.New("timed out waiting for events channel to close")
+			w.saw.see(strings.TrimSpace(fmt.Sprintf("%s %s", ev.Kind, ev.Status)))
+		case <-w.timer.C:
+			return w.fail()
 		}
 	}
 }

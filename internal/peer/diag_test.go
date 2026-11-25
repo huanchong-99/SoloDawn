@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"fmt"
 	"log"
 	"log/slog"
 	"slices"
@@ -70,7 +71,7 @@ func (d *diagLog) expect(t *testing.T, conn, line string) {
 		select {
 		case <-d.wake:
 		case <-timer.C:
-			t.Fatalf("timed out after %s waiting for %q; saw %d: %q", diagTimeout, line, len(lines), lines[max(0, len(lines)-20):])
+			t.Fatal(timedOut(diagTimeout, fmt.Sprintf("%q", line), lines))
 		}
 	}
 }
@@ -81,7 +82,7 @@ func recvDiagnostic[T any](t *testing.T, what string, ch <-chan T) T {
 	case v := <-ch:
 		return v
 	case <-time.After(diagTimeout):
-		t.Fatalf("timed out after %s waiting for %s; saw 0: []", diagTimeout, what)
+		t.Fatal(timedOut(diagTimeout, what, nil))
 		panic("unreachable")
 	}
 }

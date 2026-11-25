@@ -199,7 +199,7 @@ function path(url: string, device: Device, known: Known, receive: Receive) {
 }
 
 /** Signs in on each signalling URL (rendezvous and local node; contracts/rendezvous.md 2) and
- *  sends every frame on each of them, at most 90 frames in 10 seconds per path. receive gets
+ *  sends every frame on each of them, at most 90 frames in 11 seconds per path. receive gets
  *  each path's frames with its URL, in the order they arrived, and `closed` when the path ends,
  *  including a URL the browser refuses to open. A `from` reaches it only when its `k` is the
  *  envelope's signer, its envelope passes the receiver's checks for a signal and its `conn` is

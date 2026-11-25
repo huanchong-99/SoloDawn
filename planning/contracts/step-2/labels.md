@@ -85,8 +85,9 @@ labels, and the owner's own messages and choices keep `instruction`.
 ## 4. What follows
 
 - After a task has started, direction changes in three ways only: the
-  owner writes in the thread; a new brief replaces the old one; or, for
-  added work, a mention outside the thread (a new `direct` card unless the
+  owner writes in the thread; the task is cancelled and a new brief is
+  confirmed (a brief replaces another only while that one is pending or sent
+  back, `contracts/commands.md` 1.3); or, for added work, a mention outside the thread (a new `direct` card unless the
   person's word is enough).
 - A decision chosen by someone the AI did not ask, an admin for example,
   moves the task on (the item is `instruction`) and its text is

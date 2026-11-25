@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -225,7 +226,7 @@ func waitMerged(t *testing.T, merged <-chan struct{}) {
 	select {
 	case <-merged:
 	case <-time.After(30 * time.Second):
-		t.Fatal("no TaskMerged command")
+		t.Fatal(timedOut(30*time.Second, "the TaskMerged command", nil))
 	}
 }
 
@@ -357,14 +358,12 @@ func (r *deliverRig) installHooks() {
 
 func (r *deliverRig) waitUntil(desc string, ok func() bool) {
 	r.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	poll(r.t, 5*time.Second, desc, func() string {
 		if ok() {
-			return
+			return ""
 		}
-		time.Sleep(time.Millisecond)
-	}
-	r.t.Fatalf("timed out waiting for %s", desc)
+		return fmt.Sprintf("turns=%d acks=%d sessions=%s", len(r.runtime.recorded()), len(r.home.ackList()), sessionStates(r.h))
+	})
 }
 
 func (r *deliverRig) waitGroupLive(group string) {

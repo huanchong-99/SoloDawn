@@ -83,7 +83,9 @@ func (w *externalWorld) scriptClaude(body []map[string]any) error {
 }
 
 func (w *externalWorld) scriptNotice() error {
-	return w.scriptClaude(mcpPostSteps(1, "Interruption seen"))
+	steps := slices.Concat(claudeToolTurn(true, "", "", mcpPostSteps(1, "Interruption seen")),
+		claudeToolTurn(false, "", "", nil), []map[string]any{{"dir": "eof"}})
+	return writeM6Script(w.homeNode, "claude", map[string]any{"steps": steps})
 }
 
 func (w *externalWorld) askManaged() error {
@@ -381,16 +383,14 @@ func (w *externalWorld) submitExternalReview() error {
 }
 
 func (w *externalWorld) waitForManagedNotice(reason string) error {
-	_, err := waitFakeCLILogs(w.homeNode.cliLog(), "start claude ", 1, 5*time.Second)
-	if err != nil {
-		return err
-	}
-	f, err := os.ReadFile(w.turnsPath())
-	if err != nil {
-		return err
-	}
-	if !strings.Contains(string(f), "notice · information") || !strings.Contains(string(f), reason) {
-		return fmt.Errorf("secretary's input did not include the %q notice: %s", reason, f)
-	}
-	return nil
+	return waitUntil(5*time.Second, fmt.Sprintf("secretary's %q notice", reason), func() error {
+		f, err := os.ReadFile(w.turnsPath())
+		if err != nil {
+			return abort(err)
+		}
+		if !strings.Contains(string(f), fmt.Sprintf("notice · information\\nNotice (%s)", reason)) {
+			return fmt.Errorf("secretary's input: %s", f)
+		}
+		return nil
+	})
 }
