@@ -54,9 +54,9 @@ answering node; RV, any signalling path.
    trickled candidates arrive: the type can change at an unchanged address
    and port (`contracts/rendezvous-evidence.md`, entry 11). Until a pair
    can be read there is no path, and the terminal stays unavailable. The
-   path, its round-trip time and the time it was established are shown in
-   the connection indicator; a host reports its path to the home in
-   member status.
+   path and its round-trip time are shown in the connection indicator, and
+   the page `Nodes` shows how long a relayed path has lasted; a host
+   reports its path to the home in member status.
 
    A browser has no event for every such change. It reads its statistics
    when `ctl` opens and every second after: the selected pair is the one

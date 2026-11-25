@@ -131,8 +131,7 @@ These tests need a task session, so they follow the first slice of M5
 (`start_task`, backend task B-16).
 
 - **A4.1** At level 2 an AI that needs to install a package produces a card
-  with the exact command. Approving from a second device lets it run. The
-  audit shows the request and the decision with the deciding device. With
+  with the exact command. Approving from a second device lets it run. With
   the real CLIs (`live`): `--mcp-config` takes a JSON string on Claude Code,
   and a command that the sandbox blocks for want of the network becomes a
   card once the AI asks through its CLI (R-41 rests on this;
@@ -148,8 +147,8 @@ These tests need a task session, so they follow the first slice of M5
   produces no card.
 - **A4.5** At level 3 no card appears.
 - **A4.6** An approval envelope from a device outside the owner's log,
-  injected at the home by a test hook, is ignored by the host; the audit
-  says `refused`.
+  injected at the home by a test hook, is ignored by the host and the
+  command does not run.
 - **A4.7** Pausing the group interrupts a running turn within 2 seconds.
   Mentions made while paused are delivered after resume. A task that waits
   for an approval is not woken by the resume.
@@ -271,7 +270,7 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 - **A8.1** On a clean machine of each system, pasting the onboarding prompt
   into an AI CLI installs the node, verifies the checksum, pairs, and the
   node is running again after a reboot.
-- **A8.2** Self-update replaces version n with n + 1 when the sum matches,
+- **A8.2** Postponed after 1.0 (no self-update). Self-update replaces version n with n + 1 when the sum matches,
   replaces nothing when it does not, and does not restart during a turn or
   a takeover.
 - **A8.3** With the page closed and the owner's node still connected to the
