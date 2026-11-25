@@ -98,6 +98,8 @@ that is waiting for them.
     - It is for another session, and the interrupted one is a task session:
       N reports `task preempted`. If the home refuses it (a task at step
       `merge`), nothing more is reported for that task.
+    - N has delivered the item under that number before: it interrupts
+      nothing and only acknowledges the item.
 13. N delivers the jump item as in steps 4 to 9.
 14. When the jump turn has ended, N gives the interrupted session, whatever
     its kind, one turn of its own: "You were interrupted by a direct request

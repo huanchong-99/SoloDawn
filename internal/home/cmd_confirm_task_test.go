@@ -2,9 +2,11 @@ package home_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
+	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
@@ -100,4 +102,52 @@ func TestRoleReassignmentAndReviewerWait(t *testing.T) {
 	equal(t, res.Answer.OK, true)
 	equal(t, res.Items, []home.Item{{AI: calB, Why: "review", Task: calTaskID, Commit: "commit"}})
 	equal(t, s.Tasks[calTaskID].Wait, (*proto.TaskWait)(nil))
+}
+
+// The owner of an AI gives it, as an admin, a role that they had denied: all
+// items of that task reach it. Their denial still holds for the other task of
+// the request, and for this one when somebody else gives the role again.
+func TestRoleDeniedThenGivenByTheOwner(t *testing.T) {
+	s, d, _ := cftBrief(t)
+	s.People[briefGuest] = person(briefGuest, guest, "admin")
+	s.Group.Limits.Failures = 3
+	first, second := briefTaskID(181, 0), briefTaskID(181, 1)
+	equal(t, s.Tasks[first].Asked, []string{briefA, briefB})
+	n := byte(190)
+	send := func(by identity.Key, kind, rest string) []home.Item {
+		t.Helper()
+		n++
+		res := cardApply(t, s, d, receipts{}, by, signed(by, kind, n, rest))
+		equal(t, res.Answer, store.Outcome{OK: true})
+		cardCommit(s, d, res)
+		return res.Items
+	}
+	task := func(by identity.Key, op, rest string) []home.Item {
+		t.Helper()
+		return send(by, "task", fmt.Sprintf(`,"op":%q,"id":%q%s`, op, first, rest))
+	}
+	give := func(by identity.Key, ai string) []home.Item {
+		t.Helper()
+		return task(by, "assign", fmt.Sprintf(`,"assignee":%q`, ai))
+	}
+	send(guest, "act", fmt.Sprintf(`,"msg":%q,"action":"deny"`, cftFind(t, d, briefA).ID))
+	equal(t, give(browser, briefC), []home.Item{{AI: briefC, Why: "assign", Task: first}})
+	equal(t, s.Tasks[first].Asked, []string{briefB})
+
+	equal(t, give(guest, briefA), []home.Item{{AI: briefA, Why: "assign", Task: first}})
+	equal(t, s.Tasks[first].Asked, []string{briefB})
+	task(guest, "branch", `,"branch":"task/5-report-path-changes"`)
+	task(guest, "checked", `,"ok":true,"items":[],"commit":"c1"`)
+	task(guest, "submitted", `,"commit":"c1","pr":1,"pr_url":"https://x/1","stats":{"added":1,"removed":0}`)
+	checks := task(guest, "cloud", `,"ok":false,"items":[],"commit":"c1"`)
+	equal(t, checks, []home.Item{{AI: briefA, Why: "checks", Task: first, Msg: id(n)}})
+	equal(t, task(browser, "pause", ""), []home.Item(nil))
+	equal(t, task(browser, "resume", ""), []home.Item{{AI: briefA, Why: "resume", Task: first}})
+	equal(t, s.Tasks[second].Asked, []string{briefB, briefA})
+
+	give(browser, briefC)
+	equal(t, give(browser, briefA), []home.Item{})
+	equal(t, s.Tasks[first].Asked, []string{briefA, briefB})
+	task(browser, "pause", "")
+	equal(t, task(browser, "resume", ""), []home.Item{})
 }

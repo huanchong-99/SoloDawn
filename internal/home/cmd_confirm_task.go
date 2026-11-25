@@ -19,7 +19,12 @@ func cftRequest(task proto.TaskRow) string {
 
 func cftRoleRequest(req proto.MsgRow) bool { return req.Kind == briefKind || req.Kind == "task" }
 
+// cftCard is the card that an AI's role in the task waits on; a role that
+// asks nobody has none, whatever the card of its request says.
 func cftCard(d Disk, task proto.TaskRow, ai string) proto.MsgRow {
+	if !slices.Contains(task.Asked, ai) {
+		return proto.MsgRow{}
+	}
 	card, _ := d.Msg(cfmCardID(proto.ID(cftRequest(task)), ai))
 	return card
 }
@@ -50,9 +55,9 @@ func (s *State) cftFinish(c Command, res Result) Result {
 	changed := map[string]bool{}
 	cftReadRows(&view, d, changed, res.Rows)
 	for _, id := range slices.Sorted(maps.Keys(changed)) {
-		s.cftNewRoles(c, view.Tasks[id], d, &res)
+		view.Tasks[id] = s.cftNewRoles(c, view.Tasks[id], d, &res)
 	}
-	res.Items = view.cftFilterItems(c, d, res.Items, changed, s.Tasks)
+	res.Items = view.cftFilterItems(d, res.Items, changed)
 	for _, id := range slices.Sorted(maps.Keys(changed)) {
 		task := view.Tasks[id]
 		if task.State == taskActive {
@@ -83,39 +88,53 @@ func cftReadRows(view *State, d cftDisk, changed map[string]bool, rows []Row) {
 	}
 }
 
-func (s *State) cftFilterItems(c Command, d Disk, items []Item, changed map[string]bool, old map[string]proto.TaskRow) []Item {
+func (s *State) cftFilterItems(d Disk, items []Item, changed map[string]bool) []Item {
 	return slices.DeleteFunc(slices.Clone(items), func(it Item) bool {
 		if it.Task == "" {
 			return false
 		}
 		changed[it.Task] = true
-		return s.cftHoldItem(c, d, it, old[it.Task])
+		return s.cftHoldItem(d, it)
 	})
 }
 
-func (s *State) cftNewRoles(c Command, task proto.TaskRow, d cftDisk, res *Result) {
+// cftNewRoles records in the task whose owners its roles ask, and writes the
+// cards that are missing.
+func (s *State) cftNewRoles(c Command, task proto.TaskRow, d cftDisk, res *Result) proto.TaskRow {
 	old, exists := s.Tasks[task.ID]
 	if !exists && task.Brief == "" {
-		return
+		return task
 	}
+	var asked []string
 	for _, role := range []struct{ ai, old string }{{task.Assignee, old.Assignee}, {task.Reviewer, old.Reviewer}} {
-		if role.ai == "" || role.ai == role.old {
-			continue
+		if s.cftAsks(c.Who.User, old, role.ai, role.old, !exists) {
+			asked = append(asked, role.ai)
+			s.cftAsk(c, task, s.AIs[role.ai], d, res)
 		}
-		s.cftNewRole(c, task, s.AIs[role.ai], !exists, d, res)
 	}
+	if !slices.Equal(asked, task.Asked) {
+		task.Asked = asked
+		cftPutTask(res, task)
+	}
+	return task
 }
 
-func (s *State) cftNewRole(c Command, task proto.TaskRow, ai proto.AIMemberRow, initial bool, d cftDisk, res *Result) {
-	if c.Who.User == ai.User {
-		return
+// cftAsks reports whether a role needs its owner's word by a card: a role kept
+// as it did, a new one unless the owner gives it, or the first word is enough.
+func (s *State) cftAsks(user string, old proto.TaskRow, ai, was string, initial bool) bool {
+	if ai == was {
+		return slices.Contains(old.Asked, ai)
 	}
-	if initial && cfmEnough(c.Who.User, ai) {
-		return
-	}
+	member := s.AIs[ai]
+	return user != member.User && !(initial && cfmEnough(user, member))
+}
+
+// cftAsk writes the card of a role that did not ask yet, unless the request has
+// one. A kept role never gets one again: a finished task's is deleted.
+func (s *State) cftAsk(c Command, task proto.TaskRow, ai proto.AIMemberRow, d cftDisk, res *Result) {
 	req := proto.MsgRow{RowHeader: proto.RowHeader{ID: cftRequest(task)}}
 	card := s.cfmNewCard(c, cfmWhatDirect, req, ai)
-	if _, found := d.Msg(card.ID); found {
+	if _, found := d.Msg(card.ID); found || slices.Contains(s.Tasks[task.ID].Asked, ai.ID) {
 		return
 	}
 	d.msgs[card.ID] = card
@@ -135,22 +154,8 @@ func cftNames(task proto.TaskRow, ai string) bool { return task.Assignee == ai |
 
 func cftFinal(state string) bool { return state == taskMerged || state == taskCancelled }
 
-func (s *State) cftHoldItem(c Command, d Disk, it Item, old proto.TaskRow) bool {
-	if !slices.Contains(workItems, it.Why) {
-		return false
-	}
-	task := s.Tasks[it.Task]
-	if cftOwnerChange(c, old, task, it.AI, s.AIs[it.AI].User) {
-		return false
-	}
-	return cftHeld(cftCard(d, task, it.AI))
-}
-
-func cftOwnerChange(c Command, old, task proto.TaskRow, ai, owner string) bool {
-	if c.Who.User != owner {
-		return false
-	}
-	return (task.Assignee == ai && old.Assignee != ai) || (task.Reviewer == ai && old.Reviewer != ai)
+func (s *State) cftHoldItem(d Disk, it Item) bool {
+	return slices.Contains(workItems, it.Why) && cftHeld(cftCard(d, s.Tasks[it.Task], it.AI))
 }
 
 func cftWait(d Disk, task proto.TaskRow) *proto.TaskWait {
@@ -225,7 +230,7 @@ func (s *State) cftTasksFor(req, ai string) []proto.TaskRow {
 	var tasks []proto.TaskRow
 	for _, id := range slices.Sorted(maps.Keys(s.Tasks)) {
 		task := s.Tasks[id]
-		if cftRequest(task) == req && cftNames(task, ai) && task.State == taskActive {
+		if cftRequest(task) == req && slices.Contains(task.Asked, ai) && task.State == taskActive {
 			tasks = append(tasks, task)
 		}
 	}

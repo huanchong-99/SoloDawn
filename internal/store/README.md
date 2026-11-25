@@ -35,7 +35,7 @@ before another transaction can run.
 
 `home_reads.go` holds what the run loop of a home needs inside a `Write`: `Groups`,
 `StateRows` and `Counters` to load a group, `Row`, `Thread`, `Pending` and `Queued` for
-what a rule reads from disk, and `RaiseNum` and `Retire`. A read there sees what its
+what a rule reads from disk, and `RaiseNum`, `Retire` and `Jump`. A read there sees what its
 own transaction wrote, and never waits for the writer, which it runs on.
 
 `offers.go` remembers applied signalling offers across restarts: `RememberOffer(signer, conn, ts, now)`

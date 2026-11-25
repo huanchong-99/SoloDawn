@@ -14,6 +14,7 @@ type TaskRow struct {
 	Commit     string        `json:"commit,omitempty"`
 	Assignee   string        `json:"assignee"`
 	Reviewer   string        `json:"reviewer,omitempty"`
+	Asked      []string      `json:"asked,omitempty"`
 	Foundation bool          `json:"foundation"`
 	Pass       int           `json:"pass"`
 	Depends    []string      `json:"depends"`

@@ -173,8 +173,9 @@ Acting on a card whose `state.status` is not `pending` returns `conflict`.
 A decided card keeps the signed `act` in `state.act`.
 
 `jump` (R-72), fields: `msg`. By the person who wrote message `msg`. Every
-unacknowledged `mention` item that `msg` produced gets `jump: true` and is
-sent again; when there is none, `conflict`.
+unacknowledged `mention` item that `msg` produced gets `jump: true` under
+its number, is no longer held back by the wake-up cap, and is sent again;
+when there is none, `conflict`.
 The host does the rest (`flows/agent-turn.md` C).
 
 ### 1.5 `task`
@@ -236,21 +237,23 @@ end for that browser (RFC 8291); the vendor sees ciphertext only (R-163).
 Its content is a short summary:
 
 ```json
-{"g":"<group id>","msg":"<id of the card or message>","group":"Website",
+{"g":"<group id>","msg":"<what a click opens>","group":"Website",
  "kind":"approval","who":"Codex","title":"Install the browser test dependencies"}
 ```
 
 | Field | Content |
 | --- | --- |
+| `msg` | the id of the card or message; for a message that is in a task's thread alone, the task's id: that of the task's message in the main line, which opens the thread |
 | `kind` | `approval`, `decision`, `brief`, `mention`, `done`, `confirm` |
 | `who` | display name of the member it is about: the AI asking, the secretary, the author of the mention; for a `system` row that mentions people, the AI its body names, or the assignee of the task its body names |
 | `title` | one line, at most 80 characters. `approval`: the first line of the justification the CLI attached (`body.why`), absent if there is none. `decision`: the question. `brief`, `done`: the brief or task title. `mention`: the task title for a `system` row about a task, else absent |
+| `code` | for a `system` row its `code`, such as `task_failed` or `login_invalid`, else absent |
 
-`title` is optional; every other field is always present.
+`title` and `code` are optional; every other field is always present.
 
 Never included: message text, the command of an approval, code, file
-names. The browser shows `group · kind · who: title` in the user's language
-and opens the card `msg`.
+names. The browser shows `group · kind · who: title` in the user's language,
+with words for `code` in place of `kind` when it has some, and opens `msg`.
 
 Each created message row produces at most one reminder kind: `approval`
 (`body.approvers`), `decision` (`body.to`), `brief` (human `body.requester`)

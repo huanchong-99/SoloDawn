@@ -192,7 +192,8 @@ no `g` and no `to`.
 
 `item` is the plain item object, built by the home in the transaction that
 queues it, and stored: what is sent later is what was decided then,
-whatever the task has become. It always has `item`, `ai` and `why`, and the
+whatever the task has become; only a `jump` (R-72) still adds `jump: true`
+to a stored item, under its number. It always has `item`, `ai` and `why`, and the
 fields the table gives its `why`, each there exactly when the table says.
 `ack.item` is `items[].item.item`. In `item`, `task` and `msg` are the ids
 of those rows, and the optional fields are `task`, `msg`, `commit`, `pr`,
@@ -228,7 +229,10 @@ frame has none.
 - The host answers `{"t":"ack","g":"…","item":4411}` when it delivers the
   item to the session or refuses it. The home deletes an acknowledged item
   only if the acknowledging connection is the item's host. On every `hello`
-  from a host the home sends its unacknowledged items again.
+  from a host the home sends its unacknowledged items again, and an item
+  that jumps as soon as it does. A host acknowledges an item it has
+  delivered before, and an item that jumps replaces the one it holds under
+  that number.
 - A `merge` item is for the host itself, not for a session. What the host
   does with an item is in `flows/agent-turn.md`.
 

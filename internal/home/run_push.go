@@ -15,7 +15,7 @@ import (
 // What the clients of a group are told once a result is committed
 // (planning/contracts/datachannel.md sections 3, 4 and 6): the rows first,
 // then the list of groups when it changed, then the inbox items the result
-// queued. A row change so reaches a host before the items it causes.
+// queued or that jump. A row change so reaches a host before the items it causes.
 
 // runRoom is the most bytes the rows or items of one ctl frame may have: a ctl
 // message of 61,440 bytes less the frame around them
@@ -34,8 +34,18 @@ func (g *runGroup) tell(res Result, now time.Time) {
 	if res.GroupsChanged {
 		g.loop.announce()
 	}
-	if len(res.Items) > 0 {
+	g.forgetSent(res.Jump)
+	if len(res.Items)+len(res.Jump) > 0 {
 		g.deliver(now)
+	}
+}
+
+// forgetSent has items sent again to the connections that were sent them.
+func (g *runGroup) forgetSent(ids []int64) {
+	for _, seat := range g.seats {
+		for _, id := range ids {
+			delete(seat.sent, id)
+		}
 	}
 }
 

@@ -781,6 +781,7 @@ func TestRunAFailedWriteChangesNothing(t *testing.T) {
 			return home.Result{Rows: []home.Row{note(c)}, Items: []home.Item{{AI: aiID, Why: "notice"}}}
 		},
 		"retire": func(c home.Command) home.Result { return home.Result{Retire: []int64{1}} },
+		"jump":   func(c home.Command) home.Result { return home.Result{Jump: []int64{1}} },
 	}
 	tables.Commands["jump"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 		var p struct {
@@ -831,6 +832,7 @@ func TestRunAFailedWriteChangesNothing(t *testing.T) {
 	runExec(t, w.db, "DROP TABLE inbox")
 	fails("queue", "no such table: inbox")
 	fails("retire", "no such table: inbox")
+	fails("jump", "no such table: inbox")
 	runExec(t, w.db, "DROP TABLE grp")
 	fails("retire", "no such table: grp")
 	fails("row", "no such table: grp")

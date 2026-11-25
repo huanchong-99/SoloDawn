@@ -187,7 +187,6 @@ type Item struct {
 	Msg    string
 	Commit string // review, merge
 	PR     int    // merge, when the group has a remote
-	Jump   bool   // mention, after the author's jump
 	Code   string // notice
 	Detail string // notice, where its case has one
 
@@ -209,6 +208,7 @@ type Result struct {
 	Rows   []Row         // the changed rows, in the order of their sequence numbers
 	Items  []Item        // the inbox items to queue, after the rows
 	Retire []int64       // the queued inbox items that the change made pointless, by id
+	Jump   []int64       // the queued inbox items that jump the queue, by id
 	Writes []Write       // what changes besides rows and items
 	Answer store.Outcome // a function sets the result fields of its command and nothing else
 	Msg    string        // of a refusal: the sentence for logs
