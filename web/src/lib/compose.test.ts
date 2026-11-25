@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   actTextLimit,
   complete,
@@ -271,15 +271,20 @@ describe('the size of a row', () => {
 
 describe('parts of a text with many mentions', () => {
   const many = (n: number) => '@Codex hi '.repeat(n);
-  const time = (n: number) => {
-    const text = many(n);
-    const start = performance.now();
-    const result = parts(text, members);
-    return { result, ms: performance.now() - start };
-  };
 
-  it('are cut as for a few, and cost about as much per mention for more', () => {
-    const { result } = time(2300);
+  /** The characters `slice` copied while `run` ran: work, which a busy machine does not change. */
+  function copied(run: () => void) {
+    const slice = vi.spyOn(String.prototype, 'slice');
+    try {
+      run();
+      return slice.mock.results.reduce((sum, call) => sum + (call.value as string).length, 0);
+    } finally {
+      slice.mockRestore();
+    }
+  }
+
+  it('are cut as for a few', () => {
+    const result = parts(many(2300), members);
     expect(result).toHaveLength(2300 * 2);
     expect(result.slice(0, 4)).toEqual([
       { kind: 'at', text: '@Codex', id: 'x' },
@@ -289,10 +294,13 @@ describe('parts of a text with many mentions', () => {
     ]);
     expect(result.map((part) => part.text).join('')).toBe(many(2300));
     expect(mentioned(many(2300), members)).toEqual(['x']);
-    // Four times the mentions, well under sixteen times the time: it is not quadratic.
-    time(500);
-    const small = Math.max(time(1500).ms, 5);
-    expect(time(6000).ms).toBeLessThan(small * 10);
+  });
+
+  it('copy each character once, however many there are: it is not quadratic, nor recursive', () => {
+    for (const n of [2300, 6000]) {
+      const text = many(n);
+      expect(copied(() => parts(text, members))).toBeLessThanOrEqual(text.length);
+    }
   });
 });
 

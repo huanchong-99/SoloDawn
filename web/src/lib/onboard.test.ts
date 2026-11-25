@@ -1,5 +1,14 @@
 import { IDBFactory } from 'fake-indexeddb';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+  type FakeTimersConfig,
+} from 'vitest';
 import { DeviceLog } from './devlog';
 import { Device, ed25519, encode, loadDevice, verifyEnvelope } from './identity';
 import {
@@ -72,6 +81,36 @@ vi.mock('./mock', async (actual) => {
     },
   };
 });
+
+// The countdown is an interval that reads the date. Nothing else is faked: the fake IndexedDB
+// schedules its work with timers, and a faked one never runs them.
+const countdownClock: FakeTimersConfig = { toFake: ['setInterval', 'clearInterval', 'Date'] };
+
+/** Waits until `check` stops throwing, a turn of the event loop at a time. The wait has no clock
+ *  of its own: how long a cold import, a key or a database takes depends on the machine. It ends
+ *  with its test, so a wait that is stuck for good ends at the test timeout, prints what `check`
+ *  last said, and does not run into the next test. Unlike `vi.waitFor`, it does not move a faked
+ *  clock by one poll's time. */
+async function until(check: () => void) {
+  let over = false;
+  let done = false;
+  let failure: unknown;
+  onTestFinished(() => {
+    over = true;
+    if (!done) console.error(`until: the test ended while waiting: ${String(failure)}`);
+  });
+  while (!over) {
+    try {
+      check();
+      done = true;
+      return;
+    } catch (error) {
+      failure = error;
+      await new Promise((resolve) => setTimeout(resolve));
+    }
+  }
+  throw failure;
+}
 
 const newDevice = async () =>
   Device.of(crypto, await crypto.subtle.generateKey(ed25519, false, ['sign', 'verify']));
@@ -282,7 +321,7 @@ describe('PairingSession mock, countdown and storage checks', () => {
   });
   it('loads mock state, reacts to host.info pushes, and declares accounts', async () => {
     const session = new PairingSession('mock');
-    await vi.waitFor(() => expect(session.stage).toBe('accounts'));
+    await until(() => expect(session.stage).toBe('accounts'));
     expect(session.role).toBe('a');
     expect(session.code).toMatch(/^([0-9A-HJKMNP-TV-Z]{4}-){3}[0-9A-HJKMNP-TV-Z]{4}$/);
     expect(session.enrolled).toBe(true);
@@ -334,7 +373,7 @@ describe('PairingSession mock, countdown and storage checks', () => {
   it('finishes onboarding without declaring an account for an external agent', async () => {
     const session = new PairingSession('mock');
     try {
-      await vi.waitFor(() => expect(session.stage).toBe('accounts'));
+      await until(() => expect(session.stage).toBe('accounts'));
       const managed = session.agents!.find((agent) => agent.agent === 'claude')!;
       const info = hostInfoOf(session.node!.id, [
         managed,
@@ -376,15 +415,15 @@ describe('PairingSession mock, countdown and storage checks', () => {
     vi.stubGlobal('indexedDB', idb);
     vi.stubEnv('DEV', false);
     const prod = new PairingSession('mock');
-    await vi.waitFor(() => expect(hubs).toHaveLength(1));
+    await until(() => expect(hubs).toHaveLength(1));
     prod.destroy();
   });
 
   it('counts down by whole seconds, expires at 0, and clamps past-deadline jumps to 0', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers(countdownClock);
     vi.setSystemTime(1_000_000);
     const session = new PairingSession('live');
-    await vi.waitFor(() => expect(hubs).toHaveLength(1));
+    await until(() => expect(hubs).toHaveLength(1));
     await vi.advanceTimersByTimeAsync(0);
     expect(session.remaining).toBe(600);
     expect(session.code).not.toBe('');
@@ -403,7 +442,7 @@ describe('PairingSession mock, countdown and storage checks', () => {
   });
 
   it('counts the mock window down and stops counting after destroy or a bad secret', () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers(countdownClock);
     vi.setSystemTime(1_000_000);
     const mock = new PairingSession('mock');
     vi.advanceTimersByTime(2000);
@@ -433,7 +472,7 @@ describe('PairingSession mock, countdown and storage checks', () => {
       },
     });
     const noStorage = new PairingSession('live');
-    await vi.waitFor(() => expect(noStorage.stage).toBe('failed'));
+    await until(() => expect(noStorage.stage).toBe('failed'));
     expect(noStorage.error).toStrictEqual({ step: 1, key: 'storage', code: undefined });
     noStorage.destroy();
 
@@ -457,7 +496,7 @@ describe('PairingSession mock, countdown and storage checks', () => {
       opens++ === 0 ? realOpen(name) : realOpen(name, 1)) as typeof newerIdb.open);
     vi.stubGlobal('indexedDB', newerIdb);
     const otherErr = new PairingSession('live');
-    await vi.waitFor(() => expect(otherErr.stage).toBe('failed'));
+    await until(() => expect(otherErr.stage).toBe('failed'));
     expect(otherErr.error).toStrictEqual({ step: 1, key: 'lost', code: undefined });
     otherErr.destroy();
   });
@@ -481,7 +520,7 @@ describe('PairingSession live role a and role b flows', () => {
     const stranger = await newDevice();
 
     const session = new PairingSession('live');
-    await vi.waitFor(() => expect(hubs).toHaveLength(1));
+    await until(() => expect(hubs).toHaveLength(1));
     const hub = hubs[0];
     expect(hub.options.urls).toStrictEqual([`ws://${location.host}/rv`]);
     expect(hub.options.name).toBe('Browser');
@@ -527,7 +566,7 @@ describe('PairingSession live role a and role b flows', () => {
 
     hub.options.heard!(url, { t: 'room', room: roomId, data: validPair });
     hub.options.heard!(url, { t: 'room', room: roomId, data: validPair });
-    await vi.waitFor(() => expect(hub.peers).toHaveLength(1));
+    await until(() => expect(hub.peers).toHaveLength(1));
     expect(session.stage).toBe('linking');
     expect(session.node?.id).toBe(node1.id);
     expect(hub.options.known(node1.id)).toBe(true);
@@ -573,7 +612,7 @@ describe('PairingSession live role a and role b flows', () => {
     });
 
     peer.listener.online(ctl, welcomeOf(node1.id, false, 'Mac One'));
-    await vi.waitFor(() => expect(session.stage).toBe('accounts'));
+    await until(() => expect(session.stage).toBe('accounts'));
     expect(peer.sent).toHaveLength(1);
     expect(peer.sent[0].t).toBe('devlog');
     expect(peer.sent[0].entries).toHaveLength(2);
@@ -618,7 +657,7 @@ describe('PairingSession live role a and role b flows', () => {
 
     // Pairing a second computer appends entry 3 to the stored owner log; re-pairing node2 adds nothing.
     await session.start();
-    await vi.waitFor(() => expect(hubs).toHaveLength(2));
+    await until(() => expect(hubs).toHaveLength(2));
     const hub2 = hubs[1];
     expect(hub2.options.known(node1.id)).toBe(true);
     expect(hub2.options.known(node2.id)).toBe(false);
@@ -631,18 +670,18 @@ describe('PairingSession live role a and role b flows', () => {
       room: room2,
       data: { t: 'pair', ...self2, mac: await mac(crypto, secret2, self2) },
     });
-    await vi.waitFor(() => expect(hub2.peers).toHaveLength(1));
+    await until(() => expect(hub2.peers).toHaveLength(1));
     const ctl2 = makeCtl(async (req) =>
       req.t === 'hello' ? welcomeOf(node2.id, true, 'Mac Two') : hostInfoOf(node2.id, []),
     );
     hub2.peers[0].listener.online(ctl2, welcomeOf(node2.id, false, 'Mac Two'));
-    await vi.waitFor(() => expect(session.stage).toBe('ready'));
+    await until(() => expect(session.stage).toBe('ready'));
     expect(hub2.peers[0].sent[0].entries).toHaveLength(3);
 
     // Re-pairing an already valid node sends the 3-entry log unchanged.
     await session.start();
     expect(hub2.closed).toBe(1);
-    await vi.waitFor(() => expect(hubs).toHaveLength(3));
+    await until(() => expect(hubs).toHaveLength(3));
     const secret3 = parseSecret(session.code);
     const room3 = await room(crypto, secret3);
     hubs[2].options.heard!(url, {
@@ -650,9 +689,9 @@ describe('PairingSession live role a and role b flows', () => {
       room: room3,
       data: { t: 'pair', ...self2, mac: await mac(crypto, secret3, self2) },
     });
-    await vi.waitFor(() => expect(hubs[2].peers).toHaveLength(1));
+    await until(() => expect(hubs[2].peers).toHaveLength(1));
     hubs[2].peers[0].listener.online(ctl2, welcomeOf(node2.id, false, 'Mac Two'));
-    await vi.waitFor(() => expect(session.stage).toBe('ready'));
+    await until(() => expect(session.stage).toBe('ready'));
     expect(hubs[2].peers[0].sent[0].entries).toHaveLength(3);
     session.destroy();
   });
@@ -664,7 +703,7 @@ describe('PairingSession live role a and role b flows', () => {
     location.hash = `#pair=${shown(link1)}`;
 
     const session = new PairingSession('live');
-    await vi.waitFor(() => expect(hubs).toHaveLength(1));
+    await until(() => expect(hubs).toHaveLength(1));
     expect(session.role).toBe('b');
     expect(session.code).toBe('');
     const browserDev = await loadDevice({ crypto, idb: () => idb });
@@ -675,7 +714,7 @@ describe('PairingSession live role a and role b flows', () => {
       room: room1,
       data: { t: 'pair', ...nodeSelf, mac: await mac(crypto, link1, nodeSelf) },
     });
-    await vi.waitFor(() => expect(hubs[0].peers).toHaveLength(1));
+    await until(() => expect(hubs[0].peers).toHaveLength(1));
 
     const ctl = makeCtl(async (req) =>
       req.t === 'hello' ? welcomeOf(node.id, true) : hostInfoOf(node.id, []),
@@ -692,7 +731,7 @@ describe('PairingSession live role a and role b flows', () => {
     expect(session.enrolled).toBe(false);
 
     peer.listener.push({ t: 'devlog', user: owner.id, entries: [e3] });
-    await vi.waitFor(() => expect(session.stage).toBe('ready'));
+    await until(() => expect(session.stage).toBe('ready'));
     const stored = await loadOwner(crypto, () => idb);
     expect(stored.log?.valid(browserDev.id)).toBe(true);
 
@@ -701,16 +740,16 @@ describe('PairingSession live role a and role b flows', () => {
     const link2 = newSecret(crypto);
     location.hash = `#pair=${shown(link2)}`;
     await session.start();
-    await vi.waitFor(() => expect(hubs).toHaveLength(2));
+    await until(() => expect(hubs).toHaveLength(2));
     const room2 = await room(crypto, link2);
     hubs[1].options.heard!(hubs[1].options.urls[0], {
       t: 'room',
       room: room2,
       data: { t: 'pair', ...nodeSelf, mac: await mac(crypto, link2, nodeSelf) },
     });
-    await vi.waitFor(() => expect(hubs[1].peers).toHaveLength(1));
+    await until(() => expect(hubs[1].peers).toHaveLength(1));
     hubs[1].peers[0].listener.online(ctl, welcomeOf(node.id, false));
-    await vi.waitFor(() => expect(session.stage).toBe('failed'));
+    await until(() => expect(session.stage).toBe('failed'));
     expect(session.error).toStrictEqual({ step: 3, key: 'unadopted', code: undefined });
 
     // Fresh browser with welcome.owner === true skips devlog wait, even without navigator.storage.
@@ -720,16 +759,16 @@ describe('PairingSession live role a and role b flows', () => {
     const link3 = newSecret(crypto);
     location.hash = `#pair=${shown(link3)}`;
     const quick = new PairingSession('live');
-    await vi.waitFor(() => expect(hubs).toHaveLength(3));
+    await until(() => expect(hubs).toHaveLength(3));
     const room3 = await room(crypto, link3);
     hubs[2].options.heard!(hubs[2].options.urls[0], {
       t: 'room',
       room: room3,
       data: { t: 'pair', ...nodeSelf, mac: await mac(crypto, link3, nodeSelf) },
     });
-    await vi.waitFor(() => expect(hubs[2].peers).toHaveLength(1));
+    await until(() => expect(hubs[2].peers).toHaveLength(1));
     hubs[2].peers[0].listener.online(ctl, welcomeOf(node.id, true));
-    await vi.waitFor(() => expect(quick.stage).toBe('ready'));
+    await until(() => expect(quick.stage).toBe('ready'));
     const entry = { p: '{}', k: 'x', s: 'y' };
     const apply = vi.spyOn(DeviceLog.prototype, 'apply');
     hubs[2].peers[0].listener.push({ t: 'devlog', user: node.id, entries: [entry] });
@@ -762,7 +801,7 @@ describe('PairingSession live role a and role b flows', () => {
       location.hash = `#pair=${shown(link)}`;
       const s = new PairingSession('live');
       const count = hubs.length + 1;
-      await vi.waitFor(() => expect(hubs).toHaveLength(count));
+      await until(() => expect(hubs).toHaveLength(count));
       const hub = hubs.at(-1)!;
       const roomId = await room(crypto, link);
       const self = { role: 'a' as const, k: node.id, kind: 'node' as const, name: 'desk' };
@@ -771,7 +810,7 @@ describe('PairingSession live role a and role b flows', () => {
         room: roomId,
         data: { t: 'pair', ...self, mac: await mac(crypto, link, self) },
       });
-      await vi.waitFor(() => expect(hub.peers).toHaveLength(1));
+      await until(() => expect(hub.peers).toHaveLength(1));
       return { session: s, peer: hub.peers[0] };
     }
 
@@ -801,7 +840,7 @@ describe('PairingSession live role a and role b flows', () => {
       Object.defineProperty(navigator, 'storage', { configurable: true, value: {} });
       const s = new PairingSession('live');
       const count = hubs.length + 1;
-      await vi.waitFor(() => expect(hubs).toHaveLength(count));
+      await until(() => expect(hubs).toHaveLength(count));
       const hub = hubs.at(-1)!;
       const secret = parseSecret(s.code);
       const roomId = await room(crypto, secret);
@@ -826,7 +865,7 @@ describe('PairingSession live role a and role b flows', () => {
     {
       const s = new PairingSession('live');
       const count = hubs.length + 1;
-      await vi.waitFor(() => expect(hubs).toHaveLength(count));
+      await until(() => expect(hubs).toHaveLength(count));
       const hub = hubs.at(-1)!;
       const secret = parseSecret(s.code);
       const roomId = await room(crypto, secret);
@@ -836,7 +875,7 @@ describe('PairingSession live role a and role b flows', () => {
         room: roomId,
         data: { t: 'pair', ...self, mac: await mac(crypto, secret, self) },
       });
-      await vi.waitFor(() => expect(hub.peers).toHaveLength(1));
+      await until(() => expect(hub.peers).toHaveLength(1));
       const enrolCtl = makeCtl(async (req) => {
         if (req.t === 'hello') {
           queueMicrotask(() => s.destroy());
@@ -869,7 +908,7 @@ describe('PairingSession live role a and role b flows', () => {
       const ctl = makeCtl(async () => ({}));
       peer.listener.online(ctl, welcomeOf(node.id, false));
       peer.listener.push({ t: 'devlog', user: node.id, entries: [{ p: '{}', k: 'x', s: 'y' }] });
-      await vi.waitFor(() => expect(session.stage).toBe('failed'));
+      await until(() => expect(session.stage).toBe('failed'));
       expect(session.error).toStrictEqual({ step: 3, key: 'unadopted', code: undefined });
       session.destroy();
     }
@@ -901,7 +940,7 @@ describe('PairingSession live role a and role b flows', () => {
       vi.stubGlobal('indexedDB', idb);
       const s = new PairingSession('live');
       const count = hubs.length + 1;
-      await vi.waitFor(() => expect(hubs).toHaveLength(count));
+      await until(() => expect(hubs).toHaveLength(count));
       const hub = hubs.at(-1)!;
       const secret = parseSecret(s.code);
       const roomId = await room(crypto, secret);
@@ -911,14 +950,14 @@ describe('PairingSession live role a and role b flows', () => {
         room: roomId,
         data: { t: 'pair', ...self, mac: await mac(crypto, secret, self) },
       });
-      await vi.waitFor(() => expect(hub.peers).toHaveLength(1));
+      await until(() => expect(hub.peers).toHaveLength(1));
       const ctl = makeCtl(async (req) => {
         const res = req.t === 'hello' ? helloRes : infoRes;
         if (!res) throw new Error('dropped');
         return res;
       });
       hub.peers[0].listener.online(ctl, welcomeOf(node.id, false));
-      await vi.waitFor(() => expect(s.stage, label).toBe('failed'));
+      await until(() => expect(s.stage, label).toBe('failed'));
       expect(s.error, label).toStrictEqual(expected);
       expect(hub.closed, label).toBe(1);
       s.destroy();
@@ -943,7 +982,7 @@ describe('PairingSession live role a and role b flows', () => {
       if (link) location.hash = `#pair=${shown(link)}`;
       const session = new PairingSession('live');
       const count = hubs.length + 1;
-      await vi.waitFor(() => expect(hubs).toHaveLength(count));
+      await until(() => expect(hubs).toHaveLength(count));
       const hub = hubs[count - 1];
       const secret = link ?? parseSecret(session.code);
       const self = {
@@ -957,7 +996,7 @@ describe('PairingSession live role a and role b flows', () => {
         room: await room(crypto, secret),
         data: { t: 'pair', ...self, mac: await mac(crypto, secret, self) },
       });
-      await vi.waitFor(() => expect(hub.peers).toHaveLength(1));
+      await until(() => expect(hub.peers).toHaveLength(1));
       return { session, peer: hub.peers[0] };
     }
 
@@ -968,13 +1007,13 @@ describe('PairingSession live role a and role b flows', () => {
     const first = await dial();
     first.peer.listener.online(ctl, welcomeOf(node.id, false));
     pushLog(first.peer);
-    await vi.waitFor(() => expect(first.session.stage).toBe('ready'));
+    await until(() => expect(first.session.stage).toBe('ready'));
     first.session.destroy();
 
     const second = await dial(newSecret(crypto));
     second.peer.listener.online(ctl, { ...welcomeOf(node.id, true), addrs: ['wss://other/rv'] });
     pushLog(second.peer);
-    await vi.waitFor(() => expect(second.session.stage).toBe('ready'));
+    await until(() => expect(second.session.stage).toBe('ready'));
     expect((await loadOwner(crypto, () => idb)).addrs[node.id]).toEqual(['wss://other/rv']);
     second.session.destroy();
   });
