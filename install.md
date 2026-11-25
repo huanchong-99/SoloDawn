@@ -84,3 +84,85 @@ Add only repositories you trust, because their `CLAUDE.md`, `AGENTS.md` and
 hooks are used by the AIs that work on them. A Qwen Code AI may load a
 repository's own configuration (`.qwen/settings.json`, `QWEN.md`) even in a
 group session: Qwen Code has no known switch to keep it out.
+
+## Update
+
+Version 1 does not update itself. The node keeps its pairing and groups;
+they are not in the binary. To update a computer, download the new release's
+`SHA256SUMS` and binary into an empty directory, then for your system do three
+things in this order: stop the node, replace the binary with the commands of
+"Verify and install" above (set `asset` to the new filename in that block),
+and start the node. Confirm the new tag with `solodawn version`.
+
+If the node runs in a terminal, press Ctrl+C there first, replace the binary,
+then start `solodawn node` again. If it runs as the login service, use the
+commands below.
+
+**Linux**
+
+```sh
+systemctl --user stop solodawn.service
+```
+
+Replace the binary, then:
+
+```sh
+systemctl --user start solodawn.service
+```
+
+**macOS**
+
+```sh
+launchctl bootout "gui/$(id -u)/org.solodawn.node" 2>/dev/null || true
+```
+
+Replace the binary, then:
+
+```sh
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.solodawn.node.plist"
+```
+
+**Windows** (PowerShell). A running `solodawn.exe` cannot be overwritten, so
+end the task and wait until no `solodawn` process is left:
+
+```powershell
+$name = 'SoloDawn-' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Stop-ScheduledTask -TaskPath '\' -TaskName $name
+for ($i = 0; $i -lt 10 -and (Get-Process -Name solodawn -ErrorAction SilentlyContinue); $i++) {
+    Start-Sleep -Seconds 1
+}
+Get-Process -Name solodawn -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.Id -Force }
+```
+
+Replace the binary, then:
+
+```powershell
+$name = 'SoloDawn-' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Start-ScheduledTask -TaskPath '\' -TaskName $name
+```
+
+## Back up a group
+
+`solodawn group export <group id> <file>` without `--to` writes a copy of a
+group that this node is the home of, and replaces `<file>` if it exists.
+The node must be running. SoloDawn schedules nothing; run the command from
+the system's timer.
+
+**Linux and macOS**: add one line with `crontab -e`, here every day at 03:00
+(adjust the two paths):
+
+```text
+0 3 * * * "$HOME/.local/bin/solodawn" group export <group id> "$HOME/solodawn-backup.db"
+```
+
+**Windows** (PowerShell), every day at 03:00:
+
+```powershell
+$exe = "$env:LOCALAPPDATA\Programs\SoloDawn\solodawn.exe"
+$action = New-ScheduledTaskAction -Execute $exe -Argument "group export <group id> `"$env:USERPROFILE\solodawn-backup.db`""
+Register-ScheduledTask -TaskName SoloDawnBackup -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 3am)
+```
+
+To restore on another computer of the same owner, run
+`solodawn group import <file>` there (`planning/contracts/step-2/export.md`
+section 4).

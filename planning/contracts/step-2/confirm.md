@@ -137,8 +137,8 @@ Two rows for the table of `contracts/commands.md` 1.4. No new action name:
 
 | `what` | Confirmed | Denied |
 | --- | --- | --- |
-| `direct` | the home queues what the request gives this AI: the `mention`, when the request mentions the AI or is a main-line message that goes to it as secretary; and the items of section 7, when a task from the request names it | section 7 for a role. `notice` for the secretary when the request was written by an AI or gave a role |
-| `ask` | `mention` for the callee with the call as `msg`. From there `flows/ask.md` step 4 | the home answers the call with the denial: the call's `state` becomes `denied` with `at`, and a `reply` item for the caller carries the card as `msg`. The caller's open `ask` returns `{"denied":true}`; after the wait the denial is its turn. `notice` for the secretary |
+| `direct` | the home queues what the request gives this AI: the `mention`, when the request mentions the AI or is a main-line message that goes to it as secretary; and the items of section 7, when a task from the request names it | section 7 for a role. `notice` (`code: confirm_denied`) for the secretary when the request was written by an AI or gave a role |
+| `ask` | `mention` for the callee with the call as `msg`. From there `flows/ask.md` step 4 | the home answers the call with the denial: the call's `state` becomes `denied` with `at`, and a `reply` item for the caller carries the card as `msg`. The caller's open `ask` returns `{"denied":true}`; after the wait the denial is its turn. `notice` (`code: confirm_denied`) for the secretary |
 | `watch` | one item `watch` for the AI's host, with the card as `msg`; the host keeps the grant (`contracts/step-2/watch-team.md` section 2) | nothing |
 
 - A confirmation delivers its message or call once; for a role it holds
@@ -177,10 +177,13 @@ needs its owner's word**:
   current step and the AI's role, as on activation. Tasks that become
   active later, and later reviews, get theirs too.
 - Denied: no item, now or later; the wait is recomputed; the secretary gets
-  a `notice` and reassigns or cancels. Naming another AI is row 11.
+  a `notice` (`code: confirm_denied`) and reassigns or cancels. Naming
+  another AI is row 11.
 - **A request is kept** while a task from it is not final: the exemption of
   `contracts/storage.md` section 4 for a confirmed brief with a queued task
-  covers the brief and the `task` message of every such task.
+  covers the brief, the `task` message of every such task and the `confirm`
+  cards of `what` `direct` that name the brief or one of those tasks as
+  `re`.
 
 ## 7. The `information` label
 

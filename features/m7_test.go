@@ -2025,7 +2025,9 @@ func (w *m7World) whenCutDirectToRelay() error {
 		return err
 	}
 	relay := make(chan struct{}, 1)
+	var saw trail
 	w.browser.pc.SCTP().Transport().ICETransport().OnSelectedCandidatePairChange(func(pair *webrtc.ICECandidatePair) {
+		saw.see(pair.String())
 		if pair.Local.Typ == webrtc.ICECandidateTypeRelay {
 			select {
 			case relay <- struct{}{}:
@@ -2035,9 +2037,9 @@ func (w *m7World) whenCutDirectToRelay() error {
 	})
 	w.browser.ctrl.relayOnly.Store(true)
 	close(w.browser.cutDirect)
-	wait := newWait(m7Event, "the browser to select its TURN allocation", nil)
-	defer wait.stop()
-	_, err := recvWait(wait, relay)
+	wt := newWait(m7Event, "the browser to select its TURN allocation", &saw)
+	defer wt.stop()
+	_, err := recvWait(wt, relay)
 	return err
 }
 

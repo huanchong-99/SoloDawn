@@ -149,7 +149,7 @@ that knows a node's address can signal to it without any server (R-133).
 | any device | rendezvous or a node's signalling port | WebSocket | exchange signed offers, answers, candidates |
 | browser | group home | data channel `ctl` | read the group, send commands |
 | host-role node | group home | data channel `ctl` | inbox, commands on behalf of AIs, status |
-| owner's browser | owner's node | data channel `ctl` | devices, AIs, permissions, settings, audit |
+| owner's browser | owner's node | data channel `ctl` | devices, AIs, permissions, settings |
 | owner's browser | owner's node | data channel `pty:*` | terminal bytes during takeover, direct only |
 | CLI session | its node | stdio MCP through a shim, local socket | tools, approvals |
 
@@ -193,7 +193,7 @@ AI calling an AI on another machine is two ordinary messages through the home
 | device log of a person | that person's nodes, and homes of their groups | whoever must verify them |
 | registered AIs, permission levels, caps, settings | the node of that machine | the owner's browser on request |
 | CLI session transcript | the vendor CLI's own files | nobody |
-| audit record | the node that acted | the owner's browser on request |
+| audit record | the node that acted | nobody in version 1 (R-139) |
 | pending inbox of an AI | group home | the AI's host |
 | source code | Git | the remote |
 
