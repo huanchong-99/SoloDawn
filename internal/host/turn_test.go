@@ -345,6 +345,8 @@ func TestFirstTaskTurnFromBriefAndNotesLimit(t *testing.T) {
 		`Acceptance criteria:`,
 		`1. Indicator follows a path change within 1 s`,
 		`2. No false notice on local link`,
+		`In scope: node`,
+		`Out of scope: relay`,
 		`Reviewer: Codex   Pass score: 90`,
 		`Notes of this group:`,
 		`- Path events use fields path, rtt_ms, since, limited.`,
@@ -355,6 +357,9 @@ func TestFirstTaskTurnFromBriefAndNotesLimit(t *testing.T) {
 	if len(r.home.asked) != 2 || r.home.asked[0] != wantBriefReq || r.home.asked[1] != wantNoteReq {
 		t.Fatalf("unexpected fetch requests: %+v", r.home.asked)
 	}
+	r.brief.Scope = proto.BriefScope{In: []string{}, Out: []string{"relay", "web"}}
+	got, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignRaw})
+	assertContains(t, got, err, "2. No false notice on local link\nOut of scope: relay; web\nReviewer: Codex")
 	checkNoteByteLimitAndEmpty(t, r, assignRaw)
 }
 
@@ -519,7 +524,7 @@ func checkReviewReviewedChecksResume(t *testing.T, r *turnRig) {
 	t.Helper()
 	revRaw := r.makeInboxItem(proto.Item{Item: 3, AI: proto.ID(tPeerID), Why: "review", Task: proto.ID(tTaskID), Commit: "9f2c1ab"}, nil, nil)
 	gotRev, _, err := Compose(r.h, r.session(ReviewSession, false, ""), ItemsTurn, []json.RawMessage{revRaw})
-	if err != nil || !strings.Contains(gotRev, "Commit: 9f2c1ab\nDiff: .solodawn-review.diff\nGoal: Show the connection path and warn when relayed.") || !strings.HasSuffix(gotRev, "Pass score: 90") {
+	if err != nil || !strings.Contains(gotRev, "Commit: 9f2c1ab\nDiff: .solodawn-review.diff\nGoal: Show the connection path and warn when relayed.") || !strings.HasSuffix(gotRev, "\nIn scope: node\nOut of scope: relay\nPass score: 90") {
 		t.Fatalf("review turn failed: err=%v\n%s", err, gotRev)
 	}
 
@@ -784,7 +789,7 @@ func checkHandbackAndTaskStartedNotices(t *testing.T, r *turnRig, sec Session) {
 	briefNotice, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 7, AI: proto.ID(tSecID), Why: "notice", Msg: proto.ID(tBriefID), Code: "brief"}, r.briefMsgJSON(tBriefID, nil), nil),
 	})
-	assertContains(t, briefNotice, err, "(brief)")
+	assertContains(t, briefNotice, err, "Brief \"Connection path\" (id "+tBriefID+"): ")
 }
 
 func TestReplacedTurnRecoveryForEverySessionKind(t *testing.T) {
@@ -802,7 +807,7 @@ func TestReplacedTurnRecoveryForEverySessionKind(t *testing.T) {
 		`-- system · from the home in T-12 · information`,
 		`System: turn_interrupted`,
 		`-- decision · from "Claude Code" (AI) in T-12 · information`,
-		`(decision)`,
+		`Decision (id ` + turnID("h-mid") + `): q`,
 		`-- decision · from "owner" in T-12 · instruction`,
 		`Decision (id ` + decID + `): Retry on relay?`,
 		`Choice: A (Yes)`,
