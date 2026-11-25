@@ -29,11 +29,11 @@ export function computers(homes: readonly Home[]) {
   };
 }
 
-/** The names of computers as one phrase in the reader's language, with the space that Chinese
+/** Names as one phrase in the reader's language, with the space that Chinese
  *  text has beside a Latin name. */
-export const names = (homes: readonly Home[], lang: string) =>
+export const names = (named: readonly { name: string }[], lang: string) =>
   new Intl.ListFormat(lang)
-    .formatToParts(homes.map((home) => home.name))
+    .formatToParts(named.map(({ name }) => name))
     .map(({ type, value }) => (type === 'literal' ? value.replace('和', ' 和 ') : value))
     .join('');
 

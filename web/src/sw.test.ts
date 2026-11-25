@@ -78,13 +78,13 @@ describe('resolveReminderLang', () => {
 describe('formatReminder', () => {
   const sample = decode(Reminder, goldens['push-reminder']);
 
-  it('formats all six reminder kinds in English and Chinese and passes unknown kinds through', () => {
+  it('formats each reminder kind and a stopped task in English and Chinese and passes unknown kinds through', () => {
     const cases = [
       ['approval', 'Approval', '审批申请'],
       ['decision', 'Decision', '请拍板'],
       ['brief', 'Task brief', '任务说明'],
       ['confirm', 'Request for your AI', '有人想用你的 AI'],
-      ['mention', 'Mention', '提及'],
+      ['mention', 'Task stopped', '任务已停下'],
       ['done', 'Task done', '任务完成'],
       ['custom', 'custom', 'custom'],
     ] as const;
@@ -107,6 +107,14 @@ describe('formatReminder', () => {
       title: 'Website · Approval',
       body: 'Codex',
     });
+    for (const title of [undefined, ''])
+      expect(formatReminder({ ...sample, kind: 'mention', title }, 'en')).toEqual({
+        title: 'Website · Mention',
+        body: 'Codex',
+      });
+    expect(formatReminder({ ...withoutTitle, kind: 'mention' }, 'zh-CN').title).toBe(
+      'Website · 提及',
+    );
     expect(formatReminder({ ...sample, title: '' }, 'zh-CN')).toEqual({
       title: 'Website · 审批申请',
       body: 'Codex',

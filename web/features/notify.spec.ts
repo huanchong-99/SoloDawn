@@ -217,6 +217,47 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
+    'A notice of the home that mentions the reader says in its own words what happened',
+    ({ Given, When, Then }) => {
+      Given('the person opens the client at "#/settings"', () => openPage('#/settings'));
+      When(
+        'task 12, which "Codex" does, stops after repeated failures, and the sign-in of "Claude Code" fails',
+        () => {
+          const notice = (id: string, thread: string | null, body: object) =>
+            home.write(website, example('row-msg-system', { id, thread, mentions: [owner], body }));
+          notice('stop', taskId, { code: 'task_failed', task: taskId, reason: 'failures' });
+          notice('login', null, { code: 'login_invalid', ai: claude });
+          flushSync();
+        },
+      );
+      Then(
+        'the notification layer shows two red notifications: "Task T-12 stopped after repeated failures." for "Website · Codex" and "Claude Code\'s sign-in is no longer valid." for "Website · Claude Code"',
+        () => {
+          expect(toastTexts('b')).toEqual([
+            'Task T-12 stopped after repeated failures.',
+            "Claude Code's sign-in is no longer valid.",
+          ]);
+          expect(toastTexts('p')).toEqual(['Website · Codex', 'Website · Claude Code']);
+          expect(activeToasts().map((el) => el.getAttribute('data-tone'))).toEqual([
+            'danger',
+            'danger',
+          ]);
+        },
+      );
+      When('the person clicks "Open" on the stopped task', () => {
+        one<HTMLAnchorElement>('.toast:not([inert]) a.btn').click();
+        flushSync();
+      });
+      Then('the chat of "Website" opens with focus on task 12\'s card', async () => {
+        await vi.waitFor(() => {
+          flushSync();
+          expect(document.activeElement?.closest('.msg')?.id).toBe(`m-${taskId}`);
+        });
+      });
+    },
+  );
+
+  Scenario(
     'Mentions and completed tasks pause under focus or pointer, auto-dismiss after leaving, and yield to blocking cards',
     ({ Given, When, Then }) => {
       Given('the person opens the client at "#/settings"', () => {

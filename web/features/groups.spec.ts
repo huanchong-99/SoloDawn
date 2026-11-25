@@ -5,12 +5,26 @@ import { homes, type Group } from '../src/lib/groups.svelte';
 import * as p from '../src/lib/proto';
 import { browser, example, ownedNode, owner, TestHome, user, type OwnedNode } from './home';
 import CreateGroup from '../src/components/groups/CreateGroup.svelte';
-import { all, choose, closePage, field, fill, go, one, openPage, show, text, texts } from './page';
+import {
+  all,
+  choose,
+  closePage,
+  field,
+  fill,
+  go,
+  one,
+  openPage,
+  otherBrowser,
+  show,
+  text,
+  texts,
+} from './page';
 
 const feature = await loadFeature('../features/web_groups.feature');
 
 const website = 'rZNvy-1jH6Z-BcPqA5U5BQ';
 const docs = 'ZG9jcy1ncm91cC0wMDAwMQ';
+const mina = 'bWluYS1tZW1iZXItMDAwMQ';
 const minute = 60_000;
 
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
@@ -142,7 +156,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     ({ Given, When, Then, And }) => {
       let created: string;
       Given('a second browser of the same person is connected', async () => {
-        second = browser(home);
+        second = await otherBrowser(home);
         await read(second);
       });
       When(
@@ -355,6 +369,57 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     },
   );
 
+  Scenario(
+    'A group known from a computer of the person shows while its home is away',
+    ({ Given, When, Then, And }) => {
+      let desk: OwnedNode;
+      const far = new TestHome('far');
+      const away = browser(far);
+      const row = () => all('.gitem').find((each) => each.textContent!.includes('Docs'))!;
+      Given(
+        '"desk", a computer of the person, knows that "Docs" is homed on a computer out of reach',
+        () => {
+          const known = [{ g: docs, home: 'far', name: 'Docs' }];
+          desk = ownedNode('desk', 'desk-device', { homes: known });
+          // As net.svelte.ts does with each home that it hears of.
+          desk.store.onhomes = (entries) =>
+            entries.forEach(({ g, name }) => away.store.expect(g, name));
+          homes.push(desk.store, away.store);
+          openPage();
+        },
+      );
+      When('"desk" connects', () => desk.connect());
+      Then(
+        'the list shows "Docs" with "cannot reach the group home" and no word of its messages',
+        async () => {
+          await vi.waitFor(() => expect(texts('.gdown')).toEqual(['cannot reach the group home']));
+          expect(row().querySelector('.gprev')!.textContent).toBe('');
+        },
+      );
+      And('its chat says neither its kind nor how many members it has', () => {
+        go(`#/groups/${docs}`);
+        expect([text('.chat-head h2'), text('.chat-head p')]).toEqual(['Docs', '']);
+        go('#/groups');
+      });
+      When('that computer connects, with "Mina: Section 3 is in." in "Docs"', async () => {
+        far.add(docs, 'Docs');
+        far.write(
+          docs,
+          example('row-member-human', { id: mina, g: docs, name: 'Mina', user: 'm' }),
+        );
+        far.say(docs, mina, 'Section 3 is in.');
+        await away.connect();
+      });
+      Then('the list shows "Docs" with "Mina: Section 3 is in."', () =>
+        vi.waitFor(() => {
+          flushSync();
+          expect(row().querySelector('.gprev')!.textContent).toBe('Mina: Section 3 is in.');
+          expect(all('.gdown')).toEqual([]);
+        }),
+      );
+    },
+  );
+
   let laptop: TestHome;
   let onLaptop: ReturnType<typeof browser>;
   const commands = (of: TestHome) => of.asked.filter((req) => req.t === 'cmd');
@@ -555,7 +620,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When('a browser that holds nothing reads the group', async () => {
-        second = browser(home);
+        second = await otherBrowser(home);
         await read(second);
         cold = second.store.groups[0];
       });

@@ -2,6 +2,8 @@
   "queue.waits": "{ai} 正在做 {task}，这条先排队。",
   "queue.first": "插队，先暂停 {task}",
   "queue.first.review": "插队，先打断评审",
+  "queue.first.turn": "插队，先打断 {ai} 手上的活",
+  "queue.first.all": "插队，先打断 {tasks}",
   "queue.going": "{ai} 接下来先处理这条。",
   "queue.paused": "{ai} 先处理这条，{task} 暂停，之后自动继续。"
 }

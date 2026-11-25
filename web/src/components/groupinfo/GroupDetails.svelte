@@ -24,8 +24,10 @@
 <section class="group-details field" aria-labelledby={`${uid}-title`}>
   <h2 class="sec-title" id={`${uid}-title`}>{t('groupinfo.details')}</h2>
   <dl class="kv">
-    <dt>{t('groupinfo.home')}</dt>
-    <dd>{group.home.name}</dd>
+    {#if group.home.name}
+      <dt>{t('groupinfo.home')}</dt>
+      <dd>{group.home.name}</dd>
+    {/if}
     <dt>{t('groupinfo.home.owner')}</dt>
     <dd>{ownerName}</dd>
   </dl>
