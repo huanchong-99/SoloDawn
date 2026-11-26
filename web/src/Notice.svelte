@@ -7,7 +7,7 @@
 
 <main>
   <p class="brand"><img class="logo-mark" src="icon.svg" alt="" />SoloDawn</p>
-  <section class="card need">
+  <section class="card">
     <h1>{t(`${kind}.title`)}</h1>
     <p>{t(`${kind}.body`)}</p>
   </section>
@@ -27,16 +27,16 @@
     gap: 10px;
     font-size: var(--fs-lg);
     font-weight: 600;
-    letter-spacing: -0.02em;
   }
   .card {
     max-width: 440px;
-    padding: var(--sp-5);
+    padding: var(--sp-6);
   }
   h1 {
     font-size: var(--fs-xl);
   }
   .card p {
     color: var(--text-2);
+    font-size: var(--fs-ui);
   }
 </style>

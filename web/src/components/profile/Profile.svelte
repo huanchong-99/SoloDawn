@@ -143,7 +143,7 @@
     gap: 6px;
     height: 22px;
     padding: 0 3px 0 8px;
-    border: 1px dashed var(--line-strong);
+    border: 1px solid var(--line);
     border-radius: var(--r-full);
     background: none;
     color: var(--text-3);
@@ -161,7 +161,7 @@
     border-radius: var(--r-full);
     background: var(--sky-soft);
     color: var(--sky);
-    font-weight: 600;
+    font-weight: 500;
   }
   .suggest:hover:not(:disabled) {
     border-color: var(--sky);
@@ -175,7 +175,6 @@
     display: grid;
     gap: var(--sp-3);
     padding: var(--sp-3);
-    border: 1px solid var(--line);
     border-radius: var(--r-md);
     background: var(--surface-2);
     animation: -global-appear var(--dur-2) var(--ease-out);

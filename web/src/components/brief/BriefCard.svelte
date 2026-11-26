@@ -6,6 +6,7 @@
   import { clock } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
+  import { changed } from '../changed';
   import Icon from '../Icon.svelte';
   import BriefPreset from '../preset/BriefPreset.svelte';
 
@@ -174,6 +175,8 @@
   bind:this={cardEl}
   class="card"
   class:need={canAct}
+  class:settled={!pending}
+  use:changed={msg.state.status}
   aria-label={`${t('brief.kind')} · ${msg.body.title}`}
 >
   <header class="card-head">
@@ -281,66 +284,87 @@
 
 <style>
   .scope p + p {
-    margin-top: 4px;
+    margin-top: 6px;
   }
   .num {
     list-style: decimal;
     padding-left: 1.4em;
+
     li + li {
       margin-top: 2px;
     }
+    li::marker {
+      color: var(--text-3);
+      font-size: var(--fs-sm);
+    }
   }
+  /* In and out of scope: two small chips, one neutral and one muted. No colour says which. */
   .pill-do,
   .pill-dont {
     display: inline-block;
-    margin-right: 6px;
+    margin-right: 8px;
     padding: 0 6px;
     border-radius: var(--r-sm);
-    font-size: var(--fs-xs);
-    font-weight: 600;
-  }
-  .pill-do {
-    background: var(--ok-soft);
-    color: var(--ok);
-  }
-  .pill-dont {
     background: var(--surface-2);
     color: var(--text-2);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    line-height: 20px;
+  }
+  .pill-dont {
+    background: none;
+    box-shadow: inset 0 0 0 1px var(--line);
+    color: var(--text-3);
   }
   .split li {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-    padding: 6px 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 2px var(--sp-2);
+    padding: 7px 0;
+
     & + li {
-      border-top: 1px dashed var(--line);
+      border-top: 1px solid var(--line);
     }
+    &:first-child {
+      padding-top: 0;
+    }
+  }
+  .split .mono {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
   .who {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     min-width: 0;
+    font-size: var(--fs-sm);
   }
   .revise {
     display: grid;
     gap: var(--sp-2);
   }
   .revise-note {
-    padding: 8px 10px;
+    padding: 10px 12px;
     border-radius: var(--r-md);
     background: var(--surface-2);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-ui);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
   .over {
     color: var(--danger);
   }
+  .who :global(.av) {
+    align-self: center;
+  }
   @media (max-width: 640px) {
-    .split .grow {
-      flex-basis: 100%;
+    .split li {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+    .split .who {
+      grid-column: 2;
     }
   }
 </style>

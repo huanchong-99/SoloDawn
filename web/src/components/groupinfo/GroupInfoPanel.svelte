@@ -225,7 +225,7 @@
   code {
     padding: 1px 5px;
     border-radius: var(--r-sm);
-    background: var(--surface-2);
+    background: var(--surface-3);
     overflow-wrap: anywhere;
   }
   .mem-body {
@@ -259,10 +259,11 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 8px 10px;
-    border: 1px solid var(--line);
+    padding: 10px var(--sp-3);
     border-radius: var(--r-md);
-    background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+    background: var(--surface-2);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
     min-width: 0;
   }
   .mem-meta {
@@ -299,7 +300,7 @@
     margin-top: 2px;
   }
   .bul code {
-    background: var(--surface);
+    background: var(--surface-3);
   }
   .loc {
     margin-left: 4px;

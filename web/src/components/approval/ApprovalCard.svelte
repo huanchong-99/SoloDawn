@@ -5,6 +5,7 @@
   import { clock } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
+  import { changed } from '../changed';
   import Icon from '../Icon.svelte';
 
   /** An AI's permission request in any of its five states (contracts/messages.md 2.3 and 3.2). */
@@ -68,7 +69,14 @@
   }
 </script>
 
-<section bind:this={cardEl} class="card" class:need={needsMe} aria-label={t('approval.kind')}>
+<section
+  bind:this={cardEl}
+  class="card"
+  class:need={needsMe}
+  class:settled={!pending}
+  use:changed={msg.state.status}
+  aria-label={t('approval.kind')}
+>
   <header class="card-head">
     <Icon name="shield" />
     <span class="kind">{t('approval.kind')}</span>
@@ -83,10 +91,12 @@
       </span>
     {:else if msg.state.status === 'approved'}
       <span class="badge" data-tone="ok">
+        <Icon name="check" sm />
         {t('approval.status.approved').replace('{who}', actor).replace('{time}', at)}
       </span>
     {:else if msg.state.status === 'denied'}
-      <span class="badge" data-tone="danger">
+      <span class="badge refused" data-tone="danger">
+        <Icon name="x" sm />
         {t('approval.status.denied').replace('{who}', actor).replace('{time}', at)}
       </span>
     {:else if msg.state.status === 'reassigned'}
@@ -197,20 +207,12 @@
     flex-direction: column;
     gap: 6px;
   }
-  .cmd {
-    padding: 8px 10px;
-    border-radius: var(--r-sm);
-    background: var(--surface-2);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    line-height: 1.5;
-  }
   .note {
     display: flex;
     gap: var(--sp-2);
     padding: 10px 12px;
     border-radius: var(--r-md);
-    background: var(--tone-soft, var(--surface-2));
+    background: var(--surface-2);
     color: var(--text);
     font-size: var(--fs-sm);
   }

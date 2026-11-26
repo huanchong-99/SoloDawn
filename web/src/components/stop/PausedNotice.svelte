@@ -58,13 +58,13 @@
 {/if}
 
 <style>
+  /* An inset bar above the composer: the pause is a state, not a failure, so only its glyph is
+     red. */
   .paused {
-    padding: 10px var(--sp-4);
-    border-top: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
-    background: var(--danger-soft);
+    padding: var(--sp-2) var(--sp-6) 0;
     font-size: var(--fs-sm);
     animation:
-      rise var(--dur-3) var(--ease-out),
+      rise var(--dur-2) var(--ease-out),
       appear var(--dur-2) var(--ease-out);
   }
   .paused > :global(*) {
@@ -75,14 +75,25 @@
     display: flex;
     align-items: center;
     gap: var(--sp-3);
+    padding: 10px var(--sp-3) 10px 14px;
+    border-radius: 12px;
+    background: var(--surface-2);
   }
   .glyph {
     display: grid;
     flex: none;
     color: var(--danger);
   }
+  b {
+    font-size: var(--fs-ui);
+  }
   p {
     color: var(--text-2);
     line-height: 1.5;
+  }
+  @media (max-width: 767px) {
+    .paused {
+      padding-inline: var(--sp-3);
+    }
   }
 </style>

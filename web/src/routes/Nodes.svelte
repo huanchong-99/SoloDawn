@@ -328,8 +328,8 @@
       </section>
     {/each}
   {:else}
-    <div class="empty">
-      <span class="horizon"></span>
+    <div class="empty blank">
+      <span class="blank-mark"><Icon name="pc" /></span>
       <h3>{t('nodes.empty.title')}</h3>
       <p>{t('nodes.empty.body')}</p>
     </div>
@@ -339,11 +339,20 @@
 <PairBrowserDialog bind:open={pairing} {net} />
 
 <style>
+  /* The page's actions are small and plain. */
+  .page-head .btn {
+    height: var(--ctl-sm);
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: var(--fs-sm);
+  }
+  /* A computer is a card: its head, what is known of it, and its AIs as a list under hairlines. */
   .node {
     padding: 0;
     gap: 0;
   }
   .node > header {
+    gap: var(--sp-3);
     padding: var(--sp-4);
   }
   .node > header h3 {
@@ -353,33 +362,33 @@
     flex-wrap: wrap;
   }
   .sub {
-    font-size: var(--fs-sm);
+    font-size: var(--fs-xs);
     margin-top: 2px;
+  }
+  /* Online or not, as a pill: told by the shape of its dot and by its words. */
+  .node > header .st {
+    height: 22px;
+    padding: 0 10px 0 8px;
+    border-radius: var(--r-full);
+    background: var(--surface-2);
+    font-size: var(--fs-xs);
   }
   .node > .kv,
   .node > .note {
     margin: 0 var(--sp-4) var(--sp-4);
   }
+  /* This computer is the home of groups: it asks for attention, so it stands on dawn. */
+  .node > p.note {
+    background: var(--dawn-soft);
+  }
   .node-ico {
     display: grid;
     place-items: center;
-    width: 44px;
-    height: 44px;
-    border-radius: 13px;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--r-md);
     background: var(--surface-2);
     color: var(--text-2);
-  }
-  .kv {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: 6px var(--sp-4);
-    font-size: var(--fs-sm);
-  }
-  .kv dt {
-    color: var(--text-3);
-  }
-  .kv dd {
-    min-width: 0;
   }
   .who {
     display: inline-flex;
@@ -402,17 +411,24 @@
     flex-direction: column;
     gap: var(--sp-3);
   }
+  .ai-row > .row {
+    gap: var(--sp-3);
+  }
   .ai-title {
     gap: 6px;
   }
+  .ai-title b {
+    font-weight: 500;
+  }
   .ai-row p.st {
-    margin-top: 2px;
+    margin-top: 1px;
+    font-size: var(--fs-xs);
   }
   .behind {
     align-items: center;
   }
   .turn {
-    margin-right: -10px;
+    margin-right: -6px;
   }
   .turn :global(.i) {
     transition: transform var(--dur-2) var(--ease);
@@ -426,34 +442,12 @@
     gap: var(--sp-3);
     font-size: var(--fs-sm);
   }
-  .perm + .perm {
-    padding-top: var(--sp-2);
-    border-top: 1px dashed var(--line);
-  }
   .perm > span:first-child {
     flex: 1;
     min-width: 0;
   }
   .empty {
-    display: grid;
-    justify-items: start;
-    gap: var(--sp-3);
-    padding: var(--sp-6) var(--sp-5);
-    border: 1px dashed var(--line-strong);
-    border-radius: var(--r-lg);
-  }
-  .empty h3 {
-    font-size: var(--fs-lg);
-  }
-  .empty p {
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-  }
-  .horizon {
-    width: 100%;
-    height: 2px;
-    border-radius: 1px;
-    background: var(--horizon);
+    margin-top: var(--sp-8);
   }
   @media (max-width: 640px) {
     .perm {

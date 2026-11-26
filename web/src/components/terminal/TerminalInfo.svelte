@@ -95,17 +95,42 @@
 </aside>
 
 <style>
+  /* Beside the terminal: sections under one another, then the hints as one quiet list. */
   .info {
     overflow: auto;
-    padding: var(--sp-4);
+    padding: var(--sp-2) var(--sp-4) var(--sp-4);
     border-left: 1px solid var(--line);
     background: var(--surface);
     display: flex;
     flex-direction: column;
-    gap: var(--sp-3);
   }
   .info > * {
     flex: none;
+  }
+  .info > :global(.card) {
+    padding: var(--sp-4) 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+  .info > :global(.card + .card) {
+    border-top: 1px solid var(--line);
+  }
+  .info :global(.card-head .kind) {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .info > .note {
+    padding: 6px 0;
+    background: none;
+    color: var(--text-2);
+  }
+  .info > #term-leave {
+    margin-top: var(--sp-1);
+    padding-top: var(--sp-4);
+    border-top: 1px solid var(--line);
+    border-radius: 0;
   }
   .who {
     display: inline-flex;
@@ -114,9 +139,10 @@
     min-width: 0;
   }
   code {
-    padding: 1px 5px;
+    padding: 2px 6px;
     border-radius: var(--r-sm);
     background: var(--surface-2);
+    font-size: var(--fs-xs);
     overflow-wrap: anywhere;
   }
   @media (max-width: 1023px) {

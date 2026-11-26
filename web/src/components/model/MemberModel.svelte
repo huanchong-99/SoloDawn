@@ -154,11 +154,17 @@
     align-items: center;
     gap: 4px 6px;
   }
-  .acts {
+  /* The value, and beside it the way to change it: a link in the accent and its refresh. */
+  dd:has(> .what) {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--sp-2);
-    margin-top: 2px;
+    gap: 2px var(--sp-2);
+  }
+  .acts {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     animation: -global-appear var(--dur-2) var(--ease-out);
   }
   .name {
@@ -190,7 +196,7 @@
     background: none;
     color: var(--sky);
     font: inherit;
-    font-size: var(--fs-xs);
+    font-size: inherit;
     font-weight: 500;
     cursor: pointer;
   }
@@ -202,7 +208,6 @@
     display: grid;
     gap: var(--sp-3);
     padding: var(--sp-3);
-    border: 1px solid var(--line);
     border-radius: var(--r-md);
     background: var(--surface-2);
     animation: -global-appear var(--dur-2) var(--ease-out);

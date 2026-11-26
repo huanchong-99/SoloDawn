@@ -2,6 +2,7 @@
   import type { Group } from '../../lib/groups.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { t } from '../../lib/prefs.svelte';
+  import Icon from '../Icon.svelte';
 
   let { group, net }: { group: Group; net: Net } = $props();
   const uid = $props.id();
@@ -15,7 +16,7 @@
   <section class="move" aria-labelledby={`${uid}-title`}>
     <h2 class="sec-title" id={`${uid}-title`}>{t('move.title')}</h2>
     <details class="fold">
-      <summary>{t('move.commands')}</summary>
+      <summary><Icon name="down" sm />{t('move.commands')}</summary>
       <div class="fold-body field">
         <p class="hint">{t('move.lead')}</p>
         <p>{t('move.export').replace('{computer}', group.home.name)}</p>
@@ -42,6 +43,11 @@
     gap: var(--sp-2);
     padding: var(--sp-4) var(--sp-4) 14px;
     border-top: 1px solid var(--line);
+  }
+  /* A disclosure row like the others in the side panel: a chevron and the label in text. */
+  .fold > summary {
+    color: var(--text);
+    font-weight: 500;
   }
   code {
     display: block;

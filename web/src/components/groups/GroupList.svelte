@@ -46,7 +46,7 @@
   <ul class="glist">
     {#each groups as group, i (group.g)}
       {@const last = group.main.at(-1)}
-      <li animate:flip={{ duration: prefersReducedMotion.current ? 0 : 320 }}>
+      <li animate:flip={{ duration: prefersReducedMotion.current ? 0 : 240 }}>
         <a
           class="gitem"
           href={`#/groups/${group.g}`}
@@ -88,8 +88,8 @@
     {/each}
   </ul>
 {:else}
-  <div class="empty">
-    <span class="horizon"></span>
+  <div class="empty blank">
+    <span class="blank-mark"><Icon name="chat" /></span>
     <h3>{t('groups.empty.title')}</h3>
     <p>{t(canCreate ? 'groups.empty.body' : 'groups.empty.offline')}</p>
     {#if canCreate}
@@ -107,15 +107,22 @@
     display: flex;
     align-items: center;
     gap: var(--sp-3);
-    padding: var(--sp-4) var(--sp-4) var(--sp-2);
+    padding: var(--sp-4) var(--sp-4) var(--sp-2) var(--sp-5);
+  }
+  .head h2 {
+    color: var(--text);
+    font-size: var(--fs-md);
+    letter-spacing: normal;
+    text-transform: none;
   }
   .glist {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: var(--sp-2);
+    padding: var(--sp-1) var(--sp-2) var(--sp-4);
   }
-  /* A row is one link. Its hover and current states are a layer under it, as for a button. */
+  /* A row is one link, 64px. Its hover is a layer under it, as for a button; the open group is
+     a raised, neutral row: never the accent, which would tire the eye in a list. */
   .gitem {
     position: relative;
     isolation: isolate;
@@ -123,33 +130,45 @@
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: var(--sp-3);
     align-items: center;
-    padding: 10px;
-    border-radius: var(--r-md);
+    min-height: 64px;
+    padding: 10px var(--sp-3);
+    border-radius: 12px;
     color: var(--text);
     animation:
-      rise var(--dur-3) var(--ease-out) calc(var(--i) * 30ms) backwards,
-      appear var(--dur-2) var(--ease-out) calc(var(--i) * 30ms) backwards;
+      rise var(--dur-3) var(--ease-out) calc(var(--i) * var(--stagger)) backwards,
+      appear var(--dur-2) var(--ease-out) calc(var(--i) * var(--stagger)) backwards;
   }
-  .gitem::before {
+  .gitem::before,
+  .gitem::after {
     content: '';
     position: absolute;
     inset: 0;
     z-index: -1;
     border-radius: inherit;
-    background: var(--surface-2);
     opacity: 0;
     transition: opacity var(--dur-1) var(--ease);
+  }
+  .gitem::before {
+    background: var(--surface-3);
+  }
+  .gitem::after {
+    background: var(--raised);
+    box-shadow:
+      var(--shadow-1),
+      0 0 0 1px var(--line);
   }
   .gitem:hover {
     text-decoration: none;
   }
-  .gitem[aria-current]::before,
   .gitem:active::before {
+    opacity: 0.7;
+  }
+  .gitem[aria-current]::after {
     opacity: 1;
   }
   @media (hover: hover) {
     .gitem:hover::before {
-      opacity: 1;
+      opacity: 0.7;
     }
   }
   @media (forced-colors: active) {
@@ -161,12 +180,15 @@
   .gbody {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
     min-width: 0;
     line-height: 1.4;
   }
+  .gbody b {
+    font-weight: 500;
+  }
   .gprev {
-    color: var(--text-2);
+    color: var(--text-3);
     font-size: var(--fs-sm);
   }
   .gdown {
@@ -177,6 +199,7 @@
     font-size: var(--fs-xs);
   }
   .gbody .st {
+    color: var(--text-3);
     font-size: var(--fs-xs);
   }
   .gdown.away {
@@ -187,17 +210,19 @@
     flex: none;
     width: 8px;
     height: 8px;
-    border: 2px solid currentColor;
+    border: 1.5px solid currentColor;
     border-radius: 50%;
   }
   .gside {
     display: grid;
-    gap: 4px;
+    gap: 6px;
     justify-items: end;
     align-content: start;
     align-self: start;
+    padding-top: 2px;
     color: var(--text-3);
     font-size: var(--fs-xs);
+    line-height: 1.4;
   }
   .gside time {
     text-transform: capitalize;
@@ -206,35 +231,7 @@
   .gside .badge {
     animation: pop var(--dur-4) var(--spring);
   }
-  @keyframes pop {
-    from {
-      transform: scale(0.4);
-    }
-  }
   .empty {
-    display: grid;
-    justify-items: start;
-    gap: var(--sp-3);
-    margin: var(--sp-4);
-    padding: var(--sp-6) var(--sp-5);
-    border: 1px dashed var(--line-strong);
-    border-radius: var(--r-lg);
-    animation:
-      rise var(--dur-3) var(--ease-out),
-      appear var(--dur-2) var(--ease-out);
-  }
-  .empty h3 {
-    font-size: var(--fs-lg);
-  }
-  .empty p {
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-  }
-  /* The one line of first light: here is where a first group will be. */
-  .horizon {
-    width: 100%;
-    height: 2px;
-    border-radius: 1px;
-    background: var(--horizon);
+    margin-top: var(--sp-8);
   }
 </style>

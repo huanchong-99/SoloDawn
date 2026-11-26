@@ -115,14 +115,15 @@
 </section>
 
 <style>
+  /* 44 by 26, the track in the accent when it is on; the thumb slides by transform. */
   .switch {
     appearance: none;
     flex: none;
-    width: 42px;
-    height: 24px;
+    width: 44px;
+    height: 26px;
     margin: 0;
     border: 0;
-    border-radius: 12px;
+    border-radius: 13px;
     background: var(--line-strong);
     cursor: pointer;
     position: relative;
@@ -132,10 +133,11 @@
       position: absolute;
       top: 3px;
       left: 3px;
-      width: 18px;
-      height: 18px;
+      width: 20px;
+      height: 20px;
       border-radius: 50%;
       background: #fff;
+      box-shadow: var(--shadow-1);
       transition: transform var(--dur-2) var(--ease);
     }
     &:checked {
@@ -150,29 +152,35 @@
       cursor: not-allowed;
     }
   }
+  .set-row:has(.stack) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-2);
+    padding-block: 14px;
+  }
   .set-row:has(.stack) > div:first-child {
     flex: none;
   }
+  /* What to be told about: a wrapping set of chips, each a checkbox with its words. */
   .stack {
     display: flex;
-    flex: 1;
     flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 6px var(--sp-4);
+    gap: var(--sp-2);
   }
   .check {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-2);
+    min-height: 32px;
+    padding: 0 12px 0 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-full);
     font-size: var(--fs-sm);
     cursor: pointer;
-
-    input {
-      width: 16px;
-      height: 16px;
-      margin: 0;
-      accent-color: var(--sky);
-    }
+  }
+  .check:has(:checked) {
+    border-color: color-mix(in srgb, var(--sky) 45%, var(--line));
+    background: var(--sky-soft);
   }
   .ios {
     margin: var(--sp-3) var(--sp-4) var(--sp-4);
@@ -184,14 +192,9 @@
     color: var(--danger);
     font-size: var(--fs-sm);
   }
-  @media (max-width: 640px) {
-    .set-row:has(.stack) {
-      flex-direction: column;
-      align-items: stretch;
-      gap: var(--sp-2);
-    }
-    .stack {
-      justify-content: flex-start;
+  @media (pointer: coarse) {
+    .check {
+      min-height: 44px;
     }
   }
 </style>

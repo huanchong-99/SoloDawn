@@ -88,19 +88,23 @@
 {#if failed && waits.length}<Failure code={failed} />{/if}
 
 <style>
+  /* Under a message: a quiet line that says an AI is busy, with the offer as a link. */
   .wait {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
     gap: 2px 6px;
+    padding-inline: 2px;
     color: var(--text-3);
     font-size: var(--fs-xs);
     outline-offset: 2px;
     border-radius: var(--r-sm);
-    animation: appear var(--dur-3) var(--ease-out);
+    animation: appear var(--dur-2) var(--ease-out);
   }
   .wait :global(.i) {
     align-self: center;
+    width: 14px;
+    height: 14px;
   }
   .go {
     padding: 0;

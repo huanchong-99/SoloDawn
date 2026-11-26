@@ -69,8 +69,8 @@
         class="toast"
         class:need={item.needsYou}
         data-tone={tones[item.kind]}
-        animate:flip={{ duration: prefersReducedMotion.current ? 0 : 320 }}
-        out:fade={{ duration: prefersReducedMotion.current ? 0 : 200 }}
+        animate:flip={{ duration: prefersReducedMotion.current ? 0 : 240 }}
+        out:fade={{ duration: prefersReducedMotion.current ? 0 : 140 }}
         onfocusin={() => notifier.hold(item.key)}
         onfocusout={() => notifier.release(item.key)}
         onpointerenter={() => notifier.hold(item.key)}
@@ -117,7 +117,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--sp-2);
-    width: min(380px, calc(100% - 2 * var(--sp-4)));
+    width: min(360px, calc(100% - 2 * var(--sp-4)));
     margin: var(--sp-3) var(--sp-4) 0;
     pointer-events: none;
   }
@@ -132,25 +132,25 @@
       width: calc(var(--side-w) - 2 * var(--sp-4));
     }
   }
+  /* A raised card that comes down from the top and fades when it goes. One that waits for the
+     reader has the tint of dawn in its edge and its glyph; the way in is always the accent. */
   .toast {
     display: flex;
     align-items: center;
     gap: var(--sp-3);
-    padding: 10px 10px 10px var(--sp-4);
-    border: 1px solid var(--line);
+    padding: 10px 6px 10px var(--sp-4);
     border-radius: var(--r-lg);
-    background: var(--surface);
+    background: var(--raised);
     box-shadow: var(--shadow-pop);
     pointer-events: auto;
     animation:
-      drop var(--dur-4) var(--spring),
+      drop var(--dur-2) var(--ease-out),
       appear var(--dur-2) var(--ease-out);
 
     &.need {
-      border-color: color-mix(in srgb, var(--dawn) 55%, var(--line));
       box-shadow:
-        inset 3px 0 0 var(--dawn),
-        var(--shadow-pop);
+        0 6px 20px light-dark(rgb(16 24 40 / 0.1), rgb(0 0 0 / 0.5)),
+        0 0 0 1px var(--need-line);
     }
   }
   .glyph {
@@ -161,7 +161,24 @@
   }
   .toast b {
     display: block;
-    font-size: 14px;
+    font-size: var(--fs-ui);
+    line-height: 1.4;
+  }
+  .toast .btn {
+    --hover: color-mix(in srgb, var(--sky) 86%, var(--text));
+    border-color: transparent;
+    background: var(--sky);
+    box-shadow: none;
+    color: var(--on-sky);
+  }
+  .toast .btn::before {
+    inset: -1px;
+    border-radius: inherit;
+  }
+  .toast .icon-btn {
+    width: 32px;
+    height: 32px;
+    margin-left: -6px;
   }
   /* What waits for the reader has room to say who asks, and an alert to say what happened. */
   .toast b:not(.cut) {
@@ -185,9 +202,12 @@
     :global(.app[data-full='phone']) > .notify {
       margin-top: calc(var(--bar-h) + var(--sp-3));
     }
+    .notify {
+      margin-top: calc(var(--sp-2) + env(safe-area-inset-top));
+    }
     .toast {
       gap: var(--sp-2);
-      padding: 10px var(--sp-2) 10px var(--sp-3);
+      padding: 10px 2px 10px var(--sp-3);
     }
   }
 </style>

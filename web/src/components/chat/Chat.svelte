@@ -174,8 +174,8 @@
         </section>
       {:else}
         {#if !paging.more}
-          <div class="empty">
-            <span class="horizon"></span>
+          <div class="empty blank">
+            <span class="blank-mark"><Icon name="chat" /></span>
             <h3>{t('chat.empty.title')}</h3>
             <p>{t(emptyBody)}</p>
           </div>
@@ -213,11 +213,14 @@
 </section>
 
 <style>
+  /* The chat is the content: it stands on the card colour, while the navigation and the group
+     list beside it stay on the page colour. */
   .chat {
     display: grid;
     grid-template: auto auto minmax(0, 1fr) auto / minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
+    background: var(--surface);
   }
   .top {
     min-width: 0;
@@ -249,22 +252,40 @@
     }
   }
   @media (max-width: 1023px) {
+    /* It comes in over 300 ms and leaves faster than it came. */
     .side {
       position: fixed;
       inset: var(--bar-h) 0 0 auto;
       z-index: 5;
       width: min(360px, 100%);
-      box-shadow: var(--shadow-pop);
+      border-left: 0;
+      box-shadow: var(--shadow-dlg);
       transform: translateX(100%);
       visibility: hidden;
       transition:
-        transform var(--dur-3) var(--ease-out),
-        visibility 0s var(--dur-3);
+        transform var(--dur-out) var(--ease-in),
+        visibility 0s var(--dur-out);
     }
     .side.open {
       transform: none;
       visibility: visible;
-      transition: transform var(--dur-4) var(--spring);
+      transition: transform var(--dur-3) var(--ease-out);
+    }
+    /* A scrim over the chat behind the panel; it fades in with it. On the chat, since the
+       panel's own scrolling would clip it. */
+    .chat::after {
+      content: '';
+      position: fixed;
+      inset: var(--bar-h) 0 0;
+      z-index: 4;
+      background: var(--scrim);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--dur-out) var(--ease-in);
+    }
+    .chat:has(.side.open)::after {
+      opacity: 1;
+      transition: opacity var(--dur-2) var(--ease-out);
     }
     .side-close {
       align-self: flex-end;
@@ -274,12 +295,11 @@
   .chat-head {
     display: flex;
     align-items: center;
-    gap: var(--sp-2);
+    gap: 10px;
     min-width: 0;
-    height: var(--bar-h);
-    padding: 0 var(--sp-4);
+    height: 56px;
+    padding: 0 var(--sp-4) 0 var(--sp-5);
     border-bottom: 1px solid var(--line);
-    background: var(--surface);
   }
   .chat-head h2 {
     font-size: var(--fs-md);
@@ -291,7 +311,9 @@
     min-width: 3ch;
   }
   .chat-head p :global(.i) {
-    vertical-align: -2px;
+    width: 12px;
+    height: 12px;
+    vertical-align: -1.5px;
   }
   .scroller {
     display: flex;
@@ -308,9 +330,9 @@
   }
   .line {
     width: 100%;
-    max-width: calc(var(--measure) + 2 * var(--sp-4));
+    max-width: calc(var(--measure) + 2 * var(--sp-6));
     margin-inline: auto;
-    padding: var(--sp-2) var(--sp-4) var(--sp-6);
+    padding: 0 var(--sp-6) var(--sp-5);
   }
   .edge {
     display: grid;
@@ -347,89 +369,75 @@
     }
   }
   /* The day stays at the top of the line while its messages pass under it. It stands on a band
-     of the page's colour that fades out below it, so that no text shows above the day or is cut
-     by it: the top edge of the line reads clean. */
+     of the canvas colour, so that nothing shows above the day and nothing is covered by it: the
+     top edge of the line reads clean. */
   .sep {
     position: sticky;
     top: 0;
     z-index: 1;
     display: flex;
     justify-content: center;
-    margin-top: var(--sp-3);
-    padding: var(--sp-2) 0 var(--sp-3);
-    background: linear-gradient(var(--bg) 62%, transparent);
+    margin: var(--sp-3) calc(-1 * var(--sp-2)) 0;
+    padding: 6px 0;
+    background: var(--surface);
     pointer-events: none;
+  }
+  .sep time {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 12px;
+    border-radius: var(--r-full);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    text-transform: capitalize;
   }
   /* The band already keeps the first message of a day off the day's name. */
   .sep + :global(.msg) {
     margin-top: var(--sp-2);
   }
-  .sep time {
-    padding: 2px 12px;
-    border: 1px solid var(--line);
-    border-radius: var(--r-full);
-    background: var(--bg);
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    text-transform: capitalize;
-  }
-  .empty {
-    display: grid;
-    gap: var(--sp-2);
-    margin-top: var(--sp-6);
-    padding: var(--sp-5);
-    border: 1px dashed var(--line-strong);
-    border-radius: var(--r-lg);
-    animation:
-      rise var(--dur-3) var(--ease-out),
-      appear var(--dur-2) var(--ease-out);
-  }
-  .empty h3 {
-    font-size: var(--fs-lg);
-  }
-  .empty p {
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-  }
-  .horizon {
-    height: 2px;
-    border-radius: 1px;
-    background: var(--horizon);
-  }
+  /* A quiet word under the line: this group has no secretary. Told by its glyph and its words. */
   .nosec {
     display: flex;
     align-items: flex-start;
-    gap: var(--sp-2);
+    justify-content: center;
+    gap: 6px;
     margin-top: var(--sp-5);
-    padding: 10px 12px;
-    border-radius: var(--r-md);
-    background: var(--dawn-soft);
+    color: var(--text-2);
     font-size: var(--fs-sm);
+    line-height: 1.5;
   }
   .nosec :global(.i) {
-    margin-top: 4px;
+    margin-top: 2px;
     color: var(--dawn-text);
   }
   .dock {
     position: relative;
     min-width: 0;
   }
-  /* Springs up over the composer when the reader has scrolled back. */
+  /* Comes up over the composer when the reader has scrolled back. */
   .latest {
     position: absolute;
     left: 50%;
     bottom: calc(100% + var(--sp-3));
     z-index: 2;
     translate: -50% 0;
+    height: 32px;
+    padding: 0 14px 0 10px;
+    border-color: transparent;
     border-radius: var(--r-full);
     box-shadow: var(--shadow-pop);
     animation:
-      rise var(--dur-4) var(--spring),
+      rise var(--dur-2) var(--ease-out),
       appear var(--dur-2) var(--ease-out);
   }
+  .latest::before {
+    border-radius: inherit;
+  }
   .dot {
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: var(--sky);
   }
@@ -438,9 +446,16 @@
       display: none;
     }
   }
+  @media (max-width: 1279px) {
+    .chat-head {
+      padding-left: var(--sp-2);
+      gap: var(--sp-2);
+    }
+  }
   @media (max-width: 767px) {
     .chat-head {
-      padding: 0 var(--sp-3) 0 var(--sp-2);
+      padding: 0 var(--sp-2) 0 var(--sp-1);
+      gap: var(--sp-1);
     }
     /* On a phone the chat has the screen without the top bar. The group's name is worth more
        there than its picture. */
@@ -453,7 +468,7 @@
   }
   @media (max-width: 640px) {
     .line {
-      padding-inline: var(--sp-3);
+      padding-inline: var(--sp-4);
     }
   }
 </style>

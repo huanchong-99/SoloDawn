@@ -3,6 +3,7 @@
   import type { CardProps } from '../../lib/mounts.svelte';
   import { t } from '../../lib/prefs.svelte';
   import Failure from '../Failure.svelte';
+  import { changed } from '../changed';
   import Icon from '../Icon.svelte';
 
   let { group, msg }: CardProps<'confirm'> = $props();
@@ -25,14 +26,25 @@
   }
 </script>
 
-<section bind:this={card} class="card" class:need={needsMe} aria-label={t('chat.kind.confirm')}>
+<section
+  bind:this={card}
+  class="card"
+  class:need={needsMe}
+  class:settled={status !== 'pending'}
+  use:changed={status}
+  aria-label={t('chat.kind.confirm')}
+>
   <header class="card-head">
     <Icon name="shield" />
     <span class="kind">{t('chat.kind.confirm')}</span>
     {#if needsMe}
       <span class="badge solid" data-tone="dawn">{t('confirm.needs_you')}</span>
     {:else}
-      <span class="badge" data-tone={tones[status]}>{confirmStatus(group, msg)}</span>
+      <span class="badge" class:refused={status === 'denied'} data-tone={tones[status]}>
+        {#if status === 'confirmed'}<Icon name="check" sm />{/if}
+        {#if status === 'denied'}<Icon name="x" sm />{/if}
+        {confirmStatus(group, msg)}
+      </span>
     {/if}
   </header>
 

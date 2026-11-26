@@ -18,7 +18,7 @@ function el(tag: string, style: string, ...children: Child[]) {
 }
 
 const buttonStyle =
-  'display:block;width:100%;text-align:left;margin:4px 0;padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface-2);color:var(--text);font:inherit;cursor:pointer';
+  'display:block;width:100%;text-align:left;margin:4px 0;padding:7px 10px;border-radius:8px;border:0;background:var(--surface-2);color:var(--text);font:inherit;cursor:pointer';
 const headStyle = 'margin:12px 0 2px;font-size:12px;color:var(--text-2);font-weight:600';
 
 function button(label: string, act: () => unknown) {
@@ -69,7 +69,7 @@ export class Panel {
     });
     toggle.setAttribute(
       'style',
-      `${buttonStyle};width:auto;box-shadow:0 4px 16px rgb(0 0 0 / .18);background:var(--surface)`,
+      `${buttonStyle};width:auto;border-radius:10px;box-shadow:var(--shadow-pop);background:var(--raised)`,
     );
     toggle.setAttribute('aria-expanded', String(this.#open));
     const body = this.#open ? [this.#sheet()] : [];
@@ -77,12 +77,10 @@ export class Panel {
   }
 
   #sheet() {
-    const note = this.#note
-      ? [el('p', 'margin:8px 0 0;color:var(--dawn, #c2410c)', this.#note)]
-      : [];
+    const note = this.#note ? [el('p', 'margin:8px 0 0;color:var(--dawn-text)', this.#note)] : [];
     return el(
       'div',
-      'width:280px;max-height:70vh;overflow:auto;margin-bottom:8px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text);box-shadow:0 8px 32px rgb(0 0 0 / .22)',
+      'width:280px;max-height:70vh;overflow:auto;margin-bottom:8px;padding:12px;border-radius:14px;background:var(--raised);color:var(--text);box-shadow:var(--shadow-pop)',
       el('b', '', '演示面板'),
       el(
         'p',

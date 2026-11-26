@@ -6,6 +6,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-26 · bug · A task's menu stays open after one of its items is picked
+
+- Symptom: in headless Chromium (Playwright 1.64, a trusted click) on the demo world at `?demo`, opening the `⋯` menu of a running task and pressing 暂停, 换人 or 取消任务 carries the action out but leaves the popover open over the card (`.menu:popover-open` still matches, and no `toggle` event follows the click). The next press on `⋯` then closes it instead of opening it. Seen while taking the screenshots of the redesign; it is the same with the menu's styles as they were before the redesign (`web/src/components/task/TaskMenu.svelte` at fe89a231b and at 51aee6673).
+- Cause: the items closed the menu through `popovertarget` + `popovertargetaction="hide"`, which the browser runs as the button's activation behaviour, after the click listeners and the microtask checkpoint that follows them, and skips when the pressed button is no longer connected or is disabled. The demo answers a request through promises alone, so for 暂停 and 恢复 the task's new row arrived inside that checkpoint, the keyed `{#each ops as op (op)}` (`web/src/components/task/TaskMenu.svelte:90`) replaced the pressed item, and the hide never ran (reproduced 2026-11-26 in headless Chromium at 1440: no `toggle` event, a MutationObserver saw the item replaced and `isConnected` false before the activation). 换人 and 取消任务 closed normally in that run, since they only open a question. A real home answers in a later task, which is why the e2e of M5 did not see it; the menu depended on that timing.
+- Fix: each item hides the menu itself before it hands on the pick (`hide()` at `web/src/components/task/TaskMenu.svelte:99`); the two attributes are gone. The `pick` helper of `web/features/taskops.spec.ts:46` now expects the menu to hide on every pick; with the old menu it fails in 9 steps. After the fix all four items close the menu in the same Chromium probe at 1440 and 390.
+- Status: resolved on `web/redesign` (commit `web: redesign review fixes`).
+
 ### 2026-11-26 · deviation · Rough edges of the web client seen while walking every flow of the demo
 
 - Symptom: walking every flow of `?demo` (`web/features/sim`, branch `web/demo-sim`) in the built-in browser showed, in the client itself:

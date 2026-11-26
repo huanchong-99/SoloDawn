@@ -183,37 +183,56 @@
 {/if}
 
 <style>
+  /* The steps as a list: a 20px glyph, the step, and under it what is known so far. */
   .link-steps li {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
-    gap: var(--sp-2);
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 10px;
     padding: 10px 0;
-    font-size: var(--fs-sm);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    line-height: 1.5;
   }
   .link-steps li + li {
     border-top: 1px solid var(--line);
   }
+  .link-steps li:first-child {
+    padding-top: 0;
+  }
   .link-steps b {
     display: block;
-    font-size: 14px;
+    color: var(--text);
+    font-size: var(--fs-ui);
+    font-weight: 500;
+  }
+  .link-steps span:not(.muted) {
+    color: var(--text-2);
   }
   .link-steps :global(.i) {
-    margin-top: 2px;
+    margin-top: 1px;
   }
-  .link-steps .todo {
+  .link-steps .todo b {
     color: var(--text-3);
   }
   .step-dot {
     justify-content: center;
-    width: 18px;
-    height: 18px;
-    margin-top: 2px;
+    width: 20px;
+    height: 20px;
+    margin-top: 1px;
   }
   .mark {
     display: inline-flex;
   }
+  /* A step that is done lands. */
   .mark.ok {
     color: var(--ok);
+    animation: done var(--dur-4) var(--spring);
+  }
+  @keyframes done {
+    from {
+      opacity: 0;
+      transform: scale(0.6);
+    }
   }
   .mark.err {
     color: var(--danger);
@@ -221,7 +240,7 @@
   .spin {
     width: 16px;
     height: 16px;
-    margin: 3px 1px;
+    margin: 3px 2px;
     border-radius: 50%;
     border: 2px solid var(--surface-3);
     border-top-color: var(--sky);
@@ -234,5 +253,6 @@
   }
   .done-btn {
     width: 100%;
+    height: 44px;
   }
 </style>

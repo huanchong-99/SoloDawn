@@ -179,28 +179,30 @@
 </div>
 
 <style>
+  /* A thread is a work log: compact flat rows, no bubbles and no boxes. */
   .thread {
-    background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
     border-radius: 0 0 var(--r-lg) var(--r-lg);
     font-size: var(--fs-sm);
+    line-height: 1.5;
   }
   .tpage {
     display: flex;
     justify-content: center;
-    padding: var(--sp-2) var(--sp-4) 0;
+    padding: var(--sp-1) var(--sp-4) 0;
     color: var(--text-3);
     font-size: var(--fs-xs);
   }
   .tlist {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-3);
-    padding: var(--sp-2) var(--sp-4) var(--sp-4);
+    gap: var(--sp-2);
+    padding: var(--sp-1) var(--sp-4) var(--sp-4);
   }
   .ti {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-columns: 20px minmax(0, 1fr);
     gap: 2px var(--sp-2);
+    color: var(--text-2);
   }
   .ti > :global(.av) {
     margin-top: 1px;
@@ -208,7 +210,7 @@
   .ti > div {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
     min-width: 0;
   }
   .ti.sys {
@@ -220,6 +222,7 @@
     align-items: center;
   }
   .ti.empty {
+    padding-block: var(--sp-2);
     text-align: center;
   }
   .ti-head {
@@ -227,6 +230,11 @@
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
+    min-height: 20px;
+  }
+  .ti-head b {
+    color: var(--text);
+    font-weight: 500;
   }
   .ti-head time {
     color: var(--text-3);
@@ -236,6 +244,7 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
+  /* The AI is at work: its dots breathe, the one motion that loops. */
   .typing {
     display: inline-flex;
     justify-self: center;
@@ -245,23 +254,13 @@
     width: 4px;
     height: 4px;
     border-radius: 50%;
-    background: var(--text-3);
-    animation: blink 1.2s infinite;
+    background: var(--sky);
+    animation: pulse 1.6s ease-in-out infinite;
   }
   .typing i:nth-child(2) {
     animation-delay: 0.2s;
   }
   .typing i:nth-child(3) {
     animation-delay: 0.4s;
-  }
-  @keyframes blink {
-    0%,
-    60%,
-    100% {
-      opacity: 0.25;
-    }
-    30% {
-      opacity: 1;
-    }
   }
 </style>

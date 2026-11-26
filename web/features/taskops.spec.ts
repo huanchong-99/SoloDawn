@@ -42,8 +42,12 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     flushSync();
   };
   const menu = () => texts('.menu .item');
+  // The menu hides itself when an item is picked: the item may be gone before the browser would.
   const pick = async (name: string) => {
+    const panel = button(name, '.menu').closest<HTMLElement>('.menu')!;
+    panel.hidePopover = vi.fn();
     press(name, '.menu');
+    expect(panel.hidePopover).toHaveBeenCalledOnce();
     await new Promise((later) => setTimeout(later));
     flushSync();
   };

@@ -1,6 +1,6 @@
-/* SoloDawn shared styles. Colours and sizes come from tokens.css only.
+/* SoloDawn shared styles (design/README.md). Colours and sizes come from tokens.css only.
    Sections: 1 base  2 utilities  3 shell  4 buttons  5 cards  6 forms  7 motion  8 forced colours
-   9 badges and small texts  10 fields and dialogs.
+   9 badges and small texts  10 fields and dialogs  11 empty states and rows.
    Styles of one component (avatars, chat, thread, terminal) arrive with it, in its own file. */
 
 /* 1 base */
@@ -56,7 +56,15 @@ h3,
 h4 {
   font-weight: 600;
   line-height: var(--lh-tight);
+  text-wrap: balance;
+}
+/* Latin headings sit a little tighter; Chinese ones are left as the font sets them. */
+:lang(en) :is(h1, h2, h3, h4) {
   letter-spacing: -0.01em;
+}
+b,
+strong {
+  font-weight: 600;
 }
 ul,
 ol {
@@ -71,7 +79,8 @@ a:hover {
 }
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
   color: inherit;
 }
@@ -94,7 +103,7 @@ kbd,
   opacity: 1;
 }
 ::selection {
-  background: color-mix(in srgb, var(--sky) 30%, transparent);
+  background: color-mix(in srgb, var(--sky) 26%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -132,6 +141,7 @@ kbd,
   border-radius: var(--r-md);
   background: var(--text);
   color: var(--bg);
+  font-size: var(--fs-ui);
   transform: translateY(-200%);
 }
 .skip:focus {
@@ -155,9 +165,10 @@ kbd,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A line icon (Icon.svelte): 20px in buttons and the navigation, 16px inline. */
 .i {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   flex: none;
   fill: none;
   stroke: currentColor;
@@ -166,8 +177,9 @@ kbd,
   stroke-linejoin: round;
 }
 .i.sm {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
 }
 .logo-mark {
   width: 30px;
@@ -213,7 +225,8 @@ kbd,
   --on-tone: var(--on-danger);
 }
 
-/* 3 shell: side navigation and top bar; on phones, top bar and bottom navigation */
+/* 3 shell: side navigation and top bar; on phones, top bar and bottom navigation. Both stand on
+   the page colour, so that they recede and the content leads. */
 .app {
   display: grid;
   height: 100dvh;
@@ -253,9 +266,9 @@ kbd,
   flex-direction: column;
   align-items: center;
   gap: var(--sp-1);
-  padding: var(--sp-3) 0;
+  padding: 11px 0 var(--sp-3);
   border-right: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--bg);
 
   .logo {
     margin-bottom: var(--sp-3);
@@ -272,28 +285,32 @@ kbd,
   display: grid;
   grid-auto-rows: 1fr;
   gap: var(--sp-1);
-  width: calc(var(--rail-w) - 10px);
+  width: calc(var(--rail-w) - 16px);
 
-  /* The mark of the current page: one pill, which springs to the entry at --at. It shares the
-     cell of the first entry, so it has the size of an entry at any width and in any language. */
+  /* The mark of the current page: one raised pill, which springs to the entry at --at. It shares
+     the cell of the first entry, so it has the size of an entry at any width and in any
+     language. */
   &::before {
     content: '';
     grid-area: 1 / 1;
     border-radius: var(--r-md);
-    background: var(--surface-2);
+    background: var(--raised);
+    box-shadow: var(--shadow-1);
     transform: translateY(calc(var(--at) * (100% + var(--sp-1))));
     transition: transform var(--dur-4) var(--spring);
   }
   a {
+    --hover: var(--surface-3);
     display: grid;
     justify-items: center;
     align-content: center;
-    gap: 2px;
-    padding: 8px 0 6px;
+    gap: 3px;
+    min-height: 48px;
+    padding: 6px 0 5px;
     border-radius: var(--r-md);
     color: var(--text-3);
     font-size: 11px;
-    line-height: 1.3;
+    line-height: 1.2;
   }
   a:first-of-type {
     grid-area: 1 / 1;
@@ -302,9 +319,18 @@ kbd,
     color: var(--text);
     text-decoration: none;
   }
+  /* The current entry: its icon in the accent, its name in the text colour and heavier. */
   a[aria-current] {
     color: var(--text);
     font-weight: 600;
+
+    .i {
+      color: var(--sky);
+    }
+  }
+  /* The raised pill is its own layer: no hover layer over it. */
+  a[aria-current]::before {
+    display: none;
   }
   /* A page outside the navigation: no entry is marked. */
   &:not(:has([aria-current]))::before {
@@ -321,9 +347,9 @@ kbd,
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
-  padding: 0 var(--sp-4);
+  padding: 0 var(--sp-4) 0 var(--sp-5);
   border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--bg);
 }
 .bar-title {
   flex: 1;
@@ -344,11 +370,19 @@ kbd,
     text-overflow: ellipsis;
   }
 }
+/* The right cluster is quiet: small ghost buttons, nothing framed but the emergency stop. */
 .global {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
   flex: none;
+
+  .icon-btn {
+    --hover: var(--surface-3);
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-md);
+  }
 }
 .page {
   max-width: 920px;
@@ -356,7 +390,7 @@ kbd,
   padding: var(--sp-6) var(--sp-5) var(--sp-16);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-6);
+  gap: var(--sp-5);
 }
 .page-head {
   display: flex;
@@ -369,7 +403,7 @@ kbd,
   }
   p {
     color: var(--text-2);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-ui);
     margin-top: 4px;
   }
   .grow {
@@ -392,6 +426,7 @@ kbd,
     padding: 4px 8px calc(4px + env(safe-area-inset-bottom));
     border-right: 0;
     border-top: 1px solid var(--line);
+    background: var(--surface);
 
     .logo {
       display: none;
@@ -406,7 +441,21 @@ kbd,
     min-height: 48px;
 
     &::before {
-      transform: translateX(calc(var(--at) * 100%));
+      margin-inline: 14%;
+      background: var(--surface-2);
+      box-shadow: none;
+      transform: translateX(calc(var(--at) * 100% / 0.72));
+    }
+    a {
+      --hover: var(--surface-2);
+    }
+    a .i {
+      width: 22px;
+      height: 22px;
+    }
+    /* On the bottom bar the current entry is told by the accent and its weight. */
+    a[aria-current] {
+      color: var(--sky);
     }
   }
   /* On a phone a page whose route asks for it has the screen without the top bar and the
@@ -422,14 +471,11 @@ kbd,
     }
   }
   .bar {
-    padding: 0 var(--sp-3) 0 var(--sp-2);
-  }
-  .bar-title:first-child {
-    padding-left: var(--sp-2);
+    padding: 0 var(--sp-3) 0 var(--sp-4);
   }
   .page {
     padding: var(--sp-4) var(--sp-4) var(--sp-12);
-    gap: var(--sp-5);
+    gap: var(--sp-4);
   }
 }
 
@@ -497,20 +543,23 @@ kbd,
     opacity: 1;
   }
 }
+/* Secondary, the plain button: a raised surface with a hairline. */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   flex: none;
-  height: 36px;
+  height: var(--ctl);
   padding: 0 14px;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  background: var(--surface);
+  background: var(--raised);
+  box-shadow: var(--shadow-1);
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--fs-ui);
   font-weight: 500;
+  line-height: 1.2;
   white-space: nowrap;
 
   /* The layer lies inside the border, the ring outside it. */
@@ -523,40 +572,52 @@ kbd,
   &:hover {
     text-decoration: none;
   }
-  &[disabled] {
-    background: var(--surface-2);
+  &[disabled],
+  &[aria-disabled='true'] {
+    border-color: transparent;
+    background: var(--surface-3);
+    box-shadow: none;
     color: var(--text-3);
-    border-style: dashed;
     cursor: not-allowed;
     transform: none;
+
+    &::before {
+      display: none;
+    }
   }
 }
-.btn-primary {
-  --hover: color-mix(in srgb, var(--text) 86%, var(--bg));
-  background: var(--text);
-  color: var(--bg);
-  border-color: transparent;
-}
+/* Primary: the accent. A button on a card that waits for the person is primary too: the wait is
+   told by the card's pill and border, never by an amber button. */
+.btn-primary,
 .btn-dawn {
-  --hover: color-mix(in srgb, var(--dawn) 86%, #fff);
-  background: var(--dawn);
-  color: var(--on-dawn);
+  --hover: color-mix(in srgb, var(--sky) 86%, var(--text));
+  background: var(--sky);
+  color: var(--on-sky);
   border-color: transparent;
-  font-weight: 600;
 }
 .btn-danger {
   --hover: var(--danger-soft);
   color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+
+  /* The button that confirms something destructive. */
+  &.solid {
+    --hover: color-mix(in srgb, var(--danger) 86%, var(--text));
+    background: var(--danger);
+    color: var(--on-danger);
+    border-color: transparent;
+  }
 }
 .btn-ghost {
   border-color: transparent;
   background: none;
+  box-shadow: none;
   color: var(--text-2);
 }
 /* No border to stay inside of: the layer covers the whole button. */
 .btn-primary,
 .btn-dawn,
+.btn-danger.solid,
 .btn-ghost {
   &::before {
     inset: -1px;
@@ -564,16 +625,21 @@ kbd,
   }
 }
 .btn-sm {
-  height: 30px;
+  height: var(--ctl-sm);
   padding: 0 10px;
+  border-radius: 8px;
   font-size: var(--fs-sm);
+
+  &::before {
+    border-radius: 7px;
+  }
 }
 .icon-btn {
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 36px;
-  height: 36px;
+  width: var(--ctl);
+  height: var(--ctl);
   border: 0;
   border-radius: var(--r-md);
   background: none;
@@ -586,10 +652,12 @@ kbd,
 }
 @media (pointer: coarse) {
   .btn,
-  .icon-btn {
+  .icon-btn,
+  .global .icon-btn {
     min-height: 44px;
   }
-  .icon-btn {
+  .icon-btn,
+  .global .icon-btn {
     min-width: 44px;
   }
   .btn-sm {
@@ -598,23 +666,25 @@ kbd,
 }
 
 /* 5 cards */
+/* One anatomy for every card: a head that says what it is (icon, label, id, state pill), a
+   title, key-value rows, actions. The type is told by icon and label, never by a colour. */
 .card {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  padding: 14px var(--sp-4);
+  padding: var(--sp-4);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--surface);
+  box-shadow: var(--shadow-1);
   min-width: 0;
 
   h3 {
     font-size: var(--fs-lg);
   }
-  /* Waiting on you: a line of dawn down the left edge. */
+  /* Waiting on you: a tint of dawn in the border, and the pill in its head. Nothing else. */
   &.need {
-    border-color: color-mix(in srgb, var(--dawn) 55%, var(--line));
-    box-shadow: inset 3px 0 0 var(--dawn);
+    border-color: var(--need-line);
   }
 }
 .card-head {
@@ -622,13 +692,19 @@ kbd,
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
+  min-height: 20px;
   color: var(--text-2);
   font-size: var(--fs-sm);
+  line-height: 1.4;
 
   .kind {
-    font-weight: 600;
+    font-weight: 500;
     font-size: var(--fs-sm);
-    color: var(--text);
+    color: var(--text-2);
+  }
+  .mono {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
   h3 {
     flex: 1;
@@ -639,43 +715,91 @@ kbd,
     margin-left: auto;
   }
 }
+.card-head > .i {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+}
+/* A card whose question is settled recedes: no shadow, its words in the second text colour. Its
+   pill, the outcome, lands with a spring when the state changes while the card is in view
+   (`data-changed`, set by components/changed.ts). A refusal is not a failure: its pill is neutral, with a cross. */
+.card.settled {
+  box-shadow: none;
+
+  > :is(h3, p),
+  .card-head h3 {
+    color: var(--text-2);
+  }
+}
+.card[data-changed] .card-head .badge:not(.solid) {
+  animation: land var(--dur-4) var(--spring);
+}
+.badge.refused {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
 .card-foot {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
+
+  .hint {
+    margin-left: var(--sp-1);
+  }
+}
+/* A command or a block of code in a card. */
+.card pre {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.card > p {
+  overflow-wrap: anywhere;
 }
 .kv {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 6px var(--sp-4);
-  font-size: var(--fs-sm);
+  grid-template-columns: minmax(var(--kv-w, 72px), max-content) minmax(0, 1fr);
+  gap: 6px var(--sp-3);
+  font-size: var(--fs-ui);
+  line-height: 1.45;
 
   dt {
     color: var(--text-3);
+    font-size: var(--fs-sm);
+    line-height: calc(var(--fs-ui) * 1.45);
   }
   dd {
     min-width: 0;
+    overflow-wrap: anywhere;
   }
 }
+:lang(en) .kv {
+  --kv-w: 96px;
+}
+/* A line with a share used: its label, the share in figures, and a 4px track. */
 .meter {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 4px 8px;
+  gap: 6px 8px;
   font-size: var(--fs-xs);
   color: var(--text-3);
 
   b {
     color: var(--text);
-    font-weight: 600;
+    font-weight: 500;
   }
   i {
     grid-column: 1 / -1;
-    height: 6px;
-    border-radius: 3px;
+    height: 4px;
+    border-radius: 2px;
     background: linear-gradient(
       90deg,
-      var(--tone-text, var(--text-2)) var(--v),
+      var(--tone-text, var(--sky)) var(--v),
       var(--surface-3) var(--v)
     );
   }
@@ -684,9 +808,10 @@ kbd,
     font-size: inherit;
   }
 }
+/* A disclosure row: 44px, a chevron that turns when it opens. */
 .fold {
   border-top: 1px solid var(--line);
-  margin: 0 calc(-1 * var(--sp-4)) -14px;
+  margin: 0 calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4));
 
   > summary {
     position: relative;
@@ -694,7 +819,8 @@ kbd,
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    padding: 10px var(--sp-4);
+    min-height: 44px;
+    padding: 8px var(--sp-4);
     cursor: pointer;
     list-style: none;
     font-size: var(--fs-sm);
@@ -715,11 +841,13 @@ kbd,
     transition: opacity var(--dur-1) var(--ease);
   }
   > summary .i {
+    color: var(--text-3);
     transform: rotate(-90deg);
     transition: transform var(--dur-2) var(--ease);
   }
   > summary b {
     color: var(--text);
+    font-weight: 500;
     white-space: nowrap;
   }
   &[open] > summary {
@@ -739,13 +867,16 @@ kbd,
   padding: var(--sp-1) var(--sp-4) var(--sp-4);
   font-size: var(--fs-sm);
 }
+/* The waiting strip: what waits for the person, one row that scrolls sideways. The label and
+   its dot are the only dawn in it. */
 .needbar {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 8px var(--sp-4);
-  border-bottom: 1px solid color-mix(in srgb, var(--dawn) 40%, var(--line));
-  background: var(--dawn-soft);
+  min-height: 40px;
+  padding: 6px var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
   font-size: var(--fs-sm);
   white-space: nowrap;
   overflow-x: auto;
@@ -756,21 +887,87 @@ kbd,
     align-items: center;
     flex: none;
     gap: 6px;
+    margin-right: var(--sp-1);
     color: var(--dawn-text);
+    font-weight: 500;
+  }
+  /* The dot before the label. */
+  b::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--dawn);
+  }
+  b .i {
+    display: none;
   }
   a {
+    position: relative;
+    isolation: isolate;
     display: inline-flex;
     align-items: center;
     flex: none;
-    height: 26px;
+    height: 28px;
     padding: 0 10px;
-    border: 1px solid color-mix(in srgb, var(--dawn) 40%, var(--line));
     border-radius: var(--r-full);
-    background: var(--surface);
+    background: var(--surface-2);
     color: var(--text);
+    animation: chip var(--dur-2) var(--ease-out);
+  }
+  a:hover {
+    text-decoration: none;
+  }
+  a::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--surface-3);
+    opacity: 0;
+    transition: opacity var(--dur-1) var(--ease);
+  }
+  a:active::before {
+    opacity: 1;
+  }
+}
+@media (hover: hover) {
+  .needbar a:hover::before {
+    opacity: 1;
+  }
+}
+@keyframes chip {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+/* A finger has the whole height of the strip for a chip. */
+@media (pointer: coarse) {
+  .needbar {
+    min-height: 44px;
+  }
+  .needbar a::after {
+    content: '';
+    position: absolute;
+    inset: -8px 0;
   }
 }
 @media (max-width: 640px) {
+  .card {
+    padding: 14px;
+  }
+  .fold {
+    margin: 0 -14px -14px;
+
+    > summary {
+      padding-inline: 14px;
+    }
+  }
+  .fold-body {
+    padding-inline: 14px;
+  }
   .card-head h3 {
     flex-basis: 100%;
   }
@@ -792,21 +989,21 @@ kbd,
   padding: 3px;
   border-radius: var(--r-md);
   background: var(--surface-2);
-  border: 1px solid var(--line);
   max-width: 100%;
 
-  /* The chosen option: one thumb, which springs to the option at --at. It shares the cell of the
-     first option, as the pill of the navigation does. */
+  /* The chosen option: one raised thumb, which springs to the option at --at. It shares the cell
+     of the first option, as the pill of the navigation does. */
   &::before {
     content: '';
     grid-area: 1 / 1;
     border-radius: 7px;
-    background: var(--surface);
-    box-shadow: 0 0 0 1px var(--line);
+    background: var(--raised-2);
+    box-shadow: var(--shadow-1);
     transform: translateX(calc(var(--at) * 100%));
     transition: transform var(--dur-4) var(--spring);
   }
   label {
+    --hover: transparent;
     display: grid;
     place-items: center;
     min-height: 30px;
@@ -831,18 +1028,25 @@ kbd,
     inset: -3px;
     border-radius: 10px;
   }
+  label:hover {
+    color: var(--text);
+  }
   label:has(:checked) {
     color: var(--text);
-    font-weight: 600;
+    font-weight: 500;
   }
 }
+/* A group of settings: one list on a card, a hairline between its rows, inset 16px. */
 .set {
   padding: 0;
   gap: 0;
 
   > header {
-    padding: 14px var(--sp-4) 0;
+    padding: var(--sp-4) var(--sp-4) var(--sp-1);
 
+    h3 {
+      font-size: var(--fs-md);
+    }
     p {
       color: var(--text-3);
       font-size: var(--fs-sm);
@@ -850,12 +1054,17 @@ kbd,
   }
 }
 .set-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--sp-4);
-  padding: 14px var(--sp-4);
+  min-height: 52px;
+  padding: 10px var(--sp-4);
 
-  & + & {
+  & + &::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto var(--sp-4);
     border-top: 1px solid var(--line);
   }
   > div:first-child {
@@ -863,11 +1072,13 @@ kbd,
     min-width: 0;
   }
   b {
+    font-size: var(--fs-ui);
     font-weight: 500;
   }
   p {
     color: var(--text-3);
     font-size: var(--fs-sm);
+    line-height: 1.5;
   }
 }
 @media (max-width: 640px) {
@@ -888,8 +1099,9 @@ kbd,
     min-height: 38px;
   }
 }
-/* Account-type radio options (onboarding and computer cards). Positioned so a visually hidden
-   legend inside the fieldset stays anchored to the card instead of the document. */
+/* Radio cards: account type (onboarding and computer cards), and every choice between a few
+   named options (.choice in the dialogs). Positioned so a visually hidden legend inside the
+   fieldset stays anchored to the card instead of the document. */
 .acct {
   position: relative;
   display: grid;
@@ -898,25 +1110,82 @@ kbd,
   label {
     display: flex;
     gap: var(--sp-3);
-    padding: 10px 12px;
+    min-height: 56px;
+    padding: 10px 14px;
     border: 1px solid var(--line);
-    border-radius: var(--r-md);
+    border-radius: 12px;
+    background: var(--surface);
     cursor: pointer;
     font-size: var(--fs-sm);
+    line-height: 1.5;
     color: var(--text-2);
   }
+  /* 1.5px of accent: the half pixel is drawn inside, so nothing moves when the choice does. */
   label:has(:checked) {
     border-color: var(--sky);
     background: var(--sky-soft);
+    box-shadow: inset 0 0 0 0.5px var(--sky);
+  }
+  label:has(:disabled) {
+    opacity: 0.55;
+    cursor: not-allowed;
   }
   input {
-    margin-top: 4px;
-    accent-color: var(--sky);
+    flex: none;
+    margin-top: 3px;
   }
   b {
     display: block;
     color: var(--text);
-    font-size: 14px;
+    font-size: var(--fs-ui);
+    font-weight: 500;
+  }
+}
+/* Radios and checkboxes drawn by the client: 18px, the accent when chosen. The tick and the dot
+   are drawn in the colour that stands on the accent. */
+:where(input:is([type='radio'], [type='checkbox']):not(.seg input, .switch)) {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  cursor: pointer;
+
+  &[type='radio'] {
+    border-radius: 50%;
+  }
+  &::before {
+    content: '';
+    width: 10px;
+    height: 10px;
+    transform: scale(0);
+    transition: transform var(--dur-2) var(--spring);
+    background: var(--on-sky);
+    /* A tick. */
+    clip-path: polygon(12% 52%, 0 66%, 38% 100%, 100% 22%, 86% 10%, 36% 72%);
+  }
+  &[type='radio']::before {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    clip-path: none;
+  }
+  &:checked {
+    border-color: var(--sky);
+    background: var(--sky);
+  }
+  &:checked::before {
+    transform: none;
+  }
+  &:disabled {
+    border-color: var(--surface-3);
+    background: var(--surface-3);
+    cursor: not-allowed;
   }
 }
 
@@ -977,6 +1246,26 @@ kbd,
     transform: rotate(-90deg) scale(0.6);
   }
 }
+/* A pill whose state changed lands with a spring; a count does so each time it changes. */
+@keyframes land {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+@keyframes pop {
+  from {
+    transform: scale(0.4);
+  }
+}
+/* A layer that opens from its trigger: it grows a little from the trigger's corner, which the
+   layer names as its transform-origin. */
+@keyframes popin {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
 /* Theme and language change the whole page: shift() in motion.ts fades the picture of the old
    page out over the new page. The new page has no picture of its own: a page in a picture takes
    no pointer input, and neither would the pictures above it, so they let it through. The page
@@ -1006,9 +1295,15 @@ kbd,
     background: Highlight;
     color: HighlightText;
   }
-  /* The hover layer, which the system paints in its page colour, would cover the highlight. */
-  .tabs a[aria-current]::before {
-    display: none;
+  .tabs a[aria-current] .i {
+    color: inherit;
+  }
+  :where(input:is([type='radio'], [type='checkbox']):not(.seg input, .switch)) {
+    appearance: auto;
+
+    &::before {
+      display: none;
+    }
   }
 }
 
@@ -1016,26 +1311,46 @@ kbd,
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   flex: none;
-  height: 22px;
+  height: 20px;
   padding: 0 8px;
   border-radius: var(--r-full);
   background: var(--tone-soft, var(--surface-2));
   color: var(--tone-text, var(--text-2));
   font-size: var(--fs-xs);
   font-weight: 500;
+  line-height: 1;
   white-space: nowrap;
 
+  .i {
+    width: 12px;
+    height: 12px;
+    stroke-width: 2;
+  }
   &.solid {
     background: var(--tone);
     color: var(--on-tone);
     font-weight: 600;
   }
   &.count {
-    min-width: 22px;
+    min-width: 20px;
     justify-content: center;
     padding: 0 6px;
+  }
+}
+/* The pill of a card that waits for the person: soft, with a dot. The solid fill is for counts. */
+.card .badge.solid[data-tone='dawn']:not(.count) {
+  background: var(--dawn-soft);
+  color: var(--dawn-text);
+  font-weight: 500;
+
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--dawn);
   }
 }
 /* Shape and colour change together so state is never carried by colour alone. */
@@ -1055,9 +1370,10 @@ kbd,
     color: var(--text-3);
     background: currentColor;
   }
+  /* The one thing that loops: an AI at work breathes. */
   &[data-st='working'] i {
     color: var(--sky);
-    animation: pulse 2s var(--ease) infinite;
+    animation: pulse 1.6s ease-in-out infinite;
   }
   &[data-st='needyou'] {
     color: var(--dawn-text);
@@ -1069,7 +1385,7 @@ kbd,
   }
   &[data-st='waiting'] i {
     background: none;
-    border: 2px solid currentColor;
+    border: 1.5px solid currentColor;
   }
   &[data-st='sleeping'] {
     color: var(--text-3);
@@ -1114,16 +1430,16 @@ kbd,
   &[data-st='some'] i {
     color: var(--dawn);
     background: none;
-    border: 2px solid currentColor;
+    border: 1.5px solid currentColor;
   }
   &[data-st='down'] i {
     color: var(--danger);
     background: none;
-    border: 2px solid currentColor;
+    border: 1.5px solid currentColor;
   }
   &[data-st='linking'] i {
     color: var(--sky);
-    animation: pulse 1.2s var(--ease) infinite;
+    animation: pulse 1.6s ease-in-out infinite;
   }
 }
 p.st {
@@ -1132,32 +1448,48 @@ p.st {
 @keyframes pulse {
   50% {
     opacity: 0.35;
-    transform: scale(0.82);
   }
 }
+/* An inset block that says something beside the main matter. It is neutral: a tone colours its
+   glyph and its lead words only. */
 .note:not(:where(.msg)) {
   display: flex;
   gap: var(--sp-2);
   padding: 10px 12px;
   border-radius: var(--r-md);
-  background: var(--tone-soft, var(--surface-2));
+  background: var(--surface-2);
   color: var(--text);
   font-size: var(--fs-sm);
+  line-height: 1.5;
 
   .i {
+    width: 16px;
+    height: 16px;
+    stroke-width: 1.5;
     color: var(--tone-text, var(--text-3));
     margin-top: 2px;
   }
   b {
     color: var(--tone-text, inherit);
+    font-weight: 500;
   }
 }
+/* A failure is a result: its note stands on the soft red. */
+.note[data-tone='danger']:not(:where(.msg)) {
+  background: var(--danger-soft);
+}
+/* The head of a section: 13/600, with its count beside it. Latin heads are small capitals in
+   effect: upper case, a little apart (web/e2e/s2.spec.ts reads them so). */
 .sec-title {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   font-weight: 600;
-  color: var(--text-3);
-  letter-spacing: 0.06em;
+  line-height: 1.4;
+  color: var(--text-2);
   text-transform: uppercase;
+}
+:lang(en) .sec-title {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
 }
 .hint {
   display: inline-flex;
@@ -1165,27 +1497,40 @@ p.st {
   gap: 4px;
   color: var(--text-3);
   font-size: var(--fs-xs);
+  line-height: 1.4;
 }
 /* A mention of a member in a text. */
 .at {
+  padding: 0 3px;
+  border-radius: var(--r-sm);
+  background: var(--sky-soft);
   color: var(--sky);
   font-weight: 500;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 /* A row written by the home in a thread or in the main line: check results and system notices. */
 .sys-row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 20px minmax(0, 1fr);
   gap: 2px var(--sp-2);
   align-items: start;
   color: var(--text-3);
   font-size: var(--fs-sm);
+  line-height: 1.5;
 
   .glyph {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     color: var(--tone-text, var(--text-3));
+
+    .i {
+      width: 16px;
+      height: 16px;
+      stroke-width: 1.5;
+    }
   }
   code {
     padding: 1px 5px;
@@ -1203,7 +1548,7 @@ p.st {
   display: grid;
   gap: 6px;
   min-width: 0;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-ui);
 
   > span:first-child {
     font-weight: 500;
@@ -1212,17 +1557,23 @@ p.st {
 .input {
   width: 100%;
   min-width: 0;
-  min-height: 36px;
+  min-height: var(--ctl);
   padding: 7px 10px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   background: var(--surface);
-  font-size: 14px;
+  font-size: var(--fs-ui);
   line-height: 1.4;
 
   /* Told once the person has left the field, not while they are still typing in it. */
   &:user-invalid {
     border-color: var(--danger);
+  }
+  &:disabled {
+    border-color: var(--line);
+    background: var(--surface-2);
+    color: var(--text-3);
+    cursor: not-allowed;
   }
 }
 textarea.input {
@@ -1235,29 +1586,36 @@ textarea.input {
     font-size: 16px;
   }
 }
-/* A native dialog: the browser keeps focus inside it and closes it on Escape. It rises into
-   place over a backdrop that fades in; it closes at once. */
+/* A native dialog: the browser keeps focus inside it and closes it on Escape. It fades in a
+   little smaller than it is, over a scrim that fades in; it closes at once. On a phone it is a
+   sheet that comes up from the bottom edge. */
 .dlg {
   width: min(480px, calc(100vw - 32px));
   max-height: calc(100dvh - 32px);
-  padding: var(--sp-5);
+  padding: var(--sp-6);
   border: 0;
   border-radius: var(--r-xl);
   background: var(--surface);
   color: var(--text);
-  box-shadow: var(--shadow-pop);
+  box-shadow: var(--shadow-dlg);
 
+  &.wide {
+    width: min(640px, calc(100vw - 32px));
+  }
   &[open] {
-    animation:
-      rise var(--dur-3) var(--ease-out),
-      appear var(--dur-2) var(--ease-out);
+    animation: dialog var(--dur-2) var(--ease-out);
   }
   &::backdrop {
-    background: rgb(8 10 16 / 0.55);
+    background: var(--scrim);
     animation: appear var(--dur-2) var(--ease-out);
   }
   h2 {
     font-size: var(--fs-lg);
+  }
+  h2 + p,
+  header p {
+    color: var(--text-2);
+    font-size: var(--fs-ui);
   }
   form {
     display: flex;
@@ -1265,9 +1623,134 @@ textarea.input {
     gap: var(--sp-4);
   }
 }
-/* What arrives from just below its place: a dialog, a new message, a list that opens. */
+@keyframes dialog {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+@media (max-width: 767px) {
+  .dlg,
+  .dlg.wide {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - 24px);
+    margin: auto 0 0;
+    padding: var(--sp-6) var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom));
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+
+    &[open] {
+      animation: sheet var(--dur-3) var(--ease-out);
+    }
+    /* The grabber is decoration: the sheet closes by its buttons and by Escape. */
+    &::before {
+      content: '';
+      position: absolute;
+      top: 8px;
+      left: 50%;
+      width: 36px;
+      height: 4px;
+      margin-left: -18px;
+      border-radius: 2px;
+      background: var(--surface-3);
+    }
+  }
+}
+@keyframes sheet {
+  from {
+    transform: translateY(100%);
+  }
+}
+/* What arrives from just below its place: a list that opens, a pill over the composer. */
 @keyframes rise {
   from {
-    transform: translateY(var(--travel));
+    transform: translateY(var(--rise));
+  }
+}
+
+/* 11 empty states and rows */
+/* Nothing here yet: a quiet circle with an icon, a title, one line, at most one button. */
+.blank {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-8) var(--sp-5);
+  text-align: center;
+  animation: appear var(--dur-2) var(--ease-out);
+
+  .blank-mark {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    margin-bottom: var(--sp-1);
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--text-3);
+  }
+  .blank-mark .i {
+    width: 24px;
+    height: 24px;
+    stroke-width: 1.5;
+  }
+  :is(h3, b) {
+    font-size: var(--fs-md);
+    font-weight: 600;
+    line-height: var(--lh-tight);
+  }
+  p {
+    max-width: 36ch;
+    color: var(--text-2);
+    font-size: var(--fs-ui);
+    line-height: 1.5;
+  }
+  .btn {
+    margin-top: var(--sp-2);
+  }
+}
+/* Parts ready for lists of members and of folders (design/README.md, 3.9): a member to pick, a
+   folder an AI works in. Built from the shared styles; they hold no logic. */
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 52px;
+  padding: 6px var(--sp-1);
+  cursor: pointer;
+
+  & + & {
+    border-top: 1px solid var(--line);
+  }
+  b {
+    display: block;
+    font-size: var(--fs-ui);
+    font-weight: 500;
+    line-height: 1.4;
+  }
+  small {
+    display: block;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    line-height: 1.4;
+  }
+}
+.path-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--ctl);
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+
+  code {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
   }
 }

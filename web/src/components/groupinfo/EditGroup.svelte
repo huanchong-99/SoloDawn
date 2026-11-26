@@ -138,10 +138,14 @@
 <style>
   /* Held by its top, so that what a fold opens grows below the pointer. */
   dialog {
-    --top: clamp(16px, 8dvh - 40px, 56px);
-    margin-top: var(--top);
-    max-height: calc(100dvh - 2 * var(--top));
     overflow: auto;
+  }
+  @media (min-width: 768px) {
+    dialog {
+      --top: clamp(16px, 8dvh - 40px, 56px);
+      margin-top: var(--top);
+      max-height: calc(100dvh - 2 * var(--top));
+    }
   }
   .scores {
     display: grid;
