@@ -62,9 +62,10 @@ clears the counter; crashes do not count.
 | answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, `.ID`, `.Replaced`, and for `invite`, `Result.Link` and `Result.Expires` |
 | create or replay an invitation | `Result.InviteBy` (the inviting admin's member id) with `LoopConfig.Invite` (`Inviter`) |
 | handle a joining connection | `c.Joining`, attached with `conn.SetJoining(fn)` on `Loop`; `Result.InviteUsed` marks consumption |
-| admit or remove a person, or change their role | `cmd_people.go`: `join`, human `member/set` and `member/remove` |
+| admit or remove a person, or change their role | `cmd_people.go`: `join`, `member/add_person`, human `member/set` and `member/remove` |
 | have the node drop a removed person's device log | `Result.Forget` (their user id) with `LoopConfig.Forget`, called after the commit and before the `groups` push |
 | check another group's membership in a transaction | `Disk.OtherMember(user)` excludes the current group |
+| read the device log the node holds of a person | `Disk.DeviceLog(user)`: its entries in the order of their versions, none for a person the node does not know |
 | refuse | `&Refusal{Code: "conflict", Msg: "…"}`, with a code of [datachannel](../../planning/contracts/datachannel.md) section 9 |
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
 | add a rule that the clock sets off | a function `func(s *State, d Disk, now int64) Result` and `Timers.Add(name, f)` in its file's `init` |
@@ -1070,6 +1071,17 @@ home half of acceptance tests A6.3 and A6.4.
 `retention_test.go` covers `Retain`: default and configured `retention_days`, store error
 propagation, protected rows, and the purge mark with `Loop.Sync` reset.
 `features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
+
+`member/add_person` ([people](../../planning/contracts/step-2/people.md) 2.5) is by an admin, else
+`forbidden`. The node holds the log of a person while they are a member of a group homed on it, so
+no entry in `Disk.DeviceLog(user)` is `not_found`; a person who is a member of this group already,
+a taken `name` or a taken member id (`n`) is `conflict`, and an empty `name` is `bad_request`. It
+writes what `join` writes (`peopleEnter`): the member row with `online` true and `last_seen` the
+home's time, as for a person who joined; a `device` row per entry of the log; and `member_joined`
+with `by` the admin. It writes nothing to `device_log`, which holds the log already, and uses no
+invitation. `GroupsChanged` makes the loop push `groups` to every connected device, the person's
+among them. `cmd_people_test.go` covers both commands with every refusal, and
+`TestPeopleAddReachesThePersonsDevices` holds the home half of A9.46 on `StartLoop`.
 
 `people_seam_internal_test.go` covers joining dispatch. `people_seam_test.go` covers
 `LoopConfig.Invite` (including `Store.Write` re-entrancy freedom on `Invite` and `ReplayInvite`),

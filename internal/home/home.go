@@ -97,6 +97,11 @@ type Disk interface {
 	// Queued returns the inbox items that no host has acknowledged, oldest first.
 	Queued() []store.Item
 	OtherMember(user string) bool
+	// DeviceLog returns the entries of the device log that the node holds of a
+	// person, in the order of their versions: none for a person it does not
+	// know. It holds the log of its owner and of every member of a group
+	// homed on it (planning/contracts/step-2/people.md section 2.4).
+	DeviceLog(user string) []proto.Envelope
 }
 
 // Receipts holds the outcome of every command a home has answered

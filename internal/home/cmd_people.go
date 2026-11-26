@@ -11,9 +11,13 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
+// People in a group: invite, join, member add_person, and member set and
+// remove on a person's row (planning/contracts/step-2/people.md section 2).
+
 func init() {
 	Commands.Add(keyInvite, peopleInvite)
 	Commands.Add(keyJoin, peopleJoin)
+	Commands.Add("member/add_person", peopleAdd)
 }
 
 func peopleInvite(s *State, c Command) (Result, *Refusal) {
@@ -37,31 +41,66 @@ func peopleJoin(s *State, c Command) (Result, *Refusal) {
 	return peopleNewJoin(s, c, p.Name)
 }
 
+// peopleNewJoin lets the person of a joining connection in, uses the
+// invitation up and stores the log they presented.
 func peopleNewJoin(s *State, c Command, name string) (Result, *Refusal) {
+	log := c.Joining.Log.Entries
+	res, refusal := peopleEnter(s, c, c.Who.User, name, c.Joining.By, log)
+	if refusal != nil {
+		return Result{}, refusal
+	}
+	res.InviteUsed = true
+	for _, env := range log {
+		res.Writes = append(res.Writes, peopleLog{peopleDevice(env)})
+	}
+	return res, nil
+}
+
+// peopleAdd is member add_person (people.md section 2.5): an admin adds,
+// without an invitation, a person whose device log this node holds, which it
+// does while they are a member of another group homed on it. The groups push
+// that follows tells their connected devices.
+func peopleAdd(s *State, c Command) (Result, *Refusal) {
+	if !s.Admin(c.Who) {
+		return Result{}, &Refusal{"forbidden", "only an admin adds a person"}
+	}
+	var p proto.MemberAddPerson
+	if refusal := c.Decode(&p); refusal != nil {
+		return Result{}, refusal
+	}
+	log := c.Disk.DeviceLog(p.User)
+	if len(log) == 0 {
+		return Result{}, &Refusal{"not_found", "this home knows no such person; invite them by a link"}
+	}
+	if s.human(p.User) != "" {
+		return Result{}, &Refusal{"conflict", "the person is a member of the group already"}
+	}
+	return peopleEnter(s, c, p.User, p.Name, c.Who.Human, log)
+}
+
+// peopleEnter writes what an accepted join writes: the member row of that
+// person, whose id is the n of the command, one device row per entry of their
+// log, and member_joined in the main line by the admin who invited or added
+// them.
+func peopleEnter(s *State, c Command, user, name, by string, log []proto.Envelope) (Result, *Refusal) {
 	if name == "" {
-		return Result{}, &Refusal{"bad_request", "join requires a name"}
+		return Result{}, &Refusal{"bad_request", "a person comes into a group under a name"}
 	}
 	if s.memExists(string(c.Nonce)) || s.memNameTaken(name, "") {
 		return Result{}, &Refusal{"conflict", "the member id or name is already taken"}
 	}
-	return peopleJoined(s, c, name), nil
-}
-
-func peopleJoined(s *State, c Command, name string) Result {
 	person := proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: string(c.Nonce)},
-			Group: s.ID, Kind: "human", User: c.Who.User, Name: name, LastSeen: c.Now},
+			Group: s.ID, Kind: "human", User: user, Name: name, LastSeen: c.Now},
 		Role: "member", Online: true,
 	}
-	res := Result{Rows: []Row{RowOf(person)}, GroupsChanged: true, InviteUsed: true}
-	for _, env := range c.Joining.Log.Entries {
-		row := peopleDevice(env)
-		res.Rows = append(res.Rows, RowOf(row))
-		res.Writes = append(res.Writes, peopleLog{row})
+	res := Result{Rows: []Row{RowOf(person)}, GroupsChanged: true}
+	for _, env := range log {
+		res.Rows = append(res.Rows, RowOf(peopleDevice(env)))
 	}
-	body := proto.MemberJoinedBody{SystemCode: proto.SystemCode{Code: "member_joined"}, Member: person.ID, By: c.Joining.By}
+	body := proto.MemberJoinedBody{SystemCode: proto.SystemCode{Code: "member_joined"}, Member: person.ID, By: by}
 	res.Rows = append(res.Rows, peopleMessage(s, c, body))
-	return res
+	return res, nil
 }
 
 func peopleDevice(env proto.Envelope) proto.DeviceRow {

@@ -37,6 +37,17 @@ func TestPeopleWritesAndOtherMembership(t *testing.T) {
 		runSame(t, d.OtherMember("visitor"), true)
 		runSame(t, d.OtherMember("absent"), false)
 		runSame(t, d.err, nil)
+		// The log of a person comes in the order of its versions, whatever
+		// the order in which the entries were stored.
+		for _, ver := range []int{3, 2} {
+			later := peopleLog{proto.DeviceRow{DeviceChange: proto.DeviceChange{User: "visitor", Version: ver}, Env: proto.Envelope{Payload: fmt.Sprint("entry ", ver)}}}
+			if err := later.Put(tx); err != nil {
+				return err
+			}
+		}
+		runSame(t, d.DeviceLog("visitor"), []proto.Envelope{{Payload: "entry"}, {Payload: "entry 2"}, {Payload: "entry 3"}})
+		runSame(t, len(d.DeviceLog("absent")), 0)
+		runSame(t, d.err, nil)
 		if _, err := tx.Exec("INSERT INTO push_sub VALUES('browser','visitor','{}','{}','[]'),('other','retained','{}','{}','[]')"); err != nil {
 			return err
 		}
@@ -88,6 +99,11 @@ func TestPeopleWriteFailures(t *testing.T) {
 				if table == "device_log" {
 					if err := (peopleLog{}).Put(tx); err == nil || !strings.Contains(err.Error(), "no such table: device_log") {
 						return fmt.Errorf("unexpected log error: %v", err)
+					}
+					d := &runDisk{tx: tx, group: "here"}
+					runSame(t, len(d.DeviceLog("visitor")), 0)
+					if d.err == nil || !strings.Contains(d.err.Error(), "no such table: device_log") {
+						return fmt.Errorf("unexpected read error: %v", d.err)
 					}
 				}
 				return nil

@@ -63,8 +63,9 @@ func tskBefore(pos, before int64) bool { return before == 0 || pos < before }
 
 func (d tskDisk) Pending() []proto.MsgRow { return d.pending }
 
-func (d tskDisk) Queued() []store.Item    { return d.queued }
-func (d tskDisk) OtherMember(string) bool { return false }
+func (d tskDisk) Queued() []store.Item            { return d.queued }
+func (d tskDisk) OtherMember(string) bool         { return false }
+func (tskDisk) DeviceLog(string) []proto.Envelope { return nil }
 
 func tskState(t *testing.T) *home.State {
 	t.Helper()

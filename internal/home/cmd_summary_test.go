@@ -36,8 +36,9 @@ func (d *sumDisk) Pending() []proto.MsgRow {
 	return d.pending
 }
 
-func (*sumDisk) Queued() []store.Item    { return nil }
-func (*sumDisk) OtherMember(string) bool { return false }
+func (*sumDisk) Queued() []store.Item              { return nil }
+func (*sumDisk) OtherMember(string) bool           { return false }
+func (*sumDisk) DeviceLog(string) []proto.Envelope { return nil }
 
 func sumState(t *testing.T) *home.State {
 	t.Helper()

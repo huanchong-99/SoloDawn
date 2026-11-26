@@ -20,6 +20,7 @@ func (memDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (memDisk) Pending() []proto.MsgRow                   { return nil }
 func (d memDisk) Queued() []store.Item                    { return d }
 func (d memDisk) OtherMember(string) bool                 { return false }
+func (memDisk) DeviceLog(string) []proto.Envelope         { return nil }
 
 func memAddCmd(n byte, memberID, cli, name, account string, secretary bool) proto.MemberAddAI {
 	return proto.MemberAddAI{

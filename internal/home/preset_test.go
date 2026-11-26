@@ -28,9 +28,10 @@ func (d *presetDisk) Note(id string) (proto.NoteRow, bool) { n, ok := d.notes[id
 func (d *presetDisk) Thread(*string, int64, int) []proto.MsgRow {
 	return nil
 }
-func (d *presetDisk) Pending() []proto.MsgRow { return nil }
-func (d *presetDisk) Queued() []store.Item    { return nil }
-func (d *presetDisk) OtherMember(string) bool { return false }
+func (d *presetDisk) Pending() []proto.MsgRow         { return nil }
+func (d *presetDisk) Queued() []store.Item            { return nil }
+func (d *presetDisk) OtherMember(string) bool         { return false }
+func (*presetDisk) DeviceLog(string) []proto.Envelope { return nil }
 
 func (d *presetDisk) TypedNotes(noteType string) []proto.NoteRow {
 	notes := []proto.NoteRow{}
