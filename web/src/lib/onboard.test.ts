@@ -239,7 +239,12 @@ describe('labels, URLs, prompts and #pair= capture', () => {
       host: 'solodawn.org',
     });
     expect(enPrompt).toContain('https://solodawn.org/install.md');
-    expect(enPrompt).toContain('git config --global user.email');
+    expect(enPrompt).toContain(
+      '2. Download the node program for this system, and verify its SHA-256',
+    );
+    expect(enPrompt).toContain('3. Join with pairing code');
+    expect(enPrompt).not.toContain('git config');
+    expect(enPrompt).not.toContain('4. ');
     expect(enPrompt).toContain(code);
     expect(enPrompt).not.toMatch(/\{(install|code|rv)\}/);
     expect(enPrompt).toContain('--rendezvous wss://solodawn.org/rv');
@@ -250,7 +255,10 @@ describe('labels, URLs, prompts and #pair= capture', () => {
       host: '127.0.0.1:47800',
     });
     expect(zhPrompt).toContain('http://127.0.0.1:47800/install.md');
-    expect(zhPrompt).toContain('git config --global user.email');
+    expect(zhPrompt).toContain('2. 下载适合本机系统的节点程序');
+    expect(zhPrompt).toContain('3. 用配对码');
+    expect(zhPrompt).not.toContain('git config');
+    expect(zhPrompt).not.toContain('4. ');
     expect(zhPrompt).toContain(code);
     expect(zhPrompt).toContain('--rendezvous ws://127.0.0.1:47800/rv');
 

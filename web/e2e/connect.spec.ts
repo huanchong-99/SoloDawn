@@ -574,7 +574,8 @@ describe('web client connections against real nodes (I-8)', () => {
     const code = await waitForPairingCode(page, proxy.signal);
     const prompt = (await page.locator('#prompt').textContent()) ?? '';
     expect(prompt).toContain(`${proxy.url}install.md`);
-    expect(prompt).toContain('git config --global user.email');
+    expect(prompt).toContain('3. Join with pairing code');
+    expect(prompt).not.toContain('git config');
 
     const paired = await node.run(
       'solodawn',

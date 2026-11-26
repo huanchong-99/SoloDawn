@@ -10,7 +10,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: the prompt that **Add a computer** gives for an AI CLI has a step "Check `git config --global user.email`; if it is empty, ask me for a name and an email and set them". `install.md` no longer has that step, and SoloDawn commits nothing and needs no Git.
 - Cause: the texts `pairing.prompt.text_rv` of `web/src/messages/pairing.en.json:15` and `pairing.zh-CN.json:15` were not changed with the model, and `web/src/lib/onboard.test.ts:242-253` and `web/e2e/connect.spec.ts:577` assert the line.
-- Status: open; found while rewriting the real-machine checklist (unit DOC-1). The fix is to delete the line from both texts and from the three tests; it is a code change, outside DOC-1.
+- Status: resolved by this commit: the prompt now has three steps and no `git config` check; the three tests assert the new steps. Found while rewriting the real-machine checklist (unit DOC-1).
 
 ### 2026-11-27 · limitation · An AI works in its owner's own folder, with no isolation
 
