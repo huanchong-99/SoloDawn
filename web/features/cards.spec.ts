@@ -584,7 +584,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'Summary cards show the merged task, review score, rounds, formatted duration and diff stats',
+    'Summary cards show the done task, review score, rounds and formatted duration',
     ({ Given, And, Then }) => {
       Given(
         'the secretary has posted the golden summary for "T-12" with text "All criteria passed."',
@@ -593,71 +593,55 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And(
-        'the secretary has posted a local-only summary of 1 round and 45 minutes with no pull request',
+        'the secretary has posted summaries of 1 round in 45 minutes and of 3 rounds in 2 hours for a task the browser does not hold',
         () => {
           home.write(
             website,
             example('row-msg-summary', {
               id: 'localSummaryCard00000A',
-              body: {
-                task: 'missing-task',
-                score: 91,
-                rounds: 1,
-                minutes: 45,
-                added: 40,
-                removed: 5,
-              },
+              body: { task: 'missing-task', score: 91, rounds: 1, minutes: 45 },
             }),
           );
           home.write(
             website,
             example('row-msg-summary', {
               id: 'exactHourSummaryCard0A',
-              body: {
-                task: 'missing-task',
-                score: 100,
-                rounds: 3,
-                minutes: 120,
-                added: 10,
-                removed: 0,
-              },
+              body: { task: 'missing-task', score: 100, rounds: 3, minutes: 120 },
             }),
           );
           flushSync();
         },
       );
       Then(
-        'the first summary card shows "Done", "T-12", "Merged", "Show connection path", "94", "2 rounds", "1h 12m", "+318 −42" and "PR #28"',
+        'the first summary card shows "Done", "T-12", "Show connection path", "94", "2 rounds" and "1h 12m"',
         () => {
           expect(texts('.msg-body .text')).toContain('All criteria passed.');
           const first = all('.msg-body .card')[0];
           expect(first.querySelector('.kind')!.textContent).toBe('Done');
           expect(first.querySelector('.card-head .mono')!.textContent).toBe('T-12');
-          expect(first.querySelector('.card-head .badge')!.textContent).toBe('Merged');
+          expect(first.querySelector('.card-head .badge')!.getAttribute('data-tone')).toBe('ok');
           expect(first.querySelector('h3')!.textContent).toBe('Show connection path');
           expect(
             [...first.querySelectorAll('.stats li')].map((li) =>
               li.textContent!.replace(/\s+/g, ' ').trim(),
             ),
-          ).toEqual([
-            '94Review score',
-            '2 roundsReview rounds',
-            '1h 12mTime spent',
-            '+318 −42 PR #28',
-          ]);
+          ).toEqual(['94Review score', '2 roundsReview rounds', '1h 12mTime spent']);
         },
       );
-      And('the second summary card shows "1 round", "45m" and "Changes"', () => {
-        const second = all('.msg-body .card')[1];
-        expect(second.querySelector('h3')).toBeNull();
-        expect(
-          [...second.querySelectorAll('.stats li')].map((li) =>
-            li.textContent!.replace(/\s+/g, ' ').trim(),
-          ),
-        ).toEqual(['91Review score', '1 roundReview rounds', '45mTime spent', '+40 −5 Changes']);
-        const third = all('.msg-body .card')[2];
-        expect(third.querySelectorAll('.stats li b')[2].textContent).toBe('2h');
-      });
+      And(
+        'the second summary card shows "1 round" and "45m" without a title, and the third "2h"',
+        () => {
+          const second = all('.msg-body .card')[1];
+          expect(second.querySelector('h3')).toBeNull();
+          expect(
+            [...second.querySelectorAll('.stats li')].map((li) =>
+              li.textContent!.replace(/\s+/g, ' ').trim(),
+            ),
+          ).toEqual(['91Review score', '1 roundReview rounds', '45mTime spent']);
+          const third = all('.msg-body .card')[2];
+          expect(third.querySelectorAll('.stats li b')[2].textContent).toBe('2h');
+        },
+      );
     },
   );
 });

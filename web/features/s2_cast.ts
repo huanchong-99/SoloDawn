@@ -40,7 +40,6 @@ const ai = (id: string, name: string, account: string, state: string) =>
     state,
   });
 home.add(ids.g, 'Website');
-home.write(ids.g, example('row-group-custom', { id: ids.g, checks: ['pnpm check', 'pnpm test'] }));
 home.write(
   ids.g,
   example('row-member-human', { id: ids.q, g: ids.g, user: ids.qUser, name: 'Q', role: 'member' }),
@@ -59,10 +58,8 @@ for (const id of [ids.c1, ids.c2])
       body: { what: 'direct', ai: ids.qPersonal, to: [ids.qUser] },
     }),
   );
-/** Writes a secretary's notice to a team group. */
-const bulletin = (g: string) => home.write(g, example('row-msg-bulletin', { g }));
-home.add(ids.team, 'Team', 'row-group-team');
-bulletin(ids.team);
+// A group of people without AIs.
+home.add(ids.team, 'Team', { secretary: undefined });
 
 let other: OwnedNode;
 
@@ -101,7 +98,7 @@ const update = (r: string, id: Id, changes: Fields) =>
 
 const remove = (r: string, id: Id) => home.remove(ids.g, r, ids[id]);
 
-const s2 = { ids, cast, sent, told, update, remove, bulletin };
+const s2 = { ids, cast, sent, told, update, remove };
 declare global {
   interface Window {
     s2: typeof s2;

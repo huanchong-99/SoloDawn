@@ -31,7 +31,7 @@
   "groups.create.ais": "AIs",
   "groups.create.ais.none": "No AI is connected yet. Connect a computer and choose an account type for its AI on the Computers page.",
   "groups.create.ai.name": "Name of {ai} in the group",
-  "groups.create.ai.secretary": "Make it the secretary",
+  "groups.create.ai.secretary": "Make {ai} the secretary",
   "groups.create.partly": "The group exists, but not everyone could be added. Add them again from its member panel.",
   "groups.create.added": "Added",
   "groups.create.unsent": "Not sent: an earlier step was refused",

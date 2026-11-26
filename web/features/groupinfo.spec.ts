@@ -148,7 +148,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
   Background(({ Given }) => {
     Given(
-      'a project group "Website" homed on "workstation", open in a browser of its owner in English',
+      'a group "Website" homed on "workstation", open in a browser of its owner in English',
       async () => {
         rig = makeRig();
         rig.home.add(website, 'Website');

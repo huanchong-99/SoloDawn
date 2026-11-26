@@ -3,7 +3,7 @@ Feature: Approval card and waiting bar of the web client
   An approval card shows a permission request from an AI in all five states, labelled with the
   request category and the justification the CLI attached, and warns when only the beginning of a
   long request is shown (planning/contracts/messages.md sections 2.3 and 3.2; planning/risks.md
-  Q-18 and K-21; acceptance tests A4.1 and A4.2). Above the chat's main line, a bar lists the
+  Q-18 and K-21; acceptance tests A4.1, A4.2 and A5.23). Above the chat's main line, a bar lists the
   cards in that group that wait on the reader and jumps to each one.
 
   Background:
@@ -47,6 +47,13 @@ Feature: Approval card and waiting bar of the web client
     And the Approve and Deny buttons are disabled with the lock hint "Only the computer's owner Mina can approve"
     When a pending approval waits on an unknown user with category "other"
     Then that card reads "Waiting for owner", category "Other", and "Only the computer's owner can approve"
+
+  Scenario: A card closed by a reassignment names who gave the task to which AI, also after that person left
+    Given a pending command approval for "Codex" on task 12 without truncation
+    When the admin "Mina" gives T-12 to "Claude Code" and the home closes the card as reassigned by her
+    Then the card reads "Reassigned" and says "Mina gave the task to Claude Code; this request is closed."
+    When Mina leaves the group
+    Then the card still names Mina, in English and in Chinese "Mina 把任务改派给了 Claude Code，这个申请随之关闭。"
 
   Scenario: Offline and refused actions disable or report errors cleanly
     Given a pending command approval for "Codex" on task 12 without truncation

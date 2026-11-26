@@ -63,11 +63,17 @@ const pointed = (el: Element, attr: 'aria-labelledby' | 'aria-describedby') =>
     .map((id) => read(document.getElementById(id)!))
     .join(' ');
 const described = (el: Element) => pointed(el, 'aria-describedby');
+/** The text of an element as a screen reader reads it: without what is hidden from it. */
+function heard(el: Element) {
+  const copy = el.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+  return read(copy);
+}
 /** What names an element: the parts it points at, its `aria-label`, its label, or its text. */
 const named = (el: Element) =>
   pointed(el, 'aria-labelledby') ||
   el.getAttribute('aria-label') ||
-  read((el as HTMLInputElement).labels?.[0] ?? el);
+  heard((el as HTMLInputElement).labels?.[0] ?? el);
 
 const buttonNamed = (root: ParentNode, label: string) =>
   [...root.querySelectorAll<HTMLButtonElement>('button')].find((btn) =>
@@ -346,20 +352,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(named(dlg)).toBe('New group');
           const controls = [...dlg.querySelectorAll('input, select, textarea')];
           expect(controls.map((el) => named(el))).toEqual([
-            'Project group',
-            'Team group',
             'Group name',
-            'Git repository',
-            'Base branch',
             'Your name in the group',
-            'Pull requests and hosted checks',
-            'Check commands',
-            'Home computer',
+            'Mina',
           ]);
-          expect(described(controls[0])).toBe('AIs work on one repository.');
-          expect(described(controls[1])).toBe('Notices and talk. No tasks.');
-          expect(described(controls[3])).toContain('clone the project from');
-          expect(described(controls[7])).toContain('One per line');
+          expect(controls.map((el) => described(el))).toEqual(['', '', '']);
         },
       );
       When('the person opens the chat of "Website" on a 1280 px desktop', () => {

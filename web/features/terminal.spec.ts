@@ -299,7 +299,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     'Opening an owned AI terminal with a task streams terminal bytes, resizes, says messages wait and renders handback',
     ({ Given, When, Then, And }) => {
       Given(
-        '"Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms',
+        '"Claude Code" is working on task 12 "Fix path events" in its folder with a direct path of 4 ms',
         () => {
           workstation.home.write(
             website,
@@ -309,7 +309,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               num: 12,
               title: 'Fix path events',
               assignee: claudeId,
-              branch: 'task/12-conn-events',
             }),
           );
           workstation.home.write(
@@ -366,20 +365,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           });
         },
       );
+      And('the terminal header reads "Claude Code · Terminal" and "workstation · T-12"', () => {
+        expect(texts('.term-head h2')).toEqual(['Claude Code · Terminal']);
+        expect(texts('.term-head p')).toEqual(['workstation · T-12']);
+      });
       And(
-        'the terminal header reads "Claude Code · Terminal" and "workstation · T-12 · task/12-conn-events"',
-        () => {
-          expect(texts('.term-head h2')).toEqual(['Claude Code · Terminal']);
-          expect(texts('.term-head p')).toEqual(['workstation · T-12 · task/12-conn-events']);
-        },
-      );
-      And(
-        'the takeover bar reads "Owner is driving" and the session card shows "T-12 Fix path events", "task/12-conn-events" and "Direct · 4 ms"',
+        'the takeover bar reads "Owner is driving" and the session card shows "T-12 Fix path events", the folder "/home/dev/website" and "Direct · 4 ms"',
         () => {
           expect(texts('.takeover b')).toEqual(['Owner is driving']);
           const infoText = one('.info').textContent!.replace(/\s+/g, ' ');
           expect(infoText).toContain('T-12 Fix path events');
-          expect(infoText).toContain('task/12-conn-events');
+          expect(infoText).toContain('Folder /home/dev/website');
           expect(infoText).toContain('Direct · 4 ms');
         },
       );
@@ -436,7 +432,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the channel closes, "workstation" receives a signed "takeover.end", and the chat renders the handback card with "path.go", "9f2c1ab", "Emit path changes" and "+40 −3"',
+        'the channel closes, "workstation" receives a signed "takeover.end", and the main line shows the AI\'s own account of the takeover',
         () => {
           expect(workstation.channels[0].closed).toBe(true);
           expect(workstation.ends).toHaveLength(1);
@@ -446,18 +442,16 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             g: website,
             member: claudeId,
           });
-          const hb = one('.handback').textContent!.replace(/\s+/g, ' ');
-          expect(hb).toContain('path.go');
-          expect(hb).toContain('9f2c1ab');
-          expect(hb).toContain('Emit path changes');
-          expect(hb).toContain('+40 −3');
+          expect(texts('.msg-body .text')).toContain(
+            'Renamed the indicator in the terminal, as its owner asked.',
+          );
         },
       );
     },
   );
 
   Scenario(
-    'Opening an AI without a task explains new-task creation, route task ids are forwarded, and the secretary is read-only',
+    'Opening an AI without a task opens its group session and creates no task, route task ids are forwarded, and the secretary is read-only',
     ({ Given, When, Then }) => {
       Given(
         '"Claude Code" has no task and "Secretary" is the group\'s secretary on a direct path',
@@ -490,47 +484,43 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the session card says "Opening the terminal of an AI without a task creates one so changes stay on a task branch."',
+        'the session card says "This AI has no task now: the terminal opens on its group session in its folder, and no task is created."',
         () => {
           expect(texts('.info .card .hint')[0]).toBe(
-            'Opening the terminal of an AI without a task creates one so changes stay on a task branch.',
+            'This AI has no task now: the terminal opens on its group session in its folder, and no task is created.',
           );
         },
       );
-      When(
-        'the host creates task 15 "Owner takeover" on branch "task/15-owner-takeover" for "Claude Code"',
-        () => {
-          workstation.home.write(
-            website,
-            example('row-task', {
-              id: task15Id,
-              g: website,
-              num: 15,
-              title: 'Owner takeover',
-              assignee: claudeId,
-              branch: 'task/15-owner-takeover',
-            }),
-          );
-          workstation.home.write(
-            website,
-            example('row-member-ai', {
-              id: claudeId,
-              g: website,
-              user,
-              name: 'Claude Code',
-              cli: 'claude',
-              host: workstationId,
-              host_name: 'workstation',
-              state: 'takeover',
-              task: task15Id,
-              path: 'local',
-            }),
-          );
-          flushSync();
-        },
-      );
-      Then('the terminal header updates to "workstation · T-15 · task/15-owner-takeover"', () => {
-        expect(texts('.term-head p')).toEqual(['workstation · T-15 · task/15-owner-takeover']);
+      When('the secretary gives task 15 "Owner takeover" to "Claude Code"', () => {
+        workstation.home.write(
+          website,
+          example('row-task', {
+            id: task15Id,
+            g: website,
+            num: 15,
+            title: 'Owner takeover',
+            assignee: claudeId,
+          }),
+        );
+        workstation.home.write(
+          website,
+          example('row-member-ai', {
+            id: claudeId,
+            g: website,
+            user,
+            name: 'Claude Code',
+            cli: 'claude',
+            host: workstationId,
+            host_name: 'workstation',
+            state: 'takeover',
+            task: task15Id,
+            path: 'local',
+          }),
+        );
+        flushSync();
+      });
+      Then('the terminal header updates to "workstation · T-15"', () => {
+        expect(texts('.term-head p')).toEqual(['workstation · T-15']);
       });
       When(
         'the owner navigates to "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug/O21RWBqThVezWCWeVoSoSQ"',
@@ -575,7 +565,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         check();
       });
     Given(
-      '"Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms',
+      '"Claude Code" is working on task 12 "Fix path events" in its folder with a direct path of 4 ms',
       () => {
         const row = { id: task12Id, g: website, num: 12, assignee: claudeId };
         workstation.home.write(website, example('row-task', row));
@@ -657,7 +647,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           await vi.waitFor(() => expect(workstation.starts).toHaveLength(2));
           flushSync();
           expect(one('.takeover .grow').textContent!.trim()).toBe(
-            'This AI is busy: its terminal is already open, one of its tasks is merging, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.',
+            'This AI is busy: its terminal is already open, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.',
           );
 
           workstation.refuseStart = 'internal';
@@ -667,7 +657,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the takeover bar shows "Direct connection required", then "This AI is busy: its terminal is already open, one of its tasks is merging, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.", then error code "internal"',
+        'the takeover bar shows "Direct connection required", then "This AI is busy: its terminal is already open, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.", then error code "internal"',
         () => {
           expect(texts('.takeover code')).toEqual(['internal']);
         },
@@ -707,7 +697,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     ({ Given, And, When, Then }) => {
       let release = () => {};
       Given(
-        '"Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms',
+        '"Claude Code" is working on task 12 "Fix path events" in its folder with a direct path of 4 ms',
         () => {
           paths.set(workstation.store, { kind: 'direct', rtt: 4, since: Date.now() });
         },
@@ -749,7 +739,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     ({ Given, When, Then, And }) => {
       let input: HTMLTextAreaElement;
       Given(
-        '"Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms',
+        '"Claude Code" is working on task 12 "Fix path events" in its folder with a direct path of 4 ms',
         () => {
           paths.set(workstation.store, { kind: 'direct', rtt: 4, since: Date.now() });
         },
@@ -840,7 +830,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     'Tab close via pagehide and remote channel close end takeover cleanly',
     ({ Given, When, Then }) => {
       Given(
-        '"Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms',
+        '"Claude Code" is working on task 12 "Fix path events" in its folder with a direct path of 4 ms',
         () => {
           paths.set(workstation.store, { kind: 'direct', rtt: 4, since: Date.now() });
         },
@@ -886,7 +876,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     'An active terminal session closes pty and keeps ctl open when the path switches to relay',
     ({ Given, When, Then }) => {
       Given(
-        '"Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms',
+        '"Claude Code" is working on task 12 "Fix path events" in its folder with a direct path of 4 ms',
         () => {
           paths.set(workstation.store, { kind: 'direct', rtt: 4, since: Date.now() });
         },
@@ -907,34 +897,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(texts('.takeover b')).toEqual(['Handed back · switched to relay']);
           const answer = await workstation.store.ctl!.request({ t: 'host.info' });
           expect(answer).toMatchObject({ t: 'host.info', ok: true, device: workstationId });
-        },
-      );
-    },
-  );
-
-  Scenario(
-    'The development states sheet mounts the handback card for the wire example',
-    ({ Given, When, Then }) => {
-      Given('a development server', () => {
-        vi.stubEnv('MODE', 'development');
-      });
-      When('the owner opens "#/states"', () => openPage('#/states'));
-      Then(
-        'the "handback" section is marked "Mounted by terminal" and renders "path.go", "9f2c1ab", "Emit path changes" and "+40 −3"',
-        async () => {
-          await vi.waitFor(() => {
-            flushSync();
-            expect(document.getElementById('states-handback')).not.toBeNull();
-          });
-          const section = document.getElementById('states-handback')!.closest('section')!;
-          expect(section.querySelector('header .badge')!.textContent!.trim()).toBe(
-            'Mounted by terminal',
-          );
-          const content = section.textContent!.replace(/\s+/g, ' ');
-          expect(content).toContain('path.go');
-          expect(content).toContain('9f2c1ab');
-          expect(content).toContain('Emit path changes');
-          expect(content).toContain('+40 −3');
         },
       );
     },

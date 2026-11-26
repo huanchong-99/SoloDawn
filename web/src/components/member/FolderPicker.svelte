@@ -11,7 +11,7 @@
   /** The folder an AI works in (contracts/local.md section 7): a row that says which, and a dialog
    *  over the dialog that lists the folders its CLI was used in on its computer, newest first, and
    *  takes one typed by hand. A folder of another group cannot be chosen; one of an AI of `group`
-   *  can, and is shared. Until the person chooses, the newest free folder is taken. */
+   *  can, and is shared. Until the person chooses, the newest folder that no other group has is taken. */
   let {
     home,
     agent,
@@ -39,6 +39,9 @@
   let typed = $state('');
   let refused = $state('');
 
+  /** The newest folder that no other group has: the list comes newest first. */
+  const newest = (list: Folder[]) => list.find((folder) => !folder.other)?.path ?? '';
+
   // A list asked for before the AI changed is not shown.
   async function load() {
     failed = '';
@@ -52,7 +55,7 @@
       return;
     }
     folders = answer;
-    workspace ||= answer.find((folder) => !folder.other)?.path ?? '';
+    workspace ||= newest(answer);
   }
   $effect(() => {
     void [home, agent];
@@ -240,9 +243,13 @@
   .pick-row input {
     margin: 0;
   }
+  /* A folder that cannot be chosen fades its path; the reason beside it stays in full. */
   .pick-row.dim {
-    opacity: 0.55;
     cursor: not-allowed;
+  }
+  .pick-row.dim code,
+  .pick-row.dim :global(.i) {
+    opacity: 0.55;
   }
   .grow {
     min-width: 0;

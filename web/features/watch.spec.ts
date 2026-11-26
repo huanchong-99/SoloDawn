@@ -7,7 +7,7 @@ import * as p from '../src/lib/proto';
 import ConfirmCard from '../src/components/confirm/ConfirmCard.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
 
-const feature = await loadFeature('../features/web_watch_team.feature');
+const feature = await loadFeature('../features/web_watch.feature');
 describeFeature(feature, ({ AfterEachScenario, Scenario }) => {
   let group: Group;
   AfterEachScenario(closePage);
@@ -22,38 +22,32 @@ describeFeature(feature, ({ AfterEachScenario, Scenario }) => {
     return person;
   };
   Scenario(
-    'A team group has a main line and people without project controls',
+    'A group with people and no AI has a main line, its people and a way to add an AI',
     ({ Given, When, Then }) => {
-      Given('a team group with a bulletin and two people', () => {
+      Given('a group with two people and no AI', () => {
         const person = setup();
-        const row = { ...p.decode(p.GroupRow, goldens['row-group-team']), id: group.g };
-        group.apply([
-          row,
-          { ...person, id: 'reader', name: 'Reader', online: false },
-          p.decode(p.MsgRow, goldens['row-msg-bulletin']),
-        ]);
+        const row = { ...p.decode(p.GroupRow, goldens['row-group']), id: group.g };
+        delete row.secretary;
+        group.apply([row, { ...person, id: 'reader', name: 'Reader', online: false }]);
         group.name = row.name;
         group.paging().more = false;
       });
-      When('the team group is opened', () => {
+      When('the group is opened', () => {
         openPage(`#/groups/${group.g}`);
       });
-      Then('the bulletin names its AI project and signer and no project controls appear', () => {
-        expect(
-          document
-            .querySelector('[aria-label="Bulletin"]')!
-            .textContent!.replace(/\s+/g, ' ')
-            .trim(),
-        ).toBe('Claude Code Website On a computer belonging to owner The website is ready.');
-        expect(document.querySelectorAll('.people li').length).toBe(2);
-        expect(document.querySelector('.member')).toBeNull();
-        expect(document.querySelector('.group-details')).not.toBeNull();
-        expect(document.querySelector('.groupinfo, .preset, .kb')).toBeNull();
-        expect(document.querySelector('.members .head')).toBeNull();
-        expect(document.querySelector('.nosec')).toBeNull();
-        expect(document.querySelector('.chat-head')!.textContent).toContain('Team group');
-        expect(document.querySelector('textarea')!.placeholder).toBe('Message the team');
-      });
+      Then(
+        'the main line asks for a message to the people, the member list shows both people and offers to add an AI, and no secretary warning appears',
+        () => {
+          expect(document.querySelector('textarea')!.placeholder).toBe(
+            'Message the people of this group',
+          );
+          expect(document.querySelectorAll('.people li').length).toBe(2);
+          expect(texts('.members .head button')).toEqual(['Add AI']);
+          expect(document.querySelector('.member')).toBeNull();
+          expect(document.querySelector('.nosec')).toBeNull();
+          expect(document.querySelector('.chat-head')!.textContent).not.toContain('Team');
+        },
+      );
     },
   );
   Scenario("The terminal of another person's AI is titled as watched", ({ Given, When, Then }) => {

@@ -40,7 +40,7 @@
   "member.folder.other": "Taken by the group {group}",
   "member.folder.shared": "Shared with {ai}: the folder takes one task at a time.",
   "member.folder.typed": "Another folder",
-  "member.folder.typed.hint": "The whole path, such as /Users/you/project",
+  "member.folder.typed.hint": "Full path, e.g. /Users/you/app",
   "member.folder.taken": "This folder belongs to the group {group}. Choose another one.",
   "member.folder.use": "Use this folder",
   "member.folder.cancel": "Cancel",

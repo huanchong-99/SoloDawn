@@ -6,9 +6,11 @@
     canMakeSecretary,
     joinError,
     joinGroup,
+    nameClash,
     selectableCandidates,
     suggestedName,
     type Candidate,
+    type NewAI,
     type Refusal,
   } from '../../lib/members';
   import type { Points } from '../../lib/mounts.svelte';
@@ -104,24 +106,37 @@
     if (!customName) name = suggestedName(group, chosen?.agent, checked);
   }
 
+  /** What the dialog sends, once an AI, its folder and a name are chosen. */
+  function sendable(): NewAI | undefined {
+    const candidate = chosen;
+    const trimmed = name.trim();
+    if (!candidate || !group.info || !trimmed || !workspace) return undefined;
+    return { candidate, name: trimmed, secretary, workspace, draft };
+  }
+
+  /** A computer that has gone leaves the choice to the first one left; a refusal keeps the dialog
+   *  open, else it closes. */
+  function settle({ candidate, name: joined }: NewAI) {
+    if (failed) {
+      if (failed.code === 'lost' && !candidate.home.ctl) chosen = selectable[0];
+      return;
+    }
+    dialog.close();
+    onjoined?.({ group, candidate, name: joined });
+  }
+
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     failed = undefined;
-    const candidate = chosen;
-    const trimmed = name.trim();
-    if (!candidate || !group.info || !trimmed || !workspace) return;
+    const ai = sendable();
+    if (!ai) return;
     // A name taken in the group is said here: the computer's `conflict` is about the folder.
-    taken = group.members.some((member) => member.name === trimmed);
+    taken = nameClash([ai.name, ...group.members.map((member) => member.name)]);
     if (taken) return;
     busy = true;
-    const ai = { candidate, name: trimmed, secretary, workspace, draft };
-    failed = await joinGroup(group.g, group.info.home, ai);
+    failed = await joinGroup(group.g, group.info!.home, ai);
     busy = false;
-    if (failed?.code === 'lost' && !candidate.home.ctl) chosen = selectable[0];
-    if (!failed) {
-      dialog.close();
-      onjoined?.({ group, candidate, name: trimmed });
-    }
+    settle(ai);
   }
 </script>
 

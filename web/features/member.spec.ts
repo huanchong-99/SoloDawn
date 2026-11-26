@@ -5,10 +5,11 @@ import { expect, vi } from 'vitest';
 import { Home, homes } from '../src/lib/groups.svelte';
 import { goldens } from '../src/lib/mock';
 import type { Path, Source } from '../src/lib/net.svelte';
+import type { Refusal } from '../src/lib/members';
 import { nodes } from '../src/lib/nodes.svelte';
 import * as p from '../src/lib/proto';
 import { example, owner, TestHome, user } from './home';
-import { all, closePage, fill, one, read, openPage, texts } from './page';
+import { all, closePage, fill, go, one, read, openPage, texts } from './page';
 
 const feature = await loadFeature('../features/web_member.feature');
 
@@ -39,8 +40,10 @@ interface HostNode {
   store: Home;
   device: string;
   agents: p.HostInfo['agents'];
+  /** The groups whose home the node knows, when not those of `host-info-answer`. */
+  homes?: p.HostInfo['homes'];
   joins: p.HostJoin[];
-  refuseJoin?: string;
+  refuseJoin?: Refusal;
   connect(): Promise<void>;
   drop(): void;
 }
@@ -71,7 +74,7 @@ function makeNode(
       let seq = 100;
       function writeJoinedAI(join: p.HostJoin) {
         const target = groupHome ?? home;
-        const memberId = `ai-${joins.length}`;
+        const memberId = `ai-${name}-${joins.length}`;
         target.write(
           join.g,
           example('row-member-ai', {
@@ -90,7 +93,11 @@ function makeNode(
         if (join.secretary) {
           target.write(
             join.g,
-            example('row-group', { id: join.g, name: 'Website', secretary: memberId }),
+            example('row-group', {
+              id: join.g,
+              name: target.groups.get(join.g)!.name,
+              secretary: memberId,
+            }),
           );
         }
       }
@@ -100,18 +107,20 @@ function makeNode(
         const join = p.decode(p.HostJoin, env.p);
         joins.push(join);
         if (node.refuseJoin) {
-          return { re: (seq += 1), err: { code: node.refuseJoin, msg: 'refused' } };
+          return { re: (seq += 1), err: node.refuseJoin };
         }
         writeJoinedAI(join);
         return { re: (seq += 1), ok: true as const };
       }
+      async function hostInfo() {
+        await new Promise((later) => setTimeout(later));
+        const base = p.decode(p.HostInfo, goldens['host-info-answer']);
+        const { device, agents, homes = base.homes } = node;
+        return { ...base, re: (seq += 1), device, name, agents, homes };
+      }
       const ctl: p.Ctl = {
         request: (async (req: { t: string; env?: p.Envelope }) => {
-          if (req.t === 'host.info') {
-            await new Promise((later) => setTimeout(later));
-            const base = p.decode(p.HostInfo, goldens['host-info-answer']);
-            return { ...base, re: (seq += 1), device: node.device, name, agents: node.agents };
-          }
+          if (req.t === 'host.info') return hostInfo();
           if (req.t === 'host.workspaces')
             return p.decodeAnswer('host.workspaces', goldens['host-workspaces-answer']);
           if (
@@ -186,8 +195,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   const folderTaken = () =>
     vi.waitFor(() => expect(one('dialog .path-row code').textContent).toContain('/home/dev/'));
 
-  async function submitLaptopRefusal(code: string) {
-    laptop.refuseJoin = code;
+  /** Opens "Add AI" and chooses Codex on the laptop, with its folder taken. */
+  async function chooseLaptopCodex() {
     one<HTMLButtonElement>('.members .head button').click();
     flushSync();
     await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(4));
@@ -195,7 +204,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     all<HTMLInputElement>('dialog .choice input')[2].click();
     flushSync();
     await folderTaken();
+  }
+  const submitDialog = () =>
     one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+
+  async function submitLaptopRefusal(code: string, msg = 'refused') {
+    laptop.refuseJoin = { code, msg };
+    await chooseLaptopCodex();
+    submitDialog();
     await vi.waitFor(() => expect(laptop.joins).toHaveLength(1));
     flushSync();
   }
@@ -846,17 +862,514 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     },
   );
 
-  Scenario('A name conflict when adding an AI is reported clearly', ({ Given, When, Then }) => {
-    Given('a second computer "laptop" is connected', addLaptop);
-    When(
-      '"laptop" refuses "host.join" with "conflict" and the owner submits "Codex · laptop"',
-      () => submitLaptopRefusal('conflict'),
-    );
-    Then('the dialog stays open and says "That name is already used in this group."', () => {
-      expect(one<HTMLDialogElement>('#chat-side dialog').open).toBe(true);
-      expect(texts('dialog [role=alert]')).toEqual(['That name is already used in this group.']);
-    });
+  const docs = 'ZG9jcy1ncm91cC0wMDAwMQ';
+  /** An entry of `host.info` for an AI of group `g` in `workspace`. */
+  const working = (g: string, member: string, workspace: string) => ({
+    g,
+    member,
+    workspace,
+    level: 2,
+    state: 'waiting' as const,
+    queued: 0,
+    watchers: [],
   });
+  const folderRows = () =>
+    all('dialog dialog .pick-row').map((row) => ({
+      path: read(row.querySelector('code')!),
+      said: read(row.querySelector('small')!),
+      disabled: row.querySelector('input')!.disabled,
+      chosen: row.querySelector('input')!.checked,
+    }));
+
+  const aiRows = () => all('dialog div.ai');
+  const aiRow = (name: string, computer: string) =>
+    aiRows().find(
+      (row) =>
+        read(row.querySelector('b')!) === name &&
+        read(row.querySelector('small')!).startsWith(computer),
+    )!;
+  const peopleRows = () => all('dialog .part:first-of-type .pick-row');
+  /** Another person of the group "Website", whom the create dialog offers. */
+  async function addPerson(id: string, name: string) {
+    workstation.home.write(
+      website,
+      example('row-member-human', { id, g: website, user: `${id}-user`, name }),
+    );
+    await new Promise((applied) => setTimeout(applied));
+    flushSync();
+  }
+  async function openNewGroup(rows = 2) {
+    go('#/groups');
+    one<HTMLButtonElement>('.head .btn').click();
+    flushSync();
+    await vi.waitFor(() => expect(aiRows()).toHaveLength(rows));
+  }
+  /** Ticks "Claude Code" on the workstation and waits for its folder. */
+  async function tickWorkstationClaude() {
+    aiRow('Claude Code', 'workstation').querySelector('input')!.click();
+    flushSync();
+    await vi.waitFor(() =>
+      expect(one('dialog .ai-fields .path-row code').textContent).toContain('/home/dev/'),
+    );
+  }
+  /** Names the group and the owner, and submits the dialog. */
+  function createAs(group: string, member: string) {
+    const [name, who] = all<HTMLInputElement>('dialog .two input');
+    fill(name, group);
+    fill(who, member);
+    submitDialog();
+  }
+  const sentCommands = () =>
+    workstation.home.asked
+      .filter((req) => req.t === 'cmd')
+      .map((req) => JSON.parse((req.env as p.Envelope).p));
+
+  Scenario(
+    'The folder list says which AI of the group has a folder, and a folder of another group cannot be chosen',
+    ({ Given, When, Then }) => {
+      Given(
+        'on "workstation" Claude Code of this group works in "/home/dev/website" and an AI of the group "Docs" in "/home/dev/notes"',
+        () => {
+          workstation.agents[0].groups = [
+            working(website, 'claude-ws', '/home/dev/website'),
+            working(docs, 'docs-ai', '/home/dev/notes'),
+          ];
+          workstation.homes = [
+            { g: website, home: workstationId, name: 'Website' },
+            { g: docs, home: workstationId, name: 'Docs' },
+          ];
+        },
+      );
+      When(
+        'the owner opens "Add AI" with "Claude Code · workstation" chosen and opens its folder list',
+        async () => {
+          one<HTMLButtonElement>('.members .head button').click();
+          flushSync();
+          await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(2));
+          await folderTaken();
+          one<HTMLButtonElement>('dialog .path-row .change').click();
+          await vi.waitFor(() => expect(all('dialog dialog .pick-row')).toHaveLength(2));
+          flushSync();
+        },
+      );
+      Then(
+        '"/home/dev/website" is chosen and says "Claude Code works here too", and "/home/dev/notes" cannot be chosen and says "Taken by the group Docs"',
+        () => {
+          expect(folderRows()).toEqual([
+            {
+              path: '/home/dev/website',
+              said: expect.stringMatching(/^Last used .+ · Claude Code works here too$/),
+              disabled: false,
+              chosen: true,
+            },
+            {
+              path: '/home/dev/notes',
+              said: 'Taken by the group Docs',
+              disabled: true,
+              chosen: false,
+            },
+          ]);
+        },
+      );
+      When('the owner types "/home/dev/notes" as another folder and takes it', () => {
+        fill(one<HTMLInputElement>('dialog dialog input.mono'), '/home/dev/notes');
+        one<HTMLButtonElement>('dialog dialog footer .btn-primary').click();
+        flushSync();
+      });
+      Then(
+        'the list says "This folder belongs to the group Docs. Choose another one." and the folder stays "/home/dev/website"',
+        () => {
+          expect(texts('dialog dialog [role=alert]')).toEqual([
+            'This folder belongs to the group Docs. Choose another one.',
+          ]);
+          expect(one<HTMLDialogElement>('dialog dialog').open).toBe(true);
+          expect(read(one('dialog .path-row code'))).toBe('/home/dev/website');
+        },
+      );
+      When('the owner closes the list', () => {
+        one<HTMLButtonElement>('dialog dialog footer .btn-ghost').click();
+        flushSync();
+      });
+      Then(
+        'the dialog says the folder is shared with Claude Code and takes one task at a time',
+        () => {
+          expect(all('dialog dialog')).toEqual([]);
+          expect(texts('dialog .folder .hint')).toEqual([
+            'Shared with Claude Code: the folder takes one task at a time.',
+          ]);
+        },
+      );
+    },
+  );
+
+  Scenario(
+    'A group is created with a person and two AIs, each in its folder, the first AI the secretary',
+    ({ Given, When, Then, And }) => {
+      let studio: string;
+      Given(
+        '"Mina" is in the group "Website" on "workstation", and a second computer "laptop" is connected',
+        async () => {
+          workstation.home.write(
+            website,
+            example('row-member-human', {
+              id: 'mina',
+              g: website,
+              user: 'mina-user',
+              name: 'Mina',
+            }),
+          );
+          await addLaptop();
+        },
+      );
+      When('the owner opens "New group" from the group list', async () => {
+        go('#/groups');
+        one<HTMLButtonElement>('.head .btn').click();
+        flushSync();
+        await vi.waitFor(() => expect(aiRows()).toHaveLength(4));
+      });
+      Then(
+        'the dialog offers "Mina" and the four AIs, with "Codex · workstation" and "Claude Code · laptop" disabled and their computers before their reasons',
+        () => {
+          expect(texts('dialog .part:first-of-type .pick-row b')).toEqual(['Mina']);
+          expect(
+            aiRows().map((row) => [
+              read(row.querySelector('b')!),
+              read(row.querySelector('small')!),
+              row.querySelector('input')!.disabled,
+            ]),
+          ).toEqual([
+            ['Claude Code', 'workstation', false],
+            ['Codex', 'workstation · Choose an account type on the Computers page first', true],
+            ['Codex', 'laptop', false],
+            [
+              'Claude Code',
+              'laptop · Its sign-in is no longer valid: sign in again on its computer',
+              true,
+            ],
+          ]);
+          expect(all('dialog div.ai small .bad')).toEqual([]);
+        },
+      );
+      When('the owner ticks "Mina", "Claude Code · workstation" and "Codex · laptop"', async () => {
+        one<HTMLInputElement>('dialog .part:first-of-type input[type=checkbox]').click();
+        aiRow('Claude Code', 'workstation').querySelector('input')!.click();
+        flushSync();
+        aiRow('Codex', 'laptop').querySelector('input')!.click();
+        flushSync();
+        await vi.waitFor(() =>
+          expect(texts('dialog .ai-fields .path-row code')).toEqual([
+            '/home/dev/notes',
+            '/home/dev/website',
+          ]),
+        );
+      });
+      Then(
+        '"Claude Code" is the secretary, "Codex" is not, each secretary choice is named for its AI, and each AI has the newest folder that no other group has',
+        () => {
+          const radios = all<HTMLInputElement>('dialog .ai-fields input[type=radio]');
+          expect(radios.map((radio) => radio.checked)).toEqual([true, false]);
+          expect(new Set(radios.map((radio) => radio.name)).size).toBe(1);
+          expect(texts('dialog .ai-fields .check')).toEqual([
+            'Make Claude Code the secretary',
+            'Make Codex the secretary',
+          ]);
+          expect(
+            all<HTMLInputElement>('dialog .ai-fields input.input').map((input) => input.value),
+          ).toEqual(['Claude Code', 'Codex']);
+        },
+      );
+      When(
+        'the owner makes "Codex" the secretary, names the group "Studio" and themself "Alex", and creates it',
+        async () => {
+          all<HTMLInputElement>('dialog .ai-fields input[type=radio]')[1].click();
+          const [name, member] = all<HTMLInputElement>('dialog .two input');
+          fill(name, 'Studio');
+          fill(member, 'Alex');
+          one('dialog form').dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+          );
+          await vi.waitFor(() => expect(location.hash).toMatch(/^#\/groups\/.{22}$/));
+          studio = location.hash.split('/')[2];
+        },
+      );
+      Then(
+        'the home makes "Studio", adds Mina, and each computer receives a signed "host.join" with the AI\'s folder, "Codex" as the secretary',
+        () => {
+          const sent = workstation.home.asked
+            .filter((req) => req.t === 'cmd')
+            .map((req) => JSON.parse((req.env as p.Envelope).p));
+          expect(sent).toMatchObject([
+            { t: 'group', op: 'create', g: studio, name: 'Studio', member_name: 'Alex' },
+            { t: 'member', op: 'add_person', g: studio, user: 'mina-user', name: 'Mina' },
+          ]);
+          const joined = (join: p.HostJoin) => [
+            join.to,
+            join.g,
+            join.agent,
+            join.name,
+            join.workspace,
+            join.secretary,
+          ];
+          expect(workstation.joins.map(joined)).toEqual([
+            [workstationId, studio, 'claude', 'Claude Code', '/home/dev/notes', false],
+          ]);
+          expect(laptop.joins.map(joined)).toEqual([
+            [laptopId, studio, 'codex', 'Codex', '/home/dev/website', true],
+          ]);
+        },
+      );
+      And('the chat of "Studio" opens with Mina and the two AIs', async () => {
+        await vi.waitFor(() => {
+          go(location.hash);
+          expect(texts('.chat-head h2')).toEqual(['Studio']);
+          expect(texts('.member h3')).toEqual(['Codex', 'Claude Code']);
+        });
+        expect(all('dialog[open]')).toEqual([]);
+        expect(texts('.people .person-name')).toEqual(['Alex · You · Owner', 'Mina']);
+      });
+    },
+  );
+
+  Scenario(
+    "A folder that is another group's, refused by the AI's computer, is reported with that group",
+    ({ Given, When, Then }) => {
+      Given('a second computer "laptop" is connected', addLaptop);
+      When(
+        '"laptop" refuses "host.join" with "conflict" naming the group "Docs" and the owner submits "Codex · laptop"',
+        () => submitLaptopRefusal('conflict', 'the folder is the workspace of the group "Docs"'),
+      );
+      Then(
+        'the dialog stays open and says the folder is the workspace of another group, in the words of the computer that name "Docs"',
+        () => {
+          expect(one<HTMLDialogElement>('#chat-side dialog').open).toBe(true);
+          expect(texts('dialog [role=alert]')).toEqual([
+            'This folder is already the workspace of another group. The computer said: the folder is the workspace of the group "Docs"',
+          ]);
+        },
+      );
+    },
+  );
+
+  Scenario(
+    'A name that a member of the group has is refused by the dialog, and nothing is sent',
+    ({ Given, When, Then }) => {
+      const nameField = () => one<HTMLInputElement>('dialog input[required]');
+      Given('a second computer "laptop" is connected', addLaptop);
+      When(
+        'the owner opens "Add AI", chooses "Codex · laptop", names the AI "Claude Code" and submits',
+        async () => {
+          await chooseLaptopCodex();
+          fill(nameField(), 'Claude Code');
+          flushSync();
+          submitDialog();
+          await new Promise((later) => setTimeout(later, 5));
+          flushSync();
+        },
+      );
+      Then(
+        'the dialog stays open and says "That name is already used in this group." and "laptop" receives no "host.join"',
+        () => {
+          expect(one<HTMLDialogElement>('#chat-side dialog').open).toBe(true);
+          expect(texts('dialog [role=alert]')).toEqual([
+            'That name is already used in this group.',
+          ]);
+          expect(laptop.joins).toEqual([]);
+          expect(workstation.joins).toEqual([]);
+        },
+      );
+      When('the owner names the AI "Helper" and submits', () => {
+        fill(nameField(), 'Helper');
+        flushSync();
+        submitDialog();
+      });
+      Then(
+        '"laptop" receives a signed "host.join" for "codex" named "Helper" and the dialog closes',
+        async () => {
+          await vi.waitFor(() => expect(laptop.joins).toHaveLength(1));
+          expect(laptop.joins[0]).toMatchObject({ agent: 'codex', name: 'Helper', g: website });
+          await vi.waitFor(() => expect(one('#chat-side dialog[open]')).toBeNull());
+        },
+      );
+    },
+  );
+
+  Scenario(
+    'Two members of a new group cannot have one name, and nothing is sent',
+    ({ Given, When, Then }) => {
+      Given('the owner is on the group list', () => go('#/groups'));
+      When(
+        'the owner opens "New group", ticks "Claude Code · workstation", names the group "Studio" and themself "Claude Code", and creates it',
+        async () => {
+          await openNewGroup();
+          await tickWorkstationClaude();
+          createAs('Studio', 'Claude Code');
+          flushSync();
+        },
+      );
+      Then(
+        'the dialog stays open and says "Two members cannot have one name: change one of the names." and the home receives no command',
+        () => {
+          expect(one<HTMLDialogElement>('dialog').open).toBe(true);
+          expect(texts('dialog [role=alert]')).toEqual([
+            'Two members cannot have one name: change one of the names.',
+          ]);
+          expect(sentCommands()).toEqual([]);
+          expect(workstation.joins).toEqual([]);
+        },
+      );
+      When('the owner names themself "Alex" and creates it', async () => {
+        createAs('Studio', 'Alex');
+        await vi.waitFor(() => expect(location.hash).toMatch(/^#\/groups\/.{22}$/));
+      });
+      Then('the home makes "Studio" and the chat of "Studio" opens', async () => {
+        const studio = location.hash.split('/')[2];
+        expect(sentCommands()).toMatchObject([
+          { t: 'group', op: 'create', g: studio, name: 'Studio', member_name: 'Alex' },
+        ]);
+        await vi.waitFor(() => {
+          go(location.hash);
+          expect(texts('.chat-head h2')).toEqual(['Studio']);
+        });
+        expect(all('dialog[open]')).toEqual([]);
+      });
+    },
+  );
+
+  Scenario(
+    'A group whose second person is refused says where it stopped, and opens all the same',
+    ({ Given, When, Then, And }) => {
+      let studio: string;
+      const said = (row: Element) => {
+        const small = row.querySelector('small')!;
+        return [read(small), small.classList.contains('bad')];
+      };
+      Given(
+        '"Mina" and "Sam" are in the group "Website" on "workstation", and the home no longer has a log of "Sam"',
+        async () => {
+          await addPerson('mina', 'Mina');
+          await addPerson('sam', 'Sam');
+          workstation.home.forgotten.add('sam-user');
+        },
+      );
+      When(
+        'the owner opens "New group", ticks "Mina", "Sam" and "Claude Code · workstation", names the group "Studio" and themself "Alex", and creates it',
+        async () => {
+          await openNewGroup();
+          await vi.waitFor(() => expect(peopleRows()).toHaveLength(2));
+          for (const row of peopleRows()) row.querySelector('input')!.click();
+          flushSync();
+          await tickWorkstationClaude();
+          createAs('Studio', 'Alex');
+          await vi.waitFor(() => expect(all('dialog [role=status]')).toHaveLength(1));
+          studio = sentCommands()[0].g;
+        },
+      );
+      Then(
+        'the dialog stays open and says "Mina" was "Added", "Sam" was refused with "Not in any of your groups on this computer any more: invite them by link." and "Claude Code" is "Not sent: an earlier step was refused"',
+        () => {
+          expect(one<HTMLDialogElement>('dialog').open).toBe(true);
+          const [mina, sam] = peopleRows();
+          expect(read(mina.querySelector('b')!)).toBe('Mina');
+          expect(said(mina)).toEqual(['Added', false]);
+          expect(said(sam)).toEqual([
+            'Not in any of your groups on this computer any more: invite them by link.',
+            true,
+          ]);
+          const ai = aiRow('Claude Code', 'workstation');
+          expect(read(ai.querySelector('small')!)).toBe(
+            'workstation · Not sent: an earlier step was refused',
+          );
+          expect(ai.querySelector('small .bad')).not.toBeNull();
+        },
+      );
+      And(
+        'the dialog says "The group exists, but not everyone could be added. Add them again from its member panel." and its button reads "Open the group" with no "Cancel"',
+        () => {
+          expect(texts('dialog [role=status]')).toEqual([
+            'The group exists, but not everyone could be added. Add them again from its member panel.',
+          ]);
+          expect(texts('dialog footer .btn')).toEqual(['Open the group']);
+          expect(one<HTMLButtonElement>('dialog footer .btn').disabled).toBe(false);
+        },
+      );
+      And(
+        'the home made "Studio" and added Mina and tried Sam, and "workstation" received no "host.join"',
+        () => {
+          expect(sentCommands()).toMatchObject([
+            { t: 'group', op: 'create', g: studio, name: 'Studio' },
+            { t: 'member', op: 'add_person', g: studio, user: 'mina-user' },
+            { t: 'member', op: 'add_person', g: studio, user: 'sam-user' },
+          ]);
+          expect(workstation.joins).toEqual([]);
+        },
+      );
+      When('the owner presses "Open the group"', () => {
+        submitDialog();
+      });
+      Then('the chat of "Studio" opens with Mina and without Sam', async () => {
+        await vi.waitFor(() => {
+          go(location.hash);
+          expect(location.hash).toBe(`#/groups/${studio}`);
+          expect(texts('.chat-head h2')).toEqual(['Studio']);
+        });
+        expect(all('dialog[open]')).toEqual([]);
+        expect(texts('.people .person-name')).toEqual(['Alex · You · Owner', 'Mina']);
+      });
+    },
+  );
+
+  Scenario(
+    'A group whose second AI is refused for its folder says so beside it, and the earlier ones stay added',
+    ({ Given, When, Then, And }) => {
+      Given(
+        '"Mina" is in the group "Website" on "workstation", and "laptop" is connected and refuses "host.join" with "not_found"',
+        async () => {
+          await addPerson('mina', 'Mina');
+          await addLaptop();
+          laptop.refuseJoin = { code: 'not_found', msg: 'no such folder' };
+        },
+      );
+      When(
+        'the owner opens "New group", ticks "Mina", "Claude Code · workstation" and "Codex · laptop", names the group "Studio" and themself "Alex", and creates it',
+        async () => {
+          await openNewGroup(4);
+          one<HTMLInputElement>('dialog .part:first-of-type input[type=checkbox]').click();
+          await tickWorkstationClaude();
+          aiRow('Codex', 'laptop').querySelector('input')!.click();
+          flushSync();
+          await vi.waitFor(() =>
+            expect(texts('dialog .ai-fields .path-row code')).toEqual([
+              '/home/dev/notes',
+              '/home/dev/website',
+            ]),
+          );
+          createAs('Studio', 'Alex');
+          await vi.waitFor(() => expect(all('dialog [role=status]')).toHaveLength(1));
+        },
+      );
+      Then(
+        'Mina and "Claude Code" are "Added" and "Codex" says "There is no such folder on that computer."',
+        () => {
+          const small = (row: Element) => row.querySelector('small')!;
+          expect([
+            read(small(peopleRows()[0])),
+            small(peopleRows()[0]).classList.contains('bad'),
+          ]).toEqual(['Added', false]);
+          const claude = aiRow('Claude Code', 'workstation');
+          expect(read(small(claude))).toBe('workstation · Added');
+          expect(small(claude).querySelector('.bad')).toBeNull();
+          const codex = aiRow('Codex', 'laptop');
+          expect(read(small(codex))).toBe('laptop · There is no such folder on that computer.');
+          expect(small(codex).querySelector('.bad')).not.toBeNull();
+        },
+      );
+      And('both computers received "host.join" and the button reads "Open the group"', () => {
+        expect(workstation.joins).toHaveLength(1);
+        expect(laptop.joins).toHaveLength(1);
+        expect(texts('dialog footer .btn')).toEqual(['Open the group']);
+      });
+    },
+  );
 
   Scenario(
     "An unreachable group home from the AI's computer is reported clearly",

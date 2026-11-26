@@ -23,29 +23,23 @@ Feature: Group list and group cache of the web client
     And both browsers list "Handbook" without a reload
     And the first browser has opened its chat
 
-  Scenario: The last message of a team group names the AI of a bulletin
-    Given the home also holds the team group "Studio" with a bulletin of "Claude Code", sent from the computer of "Alex"
-    When the browser has read both groups
-    Then the list reads "Claude Code: The website is ready." under "Studio"
-
   Scenario: The list shows a task and a notice as the chat words them
     Given the last message of "Website" is the task T-12 "Show connection path", and the home also holds "Docs", whose last message says that "Mina" joined
     When the browser has read both groups
     Then the list reads "System: T-12 Show connection path" under "Website" and "System: Mina joined, invited by Alex." under "Docs"
 
-  Scenario: A team group is created without a repository
+  Scenario: A group created with nobody else is ready for its people
     Given the person owns a second computer, "desk", which is connected
-    When the person chooses "Team group" in the dialog, which then asks only for the names and the home, and creates "Studio"
-    Then the home has made the team group "Studio" without a repository, checks or forge
-    And "desk" has been told which computer is the home of "Studio"
-    And its chat opens as a team group, ready for the first message and for inviting people, and without AIs
-    And the dialog starts again with a project group
+    When the person creates "Studio" in the dialog with nobody ticked
+    Then the home has made "Studio" from its name and the person's name alone
+    And its chat opens ready for the first message and for inviting people, without AIs and without a secretary warning
+    And "desk" has been told nothing, since "Studio" is on a computer of the person
 
-  Scenario: A computer that connects later is told the home of a team group
-    Given the home also holds the team group "Studio", which the browser shows
+  Scenario: A computer that connects later is told the home of a group on another person's computer
+    Given the browser also reads "Docs", homed on a computer of "Mina"
     When the person's computer "desk" connects, then "laptop"
-    Then "desk" and "laptop" have each been told once which computer is the home of "Studio"
-    And neither has been told the home of "Website", a project group of a computer of the person
+    Then "desk" and "laptop" have each been told once which computer is the home of "Docs"
+    And neither has been told the home of "Website", which is on a computer of the person
 
   Scenario: A group known from a computer of the person shows while its home is away
     Given "desk", a computer of the person, knows that "Docs" is homed on a computer out of reach

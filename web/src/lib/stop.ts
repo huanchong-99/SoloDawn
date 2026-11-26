@@ -1,7 +1,7 @@
 // The emergency stop (planning/product-rules.md R-64): an admin pauses every AI of a group
 // (contracts/commands.md 1.1), and the owner of a computer takes all AIs there offline (section 2).
 import type { Group, Home } from './groups.svelte';
-import { aiMembers, isAdmin, statusOf } from './members';
+import { aiMembers, hasAI, isAdmin, statusOf } from './members';
 import { nodes } from './nodes.svelte';
 import { t } from './prefs.svelte';
 import type { AIMemberRow } from './proto';
@@ -11,7 +11,7 @@ export const setPaused = (group: Group, paused: boolean) =>
   group.home.command({ t: 'group', g: group.g, op: paused ? 'pause' : 'resume' });
 
 /** Whether this person may stop the AIs of the group: an admin, where a group has AIs. */
-export const mayPause = (group: Group) => isAdmin(group) && aiMembers(group).length > 0;
+export const mayPause = (group: Group) => isAdmin(group) && hasAI(group);
 
 /** How many AIs of the group run a turn now. */
 export const working = (group: Group) =>

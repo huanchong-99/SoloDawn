@@ -3,7 +3,8 @@ Feature: What a person does with a task: answer in its thread, stop it, carry it
   A person writes in a task's thread with the composer inside it (planning/contracts/commands.md
   1.3; planning/product-rules.md R-33, R-60). An admin pauses, resumes, reassigns and cancels a
   task from its card (planning/contracts/task-machine.md section 3, rows 11 to 13, 15 and 22). The
-  card says why a task stands still and what moves it on. A refusal is shown and changes nothing.
+  card says why a task stands still, who paused it, and what moves it on (acceptance test A5.23).
+  A refusal is shown and changes nothing.
 
   Background:
     Given the chat of "Website" open in a browser of Alex, its owner, with Codex on T-12 and Claude Code as its reviewer
@@ -40,11 +41,18 @@ Feature: What a person does with a task: answer in its thread, stop it, carry it
     Then the menu of T-12 offers "Pause", "Reassign" and "Cancel task", and goes when the page scrolls
     When Alex picks "Pause"
     Then the home receives "pause" for T-12 and focus is on its menu button
-    When T-12 is paused by hand
-    Then its card says "Paused by hand. Its AIs stay stopped until it is resumed." with "Resume"
+    When the home holds T-12 as paused by Alex
+    Then its card says "Alex paused the task. Its AIs stay stopped until it is resumed." with "Resume"
     And the menu of T-12 offers "Resume", "Reassign" and "Cancel task"
     When Alex presses "Resume"
     Then the home receives "resume" for T-12
+
+  Scenario: A task paused by the secretary, or by a person who has left, names who paused it in the reader's language
+    Given the secretary paused T-12
+    Then its card says "Secretary paused the task. Its AIs stay stopped until it is resumed." with "Resume"
+    When Mina, an admin, pauses it again and then leaves the group
+    Then its card says "Mina paused the task. Its AIs stay stopped until it is resumed."
+    And in Chinese it says "Mina 暂停了任务。恢复之前，做它的 AI 都先停着。"
 
   Scenario: A cancel takes two steps
     When Alex picks "Cancel task"
@@ -76,16 +84,13 @@ Feature: What a person does with a task: answer in its thread, stop it, carry it
     And Alex presses "Reassign"
     Then the home receives "assign" for T-12 with Claude Code as its reviewer and no assignee
 
-  Scenario: A task without a reviewer is given one, and one with a merge conflict goes back
+  Scenario: A task without a reviewer is given one
     Given T-12 waits for a reviewer
     Then its card says "Ready for review, and nobody is named to do it. The secretary or an admin names a reviewer." with "Name a reviewer"
     When Alex presses "Name a reviewer"
     And Alex chooses "Claude Code · workstation" to review it
     And Alex presses "Reassign"
     Then the home receives "assign" for T-12 with Claude Code as its reviewer and no assignee
-    When T-12 has a merge conflict
-    And Alex presses "Hand back to Codex"
-    Then the home receives "assign" for T-12 with Codex as its assignee
 
   Scenario: A stopped task is resumed, and a refusal is shown
     Given T-12 stopped after 3 failures
@@ -101,13 +106,8 @@ Feature: What a person does with a task: answer in its thread, stop it, carry it
 
   Scenario: A question goes away when another person was faster
     When Alex picks "Reassign"
-    And T-12 enters "merge"
-    Then the form is gone and the menu of T-12 offers "Cancel task"
-    When T-12 has a merge conflict
-    Then the form stays away
-    When T-12 enters "merge" again
-    And Alex picks "Cancel task"
-    Then the card also says "It has passed review and may be merging right now."
+    And another admin cancels T-12
+    Then the form is gone and the card of T-12 has no menu
 
   Scenario: A pre-empted task carries on by itself
     Given T-12 is pre-empted

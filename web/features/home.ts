@@ -56,6 +56,8 @@ export class TestHome {
   breakAfter: number | undefined;
   /** When set, every `post` is refused with this code. */
   refuse: string | undefined;
+  /** People, by user, whose log this home no longer holds: `add_person` is `not_found` for them. */
+  readonly forgotten = new Set<string>();
   /** When set, answers every command this home does not apply itself. */
   reply: ((payload: Fields) => object) | undefined;
   readonly name: string;
@@ -67,9 +69,9 @@ export class TestHome {
   }
 
   /** Adds a group with its row and the person as its owner. */
-  add(g: string, name: string, row = 'row-group') {
+  add(g: string, name: string, changes: Fields = {}) {
     this.groups.set(g, { name, seq: 0, rows: new Map() });
-    this.write(g, example(row, { id: g, name, created: Date.now() }));
+    this.write(g, example('row-group', { id: g, name, created: Date.now(), ...changes }));
     this.write(g, example('row-member-human', { g, name: 'Alex' }));
     return g;
   }
@@ -196,7 +198,8 @@ export class TestHome {
 
   #apply(payload: Fields & { n: string; g: string; ts: number }): object {
     if (payload.t === 'group' && payload.op === 'create') {
-      this.add(payload.g, payload.name as string);
+      // A new group has no secretary until an AI is made one (contracts/commands.md 1.1).
+      this.add(payload.g, payload.name as string, { secretary: undefined });
       this.#relist();
       return { ok: true };
     }
@@ -233,9 +236,11 @@ export class TestHome {
     const people = (rows: Map<string, Fields>) =>
       [...rows.values()].filter((row) => row.r === 'member' && row.kind === 'human');
     const group = this.groups.get(g)!;
-    const known = [...this.groups.entries()].some(
-      ([other, { rows }]) => other !== g && people(rows).some((row) => row.user === user),
-    );
+    const known =
+      !this.forgotten.has(user as string) &&
+      [...this.groups.entries()].some(
+        ([other, { rows }]) => other !== g && people(rows).some((row) => row.user === user),
+      );
     if (!known) return { err: { code: 'not_found', msg: 'no log of this person here' } };
     const taken = people(group.rows).some((row) => row.user === user || row.name === name);
     if (taken) return { err: { code: 'conflict', msg: 'a member already' } };

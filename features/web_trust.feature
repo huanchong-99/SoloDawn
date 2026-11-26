@@ -1,13 +1,11 @@
 @web
-Feature: Forge commands and group trust (U2-4)
+Feature: Group trust (U2-4)
 
-  Scenario: Group info discloses custom commands without a consent gate
-    Given a project with custom forge templates and a personal secretary owned by another person
-    When the reader opens the group's commands
-    Then the repository base forge checks and argument lists are disclosed with the execution warning
-    And the secretary warning is visible without blocking group settings
+  Scenario: Group info shows the warning of a personal secretary without a consent gate
+    Given a group whose secretary is the personal AI of another person
+    Then the secretary warning is visible without blocking group settings
 
-  Scenario: A built-in forge remains fixed when editing group settings
-    Given a project using the built-in GitHub forge
+  Scenario: Group settings name no command that runs on a computer
+    Given a group of the owner
     When the owner opens group settings
-    Then no forge selector or template editor is offered
+    Then the settings offer its name, its secretary, the pass score and the foundation tasks, and no command

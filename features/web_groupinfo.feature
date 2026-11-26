@@ -2,7 +2,7 @@
 Feature: Group info panel and project memory
 
   Background:
-    Given a project group "Website" homed on "workstation", open in a browser of its owner in English
+    Given a group "Website" homed on "workstation", open in a browser of its owner in English
 
   Scenario: Project memory lists notes and the review ledger, and forgetting removes an entry within 1 second
     Given the home holds two notes and a scored review whose task was removed by retention

@@ -4,6 +4,7 @@
   import { complete, fill, matching, mentioned, room, typing, unsent } from '../../lib/compose';
   import type { Group, Member } from '../../lib/groups.svelte';
   import { release } from '../../lib/jump';
+  import { hasAI } from '../../lib/members';
   import type { Net } from '../../lib/net.svelte';
   import { t } from '../../lib/prefs.svelte';
   import type { TaskRow } from '../../lib/proto';
@@ -49,8 +50,7 @@
   // a group of people only has people to write to.
   const mainHint = $derived.by(() => {
     if (!group.info || group.info.secretary) return 'chat.compose.hint';
-    const ai = group.members.some((member) => member.kind === 'ai');
-    return ai ? 'chat.compose.hint.solo' : 'chat.compose.hint.people';
+    return hasAI(group) ? 'chat.compose.hint.solo' : 'chat.compose.hint.people';
   });
   const hint = $derived(intoThread('thread.reply.hint') ?? t(mainHint));
 

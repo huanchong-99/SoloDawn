@@ -799,9 +799,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/preset.spec.ts`     | steps of `../features/web_preset.feature`                                         |
 | `features/kb.spec.ts`         | steps of `../features/web_kb.feature`                                             |
 | `features/move.spec.ts`       | steps of `../features/web_move.feature`                                           |
-| `features/forge.spec.ts`      | steps of `../features/web_forge.feature`                                          |
+| `features/trust.spec.ts`      | steps of `../features/web_trust.feature`                                          |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
-| `features/watch_team.spec.ts` | steps of `../features/web_watch_team.feature`                                     |
+| `features/watch.spec.ts`      | steps of `../features/web_watch.feature`                                          |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/stop.spec.ts`       | steps of `../features/web_stop.feature`                                           |
 | `features/queue.spec.ts`      | steps of `../features/web_queue.feature`                                          |
