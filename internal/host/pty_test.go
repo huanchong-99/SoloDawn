@@ -114,6 +114,17 @@ func runPTYHangLeafHelper(addrFile string) {
 	if err := os.WriteFile(addrFile, []byte(ln.Addr().String()), 0o600); err != nil {
 		os.Exit(5)
 	}
+	// It accepts so that a dial fails only once it is gone, not once its
+	// backlog is full.
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
 	time.Sleep(30 * time.Second)
 }
 

@@ -382,6 +382,11 @@ func TestCodexSilentLimitWaitsForActivityAndOpenCalls(t *testing.T) {
 			p.emit(Event{Kind: kind})
 			synctest.Wait()
 		}
+		time.Sleep(codexSilentLimit - time.Second)
+		synctest.Wait()
+		if p.interrupted.Load() != 0 {
+			t.Fatal("interrupted within 5 minutes of the last activity")
+		}
 		done := h.Sessions.Calling(key)
 		time.Sleep(4 * time.Minute)
 		synctest.Wait()

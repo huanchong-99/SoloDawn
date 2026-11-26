@@ -822,6 +822,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: nothing stops a person from adding to their own log a device that another person's log already holds. A home then reads that device's commands as coming from whichever of the two people has the lower user id (`planning/contracts/commands.md`, "Who"). A member could so turn the commands of another member's device into their own, which that device's person did not ask for.
 - Cause: `(*State).user` walks the logs in the order of their user ids and returns the first that holds the device as valid (`internal/home/check.go:92`). `planning/contracts/envelope.md` section 4 says nothing about one device in two logs.
 - Status: open, without effect in step 1, where a group has one person. Step 2, which adds people, has to settle it.
+- 2026-11-26: `watchDeviceUser` (`internal/host/watch.go:107`) treats a revoke of the device in anyone's log as blocking it for a watch, unlike the home's check, which takes the first log that holds it as valid (`internal/home/check.go:92`). Accepted by the coordinator.
 
 ### 2026-11-20 · limitation · A member of another group on the same home is answered `unknown_device`, not `forbidden`
 
@@ -2040,3 +2041,20 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: on PR #420, `test (windows-latest)` (run 45758838792), A9.21 waited 2m54s for the TURN relay and saw the direct `srflx` pair until ICE failed. It passed on Windows in earlier runs and on the Mac.
 - Cause: the fixture, not the product (only the watcher's pion peer in `features/m7_test.go` renominates). Pion v4.4.8 (`agent.go`, `evaluateCandidatePairQuality`) rates a pair whose last round trip is 0 as one without a measure, 30 below; `CandidatePair.UpdateRoundTripTime` stores a measured 0 as it is. The Windows clock of the test process moves in steps of about 0.5 ms (the timestamps of `nodes.log`), and from the first keep-alive on, each relay check of the watcher (`Received ChannelData` from its TURN client) and its answer (`Relay socket … received 64 bytes`) have one timestamp: the relay pair read 0 ms and scored 10 − 30 + 20 = 0, below the dead direct pair's 50 − 10·log10(3000) ≈ 15.2, so `findBestCandidatePair` kept the direct pair at every check, and no nomination request crossed the TURN server. Reproduced on the Mac with pion's round trip truncated to 2 ms steps: the old fixture fails with the CI message (relay RTT 0.00 ms at each check).
 - Status: resolved on `fix/a921-flake`: `moveToRelay` (`features/s2_watch_peer_test.go`) also delays the watcher's packets to the TURN server by 5 ms (`m7NetControl.relayNs`, `features/m7_test.go`), so the relay pair reads at least a few ms and scores about 23 (5 ms) instead of 0. With the 2 ms steps the fixed fixture passes 3 of 3.
+
+### 2026-11-26 · bug · A held item could wait for the next push after a sweep missed its AI
+
+- Symptom: `TestWorkspaceFailureReportingConfigUnmarshalAndStoreErrors` timed out in a CI mutation baseline (`internal/host/deliver_test.go:1755`, waiting for 914 review failure and 912 group recovery; turns=3, acks 6 then 7): item 914 was handled, item 912 for the secretary never.
+- Cause: a product race in delivery. The sweep of `deliverNow` and `afterGroupState` went over `heldKeys`, the AIs with held items. A step that takes a batch removes it from the held items and, when it cannot go (here a group refresh that failed with the group row it had read before the test changed `forge` to `none`), holds it again at its end (`deliverTargetBatch`, `internal/host/deliver.go:1331`). A sweep in between did not see the AI and did not set its recheck, so nothing looked at the item again until another push. Reproduced with the CI message by delaying that re-hold by one second.
+- Status: resolved. The sweeps use `sweepKeys` (`internal/host/deliver.go:853`), which adds the AIs being stepped, so `deliverPair` sets their recheck. `TestSweepRechecksAnAIWhoseBatchIsInFlight` fails on the old code.
+
+### 2026-11-26 · bug (test) · The PTY tree-kill test could not see a leaf that lived
+
+- Symptom: `pty_unix.go:78` (`-pid` to `pid` or `+pid`) lived or timed out in mutation runs although `TestPTYKillTreeStopsLeaderAndChildSubprocess` checks that the leaf stops.
+- Cause: the leaf helper listened but never accepted. `waitLeafStopped` dials every millisecond; once the backlog was full a dial failed, which it read as the leaf gone.
+- Status: resolved. The leaf accepts and closes connections (`runPTYHangLeafHelper`, `internal/host/pty_test.go`), so the test fails under both mutants.
+
+### 2026-11-26 · limitation · `watch.go:112` (`>` to `>=`) was an equivalent mutant
+
+- Cause: device rows of one log have distinct versions from 1 (`planning/contracts/envelope.md` section 4), so `>=` chose the same row. A revoked device is never added again, so the latest entry is a revoke exactly when there is one.
+- Status: resolved. `watchDeviceUser` returns no user when the device has a revoke and otherwise the user of its add, with no version comparison.

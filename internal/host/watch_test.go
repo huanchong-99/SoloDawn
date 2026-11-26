@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"testing/synctest"
@@ -354,4 +355,16 @@ func TestWatchQueueLimit(t *testing.T) {
 		}
 		p.stop(slot)
 	})
+}
+
+func TestWatchDeviceUserIsNoneOnceRevoked(t *testing.T) {
+	h := newPTYTestHost(t)
+	put := func(ver int, op string) {
+		id := fmt.Sprintf("a:%d", ver)
+		h.Rows.Put("g", "device", id, json.RawMessage(marshalWire(proto.DeviceRow{RowHeader: proto.RowHeader{Type: "device", ID: id}, DeviceChange: proto.DeviceChange{User: "a", Version: ver, Op: op, Device: "dev"}})))
+	}
+	put(1, "add")
+	assertEqual(t, watchDeviceUser(h, "g", "dev"), "a")
+	put(2, "revoke")
+	assertEqual(t, watchDeviceUser(h, "g", "dev"), "")
 }

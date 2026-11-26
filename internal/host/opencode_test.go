@@ -227,3 +227,10 @@ func TestOpenCodeEnvPinsLevelShimAndRepoConfig(t *testing.T) {
 		`OPENCODE_CONFIG_CONTENT={` + mcp + `,"permission":{"bash":"allow","doom_loop":"allow","edit":"allow","external_directory":"allow","webfetch":"allow"}}`,
 	})
 }
+
+func TestOpenCodeStatus300IsAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusMultipleChoices) }))
+	defer server.Close()
+	_, err := (&openCodeProcess{base: server.URL}).call(http.MethodGet, "/session", nil)
+	codexEqual(t, fmt.Sprint(err), "opencode: GET /session: 300 Multiple Choices ")
+}

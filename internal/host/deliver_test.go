@@ -850,6 +850,45 @@ func verifyResyncAfterFailedSync(t *testing.T, r *deliverRig) {
 	r.waitAIUnbusy(testGroup1, testAI1)
 }
 
+// A batch that cannot go is held again after its step. A push for another AI
+// while that step runs must still make the step look again: the item would
+// otherwise wait for the next push (CI flake of 11-26, item 912).
+func TestSweepRechecksAnAIWhoseBatchIsInFlight(t *testing.T) {
+	logs := captureDiag(t)
+	r := newDeliverRig(t, false)
+	r.seedGroupAndMembers()
+	// The sweep after the attach would otherwise recheck the secretary.
+	logs.wait(t, "bg.stop node="+r.hostKey.ID()[:8]+" name=group_state g="+testGroup1)
+	var composing atomic.Bool
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	r.composeMu.Lock()
+	r.composeE = errors.New("compose failed")
+	r.onCompose = func(Session, []json.RawMessage) {
+		composing.Store(true)
+		<-release
+	}
+	r.composeMu.Unlock()
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 920, AI: testSec, Why: "notice", Code: "c"}, nil)
+	r.waitUntil("item 920 in compose", composing.Load)
+	r.composeMu.Lock()
+	r.composeE, r.onCompose = nil, nil
+	r.composeMu.Unlock()
+
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 921, AI: testAI1, Why: "notice", Code: "c"}, nil)
+	d := deliv(r.h)
+	secKey := aiGroupKey{group: testGroup1, member: testSec}
+	r.waitUntil("the sweep after item 921 to recheck the secretary", func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.recheck[secKey]
+	})
+	unblock()
+	r.waitUntil("item 920 delivered", func() bool { return r.home.ackCountFor(920) == 1 && r.home.ackCountFor(921) == 1 })
+	r.waitAIUnbusy(testGroup1, testSec)
+}
+
 func TestDuplicateWhileTakingSessionAndMergeItems(t *testing.T) {
 	// (a) Duplicate mention arriving while the first copy is inside Compose -> 1 turn, 1 delivered row, 2 acks.
 	r := newDeliverRig(t, false)

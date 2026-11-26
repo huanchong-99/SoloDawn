@@ -102,21 +102,21 @@ func (h *Host) WatchStart(from Owner, device string, data json.RawMessage) (any,
 	return nil, nil
 }
 
+// watchDeviceUser is the person whose log added the device, while it is not
+// revoked: a revoked device is never added again (envelope.md section 4).
 func watchDeviceUser(h *Host, group, device string) string {
-	var latest proto.DeviceRow
+	user := ""
 	for _, raw := range h.Rows.Of(group, "device") {
 		var row proto.DeviceRow
-		if proto.Decode(raw, &row) != nil {
+		if proto.Decode(raw, &row) != nil || row.Device != device {
 			continue
 		}
-		if row.Device == device && row.Version > latest.Version {
-			latest = row
+		if row.Op == "revoke" {
+			return ""
 		}
+		user = row.User
 	}
-	if latest.Op == "add" {
-		return latest.User
-	}
-	return ""
+	return user
 }
 
 func (p *watchPart) monitor(from Owner) {
