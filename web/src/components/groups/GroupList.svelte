@@ -17,11 +17,9 @@
   // A group is created on a node of the person's own that can be reached.
   const canCreate = $derived(homes.some((home) => home.owner && home.ctl));
 
-  /** Who wrote a message: for a bulletin the AI it names, not the person whose computer sent it. */
-  function author(group: Group, msg: MsgRow) {
-    if (msg.kind === 'bulletin') return msg.body.ai;
-    return msg.by === 'system' ? t('chat.system') : group.nameOf(msg.by);
-  }
+  /** Who wrote a message. */
+  const author = (group: Group, msg: MsgRow) =>
+    msg.by === 'system' ? t('chat.system') : group.nameOf(msg.by);
 
   /** Who wrote the last message of the main line, and what it says; nothing of a group not read. */
   function preview(group: Group) {

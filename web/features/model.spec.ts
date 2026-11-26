@@ -105,6 +105,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     });
   };
   const submitAdd = async () => {
+    // The newest folder of the AI's computer is taken before anything is sent.
+    await vi.waitFor(() => expect(one('dialog .path-row code').textContent).toContain('/'));
     submit(one<HTMLFormElement>('dialog form'));
     await vi.waitFor(() => expect(sent).toHaveLength(1));
   };
@@ -211,6 +213,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           agent: 'claude',
           name: 'Claude Code',
           secretary: false,
+          workspace: '/home/dev/website',
           model: 'opus',
           effort: 'high',
           tier: 'strong',
@@ -240,6 +243,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           agent: 'claude',
           name: 'Claude Code',
           secretary: false,
+          workspace: '/home/dev/website',
           model: 'custom/model',
           effort: 'deep',
           tier: 'standard',
@@ -493,6 +497,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       node.info.agents[0].groups = [id, 'model-other'].map((member) => ({
         g,
         member,
+        workspace: '/home/dev/website',
         level: 1,
         state: 'dormant',
         queued: 0,

@@ -47,7 +47,7 @@
   "groupinfo.limit.wakes_per_hour": "Wake-ups per hour",
   "groupinfo.limit.wakes_per_hour.hint": "How often other AIs may wake an AI. What comes after that waits; a person's messages and answers are never held.",
   "groupinfo.limit.turn_minutes": "Longest turn",
-  "groupinfo.limit.turn_minutes.hint": "An AI's turn that takes longer is stopped. Its check commands count.",
+  "groupinfo.limit.turn_minutes.hint": "An AI's turn that takes longer is stopped. The tests it runs count.",
   "groupinfo.limit.failures": "Failures in a row",
   "groupinfo.limit.failures.hint": "A task that fails this often stops until a person acts.",
   "groupinfo.limit.review_rounds": "Failed reviews",

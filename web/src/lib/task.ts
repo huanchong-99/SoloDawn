@@ -114,10 +114,14 @@ export function taskSteps(group: Group, task: TaskRow, status: string) {
     label: t(`task.step.${key}`),
     mark: (i < at ? 'done' : i === at && cur) || undefined,
   }));
-  if (task.state === 'queued')
-    return { items, summary: '0 / 3', aria: t('task.steps.queued').replace('{status}', status) };
-  if (task.state === 'done')
-    return { items, summary: '3 / 3', aria: t('task.steps.done').replace('{status}', status) };
+  if (task.state === 'queued') {
+    const aria = t('task.steps.queued').replace('{status}', status);
+    return { items, summary: `${t('task.step.queued')} · 0 / 3`, aria };
+  }
+  if (task.state === 'done') {
+    const aria = t('task.steps.done').replace('{status}', status);
+    return { items, summary: `${items[2].label} · 3 / 3`, aria };
+  }
   const step = items[at].label;
   const aria = t('task.steps.at')
     .replace('{n}', `${at + 1}`)

@@ -3,14 +3,7 @@
   import { jumpToMessage } from '../../lib/jump';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { t } from '../../lib/prefs.svelte';
-  import {
-    reviewLine,
-    taskBadge,
-    taskSteps,
-    taskTitle,
-    threadPreview,
-    waitBadge,
-  } from '../../lib/task';
+  import { reviewLine, taskBadge, taskSteps, threadPreview, waitBadge } from '../../lib/task';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import Thread from '../thread/Thread.svelte';
@@ -50,7 +43,6 @@
   {@const steps = taskSteps(group, task, badge.text)}
   {@const waiting = waitBadge(group, task.wait)}
   {@const review = reviewLine(group, task)}
-  {@const noChecks = !task.checks.local && !task.checks.cloud && task.wait?.kind !== 'conflict'}
   <section
     class="card"
     bind:this={card}
@@ -58,7 +50,7 @@
   >
     <header class="card-head">
       <span class="mono" id={`task-num-${msg.id}`}>T-{task.num}</span>
-      <h3 id={`task-title-${msg.id}`}>{taskTitle(task)}</h3>
+      <h3 id={`task-title-${msg.id}`}>{task.title}</h3>
       <span class="badge" class:solid={badge.solid} data-tone={badge.tone}>
         {#if badge.dot}<span class="st" data-st={badge.dot}><i></i></span>{/if}{badge.text}
       </span>
@@ -67,7 +59,7 @@
 
     <div class="steps" role="img" aria-label={steps.aria}>
       {#each steps.items as step (step.key)}
-        <i data-s={step.mark} class:skip={step.skipped} title={step.label}></i>
+        <i data-s={step.mark} title={step.label}></i>
       {/each}
       <span>{steps.summary}</span>
     </div>
@@ -91,46 +83,17 @@
         </span>
       </dd>
 
-      {#if task.branch}
-        <dt>{t('task.kv.branch')}</dt>
-        <dd>
-          <code>{task.branch}</code>
-          {#if task.pr !== undefined}
-            <span class="muted">{' · '}</span>{#if task.pr_url}<a
-                href={task.pr_url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                PR #{task.pr}
-              </a>{:else}<span class="muted">PR #{task.pr}</span>{/if}
-          {/if}
-        </dd>
+      {#if assignee?.kind === 'ai'}
+        <dt>{t('task.kv.folder')}</dt>
+        <dd><code title={assignee.workspace}>{assignee.workspace}</code></dd>
       {/if}
 
-      <dt>{t('task.kv.checks')}</dt>
-      <dd>
-        {#if task.checks.local}
-          <span class="res" data-tone={task.checks.local.ok ? 'ok' : 'danger'}>
-            <Icon name={task.checks.local.ok ? 'check' : 'x'} sm />{t(
-              task.checks.local.ok ? 'task.checks.local.ok' : 'task.checks.local.fail',
-            )}
-          </span>
-        {/if}
-        {#if task.checks.cloud}
-          <span class="res" data-tone={task.checks.cloud.ok ? 'ok' : 'danger'}>
-            <Icon name={task.checks.cloud.ok ? 'check' : 'x'} sm />{t(
-              task.checks.cloud.ok ? 'task.checks.cloud.ok' : 'task.checks.cloud.fail',
-            )}
-          </span>
-        {/if}
-        {#if task.wait?.kind === 'conflict'}
-          <span class="res" data-tone="danger"><Icon name="x" sm />{t('task.badge.conflict')}</span>
-        {/if}
-        {#if noChecks}<span class="muted">{t('task.checks.none')}</span>{/if}
-        {#if task.wait?.msg && waiting}
-          {@const waitMsg = task.wait.msg}
-          {@const waitKind = task.wait.kind}
-          {#if noChecks}<span class="muted">{' · '}</span>{/if}<a
+      {#if task.wait?.msg && waiting}
+        {@const waitMsg = task.wait.msg}
+        {@const waitKind = task.wait.kind}
+        <dt>{t('task.kv.wait')}</dt>
+        <dd>
+          <a
             href={`#m-${waitMsg}`}
             onclick={(event) => {
               event.stopPropagation();
@@ -139,8 +102,8 @@
           >
             {waiting.text}
           </a>
-        {/if}
-      </dd>
+        </dd>
+      {/if}
 
       <dt>{t('task.kv.review')}</dt>
       <dd>
@@ -149,7 +112,7 @@
             <Icon name={review.tone === 'ok' ? 'check' : 'x'} sm />{review.verdict}
           </span>
         {/if}
-        <span class="muted">{review.meta}</span>
+        <span class="muted meta">{review.meta}</span>
       </dd>
     </dl>
 
@@ -204,9 +167,6 @@
     i[data-s]::before {
       transform: none;
     }
-    i.skip {
-      opacity: 0.45;
-    }
     i[data-s='done'] {
       --fill: var(--ok);
     }
@@ -240,6 +200,10 @@
     margin-right: 10px;
     white-space: nowrap;
     color: var(--tone-text, var(--text-2));
+  }
+  /* "Codex 评 · 及格 90" breaks at its spaces only, never inside a word. */
+  .meta {
+    word-break: keep-all;
   }
   code {
     padding: 2px 6px;

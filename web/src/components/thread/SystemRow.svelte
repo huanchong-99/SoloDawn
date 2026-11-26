@@ -1,8 +1,7 @@
 <script lang="ts">
   import type { CardProps } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
-  import { secretaryName, systemText, taskTag } from '../../lib/system';
-  import { taskTitle } from '../../lib/task';
+  import { secretaryName, systemText } from '../../lib/system';
   import { clock } from '../../lib/when';
   import Icon, { type IconName } from '../Icon.svelte';
 
@@ -12,10 +11,8 @@
   const time = $derived(clock(msg.ts, prefs.lang));
   const iso = $derived(new Date(msg.ts).toISOString());
 
-  const short = (sha: string) => sha.slice(0, 7);
-
   const icons: Record<string, { icon: IconName; tone?: 'ok' | 'danger' | 'dawn' }> = {
-    task_merged: { icon: 'check', tone: 'ok' },
+    task_done: { icon: 'check', tone: 'ok' },
     task_failed: { icon: 'x', tone: 'danger' },
     login_invalid: { icon: 'alert', tone: 'danger' },
     session_replaced: { icon: 'doc' },
@@ -44,12 +41,12 @@
 <div class="sys-row">
   <span class="glyph" data-tone={visual.tone}><Icon name={visual.icon} sm /></span>
   <p>
-    {#if body.code === 'task_merged'}
-      {@const mergedTask = group.task(body.task)}
+    {#if body.code === 'task_done'}
+      {@const doneTask = group.task(body.task)}
+      <!-- Shown under the secretary's name (R-24). -->
       <b>{secretaryName(group)}</b>
-      {t('thread.sys.task_merged').replace('{task}', taskTag(group, body.task))}
-      {#if mergedTask}· <span class="title">{taskTitle(mergedTask)}</span>{/if}
-      · <code>{short(body.commit)}</code> → <code>{short(body.merge_commit)}</code>
+      {systemText(group, msg)}
+      {#if doneTask}· <span class="title">{doneTask.title}</span>{/if}
     {:else}
       {systemText(group, msg)}
     {/if}

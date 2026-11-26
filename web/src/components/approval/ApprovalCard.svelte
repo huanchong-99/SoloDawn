@@ -187,7 +187,13 @@
       {ai ? t('approval.hint.denied').replace('{ai}', ai.name) : t('approval.hint.denied_gone')}
     </p>
   {:else if msg.state.status === 'reassigned'}
-    <p class="hint">{t('approval.hint.reassigned')}</p>
+    <!-- Who gave the task away, and to the AI that has it now (contracts/messages.md 3.2). -->
+    {@const by = msg.state.by}
+    <p class="hint">
+      {t('approval.hint.reassigned')
+        .replace('{who}', () => group.nameOf(by))
+        .replace('{ai}', () => group.nameOf(group.task(msg.body.task)?.assignee))}
+    </p>
   {:else}
     <p class="hint">{t('approval.hint.expired')}</p>
   {/if}

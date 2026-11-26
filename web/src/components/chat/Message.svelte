@@ -3,7 +3,6 @@
   import { subject, type Group } from '../../lib/groups.svelte';
   import { card as cardOf } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
-  import { taskTitle } from '../../lib/task';
   import type { MsgRow } from '../../lib/proto';
   import { clock } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
@@ -30,7 +29,7 @@
 </script>
 
 {#snippet body()}
-  {#if msg.text && !((msg.kind === 'call' || msg.kind === 'bulletin') && Card)}
+  {#if msg.text && !(msg.kind === 'call' && Card)}
     <div class="said">
       <p class="text"><Rich {group} text={msg.text} mentions={msg.mentions} /></p>
       {#if joined}<time class="aside" datetime={new Date(msg.ts).toISOString()}>{time}</time>{/if}
@@ -51,7 +50,7 @@
   {/if}
 {/snippet}
 
-{#if (msg.by === 'system' || msg.kind === 'bulletin') && Card}
+{#if msg.by === 'system' && Card}
   <!-- Written by the home, and drawn whole by the component mounted for its kind. -->
   <div class="msg sys" id={`m-${msg.id}`}><Card {group} {msg} /></div>
 {:else if msg.by === 'system'}
@@ -63,7 +62,7 @@
     {:else if msg.kind === 'task'}
       {@const task = group.task(msg.body.task)}
       {#if task}
-        <span class="cut"><span class="mono">T-{task.num}</span> {taskTitle(task)}</span>
+        <span class="cut"><span class="mono">T-{task.num}</span> {task.title}</span>
       {/if}
     {/if}
     <time datetime={new Date(msg.ts).toISOString()}>{time}</time>

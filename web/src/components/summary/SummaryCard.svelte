@@ -1,15 +1,14 @@
 <script lang="ts">
   import type { CardProps } from '../../lib/mounts.svelte';
   import { t } from '../../lib/prefs.svelte';
-  import { taskTitle } from '../../lib/task';
   import Icon from '../Icon.svelte';
 
-  /** The secretary's summary card after a task is merged (contracts/messages.md 2.5). */
+  /** The secretary's summary card after a task is done (contracts/messages.md 2.5). */
   let { group, msg }: CardProps<'summary'> = $props();
 
   const taskRow = $derived(group.task(msg.body.task));
   const cardLabel = $derived(
-    taskRow ? `${t('summary.kind')} · T-${taskRow.num} · ${taskTitle(taskRow)}` : t('summary.kind'),
+    taskRow ? `${t('summary.kind')} · T-${taskRow.num} · ${taskRow.title}` : t('summary.kind'),
   );
 
   const rounds = $derived(
@@ -33,21 +32,13 @@
     <span class="done-icon"><Icon name="check" /></span>
     <span class="kind">{t('summary.kind')}</span>
     {#if taskRow}<span class="mono">T-{taskRow.num}</span>{/if}
-    <span class="badge" data-tone="ok">{t('summary.merged')}</span>
+    <span class="badge" data-tone="ok">{t('summary.done')}</span>
   </header>
-  {#if taskRow}<h3>{taskTitle(taskRow)}</h3>{/if}
+  {#if taskRow}<h3>{taskRow.title}</h3>{/if}
   <ul class="stats">
     <li><b>{msg.body.score}</b><span>{t('summary.score')}</span></li>
     <li><b>{rounds}</b><span>{t('summary.rounds')}</span></li>
     <li><b>{duration}</b><span>{t('summary.time')}</span></li>
-    <li>
-      <b><span class="add">+{msg.body.added}</span> <span class="del">−{msg.body.removed}</span></b>
-      <span>
-        {msg.body.pr !== undefined
-          ? t('summary.pr').replace('{n}', String(msg.body.pr))
-          : t('summary.changes')}
-      </span>
-    </li>
   </ul>
 </section>
 
@@ -60,8 +51,7 @@
     width: 16px;
     height: 16px;
   }
-  /* The figures in a row: a large number over its small label. What was added is green and what
-     was removed red: the two results in this card. */
+  /* The figures in a row: a large number over its small label. */
   .stats {
     display: flex;
     flex-wrap: wrap;
@@ -77,12 +67,6 @@
     font-weight: 600;
     line-height: 1.25;
     letter-spacing: -0.01em;
-  }
-  .add {
-    color: var(--ok);
-  }
-  .del {
-    color: var(--danger);
   }
   @media (max-width: 640px) {
     .stats {

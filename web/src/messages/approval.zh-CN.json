@@ -14,7 +14,7 @@
   "approval.hint.locked_who": "只有电脑的主人 {who} 能批",
   "approval.hint.offline": "连不上群的家",
   "approval.hint.once": "只批这一次",
-  "approval.hint.reassigned": "任务已改派给别的 AI，这条申请作废。",
+  "approval.hint.reassigned": "{who} 把任务改派给了 {ai}，这个申请随之关闭。",
   "approval.host.yours": "{host}（你的电脑）",
   "approval.kind": "审批申请",
   "approval.sep": "、",

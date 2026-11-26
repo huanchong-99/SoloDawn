@@ -211,13 +211,6 @@ export function toTerminalChunk(data: unknown): Uint8Array | string | undefined 
   return typeof data === 'string' ? data : undefined;
 }
 
-/** The changed files of a `handback` card. */
-export function handbackFilesLabel(count: number): string {
-  if (count <= 0) return t('terminal.handback.files.none');
-  if (count === 1) return t('terminal.handback.files.one');
-  return t('terminal.handback.files').replace('{n}', String(count));
-}
-
 /** Signs and sends `takeover.start`; answers `""` on `ok`, else the refusal's code. */
 export async function startTakeover(
   host: Home,

@@ -65,7 +65,7 @@
   "pairing.acct.api_key": "API key",
   "pairing.acct.api_key_body": "可以授权指定的同事直接指挥。费用由 key 的主人承担。",
   "pairing.acct.hint": "拿不准？让你的 AI 自查登录方式再告诉你。SoloDawn 不读取任何账号凭证。",
-  "pairing.done": "创建第一个项目群",
+  "pairing.done": "创建第一个群",
   "pairing.trust.1.title": "数据只在你自己的电脑上",
   "pairing.trust.1.body": "聊天和任务存在「群的家」那台电脑上。",
   "pairing.trust.2.title": "服务器只帮两边找到对方",

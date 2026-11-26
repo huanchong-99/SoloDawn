@@ -49,163 +49,161 @@
 </script>
 
 <div class="members">
-  {#if group.info?.kind !== 'team'}
-    <div class="head">
-      <div class="row">
-        <h2 class="sec-title grow">{t('member.ai')} · {ais.length}</h2>
-        <button
-          class="btn btn-sm"
-          onclick={() => (adding = true)}
-          disabled={!group.info || Boolean(addReason)}
-          aria-describedby={addReason ? `${uid}-add-why` : undefined}
-        >
-          <Icon name="plus" sm /><span>{t('member.add')}</span>
-        </button>
-      </div>
-      {#if addReason}
-        <p id={`${uid}-add-why`} class="hint add-why">{addReason}</p>
-      {/if}
+  <div class="head">
+    <div class="row">
+      <h2 class="sec-title grow">{t('member.ai')} · {ais.length}</h2>
+      <button
+        class="btn btn-sm"
+        onclick={() => (adding = true)}
+        disabled={!group.info || Boolean(addReason)}
+        aria-describedby={addReason ? `${uid}-add-why` : undefined}
+      >
+        <Icon name="plus" sm /><span>{t('member.add')}</span>
+      </button>
     </div>
+    {#if addReason}
+      <p id={`${uid}-add-why`} class="hint add-why">{addReason}</p>
+    {/if}
+  </div>
 
-    {#each ais as ai (ai.id)}
-      {@const host = hostHomeOf(net.homes, ai.host)}
-      {@const status = statusIn(group, ai, host)}
-      {@const mine = ai.user === group.home.me.user}
-      {@const owner = mine ? undefined : group.personName(ai.user)}
-      {@const termWhy = mine ? terminalDisabledReason(net, ai) : undefined}
-      {@const terminal = offersTerminal(host, ai.cli)}
-      {@const watchWhy = watchDisabledReason(net, ai)}
-      {@const meter = usageMeter(ai, prefs.lang)}
-      <section class="card member">
-        <header class="row">
-          <span
-            class="av-wrap"
-            class:sec={ai.secretary}
-            data-sec={t('member.sec.mark')}
-            data-st={status.st}
-            aria-hidden="true"
-          >
-            <Avatar id={ai.id} name={ai.name} cli={ai.cli} />
-          </span>
-          <div class="grow">
-            <h3>
-              {ai.name}{#if owner}{' '}<span class="owner">· {owner}</span>{/if}
-            </h3>
-            <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
-          </div>
-        </header>
-        <Profile {group} {ai} suggested={suggestedTier(host, ai)}>
-          {#snippet children(profileRows, editProfile)}
-            <AllowEditor {group} {ai} {humans}>
-              {#snippet children(accessRows, editAccess)}
-                <dl class="kv">
-                  <dt>{t('member.computer')}</dt>
-                  <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
-                  <dt>{t('member.account')}</dt>
-                  <dd>
-                    {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span
-                        class="muted"
-                      >
-                        · {t('member.account.personal.note')}
-                      </span>{/if}
-                  </dd>
-                  <Mount at="member.ai" props={{ group, ai }} />
-                  {@render profileRows()}
-                  {@render accessRows()}
-                </dl>
-                {#if meter?.fill !== undefined}
-                  <div
-                    class="meter"
-                    role="meter"
-                    aria-label={meter.label}
-                    aria-valuenow={meter.fill}
-                    aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
-                    data-tone={meter.tone}
-                    style={`--v: ${meter.fill}%`}
-                  >
-                    <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
-                        {meter.note}
-                      </small>{/if}
-                  </div>
-                {:else if meter}
-                  <p class="meter"><span>{meter.label}</span><b>{meter.value}</b></p>
-                {/if}
-                {#if mine}
-                  <footer class="card-foot">
-                    {#if ai.state === 'takeover'}
-                      <button
-                        type="button"
-                        class="btn btn-sm btn-dawn"
-                        onclick={() =>
-                          endTakeover(hostHomeOf(net.homes, ai.host), ai.host, group.g, ai.id)}
-                      >
-                        {t('member.handback')}
-                      </button>
-                    {:else if terminal && !termWhy}
-                      <a
-                        class="btn btn-sm"
-                        href={href('terminal', {
-                          g: group.g,
-                          member: ai.id,
-                          task: terminalTask(group, ai),
-                        })}
-                      >
-                        <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
-                      </a>
-                    {:else if terminal}
+  {#each ais as ai (ai.id)}
+    {@const host = hostHomeOf(net.homes, ai.host)}
+    {@const status = statusIn(group, ai, host)}
+    {@const mine = ai.user === group.home.me.user}
+    {@const owner = mine ? undefined : group.personName(ai.user)}
+    {@const termWhy = mine ? terminalDisabledReason(net, ai) : undefined}
+    {@const terminal = offersTerminal(host, ai.cli)}
+    {@const watchWhy = watchDisabledReason(net, ai)}
+    {@const meter = usageMeter(ai, prefs.lang)}
+    <section class="card member">
+      <header class="row">
+        <span
+          class="av-wrap"
+          class:sec={ai.secretary}
+          data-sec={t('member.sec.mark')}
+          data-st={status.st}
+          aria-hidden="true"
+        >
+          <Avatar id={ai.id} name={ai.name} cli={ai.cli} />
+        </span>
+        <div class="grow">
+          <h3>
+            {ai.name}{#if owner}{' '}<span class="owner">· {owner}</span>{/if}
+          </h3>
+          <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
+        </div>
+      </header>
+      <Profile {group} {ai} suggested={suggestedTier(host, ai)}>
+        {#snippet children(profileRows, editProfile)}
+          <AllowEditor {group} {ai} {humans}>
+            {#snippet children(accessRows, editAccess)}
+              <dl class="kv">
+                <dt>{t('member.computer')}</dt>
+                <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
+                <dt>{t('member.folder')}</dt>
+                <dd class="ws">
+                  <Icon name="folder" sm />
+                  <code>{ai.workspace}</code>
+                </dd>
+                <dt>{t('member.account')}</dt>
+                <dd>
+                  {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
+                      · {t('member.account.personal.note')}
+                    </span>{/if}
+                </dd>
+                <Mount at="member.ai" props={{ group, ai }} />
+                {@render profileRows()}
+                {@render accessRows()}
+              </dl>
+              {#if meter?.fill !== undefined}
+                <div
+                  class="meter"
+                  role="meter"
+                  aria-label={meter.label}
+                  aria-valuenow={meter.fill}
+                  aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
+                  data-tone={meter.tone}
+                  style={`--v: ${meter.fill}%`}
+                >
+                  <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
+                      {meter.note}
+                    </small>{/if}
+                </div>
+              {:else if meter}
+                <p class="meter"><span>{meter.label}</span><b>{meter.value}</b></p>
+              {/if}
+              {#if mine}
+                <footer class="card-foot">
+                  {#if ai.state === 'takeover'}
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-dawn"
+                      onclick={() =>
+                        endTakeover(hostHomeOf(net.homes, ai.host), ai.host, group.g, ai.id)}
+                    >
+                      {t('member.handback')}
+                    </button>
+                  {:else if terminal && !termWhy}
+                    <a
+                      class="btn btn-sm"
+                      href={href('terminal', {
+                        g: group.g,
+                        member: ai.id,
+                        task: terminalTask(group, ai),
+                      })}
+                    >
+                      <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+                    </a>
+                  {:else if terminal}
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      disabled
+                      aria-describedby={`${uid}-term-${ai.id}`}
+                    >
+                      <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+                    </button>
+                  {/if}
+                  {@render editProfile()}
+                  {@render editAccess()}
+                  {#if ai.state === 'takeover'}
+                    <span class="hint">{t('member.handback.queued')}</span>
+                  {:else if terminal && termWhy}
+                    <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
+                  {/if}
+                  <RemoveAI {group} {ai} />
+                </footer>
+              {:else if ai.state === 'takeover' || admin}
+                <footer class="card-foot">
+                  {#if ai.state === 'takeover'}
+                    <AskToWatch {group} {ai} />
+                    {#if watchWhy}
                       <button
                         type="button"
                         class="btn btn-sm"
                         disabled
-                        aria-describedby={`${uid}-term-${ai.id}`}
+                        aria-describedby={`${uid}-watch-${ai.id}`}
                       >
-                        <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+                        {t('watch.open')}
                       </button>
+                      <span id={`${uid}-watch-${ai.id}`} class="hint">{watchWhy}</span>
+                    {:else}
+                      <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
+                        {t('watch.open')}
+                      </a>
                     {/if}
-                    {@render editProfile()}
-                    {@render editAccess()}
-                    {#if ai.state === 'takeover'}
-                      <span class="hint">{t('member.handback.queued')}</span>
-                    {:else if terminal && termWhy}
-                      <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
-                    {/if}
-                    <RemoveAI {group} {ai} />
-                  </footer>
-                {:else if ai.state === 'takeover' || admin}
-                  <footer class="card-foot">
-                    {#if ai.state === 'takeover'}
-                      <AskToWatch {group} {ai} />
-                      {#if watchWhy}
-                        <button
-                          type="button"
-                          class="btn btn-sm"
-                          disabled
-                          aria-describedby={`${uid}-watch-${ai.id}`}
-                        >
-                          {t('watch.open')}
-                        </button>
-                        <span id={`${uid}-watch-${ai.id}`} class="hint">{watchWhy}</span>
-                      {:else}
-                        <a
-                          class="btn btn-sm"
-                          href={href('terminal', { g: group.g, member: ai.id })}
-                        >
-                          {t('watch.open')}
-                        </a>
-                      {/if}
-                    {/if}
-                    {#if admin}<RemoveAI {group} {ai} />{/if}
-                  </footer>
-                {/if}
-              {/snippet}
-            </AllowEditor>
-          {/snippet}
-        </Profile>
-      </section>
-    {:else}
-      <p class="hint">{t('member.ai.empty')}</p>
-    {/each}
-  {/if}
+                  {/if}
+                  {#if admin}<RemoveAI {group} {ai} />{/if}
+                </footer>
+              {/if}
+            {/snippet}
+          </AllowEditor>
+        {/snippet}
+      </Profile>
+    </section>
+  {:else}
+    <p class="hint">{t('member.ai.empty')}</p>
+  {/each}
 
   <div class="row people-head">
     <h2 class="sec-title grow">{t('member.people')} · {humans.length}</h2>
@@ -247,6 +245,23 @@
 {/if}
 
 <style>
+  /* The folder of an AI: one line in the mono face, cut at its end, whole in its title. */
+  .ws {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: var(--fs-xs);
+  }
+  .ws :global(.i) {
+    flex: none;
+    color: var(--text-3);
+  }
+  /* The whole path, on as many lines as it takes. */
+  .ws code {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
   /* Sections, not boxed cards: a head with its count and one small action, then the AIs one
      under another with a hairline between them. */
   .members {

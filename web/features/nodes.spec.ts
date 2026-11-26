@@ -169,6 +169,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
                   {
                     g: website,
                     member: '1PC8WineBrUQ-apCjx7tug',
+                    workspace: '/home/dev/office',
                     level: 2,
                     state: 'limited',
                     queued: 0,
@@ -224,7 +225,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(ai.textContent).toContain('Signed in');
           expect(ai.querySelector('.acct')).toBeNull();
           expect(ai.querySelector('.perm')!.textContent!.replace(/\s+/g, ' ').trim()).toBe(
-            'Website Working · T-12',
+            'Website Working · T-12 Folder: /home/dev/website',
           );
         },
       );

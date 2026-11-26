@@ -112,6 +112,8 @@ function makeNode(
             const base = p.decode(p.HostInfo, goldens['host-info-answer']);
             return { ...base, re: (seq += 1), device: node.device, name, agents: node.agents };
           }
+          if (req.t === 'host.workspaces')
+            return p.decodeAnswer('host.workspaces', goldens['host-workspaces-answer']);
           if (
             req.t === 'cmd' &&
             req.env &&
@@ -180,6 +182,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     await syncNode(laptop);
   }
 
+  /** The folder list of the chosen AI has been read, and its newest folder taken. */
+  const folderTaken = () =>
+    vi.waitFor(() => expect(one('dialog .path-row code').textContent).toContain('/home/dev/'));
+
   async function submitLaptopRefusal(code: string) {
     laptop.refuseJoin = code;
     one<HTMLButtonElement>('.members .head button').click();
@@ -188,6 +194,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     flushSync();
     all<HTMLInputElement>('dialog .choice input')[2].click();
     flushSync();
+    await folderTaken();
     one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(laptop.joins).toHaveLength(1));
     flushSync();
@@ -216,6 +223,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               {
                 g: website,
                 member: '1PC8WineBrUQ-apCjx7tug',
+                workspace: '/home/dev/website',
                 level: 2,
                 state: 'working',
                 queued: 0,
@@ -468,7 +476,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'the accounts read "Personal subscription · takes orders from owner", "Team plan" and "API key"',
         () => {
           const accounts = all('.member .kv').map((dl) =>
-            dl.querySelectorAll('dd')[1].textContent!.replace(/\s+/g, ' ').trim(),
+            dl.querySelectorAll('dd')[2].textContent!.replace(/\s+/g, ' ').trim(),
           );
           expect(accounts).toEqual([
             'Personal subscription · takes orders from owner',
@@ -821,6 +829,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             agent: 'codex',
             name: 'Lead Secretary',
             secretary: true,
+            workspace: '/home/dev/website',
             model: '',
             effort: '',
             tier: 'standard',
@@ -877,6 +886,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(4));
       all<HTMLInputElement>('dialog .choice input')[2].click();
       flushSync();
+      await folderTaken();
       laptop.drop();
       flushSync();
       one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -921,6 +931,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       );
       all<HTMLInputElement>('dialog .choice input')[2].click();
       flushSync();
+      await folderTaken();
       one('dialog[open] form').dispatchEvent(
         new Event('submit', { bubbles: true, cancelable: true }),
       );

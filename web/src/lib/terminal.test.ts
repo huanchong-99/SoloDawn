@@ -9,7 +9,6 @@ import {
   binaryBytes,
   bridgePty,
   endTakeover,
-  handbackFilesLabel,
   headerSubtitle,
   hostHomeOf,
   linkBadgeOf,
@@ -221,7 +220,7 @@ describe('the parts of a terminal page', () => {
 
   it('words the refusals it knows and says what the bar shows in every phase', () => {
     const busy =
-      'This AI is busy: its terminal is already open, one of its tasks is merging, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.';
+      'This AI is busy: its terminal is already open, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.';
     for (const [code, text] of [
       ['busy', busy],
       ['cli', 'The AI CLI could not open the interactive session on its computer.'],
@@ -235,7 +234,7 @@ describe('the parts of a terminal page', () => {
     expect(takeoverErrorText('forbidden')).toBeUndefined();
     prefs.lang = 'zh-CN';
     expect(takeoverErrorText('busy')).toBe(
-      '这个 AI 正忙：它的终端已经开着，或它的任务正在合并，或它马上要开始一轮（也许在等它的电脑有空位）。请稍后再试。',
+      '这个 AI 正忙：它的终端已经开着，或它马上要开始一轮（也许在等它的电脑有空位）。请稍后再试。',
     );
     prefs.lang = 'en';
 
@@ -318,18 +317,13 @@ describe('the parts of a terminal page', () => {
     expect(applyCtrl('\x7f', true)).toEqual({ out: '\x7f', ctrl: false });
   });
 
-  it('reads binary strings and channel messages, and counts the files of a hand-back', () => {
+  it('reads binary strings and channel messages', () => {
     expect([...binaryBytes('\x00\x7f\xffĂ')]).toEqual([0, 0x7f, 0xff, 0x02]);
     const bytes = new Uint8Array([65, 66]);
     expect(toTerminalChunk(bytes)).toBe(bytes);
     expect(toTerminalChunk(bytes.buffer)).toEqual(bytes);
     expect(toTerminalChunk('hello')).toBe('hello');
     expect(toTerminalChunk(42)).toBeUndefined();
-
-    expect(handbackFilesLabel(-1)).toBe('No file changes');
-    expect(handbackFilesLabel(0)).toBe('No file changes');
-    expect(handbackFilesLabel(1)).toBe('1 file');
-    expect(handbackFilesLabel(3)).toBe('3 files');
   });
 });
 
