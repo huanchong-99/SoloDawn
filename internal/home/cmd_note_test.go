@@ -33,6 +33,7 @@ func (d noteDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d noteDisk) Pending() []proto.MsgRow                   { return nil }
 func (d noteDisk) Queued() []store.Item                      { return nil }
 func (d noteDisk) OtherMember(string) bool                   { return false }
+func (noteDisk) DeviceLog(string) []proto.Envelope           { return nil }
 
 func noteState(t *testing.T) *home.State {
 	t.Helper()

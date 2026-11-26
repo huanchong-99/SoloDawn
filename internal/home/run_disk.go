@@ -151,6 +151,16 @@ func (d *runDisk) OtherMember(user string) (found bool) {
 	return found
 }
 
+func (d *runDisk) DeviceLog(user string) (entries []proto.Envelope) {
+	var data string
+	err := d.tx.QueryRow("SELECT json_group_array(json(env) ORDER BY ver) FROM device_log WHERE user=?", user).Scan(&data)
+	if err == nil {
+		err = json.Unmarshal([]byte(data), &entries)
+	}
+	d.err = errors.Join(d.err, err)
+	return entries
+}
+
 // runOne reads one row that is no marker. A row that is not there is no
 // failure.
 func runOne[R any](d *runDisk, r, id string) (row R, ok bool) {

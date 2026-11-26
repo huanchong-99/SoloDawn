@@ -35,6 +35,7 @@ func (d cardDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d cardDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d cardDisk) Queued() []store.Item                      { return nil }
 func (d cardDisk) OtherMember(string) bool                   { return false }
+func (cardDisk) DeviceLog(string) []proto.Envelope           { return nil }
 
 func (d cardDisk) Pending() []proto.MsgRow {
 	var list []proto.MsgRow
