@@ -450,7 +450,7 @@ func afterGroupState(h *Host, d *delivery, group string) {
 	stepMerges(h, d, group)
 	resumeGroupMerges(h, d, group)
 	resumeGroupHostedChecks(h, d, group)
-	for _, key := range d.heldKeys() {
+	for _, key := range d.sweepKeys() {
 		deliverPair(h, d, key)
 	}
 	for _, s := range h.Sessions.All() {
@@ -780,7 +780,7 @@ func deliverNow(h *Host, group, member string) {
 	for _, g := range d.mergeGroups() {
 		stepMerges(h, d, g)
 	}
-	for _, other := range d.heldKeys() {
+	for _, other := range d.sweepKeys() {
 		if other != primary {
 			deliverPair(h, d, other)
 		}
@@ -844,7 +844,20 @@ func (d *delivery) leaveAI(key aiGroupKey) bool {
 func (d *delivery) heldKeys() []aiGroupKey {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	keys := slices.AppendSeq(slices.Collect(maps.Keys(d.held)), maps.Keys(d.pre))
+	return sortedKeys(slices.AppendSeq(slices.Collect(maps.Keys(d.held)), maps.Keys(d.pre)))
+}
+
+// sweepKeys is heldKeys and the AIs that delivery is stepping. A batch that
+// cannot go is held again after its step, perhaps after the sweep looked; a
+// sweep that finds the AI stepping makes that step look again.
+func (d *delivery) sweepKeys() []aiGroupKey {
+	d.mu.Lock()
+	keys := slices.Collect(maps.Keys(d.busy))
+	d.mu.Unlock()
+	return sortedKeys(append(keys, d.heldKeys()...))
+}
+
+func sortedKeys(keys []aiGroupKey) []aiGroupKey {
 	order := func(a, b aiGroupKey) int {
 		return cmp.Or(cmp.Compare(a.group, b.group), cmp.Compare(a.member, b.member))
 	}

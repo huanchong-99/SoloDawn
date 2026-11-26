@@ -169,3 +169,10 @@ func TestQwenStartRefusals(t *testing.T) {
 	_, err = qwenDriver{}.Start(context.Background(), qwenLaunch(t, "", 1))
 	codexEqual(t, errors.Is(err, fs.ErrNotExist), true)
 }
+
+func TestQwenStatus300IsAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusMultipleChoices) }))
+	defer server.Close()
+	_, err := (&qwenProcess{base: server.URL}).request(http.MethodGet, "/session", nil)
+	codexEqual(t, fmt.Sprint(err), "qwen: GET /session: 300 Multiple Choices")
+}
