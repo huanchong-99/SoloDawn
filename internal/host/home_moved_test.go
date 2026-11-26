@@ -2,6 +2,7 @@ package host
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -56,6 +57,7 @@ func moveTestSynced(re int64) json.RawMessage {
 }
 
 func TestFollowMovedHomeKeepsTheCurrentHomeOnErrors(t *testing.T) {
+	logs := captureLogs(t)
 	r := newDeliverRig(t, false)
 	old, next := r.homeKey.ID(), r.ownerKey.ID()
 	joinAssertEqual(t, "invalid destination", movedHome(json.RawMessage(`{"re":1,"err":{"code":"moved","msg":"moved","home":"invalid"}}`)), "")
@@ -74,6 +76,7 @@ func TestFollowMovedHomeKeepsTheCurrentHomeOnErrors(t *testing.T) {
 	settleHomeSync(r.h, d, old, testGroup1, json.RawMessage(marshalWire(proto.ErrorResponse{
 		Re: 1, Err: proto.WireError{Code: "moved", Message: "Moved", Home: next},
 	})), false, true)
+	joinAssertEqual(t, "failure logged", strings.Contains(logs.String(), "host: follow moved group: "), true)
 	homes, err := joinSavedHomes(r.h.Store)
 	joinAssertEqual(t, "read current homes", err, nil)
 	joinAssertEqual(t, "keep current home", homes[0].Home, old)

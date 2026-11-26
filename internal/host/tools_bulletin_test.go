@@ -137,7 +137,7 @@ func TestBulletinReadsTeamStateOnExistingConnection(t *testing.T) {
 		assertEqual(t, remote.syncs[0].StateOnly, true)
 		h.Rows.Reset(bulletinGroup)
 		remote.syncFn = func(proto.Sync) (json.RawMessage, error) { return nil, errors.New("sync failed") }
-		assertEqual(t, bulletinTeam(t.Context(), h, home) != nil, true)
+		assertErrorCode(t, bulletinTeam(t.Context(), h, home), "home_unreachable")
 	}
 }
 

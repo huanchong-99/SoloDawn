@@ -255,7 +255,7 @@ func holdLimits(h *Host, key SessionKey) (string, bool) {
 	if lp.offline {
 		return "offline", true
 	}
-	if h.Now().UnixMilli() < lp.rateUntil[agent] {
+	if _, limited := lp.rateUntil[agent]; limited {
 		return "rate_limit", true
 	}
 	return "", false

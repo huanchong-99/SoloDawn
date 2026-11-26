@@ -2,12 +2,14 @@ package host
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -593,14 +595,13 @@ func (p *codexProcess) updateRateLimits(rl codexRateLimits) (Usage, int64, bool,
 	return usage, p.resetsMS(), win != nil, codexRateLimited(rl, win)
 }
 
-func selectRateWindow(primary, secondary *codexLimitWindow) *codexLimitWindow {
-	if primary == nil {
-		return secondary
+// selectRateWindow is the fuller window, the first one on a tie.
+func selectRateWindow(windows ...*codexLimitWindow) *codexLimitWindow {
+	windows = slices.DeleteFunc(windows, func(w *codexLimitWindow) bool { return w == nil })
+	if len(windows) == 0 {
+		return nil
 	}
-	if secondary != nil && secondary.UsedPercent > primary.UsedPercent {
-		return secondary
-	}
-	return primary
+	return slices.MaxFunc(windows, func(a, b *codexLimitWindow) int { return cmp.Compare(a.UsedPercent, b.UsedPercent) })
 }
 
 func codexWindowResetsMs(sec *int64) *int64 {
