@@ -14,7 +14,7 @@
   "approval.hint.locked_who": "Only the computer's owner {who} can approve",
   "approval.hint.offline": "Cannot reach the group home",
   "approval.hint.once": "Applies to this one request",
-  "approval.hint.reassigned": "The task was reassigned to another AI; this request is closed.",
+  "approval.hint.reassigned": "{who} gave the task to {ai}; this request is closed.",
   "approval.host.yours": "{host} (your computer)",
   "approval.kind": "Approval",
   "approval.sep": ", ",

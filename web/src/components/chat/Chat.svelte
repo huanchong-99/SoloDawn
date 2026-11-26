@@ -46,10 +46,9 @@
 
   const paging = $derived(group.paging());
   const line = $derived(days(withoutInlineReplies(group.main, Boolean(cardOf('call')))));
-  const emptyBody = $derived.by(() => {
-    if (group.info?.kind !== 'team') return 'chat.empty.body';
-    return group.members.length > 1 ? 'team.empty' : 'team.empty.alone';
-  });
+  // A group of people only has nobody to turn a request into a brief.
+  const hasAI = $derived(group.members.some((member) => member.kind === 'ai'));
+  const emptyBody = $derived(hasAI ? 'chat.empty.body' : 'chat.empty.people');
   const newest = $derived(group.main.at(-1)?.id);
   // Older messages may exist and cannot be had now: the home refused a page, or is not reachable.
   const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
@@ -114,7 +113,7 @@
       <h2>{group.name}</h2>
       <p>
         {#if group.info}
-          {t(group.info.kind === 'team' ? 'team.title' : 'chat.project')} · {t('chat.members')}
+          {t('chat.members')}
           {group.members.length}
           {#if group.home.name}· <Icon name="home" sm /> {group.home.name}{/if}
         {:else}&nbsp;{/if}
@@ -183,7 +182,7 @@
           </div>
         {/if}
       {/each}
-      {#if group.info?.kind === 'project' && !group.info.secretary}
+      {#if group.info && hasAI && !group.info.secretary}
         <p class="nosec"><Icon name="alert" sm />{t('chat.nosecretary')}</p>
       {/if}
     </div>

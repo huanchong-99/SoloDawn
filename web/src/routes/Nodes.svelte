@@ -317,6 +317,11 @@
                       <i></i>{stateLabel(state)}{#if taskRow}
                         {' '}· T-{taskRow.num}{/if}
                     </span>
+                    <p class="path-row">
+                      <Icon name="folder" sm />
+                      <span class="sr">{t('nodes.ai.folder')}</span>
+                      <code>{entry.workspace}</code>
+                    </p>
                   </div>
                 {/each}
               {:else}
@@ -438,13 +443,29 @@
   }
   .perm {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--sp-3);
+    gap: var(--sp-2) var(--sp-3);
     font-size: var(--fs-sm);
   }
   .perm > span:first-child {
     flex: 1;
     min-width: 0;
+  }
+  /* The folder of the membership above it: a quiet line right under it, no fill. */
+  .perm .path-row {
+    flex-basis: 100%;
+    align-self: stretch;
+    min-height: 0;
+    margin-top: calc(2px - var(--sp-2));
+    padding: 0;
+    background: none;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .perm .path-row code {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   .empty {
     margin-top: var(--sp-8);
@@ -454,6 +475,9 @@
       flex-direction: column;
       align-items: flex-start;
       gap: 4px;
+    }
+    .perm .path-row {
+      margin-top: -2px;
     }
   }
 </style>

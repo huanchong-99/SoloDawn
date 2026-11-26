@@ -241,13 +241,14 @@ export const openTasks = (group: Group, ai: AIMemberRow): TaskRow[] =>
     .filter((task) => !['done', 'cancelled'].includes(task.state))
     .sort((a, b) => a.num - b.num);
 
-/** Registered AIs on the owner's connected computers, marking those already in `group`. */
+/** Registered AIs on the owner's computers, marking those already in `group`; none is in a group
+ *  that is still being made. */
 export function candidatesOf(
-  group: Group,
+  group: Group | undefined,
   owned: readonly Home[],
   infos: ReadonlyMap<Home, HostInfoPush>,
 ): Candidate[] {
-  const existing = aiMembers(group);
+  const existing = group ? aiMembers(group) : [];
   return owned.flatMap((home) => {
     const info = infos.get(home);
     if (!info) return [];
@@ -260,10 +261,19 @@ export function candidatesOf(
       account: entry.account,
       loginOk: entry.login_ok,
       inGroup:
-        entry.groups.some((g) => g.g === group.g) ||
+        entry.groups.some((g) => g.g === group?.g) ||
         existing.some((m) => m.host === info.device && m.cli === entry.agent),
     }));
   });
+}
+
+/** Why an AI cannot be added now: its account type is not declared, its computer cannot be
+ *  reached, or its sign-in is no longer valid (contracts/commands.md section 2). */
+export function unavailable(candidate: Candidate): string | undefined {
+  if (candidate.agent !== 'external' && candidate.account === null)
+    return t('member.join.unconfigured');
+  if (!candidate.home.ctl) return t('member.join.away');
+  return candidate.loginOk ? undefined : t('member.join.nologin.why');
 }
 
 /** Candidates that have an account type set; one already in the group adds another member. */

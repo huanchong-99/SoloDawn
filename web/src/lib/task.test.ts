@@ -186,7 +186,7 @@ describe('task helpers', () => {
       taskSteps(group, task, status).items.map((item) => item.mark);
 
     const queued = taskSteps(group, { ...base, state: 'queued' }, 'Queued');
-    expect(queued.summary).toBe('0 / 3');
+    expect(queued.summary).toBe('Queued · 0 / 3');
     expect(queued.aria).toBe('Progress: 0 of 3 steps, Queued');
     expect(queued.items.map((item) => [item.key, item.label, item.mark])).toEqual([
       ['work', 'Work', undefined],
@@ -195,7 +195,7 @@ describe('task helpers', () => {
     ]);
 
     const done = taskSteps(group, { ...base, state: 'done', step: 'review' }, 'Done');
-    expect(done.summary).toBe('3 / 3');
+    expect(done.summary).toBe('Done · 3 / 3');
     expect(done.aria).toBe('Progress: 3 of 3 steps, Done');
     expect(done.items.map((item) => item.mark)).toEqual(['done', 'done', 'done']);
 

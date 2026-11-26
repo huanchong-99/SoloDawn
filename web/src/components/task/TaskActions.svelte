@@ -33,7 +33,6 @@
   const ops = $derived(taskOps(group, task));
   const hold = $derived(taskHold(group, task));
   const locked = $derived(busy || !group.home.ctl);
-  const assignee = $derived(group.member(task.assignee));
 
   const ais = $derived(workingAIs(group));
   const next = $derived({ assignee: task.assignee, reviewer: task.reviewer ?? '', ...chosen });
@@ -111,12 +110,7 @@
             {t('task.op.reply')}
           </button>
         {/if}
-        {#if hold.kind === 'conflict' && ops.includes('assign') && assignee}
-          {@render button(
-            t('task.op.return').replace('{ai}', () => assignee.name),
-            () => void run('assign', { assignee: task.assignee }),
-          )}
-        {:else if hold.kind === 'reviewer' && ops.includes('assign')}
+        {#if hold.kind === 'reviewer' && ops.includes('assign')}
           {@render button(t('task.op.reviewer'), () => void pick('assign'))}
         {:else if hold.kind === 'denied' && ops.includes('assign')}
           {@render button(t('task.op.assign'), () => void pick('assign'))}

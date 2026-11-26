@@ -1,6 +1,6 @@
 {
   "summary.kind": "Done",
-  "summary.merged": "Merged",
+  "summary.done": "Done",
   "summary.score": "Review score",
   "summary.rounds": "Review rounds",
   "summary.rounds.one": "{n} round",
@@ -8,7 +8,5 @@
   "summary.time": "Time spent",
   "summary.minutes": "{m}m",
   "summary.hours": "{h}h",
-  "summary.hours_minutes": "{h}h {m}m",
-  "summary.pr": "PR #{n}",
-  "summary.changes": "Changes"
+  "summary.hours_minutes": "{h}h {m}m"
 }

@@ -29,10 +29,7 @@
       {/each}
     </ul>
   {:else}
-    <p class="summary">
-      {t(body.ok ? 'thread.review.ok' : 'thread.review.fail')} ·
-      <code>{body.commit.slice(0, 7)}</code>
-    </p>
+    <p class="summary">{t(body.ok ? 'thread.review.ok' : 'thread.review.fail')}</p>
   {/if}
 </div>
 

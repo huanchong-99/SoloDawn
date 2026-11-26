@@ -166,11 +166,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           one('.head button').click();
           flushSync();
           expect(one<HTMLDialogElement>('dialog').open).toBe(true);
-          const [name, repo, , member] = all<HTMLInputElement>('dialog input.input');
+          const [name, member] = all<HTMLInputElement>('dialog input.input');
           fill(name, ' Handbook ');
-          fill(repo, 'https://git.example/team/handbook.git');
           fill(member, 'Alex');
-          fill(one<HTMLTextAreaElement>('dialog textarea'), 'pnpm test\n\n pnpm check ');
           one('dialog form').dispatchEvent(
             new Event('submit', { bubbles: true, cancelable: true }),
           );
@@ -187,13 +185,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           n: created,
           g: created,
           name: 'Handbook',
-          kind: 'project',
-          repo: 'https://git.example/team/handbook.git',
-          base: 'main',
-          forge: 'github',
-          checks: ['pnpm test', 'pnpm check'],
           member_name: 'Alex',
         });
+        expect(Object.keys(payload).toSorted()).toEqual(
+          ['t', 'n', 'ts', 'g', 'op', 'name', 'member_name'].toSorted(),
+        );
         expect((command.env as p.Envelope).k).toBe('this-browser');
         expect(home.groups.get(created)!.name).toBe('Handbook');
       });
@@ -363,7 +359,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     And(
       'its chat opens as a team group, ready for the first message and for inviting people, and without AIs',
       async () => {
-        await vi.waitFor(() => expect(first.store.groups.at(-1)!.info?.kind).toBe('team'));
+        await vi.waitFor(() =>
+          expect((first.store.groups.at(-1)!.info as { kind?: string } | undefined)?.kind).toBe(
+            'team',
+          ),
+        );
         go(location.hash);
         expect(text('.chat-head h2')).toBe('Studio');
         expect(text('.chat-head p')).toBe('Team group · Members 1 · workstation');
@@ -469,11 +469,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     openPage();
     one('.head button').click();
     flushSync();
-    const [name, repo, , member] = all<HTMLInputElement>('dialog input.input');
+    const [name, member] = all<HTMLInputElement>('dialog input.input');
     fill(name, 'Notes');
-    fill(repo, 'https://git.example/team/notes.git');
     fill(member, 'Alex');
-    const select = all<HTMLSelectElement>('dialog select')[1];
+    const select = one<HTMLSelectElement>('dialog select');
     expect([...select.options].map((option) => option.textContent!.trim())).toEqual([
       'workstation',
       'laptop',
@@ -552,13 +551,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         first.drop();
         show(CreateGroup, { open: true });
         expect(one<HTMLDialogElement>('dialog').open).toBe(true);
-        expect([...all<HTMLSelectElement>('dialog select')[1].options]).toEqual([]);
+        // With no computer there is nothing to choose a home from.
+        expect(all('dialog select')).toEqual([]);
       });
       When('the computer connects and the person creates the group "Notes"', async () => {
         await read();
-        const [name, repo, , member] = all<HTMLInputElement>('dialog input.input');
+        const [name, member] = all<HTMLInputElement>('dialog input.input');
         fill(name, 'Notes');
-        fill(repo, 'https://git.example/team/notes.git');
         fill(member, 'Alex');
         create();
         await new Promise((later) => setTimeout(later, 5));

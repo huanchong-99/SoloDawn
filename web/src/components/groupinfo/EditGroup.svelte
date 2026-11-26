@@ -5,14 +5,12 @@
   import { t } from '../../lib/prefs.svelte';
   import type { GroupRow } from '../../lib/proto';
   import Failure from '../Failure.svelte';
-  import TemplateEditor from '../forge/TemplateEditor.svelte';
   import Icon from '../Icon.svelte';
   import LimitFields from './LimitFields.svelte';
   import SecretaryWarning from './SecretaryWarning.svelte';
   import { secretaryCandidates } from './trust';
 
-  /** What an admin changes of a group (contracts/commands.md 1.1 `group set`). A team group has
-   *  its name only (contracts/step-2/watch-team.md section 7). */
+  /** What an admin changes of a group (contracts/commands.md 1.1 `group set`). */
   let { group, info, onclose }: { group: Group; info: GroupRow; onclose: () => void } = $props();
   const uid = $props.id();
   let dialog: HTMLDialogElement;
@@ -20,7 +18,6 @@
   let draft = $state(untrack(() => draftOf(info)));
   let busy = $state(false);
   let failed = $state('');
-  const project = $derived(info.kind === 'project');
   const changes = $derived(changesOf(before, draft, info.limits));
   const candidates = $derived(secretaryCandidates(group));
   const selected = $derived(group.member(draft.secretary));
@@ -53,68 +50,47 @@
       <span>{t('groups.create.name')}</span>
       <input class="input" bind:value={draft.name} required pattern=".*\S.*" maxlength="80" />
     </label>
-    {#if project}
-      {#if candidates.length}
-        <label class="field">
-          <span id={`${uid}-secretary`}>{t('groupinfo.secretary')}</span>
-          <select class="input" aria-labelledby={`${uid}-secretary`} bind:value={draft.secretary}>
-            <option value="" disabled>{t('groupinfo.secretary.choose')}</option>
-            {#each candidates as ai (ai.id)}<option value={ai.id}>{ai.name}</option>{/each}
-          </select>
-        </label>
-      {/if}
-      {#if selected?.kind === 'ai'}
-        <SecretaryWarning account={selected.account} owner={selected.user} {people} />
-      {/if}
+    {#if candidates.length}
       <label class="field">
-        <span id={`${uid}-checks`}>{t('groups.create.checks')}</span>
-        <textarea
-          class="input mono"
-          aria-labelledby={`${uid}-checks`}
-          aria-describedby={`${uid}-checks-hint`}
-          bind:value={draft.checks}
-          rows="3"
-          placeholder={'go vet ./...\ngo test ./...'}
-          autocapitalize="off"
-          spellcheck="false"></textarea>
-        <span class="hint" id={`${uid}-checks-hint`}>{t('groups.create.checks.hint')}</span>
+        <span id={`${uid}-secretary`}>{t('groupinfo.secretary')}</span>
+        <select class="input" aria-labelledby={`${uid}-secretary`} bind:value={draft.secretary}>
+          <option value="" disabled>{t('groupinfo.secretary.choose')}</option>
+          {#each candidates as ai (ai.id)}<option value={ai.id}>{ai.name}</option>{/each}
+        </select>
       </label>
-      <fieldset class="field" aria-describedby={`${uid}-scores-hint`}>
-        <legend class="sr">{t('groupinfo.scores')}</legend>
-        <div class="scores">
-          {#each scores as score (score)}
-            <label class="field">
-              <span>{t(`groupinfo.${score}`)}</span>
-              <input
-                class="input"
-                type="number"
-                inputmode="numeric"
-                min="1"
-                max="100"
-                required
-                bind:value={draft[score]}
-              />
-            </label>
-          {/each}
-        </div>
-        <span class="hint" id={`${uid}-scores-hint`}>{t('groupinfo.scores.hint')}</span>
-      </fieldset>
-      <div class="folds">
-        {#if draft.templates}
-          <details class="fold" oninvalidcapture={unfold}>
-            <summary><Icon name="down" sm /><b>{t('forge.custom')}</b></summary>
-            <div class="fold-body part"><TemplateEditor bind:templates={draft.templates} /></div>
-          </details>
-        {/if}
-        <details class="fold" oninvalidcapture={unfold}>
-          <summary>
-            <Icon name="down" sm /><b>{t('groupinfo.limits')}</b>
-            <span class="cut grow muted">{t('groupinfo.limits.lead')}</span>
-          </summary>
-          <div class="fold-body"><LimitFields bind:limits={draft.limits} /></div>
-        </details>
-      </div>
     {/if}
+    {#if selected?.kind === 'ai'}
+      <SecretaryWarning account={selected.account} owner={selected.user} {people} />
+    {/if}
+    <fieldset class="field" aria-describedby={`${uid}-scores-hint`}>
+      <legend class="sr">{t('groupinfo.scores')}</legend>
+      <div class="scores">
+        {#each scores as score (score)}
+          <label class="field">
+            <span>{t(`groupinfo.${score}`)}</span>
+            <input
+              class="input"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="100"
+              required
+              bind:value={draft[score]}
+            />
+          </label>
+        {/each}
+      </div>
+      <span class="hint" id={`${uid}-scores-hint`}>{t('groupinfo.scores.hint')}</span>
+    </fieldset>
+    <div class="folds">
+      <details class="fold" oninvalidcapture={unfold}>
+        <summary>
+          <Icon name="down" sm /><b>{t('groupinfo.limits')}</b>
+          <span class="cut grow muted">{t('groupinfo.limits.lead')}</span>
+        </summary>
+        <div class="fold-body"><LimitFields bind:limits={draft.limits} /></div>
+      </details>
+    </div>
     {#if failed === 'conflict'}
       <p class="fail" role="alert">{t('groupinfo.secretary.conflict')}</p>
     {:else if failed}
@@ -161,10 +137,6 @@
   .folds summary {
     padding-inline: var(--sp-5);
     border-radius: 0;
-  }
-  .part {
-    display: grid;
-    gap: var(--sp-4);
   }
   .fold-body {
     padding-inline: var(--sp-5);

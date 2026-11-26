@@ -45,13 +45,14 @@
   const intoThread = (key: 'thread.reply' | 'thread.reply.hint') =>
     task && t(key).replace('{task}', `T-${task.num}`);
   const label = $derived(intoThread('thread.reply') ?? t('chat.compose'));
-  // A request goes to the secretary; a group known to have none has only the AIs to mention.
-  const mainHint = $derived(
-    group.info && !group.info.secretary ? 'chat.compose.hint.solo' : 'chat.compose.hint',
-  );
-  const hint = $derived(
-    intoThread('thread.reply.hint') ?? t(group.info?.kind === 'team' ? 'team.compose' : mainHint),
-  );
+  // A request goes to the secretary; a group known to have none has only the AIs to mention, and
+  // a group of people only has people to write to.
+  const mainHint = $derived.by(() => {
+    if (!group.info || group.info.secretary) return 'chat.compose.hint';
+    const ai = group.members.some((member) => member.kind === 'ai');
+    return ai ? 'chat.compose.hint.solo' : 'chat.compose.hint.people';
+  });
+  const hint = $derived(intoThread('thread.reply.hint') ?? t(mainHint));
 
   // The field is as tall as its text, up to its limit in the styles.
   $effect(() => {

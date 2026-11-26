@@ -9,6 +9,7 @@
     selectableCandidates,
     suggestedName,
     type Candidate,
+    type Refusal,
   } from '../../lib/members';
   import type { Points } from '../../lib/mounts.svelte';
   import { nodes } from '../../lib/nodes.svelte';
@@ -16,14 +17,14 @@
   import { t } from '../../lib/prefs.svelte';
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
-  import Commands from '../forge/Commands.svelte';
   import SecretaryWarning from '../groupinfo/SecretaryWarning.svelte';
   import Mount from '../Mount.svelte';
   import ProfileFields from '../profile/ProfileFields.svelte';
+  import FolderPicker from './FolderPicker.svelte';
   import { newDraft, tooLong } from '../profile/profile';
 
-  /** The dialog that adds a registered AI from one of the owner's computers to the group
-   *  (contracts/commands.md section 2, `host.join`). */
+  /** The dialog that adds a registered AI from one of the owner's computers to the group, in a
+   *  folder of that computer (contracts/commands.md section 2, `host.join`). */
   let {
     group,
     open = $bindable(false),
@@ -46,8 +47,10 @@
   let customName = $state(false);
   let secretary = $state(false);
   let busy = $state(false);
-  let failed = $state('');
+  let failed = $state.raw<Refusal>();
+  let taken = $state(false);
   let draft = $state(newDraft());
+  let workspace = $state('');
 
   const candidates = $derived(candidatesOf(group, owned, nodes.infos));
   const selectable = $derived(selectableCandidates(candidates));
@@ -64,7 +67,9 @@
       name = '';
       customName = false;
       secretary = false;
-      failed = '';
+      failed = undefined;
+      taken = false;
+      workspace = '';
       draft = newDraft();
       nodes.sync(homes, true);
     });
@@ -88,6 +93,7 @@
   });
 
   function pickCandidate(candidate: Candidate) {
+    if (candidate !== chosen) workspace = '';
     chosen = candidate;
     if (candidate.agent === 'external') secretary = false;
     if (!customName) name = suggestedName(group, candidate.agent, secretary);
@@ -100,17 +106,19 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    failed = '';
+    failed = undefined;
     const candidate = chosen;
     const trimmed = name.trim();
-    if (!candidate || !group.info || !trimmed) return;
-    const target = owned.find((home) => home === candidate.home);
+    if (!candidate || !group.info || !trimmed || !workspace) return;
+    // A name taken in the group is said here: the computer's `conflict` is about the folder.
+    taken = group.members.some((member) => member.name === trimmed);
+    if (taken) return;
     busy = true;
-    const code = await joinGroup(target, group, candidate, trimmed, secretary, draft);
+    const ai = { candidate, name: trimmed, secretary, workspace, draft };
+    failed = await joinGroup(group.g, group.info.home, ai);
     busy = false;
-    if (code === 'lost' && !target?.ctl) chosen = selectable[0];
-    if (code) failed = code;
-    else {
+    if (failed?.code === 'lost' && !candidate.home.ctl) chosen = selectable[0];
+    if (!failed) {
       dialog.close();
       onjoined?.({ group, candidate, name: trimmed });
     }
@@ -173,6 +181,20 @@
       {/if}
     </fieldset>
 
+    {#if chosen}
+      <div class="field">
+        <span>{t('member.folder')}</span>
+        <FolderPicker
+          home={chosen.home}
+          agent={chosen.agent}
+          ai={name.trim() || cliName(chosen.agent)}
+          computer={chosen.hostName}
+          {group}
+          bind:workspace
+        />
+      </div>
+    {/if}
+
     <Mount
       at="member.add"
       props={{
@@ -220,19 +242,15 @@
       </div>
     {/if}
 
-    {#if failed}
+    {#if taken}
+      <p class="fail" role="alert">{t('member.join.error.conflict')}</p>
+    {:else if failed}
       {@const message = joinError(failed)}
       {#if message}
         <p class="fail" role="alert">{message}</p>
       {:else}
-        <Failure code={failed} />
+        <Failure code={failed.code} />
       {/if}
-    {/if}
-    {#if group.info?.kind === 'project'}
-      <details class="fold">
-        <summary>{t('forge.commands')}</summary>
-        <div class="fold-body"><Commands info={group.info} /></div>
-      </details>
     {/if}
     <footer class="row">
       <span class="grow"></span>
@@ -241,7 +259,7 @@
       </button>
       <button
         class="btn btn-primary"
-        disabled={busy || (!chosen && !selectable.length) || tooLong(draft)}
+        disabled={busy || (!chosen && !selectable.length) || !workspace || tooLong(draft)}
       >
         {t('member.join.submit')}
       </button>

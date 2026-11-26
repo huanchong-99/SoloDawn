@@ -107,7 +107,7 @@ it('says on the first press that an AI on unfinished tasks cannot be removed, an
   expect(request).not.toHaveBeenCalled();
   // Once the tasks are over the same place asks for the second press.
   group.apply([
-    { ...on('t-a', 12), state: 'merged', seq: 30000 },
+    { ...on('t-a', 12), state: 'done', seq: 30000 },
     { ...on('t-b', 14), state: 'cancelled', seq: 30001 },
   ]);
   flushSync();

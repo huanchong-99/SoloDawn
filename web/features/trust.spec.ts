@@ -23,12 +23,13 @@ describeFeature(feature, ({ AfterEachScenario, Scenario }) => {
     group.apply([
       person,
       { ...ai, user: 'another-owner', account: 'personal' },
+      // The removed fields stay in the row this scenario describes; WB-C rewrites it.
       {
         ...p.decode(p.GroupRow, goldens[forge === 'custom' ? 'row-group-custom' : 'row-group']),
         forge,
         secretary: ai.id,
         checks: ['pnpm check', 'pnpm test'],
-      },
+      } as p.GroupRow,
     ]);
     show(GroupDetails, { group });
   }

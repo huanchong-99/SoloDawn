@@ -211,6 +211,7 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
       expect(all('.member > dl')).toHaveLength(2);
       expect(texts('.member > dl dt')).toEqual([
         'Computer',
+        'Folder',
         'Account',
         'Model',
         'Level',
@@ -219,6 +220,7 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
         'Allow list',
         'Approval delegates',
         'Computer',
+        'Folder',
         'Account',
         'Model',
         'Level',

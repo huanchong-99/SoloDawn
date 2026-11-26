@@ -5,6 +5,6 @@ import GroupDetails from './GroupDetails.svelte';
 export default {
   'chat.side': [
     { order: 19, component: GroupDetails },
-    { order: 20, component: GroupInfoPanel, project: true },
+    { order: 20, component: GroupInfoPanel },
   ],
 } satisfies Mounts;

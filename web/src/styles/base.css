@@ -1590,12 +1590,15 @@ textarea.input {
    little smaller than it is, over a scrim that fades in; it closes at once. On a phone it is a
    sheet that comes up from the bottom edge. */
 .dlg {
+  --dlg-x: var(--sp-6);
+  --dlg-b: var(--sp-6);
+  --dlg-bg: var(--surface);
   width: min(480px, calc(100vw - 32px));
   max-height: calc(100dvh - 32px);
-  padding: var(--sp-6);
+  padding: var(--sp-6) var(--dlg-x) var(--dlg-b);
   border: 0;
   border-radius: var(--r-xl);
-  background: var(--surface);
+  background: var(--dlg-bg);
   color: var(--text);
   box-shadow: var(--shadow-dlg);
 
@@ -1622,6 +1625,20 @@ textarea.input {
     flex-direction: column;
     gap: var(--sp-4);
   }
+  /* The actions stay in sight while a long dialog scrolls: the row sticks to its lower edge,
+     over the dialog's own padding, on a line of its own. */
+  > :is(form, .body) > footer.row:last-child {
+    position: sticky;
+    bottom: calc(-1 * var(--dlg-b));
+    margin: 0 calc(-1 * var(--dlg-x)) calc(-1 * var(--dlg-b));
+    padding: var(--sp-3) var(--dlg-x) var(--dlg-b);
+    border-top: 1px solid var(--line);
+    background: var(--dlg-bg);
+  }
+  /* A dialog over a dialog is one step lighter in the dark, so its edge shows. */
+  & .dlg {
+    --dlg-bg: light-dark(var(--surface), var(--surface-2));
+  }
 }
 @keyframes dialog {
   from {
@@ -1634,9 +1651,10 @@ textarea.input {
   .dlg.wide {
     width: 100%;
     max-width: 100%;
+    --dlg-x: var(--sp-4);
+    --dlg-b: calc(var(--sp-5) + env(safe-area-inset-bottom));
     max-height: calc(100dvh - 24px);
     margin: auto 0 0;
-    padding: var(--sp-6) var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom));
     border-radius: var(--r-xl) var(--r-xl) 0 0;
 
     &[open] {
@@ -1745,12 +1763,25 @@ textarea.input {
   color: var(--text-2);
   font-size: var(--fs-sm);
 
-  code {
+  .path {
     flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     color: var(--text);
+  }
+}
+/* A folder's path on one line, cut at its start so the folder's own name stays in sight; the text
+   sits in a <bdi>, so the slashes keep their order. In a list, the chosen one shows whole. */
+.path {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+
+  .pick-row:has(:checked) & {
+    overflow-wrap: anywhere;
+    white-space: normal;
+    direction: ltr;
   }
 }

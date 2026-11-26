@@ -188,8 +188,6 @@
                         </li>
                       {/each}
                     </ul>
-                  {:else}
-                    <p class="muted"><code>{body.commit.slice(0, 7)}</code></p>
                   {/if}
                 </li>
               {/each}

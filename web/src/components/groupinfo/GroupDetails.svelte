@@ -2,8 +2,6 @@
   import type { Group } from '../../lib/groups.svelte';
   import { isAdmin } from '../../lib/members';
   import { t } from '../../lib/prefs.svelte';
-  import Commands from '../forge/Commands.svelte';
-  import Icon from '../Icon.svelte';
   import EditGroup from './EditGroup.svelte';
   import SecretaryWarning from './SecretaryWarning.svelte';
   import { homeOwner } from './trust';
@@ -33,15 +31,9 @@
     <dd>{ownerName}</dd>
   </dl>
   {#if !group.home.owner}<p class="hint">{t('groupinfo.home.foreign')}</p>{/if}
-  {#if info?.kind === 'project'}
-    <details class="fold">
-      <summary><Icon name="down" sm />{t('forge.commands')}</summary>
-      <div class="fold-body"><Commands {info} /></div>
-    </details>
-    {#if secretary?.kind === 'ai'}
-      <p>{t('groupinfo.secretary')} · {secretary.name}</p>
-      <SecretaryWarning account={secretary.account} owner={secretary.user} {people} />
-    {/if}
+  {#if secretary?.kind === 'ai'}
+    <p>{t('groupinfo.secretary')} · {secretary.name}</p>
+    <SecretaryWarning account={secretary.account} owner={secretary.user} {people} />
   {/if}
   {#if info}
     {#if isAdmin(group)}
@@ -65,10 +57,5 @@
     gap: var(--sp-2);
     padding: var(--sp-4) var(--sp-4) 14px;
     border-top: 1px solid var(--line);
-  }
-  /* A disclosure row like the others in the side panel: a chevron and the label in text. */
-  .fold > summary {
-    color: var(--text);
-    font-weight: 500;
   }
 </style>

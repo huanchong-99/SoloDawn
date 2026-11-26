@@ -24,6 +24,7 @@ import {
   terminalDisabledReason,
   usageMeter,
   waitingOnMe,
+  unavailable,
   waitingOnOther,
   watchDisabledReason,
   type Candidate,
@@ -1173,5 +1174,42 @@ describe('people and groups made with them', () => {
       });
       expect(sent).toHaveLength(at);
     }
+  });
+});
+
+describe('AIs that cannot be added now', () => {
+  const candidate = (changes: Partial<Candidate> = {}): Candidate => ({
+    key: 'dev:claude',
+    home: makeHome(),
+    device: 'dev',
+    hostName: 'workstation',
+    agent: 'claude',
+    account: 'personal',
+    loginOk: true,
+    inGroup: false,
+    ...changes,
+  });
+
+  it('say why: no account type, a computer away, a sign-in no longer valid', () => {
+    expect(unavailable(candidate())).toBeUndefined();
+    expect(unavailable(candidate({ agent: 'external', account: null }))).toBeUndefined();
+    expect(unavailable(candidate({ account: null }))).toBe(
+      'Choose an account type on the Computers page first',
+    );
+    expect(unavailable(candidate({ home: makeHome({ online: false }) }))).toBe(
+      'Its computer cannot be reached now',
+    );
+    expect(unavailable(candidate({ loginOk: false }))).toBe(
+      'Its sign-in is no longer valid: sign in again on its computer',
+    );
+  });
+
+  it('are listed for a group still being made, none of them in it', () => {
+    const home = makeHome();
+    const info = p.decode(p.HostInfo, goldens['host-info-answer']);
+    const listed = candidatesOf(undefined, [home], new Map([[home, info]]));
+    expect(listed.map((each) => [each.agent, each.inGroup])).toEqual(
+      info.agents.map((agent) => [agent.agent, false]),
+    );
   });
 });
