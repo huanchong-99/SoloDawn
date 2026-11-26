@@ -17,7 +17,7 @@ const sentences = {
   watch: 'confirm.request.watch',
 } as const;
 
-const nameOf = (group: Group, id: string) => group.member(id)?.name ?? t('chat.gone');
+const nameOf = (group: Group, id: string | undefined) => group.member(id)?.name ?? t('chat.gone');
 
 /** Who asked: the author of a `watch` card, or else of the request. A brief is written by the
  *  secretary; the word behind its roles is the person who confirmed it. */
@@ -53,6 +53,7 @@ export function confirmStatus(group: Group, { body, state }: Confirm): string {
     return t('confirm.waiting').replace('{who}', () => people.join(t('confirm.sep')));
   }
   const label = t(`confirm.${state.status}`).replace('{time}', clock(state.at, prefs.lang));
-  if (state.status === 'expired') return label;
-  return label.replace('{who}', () => nameOf(group, state.by));
+  // Only the label of a card that was decided has a {who}; an expired card has no `by`.
+  const { by } = state as { by?: string };
+  return label.replace('{who}', () => nameOf(group, by));
 }

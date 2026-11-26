@@ -178,8 +178,19 @@ jobs:
             if $ENV.ONLY != "" then [$ENV.ONLY] + [.mutate[] | select(startswith("!"))]
             else .mutate + [$ENV.SKIP | "!" + .] end | join(",")' stryker.config.json)
           echo "--mutate $mutate"
-          pnpm exec stryker run --mutate "$mutate" 2>&1 | tee stryker.log
-          exit ${PIPESTATUS[0]}
+          # Vitest's github-actions reporter appends a report to the step summary after every run, and
+          # Stryker runs the tests once per mutant: the summary reached 1056 KiB, over GitHub's 1 MiB limit.
+          # Stryker runs without a summary file; the step writes the score and the mutants that lived.
+          GITHUB_STEP_SUMMARY= pnpm exec stryker run --mutate "$mutate" 2>&1 | tee stryker.log
+          s=${PIPESTATUS[0]}
+          {
+            echo "### web ${{ matrix.name }}"
+            echo '```'
+            grep -E '^(File +\||All files)' stryker.log
+            grep -E '^(\[(Survived|NoCoverage)\]|src/|[-+] )' stryker.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $s
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

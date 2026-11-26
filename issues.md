@@ -1998,3 +1998,9 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: mutation run 45739942536 left `internal/host/limits.go:258` (`<` to `<=`), `takeover.go:251` and `codex.go:600` (`>` to `>=`) alive.
 - Cause: `holdLimits` compared the clock with `rateUntil`, but the timer of `onRateLimited` deletes the entry at the reset, so only the entry's presence decides the hold. `lastTask` and `selectRateWindow` differ under the mutants only on a tie (equal `LastActive`, equal `usedPercent`), which no contract defines.
 - Status: resolved. `holdLimits` checks that the entry exists; `lastTask` and `selectRateWindow` use `slices.MaxFunc`, which keeps the first on a tie as before and has no comparison to mutate.
+### 2026-11-26 · bug · The web mutation job's step summary passed GitHub's 1 MiB limit
+
+- Symptom: `$GITHUB_STEP_SUMMARY upload aborted ... got 1056k` in the shard "web rest" of `mutation.yml`.
+- Cause: the vitest github-actions reporter (on whenever `GITHUB_ACTIONS` is set) appends a report to `$GITHUB_STEP_SUMMARY` after every test run (`jobSummary`), and Stryker runs the tests once per mutant.
+- Status: resolved. The Mutate step runs Stryker with `GITHUB_STEP_SUMMARY` empty and then writes the score table and the mutants that lived or have no coverage to the summary.
+- Mutants of the final gate that could not change behaviour, so the code that held them is gone: `confirm.ts` `if (state.status === 'expired') return label` (the label of an expired card has no `{who}`, so the replacement callback is never called) and `notify.svelte.ts` `route.page === 'terminal'` (only the terminal page has a `member` in its address, and `route.params` is not typed by page).
