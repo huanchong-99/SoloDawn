@@ -63,6 +63,8 @@ type Pair struct {
 	Name string `json:"name"`
 	Role string `json:"role"`
 	MAC  string `json:"mac"`
+	// Expires is when the sender's window for the secret ends, Unix ms.
+	Expires int64 `json:"exp,omitempty"`
 }
 
 type DeviceChange struct {

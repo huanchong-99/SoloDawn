@@ -25,7 +25,7 @@ import {
 import { loadOwner, saveOwner } from './owner';
 import { mac, newSecret, parseSecret, room, shown, verifyPair } from './pairing';
 import type { Listener, Options, Path } from './peer';
-import { choose } from './prefs.svelte';
+import { choose, textIn } from './prefs.svelte';
 import type { Ctl, Devlog, HostInfo, Pair, Push, Welcome } from './proto';
 
 interface FakePeer {
@@ -33,6 +33,7 @@ interface FakePeer {
   listener: Listener;
   onpath: (path: Path | undefined) => void;
   sent: Devlog[];
+  handle: { unreached: () => void };
 }
 
 interface FakeHub {
@@ -63,9 +64,10 @@ vi.mock('./peer', () => ({
         listen: () => Listener,
         onpath: (path: Path | undefined) => void = () => {},
       ) => {
-        const entry: FakePeer = { target, listener: listen(), onpath, sent: [] };
-        hub.peers.push(entry);
-        return { send: (frame: Devlog) => entry.sent.push(frame) };
+        const sent: Devlog[] = [];
+        const handle = { send: (frame: Devlog) => sent.push(frame), unreached: () => {} };
+        hub.peers.push({ target, listener: listen(), onpath, sent, handle });
+        return handle;
       },
     };
   },
@@ -439,6 +441,60 @@ describe('PairingSession mock, countdown and storage checks', () => {
     expect(session.stage).toBe('expired');
     expect(session.code).toBe('');
     expect(hubs[0].closed).toBe(1);
+  });
+
+  it('ends a role b window with the expiry of the code’s creator and says why it failed', async () => {
+    vi.useFakeTimers(countdownClock);
+    vi.setSystemTime(1_000_000);
+    const node = await newDevice();
+    const link = newSecret(crypto);
+    location.hash = `#pair=${shown(link)}`;
+    const session = new PairingSession('live');
+    await until(() => expect(hubs).toHaveLength(1));
+    const roomId = await room(crypto, link);
+    const url = hubs[0].options.urls[0];
+    hubs[0].options.heard!(url, { t: 'joined', room: roomId });
+    expect(hubs[0].sent[0].frame).toMatchObject({ data: { exp: 1_600_000 } });
+    const nodeSelf = { role: 'a' as const, k: node.id, kind: 'node' as const, name: 'desk' };
+    const data = { t: 'pair' as const, ...nodeSelf, mac: await mac(crypto, link, nodeSelf) };
+    hubs[0].options.heard!(url, { t: 'room', room: roomId, data: { ...data, exp: 1_060_000 } });
+    await until(() => expect(hubs[0].peers).toHaveLength(1));
+    hubs[0].peers[0].handle.unreached();
+    expect(session.stage).toBe('linking');
+    expect(session.error).toStrictEqual({ step: 3, key: 'unreached' });
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(session.stage).toBe('linking');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(session.stage).toBe('expired');
+    expect(session.error?.key).toBe('unreached');
+    hubs[0].peers[0].handle.unreached();
+    expect(hubs[0].closed).toBe(1);
+  });
+
+  it('forgets an unreached attempt once the node answers', async () => {
+    const node = await newDevice();
+    const link = newSecret(crypto);
+    location.hash = `#pair=${shown(link)}`;
+    const session = new PairingSession('live');
+    await until(() => expect(hubs).toHaveLength(1));
+    const nodeSelf = { role: 'a' as const, k: node.id, kind: 'node' as const, name: 'desk' };
+    const data = { t: 'pair' as const, ...nodeSelf, mac: await mac(crypto, link, nodeSelf) };
+    hubs[0].options.heard!(hubs[0].options.urls[0], {
+      t: 'room',
+      room: await room(crypto, link),
+      data: { ...data, exp: Date.now() + 3_600_000 },
+    });
+    await until(() => expect(hubs[0].peers).toHaveLength(1));
+    hubs[0].peers[0].handle.unreached();
+    const ctl = makeCtl(async () => hostInfoOf(node.id, []));
+    hubs[0].peers[0].listener.online(ctl, welcomeOf(node.id, true));
+    expect(session.error).toBeUndefined();
+    session.destroy();
+  });
+
+  it('does not claim that the node keeps trying a direct connection', () => {
+    expect(textIn('en', 'pairing.status.relay_note')).not.toMatch(/keeps trying/);
+    expect(textIn('zh-CN', 'pairing.status.relay_note')).not.toMatch(/继续尝试/);
   });
 
   it('counts the mock window down and stops counting after destroy or a bad secret', () => {

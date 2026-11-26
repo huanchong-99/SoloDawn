@@ -52,7 +52,8 @@ rendezvous.
     exits 0. The AI reports it to the owner.
 
 Failure at any step shows the step and the reason on the page and in the
-command's output. The secret is discarded when pairing succeeds, fails, or
+command's output. A browser and node that found each other but could not
+connect say so, and point at a firewall on the computer or its network. The secret is discarded when pairing succeeds, fails, or
 times out.
 
 ## B. Adding another computer

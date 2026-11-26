@@ -117,7 +117,8 @@ async function openMock(onpush: (push: Push) => void) {
 }
 
 export type Stage = 'waiting' | 'linking' | 'accounts' | 'ready' | 'expired' | 'failed';
-export type ErrorKey = 'bad_secret' | 'unadopted' | 'not_owner' | 'lost' | 'refused' | 'storage';
+export type ErrorKey =
+  'bad_secret' | 'unadopted' | 'not_owner' | 'lost' | 'refused' | 'storage' | 'unreached';
 
 export interface NodeSummary {
   id: string;
@@ -325,7 +326,8 @@ export class PairingSession {
       this.browserFingerprint = device.fingerprint;
       this.#roomId = await room(crypto, this.#secret);
       const self = { role: this.role, k: device.id, kind: 'browser', name: browserName };
-      this.#pairMsg = { t: 'pair', ...self, mac: await mac(crypto, this.#secret, self) };
+      const sum = await mac(crypto, this.#secret, self);
+      this.#pairMsg = { t: 'pair', ...self, mac: sum, exp: this.#expiresAt };
       return device;
     } catch (err) {
       this.#fail(run, 1, err instanceof StorageBlocked ? 'storage' : 'lost');
@@ -363,7 +365,13 @@ export class PairingSession {
     const expected = this.role === 'a' ? 'b' : 'a';
     const valid = await verifyPair(crypto, this.#secret, data, expected);
     if (!valid || !this.#active(run)) return;
+    this.#takeExpiry(data.exp);
     await this.#dialNode(run, data);
+  }
+
+  /** Role b ends its window with the code's creator (contracts/envelope.md section 6). */
+  #takeExpiry(exp = Infinity) {
+    if (this.role === 'b') this.#expiresAt = Math.min(this.#expiresAt, exp);
   }
 
   async #dialNode(run: symbol, data: Pair) {
@@ -383,6 +391,9 @@ export class PairingSession {
         if (this.#active(run)) this.path = path;
       },
     );
+    this.#peer.unreached = () => {
+      if (this.#active(run)) this.error = { step: 3, key: 'unreached' };
+    };
   }
 
   async #onOnline(run: symbol, ctl: Ctl, welcome: Welcome) {
@@ -390,7 +401,9 @@ export class PairingSession {
     this.#ctl = ctl;
     this.#addrs[welcome.device] = welcome.addrs;
     this.node = { ...this.node!, name: welcome.name, version: welcome.version };
-    if (!this.enrolled) await this.#beginEnrolment(run, ctl, welcome);
+    if (this.enrolled) return;
+    this.error = undefined;
+    await this.#beginEnrolment(run, ctl, welcome);
   }
 
   async #beginEnrolment(run: symbol, ctl: Ctl, welcome: Welcome) {

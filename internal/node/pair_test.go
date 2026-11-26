@@ -742,8 +742,8 @@ func checkPresetAndFailedNameSave(t *testing.T, phShared *pairHarness) {
 	phShared.pairer.onPairAdopt(&sesConn{device: sesKey("unrelated").ID(), raw: newFakeCtl()})
 	waitAttempts(t, phShared.pairer, 1)
 	cancel()
-	if got := <-errCh; !errors.Is(got, context.Canceled) {
-		t.Fatalf("shared role b cancel = %v", got)
+	if got := <-errCh; !errors.Is(got, errNodeStopped) {
+		t.Fatalf("shared role b cancel = %v, want errNodeStopped", got)
 	}
 }
 
@@ -825,6 +825,46 @@ func checkSaveLabelStoreError(t *testing.T) {
 	if err := <-aSaveErr.outcome; err == nil {
 		t.Fatal("expected label store error in finish")
 	}
+}
+
+// Role b ends with the code's creator (an earlier exp of the verified pair
+// message, not a later one), and an expiry after the browser was found but
+// never connected says that no connection could be made.
+func TestPairRoleBTakesCreatorExpiry(t *testing.T) {
+	ph := newPairHarness(t, nil, true)
+	secret := identity.NewSecret()
+	errCh := make(chan error, 1) // single reader: TestPairRoleBTakesCreatorExpiry
+	go func() {
+		_, err := ph.pairer.Pair(t.Context(), PairRequest{Secret: secret.String()})
+		errCh <- err
+	}()
+	waitAttempts(t, ph.pairer, 1)
+	ph.clock.WaitWaiters(t, 1)
+	a := onlyAttempt(ph.pairer)
+	own := a.link.Expires
+	creator := proto.Pair{Type: "pair", Key: sesKey("creator").ID(), Kind: "browser", Name: "b", Role: "a", Expires: own + 1}
+	creator.MAC = secret.MAC(creator)
+	ph.pairer.acceptPair(a, creator)
+	a.peer = proto.Pair{}
+	creator.Expires = own - 240_000
+	ph.pairer.acceptPair(a, creator)
+	if a.link.Expires != own-240_000 {
+		t.Fatalf("expiry = %d, want the creator's %d", a.link.Expires, own-240_000)
+	}
+	ph.clock.WaitWaiters(t, 2)
+	ph.clock.FireAll()
+	if got := <-errCh; !errors.Is(got, errUnreached) {
+		t.Fatalf("Pair = %v, want errUnreached", got)
+	}
+}
+
+func onlyAttempt(p *Pairer) *pairAttempt {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for a := range p.attempts {
+		return a
+	}
+	return nil
 }
 
 func testPairConcurrentAndFullRoom(t *testing.T) {

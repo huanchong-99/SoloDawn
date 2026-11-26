@@ -81,6 +81,11 @@ solodawn pair <secret> --name "<label>"
 Check the pairing result against the device label and fingerprint shown
 in the browser.
 
+When pairing succeeds, the node registers itself to start at login:
+`~/Library/LaunchAgents/org.solodawn.node.plist` on macOS, the systemd user
+unit `solodawn.service` on Linux, and the scheduled task `SoloDawn-<user>` on
+Windows.
+
 Add only repositories you trust, because their `CLAUDE.md`, `AGENTS.md` and
 hooks are used by the AIs that work on them. A Qwen Code AI may load a
 repository's own configuration (`.qwen/settings.json`, `QWEN.md`) even in a

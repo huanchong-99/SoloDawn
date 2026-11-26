@@ -26,7 +26,9 @@ const pairWindow = 10 * time.Minute
 var (
 	errNoRendezvous = errors.New("no rendezvous URL configured")
 	errRoomFull     = errors.New("pairing room is full")
-	errPairExpired  = errors.New("pairing secret expired")
+	errPairExpired  = errors.New("pairing code expired")
+	errUnreached    = errors.New("pairing code expired: no connection to the browser could be made; check a firewall on this computer or its network")
+	errNodeStopped  = errors.New("the node stopped")
 	pairSchemes     = map[string]string{"wss": "https", "https": "https", "ws": "http", "http": "http"}
 )
 
@@ -309,11 +311,28 @@ func (p *Pairer) waitPair(ctx context.Context, a *pairAttempt) error {
 	case err := <-a.outcome:
 		return err
 	case <-p.cfg.After(pairWindow):
-		p.finish(a, errPairExpired)
+		p.finish(a, p.expired(a))
 	case <-ctx.Done():
-		p.finish(a, ctx.Err())
+		p.finish(a, errNodeStopped)
 	}
 	return <-a.outcome
+}
+
+// expired says why role b's window ended: a browser that was found but never
+// connected points at the network between them.
+func (p *Pairer) expired(a *pairAttempt) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if a.peer.Key != "" && a.conn == nil {
+		return errUnreached
+	}
+	return errPairExpired
+}
+
+// expireAt ends role b's window at the expiry of the code's creator.
+func (p *Pairer) expireAt(a *pairAttempt, left time.Duration) {
+	<-p.cfg.After(left)
+	p.finish(a, p.expired(a))
 }
 
 func (p *Pairer) saveLabel(name string) error {
@@ -349,9 +368,9 @@ func (p *Pairer) registerAttempt(a *pairAttempt, cancel context.CancelFunc, dial
 	for i, path := range paths {
 		routes[i] = path.Route()
 	}
-	self := proto.Pair{Type: "pair", Key: p.cfg.Key.ID(), Kind: "node", Name: a.label, Role: a.role}
-	self.MAC = a.secret.MAC(self)
 	a.room, a.link.Expires = a.secret.Room(), p.cfg.Now().Add(pairWindow).UnixMilli()
+	self := proto.Pair{Type: "pair", Key: p.cfg.Key.ID(), Kind: "node", Name: a.label, Role: a.role, Expires: a.link.Expires}
+	self.MAC = a.secret.MAC(self)
 	a.rawSelf, a.cancel, a.routes, a.outcome = dvlMustEncode(self), cancel, routes, make(chan error, 1)
 	if dialed {
 		a.ownedPaths, a.pathsLeft = paths, len(paths)
@@ -423,6 +442,15 @@ func (p *Pairer) acceptPair(a *pairAttempt, m proto.Pair) {
 	}
 	if pairLive(a, now) && a.secret.Verify(m, a.wantRole) {
 		a.peer = m
+		p.takeExpiry(a, m.Expires, now)
+	}
+}
+
+// takeExpiry shortens role b's window to the creator's, under p.mu.
+func (p *Pairer) takeExpiry(a *pairAttempt, expires, now int64) {
+	if a.role == "b" && expires != 0 && expires < a.link.Expires {
+		a.link.Expires = expires
+		go p.expireAt(a, time.Duration(expires-now)*time.Millisecond)
 	}
 }
 

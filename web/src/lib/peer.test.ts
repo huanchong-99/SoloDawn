@@ -924,6 +924,22 @@ describe('a peer', () => {
     expect(new Set(conns).size).toBe(9);
   });
 
+  it('tells the peer that ICE failed an attempt, not that one was retired or one that served', async () => {
+    const { peer } = await attempting();
+    const unreached = vi.fn();
+    peer.unreached = unreached;
+    await failsAndRetriesAfter(1000);
+    expect(unreached).not.toHaveBeenCalled();
+    last().becomes('failed');
+    await flush();
+    expect(unreached).toHaveBeenCalledTimes(1);
+    await wait(2000);
+    await serve(last());
+    last().becomes('failed');
+    await flush();
+    expect(unreached).toHaveBeenCalledTimes(1);
+  });
+
   it('starts the series again only after a connection whose ctl stayed open 60 seconds', async () => {
     const { listeners } = await attempting();
     await failsAndRetriesAfter(1000);
