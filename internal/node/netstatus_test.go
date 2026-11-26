@@ -166,6 +166,9 @@ func TestNetStatusLiveNodeRuntime(t *testing.T) {
 	mustNoErr(t, n.saveRendezvous([]string{rvGood, rvBad}))
 	n.syncRendezvous()
 	mustNoErr(t, n.waitRVPath(rvGood))
+	if err := n.waitRVPath(rvBad); err == nil {
+		t.Fatal("waitRVPath of a rendezvous that refuses the dial = nil")
+	}
 
 	checkLiveNodeNetStatus(t, n, browserKey.ID(), rvGood, rvBad)
 	n.Close()

@@ -473,7 +473,7 @@ describe('PairingSession mock, countdown and storage checks', () => {
     expect(hubs[0].closed).toBe(1);
   });
 
-  it('forgets an unreached attempt once the node answers', async () => {
+  it('forgets an unreached attempt once the node answers and ignores one after the end', async () => {
     const node = await newDevice();
     const link = newSecret(crypto);
     location.hash = `#pair=${shown(link)}`;
@@ -491,6 +491,29 @@ describe('PairingSession mock, countdown and storage checks', () => {
     const ctl = makeCtl(async () => hostInfoOf(node.id, []));
     hubs[0].peers[0].listener.online(ctl, welcomeOf(node.id, true));
     expect(session.error).toBeUndefined();
+    session.destroy();
+    hubs[0].peers[0].handle.unreached();
+    expect(session.error).toBeUndefined();
+  });
+
+  it('keeps the full window of a role a code whatever expiry the node sends', async () => {
+    vi.useFakeTimers(countdownClock);
+    vi.setSystemTime(1_000_000);
+    const node = await newDevice();
+    const session = new PairingSession('live');
+    await until(() => expect(hubs).toHaveLength(1));
+    const secret = parseSecret(session.code);
+    const nodeSelf = { role: 'b' as const, k: node.id, kind: 'node' as const, name: 'desk' };
+    const data = { t: 'pair' as const, ...nodeSelf, mac: await mac(crypto, secret, nodeSelf) };
+    hubs[0].options.heard!(hubs[0].options.urls[0], {
+      t: 'room',
+      room: await room(crypto, secret),
+      data: { ...data, exp: 1_060_000 },
+    });
+    await until(() => expect(hubs[0].peers).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(session.stage).toBe('linking');
+    expect(session.remaining).toBe(540);
     session.destroy();
   });
 
