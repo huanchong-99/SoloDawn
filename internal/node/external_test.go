@@ -3,14 +3,17 @@ package node
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/host"
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 func serveExternalReplies(t *testing.T, lines []string, err error) *[]string {
@@ -102,4 +105,40 @@ func TestExternalLocalCommands(t *testing.T) {
 	mustEqual(t, err.Error(), "not_found: the id names no external AI of this node")
 	_, err = n.runLocalCmd(t.Context(), "done", []byte(`{"cmd":"done","run":"x"}`))
 	mustEqual(t, err != nil, true)
+}
+
+// The wait command's timeout counts seconds: a member waiting with a one-hour
+// timeout is still waiting just before the hour ends and gives up at its end.
+func TestExternalWaitTimeoutIsInSeconds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h, _, err := host.New(sesOpenStore(t), sesKey("ext-wait"), time.Now)
+		mustNoErr(t, err)
+		t.Cleanup(h.Settle)
+		group, member := string(sesID("wait-group")), string(sesID("wait-member"))
+		row := proto.AIMemberRow{
+			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: member}, Group: group, Kind: "ai", Name: "Scout"},
+			CLI:       "external", Host: h.Key.ID(), Allow: []string{}, Approvers: []string{}, State: "offline", Path: "local",
+		}
+		h.Rows.Put(group, "member", member, json.RawMessage(dvlMustEncode(row)))
+		mustNoErr(t, h.Sessions.Create(host.Session{SessionKey: host.SessionKey{Group: group, Member: member}, Kind: host.GroupSession, Agent: "external"}))
+		n := &nodeRuntime{ctx: t.Context(), host: h}
+		type result struct {
+			lines []string
+			err   error
+		}
+		done := make(chan result, 1)
+		go func() {
+			lines, err := n.runLocalCmd(t.Context(), "wait", []byte(`{"cmd":"wait","member":"`+member+`","timeout":3600}`))
+			done <- result{lines, err}
+		}()
+		time.Sleep(time.Hour - time.Nanosecond)
+		synctest.Wait()
+		mustEqual(t, len(done), 0)
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		mustEqual(t, len(done), 1)
+		got := <-done
+		mustEqual(t, len(got.lines), 0)
+		mustNoErr(t, got.err)
+	})
 }

@@ -257,23 +257,27 @@ describe('jumpToMessage in the main line', () => {
   });
 
   // A scroll by Space, Tab to a control out of view, the scrollbar, assistive technology or find.
-  it('lets the message go on a scroll that is not its own, once the jump has landed', async () => {
-    const { jumpToMessage } = await load();
-    const { scroller, layout, scrollTo } = line(1000);
-    scrollTo.mockImplementation(() => {});
-    jumpToMessage(new MouseEvent('click'), 'x-1');
-    const scroll = (top: number) => {
-      layout.top = top;
-      scroller.dispatchEvent(new Event('scroll'));
-    };
-    scroll(-900);
-    expect(scroller.style.overflowAnchor).toBe('none');
-    scroll(-1649);
-    scroll(-1651);
-    expect(scroller.style.overflowAnchor).toBe('none');
-    scroll(-1300);
-    expect([scroller.style.overflowAnchor, sizes.observed]).toEqual(['', []]);
-  });
+  // The jump's scroll is to -1650; a scroll within a pixel of it is the jump's own.
+  it.each([-1300, -1648, -1652])(
+    'lets the message go on a scroll to %i that is not its own, once the jump has landed',
+    async (away) => {
+      const { jumpToMessage } = await load();
+      const { scroller, layout, scrollTo } = line(1000);
+      scrollTo.mockImplementation(() => {});
+      jumpToMessage(new MouseEvent('click'), 'x-1');
+      const scroll = (top: number) => {
+        layout.top = top;
+        scroller.dispatchEvent(new Event('scroll'));
+      };
+      scroll(-900);
+      expect(scroller.style.overflowAnchor).toBe('none');
+      scroll(-1649);
+      scroll(-1651);
+      expect(scroller.style.overflowAnchor).toBe('none');
+      scroll(away);
+      expect([scroller.style.overflowAnchor, sizes.observed]).toEqual(['', []]);
+    },
+  );
 
   it('keeps the message on its own scroll that a growth of the line overtook', async () => {
     const { jumpToMessage } = await load();
@@ -288,12 +292,17 @@ describe('jumpToMessage in the main line', () => {
   // The line, at its top, grows below the message: the browser keeps its top, and the message.
   it('keeps the message on a scroll that leaves it in place', async () => {
     const { jumpToMessage } = await load();
+    reducedMotion = true;
     const { scroller, layout } = line(50);
     jumpToMessage(new MouseEvent('click'), 'x-1');
     layout.height += 1400;
     layout.top -= 1400;
     scroller.dispatchEvent(new Event('scroll'));
     expect(scroller.style.overflowAnchor).toBe('none');
+    // Its top two pixels off `y` is not in place.
+    layout.top += 2;
+    scroller.dispatchEvent(new Event('scroll'));
+    expect(scroller.style.overflowAnchor).toBe('');
   });
 
   it('lets the message go on a scroll that is not its own after an instant jump', async () => {
@@ -361,10 +370,47 @@ describe('jumpToMessage in the main line', () => {
     const { scroller, scrollTo } = line(1000);
     scrollTo.mockImplementation(() => {});
     jumpToMessage(new MouseEvent('click'), 'x-1');
-    scroller.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+    for (const key of ['a', 'BrowserHome', 'EndCall']) {
+      scroller.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    }
     expect(scroller.style.overflowAnchor).toBe('none');
     scroller.dispatchEvent(event);
     expect([scroller.style.overflowAnchor, sizes.observed]).toEqual(['', []]);
+  });
+
+  it('listens for the wheel and touch without blocking the scroll', async () => {
+    const { jumpToMessage } = await load();
+    const { scroller } = line(1000);
+    const add = vi.spyOn(scroller, 'addEventListener');
+    jumpToMessage(new MouseEvent('click'), 'x-1');
+    const passive = add.mock.calls
+      .filter(([type]) => type === 'wheel' || type === 'touchmove')
+      .map(([type, , options]) => [type, options]);
+    expect(passive).toEqual([
+      ['wheel', { passive: true }],
+      ['touchmove', { passive: true }],
+    ]);
+  });
+
+  // The scroller of a message let go no longer concerns the hold of the next one, on another.
+  it.each([
+    ['wheel', new WheelEvent('wheel'), false],
+    ['touchmove', new Event('touchmove'), false],
+    ['a press on the scrollbar', new Event('pointerdown'), false],
+    ['Space', new KeyboardEvent('keydown', { key: ' ', bubbles: true }), false],
+    ['a scroll', new Event('scroll'), true],
+  ])('keeps the hold of a message when a scroller let go gets %s', async (_, event, landed) => {
+    const { jumpToMessage } = await load();
+    reducedMotion = landed;
+    const { scroller: before } = line(1000);
+    jumpToMessage(new MouseEvent('click'), 'x-1');
+    const { scroller, layout, scrollTo } = line(1000);
+    scrollTo.mockImplementation(() => {});
+    jumpToMessage(new MouseEvent('click'), 'x-1');
+    layout.top = -300;
+    before.dispatchEvent(event);
+    expect(scroller.style.overflowAnchor).toBe('none');
+    expect(sizes.observed).toEqual([scroller.firstElementChild]);
   });
 
   it('lets the message go when it is released, gone, or another is jumped to', async () => {

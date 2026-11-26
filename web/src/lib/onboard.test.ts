@@ -620,9 +620,21 @@ describe('PairingSession live role a and role b flows', () => {
     await new Promise((r) => setTimeout(r, 15));
     expect(hub.peers).toHaveLength(0);
 
+    // The twin and the first pair both ask for the fingerprint before either is dialled; given
+    // together, both are dialled or told apart in the same turn, with nothing to arrive later.
+    const digest = crypto.subtle.digest.bind(crypto.subtle);
+    const turns: (() => void)[] = [];
+    const held = vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (...args) => {
+      const hash = await digest(...args);
+      return new Promise((resolve) => turns.push(() => resolve(hash)));
+    });
     hub.options.heard!(url, { t: 'room', room: roomId, data: validPair });
     hub.options.heard!(url, { t: 'room', room: roomId, data: validPair });
-    await until(() => expect(hub.peers).toHaveLength(1));
+    await until(() => expect(turns).toHaveLength(2));
+    held.mockRestore();
+    for (const turn of turns) turn();
+    await until(() => expect(hub.peers.length).toBeGreaterThan(0));
+    expect(hub.peers).toHaveLength(1);
     expect(session.stage).toBe('linking');
     expect(session.node?.id).toBe(node1.id);
     expect(hub.options.known(node1.id)).toBe(true);

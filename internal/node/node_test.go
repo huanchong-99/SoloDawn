@@ -309,6 +309,18 @@ func TestNodeWebPortShadowedOnLoopback(t *testing.T) {
 	checkLocalWebServer(t, n.httpPort)
 }
 
+// A web port that nothing holds is the one the node serves on.
+func TestListenNodeHTTPTakesAFreePort(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	mustNoErr(t, err)
+	port := strconv.Itoa(probe.Addr().(*net.TCPAddr).Port)
+	mustNoErr(t, probe.Close())
+	ln, err := listenNodeHTTP(port)
+	mustNoErr(t, err)
+	t.Cleanup(func() { ln.Close() })
+	mustEqual(t, strconv.Itoa(ln.Addr().(*net.TCPAddr).Port), port)
+}
+
 func TestMultiNodePortFallbackWebAndLocalCommands(t *testing.T) {
 	dir1, dir2 := socketRoot(t), socketRoot(t)
 	l1 := openSocket(t, dir1)
