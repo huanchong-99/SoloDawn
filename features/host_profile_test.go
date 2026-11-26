@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -13,9 +14,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
-
-// profileNoPush is what the steps that MODEL-1126 took away say when they fail.
-const profileNoPush = "a submission is a report: the node pushes nothing and opens no pull request; the ask-first rule is rewritten on submit_task by report (MODEL-1126 plan 1.6)"
 
 func init() {
 	stepSets["host_profile"] = hostProfileSteps
@@ -30,15 +28,16 @@ func hostProfileSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^the secretary instructions contain the assignment rules$`, w.checkAssignmentRules)
 	sc.Step(`^list_members still returns:$`, w.checkListMembers)
 	sc.Step(`^the host has a standard assignee and an offline strong secretary$`, func() error { return w.setupEscalation(cleanup) })
-	sc.Step(`^the host composes a turn after the (\d+)(?:st|nd|rd) failed (review|hosted check)$`, w.composeFailure)
+	sc.Step(`^the host composes a turn after the (\d+)(?:st|nd|rd) failed (review)$`, w.composeFailure)
 	sc.Step(`^the turn has no escalation line$`, w.checkNoEscalation)
 	sc.Step(`^the turn ends with the escalation line:$`, w.checkEscalation)
 	sc.Step(`^the task instructions say to ask before submitting$`, w.checkAskRule)
-	sc.Step(`^a remote task with a checked commit and an unanswered escalation$`, rewritten("AC-2", profileNoPush))
-	sc.Step(`^the assignee submits the task before the answer$`, rewritten("AC-2", profileNoPush))
-	sc.Step(`^the submission returns conflict naming the offline strong secretary with no push, pull request or report$`, rewritten("AC-2", profileNoPush))
-	sc.Step(`^the host receives the task row with the escalation answered and the assignee retries$`, rewritten("AC-2", profileNoPush))
-	sc.Step(`^the retried submission pushes the commit and returns pull request 31$`, rewritten("AC-2", profileNoPush))
+	sub := &profileSubmitWorld{tskScenario{t: f.t, cleanup: cleanup}}
+	sc.Step(`^a task session whose task asks its assignee to ask a stronger AI first$`, sub.setupBlocked)
+	sc.Step(`^the assignee submits the task before the answer$`, func() { sub.whenSubmit("Ready to submit.") })
+	sc.Step(`^the submission returns conflict naming the offline strong secretary and no report was posted$`, sub.checkBlocked)
+	sc.Step(`^the host receives the task row with the escalation answered and the assignee retries$`, sub.submitAfterAnswer)
+	sc.Step(`^the retried submission posts its summary as the report in the task's thread$`, sub.thenReported)
 }
 
 type profileTurnWorld struct {
@@ -91,7 +90,9 @@ func (w *profileTurnWorld) checkAssignmentRules() error {
 		"Spread independent tasks over different AIs",
 		"members with the same CLI on the same computer share one subscription",
 		"Prefer AIs with more of their window left",
-		"Do not choose an AI that is `limited` or `offline`")
+		"Do not choose an AI that is `limited` or `offline`",
+		"Each AI works in its own folder on its own computer; the member list in your turn names both.",
+		"choose a reviewer on the assignee's computer when the project has no shared remote")
 }
 
 func (w *profileTurnWorld) checkListMembers(ctx context.Context, doc *godog.DocString) error {
@@ -121,9 +122,6 @@ func (w *profileTurnWorld) setupEscalation(cleanup func(func())) error {
 }
 
 func (w *profileTurnWorld) composeFailure(n int, kind string) error {
-	if kind == "hosted check" {
-		return rewritten("AC-2", "hosted checks are removed: the halves of A10.11 and A10.12 on two failed hosted checks go (MODEL-1126 plan 3.2)")()
-	}
 	task := w.taskRow()
 	task.Assignee = tiQTeamID
 	task.Stuck = &proto.Stuck{Kind: kind, N: n, Ask: n >= 2}
@@ -156,4 +154,49 @@ func checkProfileInstructions(s host.Session, want ...string) error {
 		}
 	}
 	return nil
+}
+
+type profileSubmitWorld struct {
+	tskScenario
+}
+
+// setupBlocked is a task session whose task failed two reviews in a row while
+// the group has a stronger AI, the offline secretary: the home asks first.
+func (w *profileSubmitWorld) setupBlocked() error {
+	if err := w.givenTaskSession(); err != nil {
+		return err
+	}
+	w.putSubmitMember(tskAccWorkerID, "Assignee", "standard", "working", false)
+	w.putSubmitMember(tskAccReviewID, "Secretary", "strong", "offline", true)
+	task := w.home.currentTask()
+	task.Stuck = &proto.Stuck{Kind: "review", N: 2, Ask: true}
+	w.home.putTask(task)
+	return nil
+}
+
+func (w *profileSubmitWorld) putSubmitMember(id, name, tier, state string, secretary bool) {
+	ai := proto.AIMemberRow{
+		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: 3}, Group: tskAccGroupID, Kind: "ai", Name: name},
+		CLI:       "claude", Host: "home-dev", HostName: "node", Workspace: w.workspace, Account: "personal", Secretary: secretary, State: state,
+		Allow: []string{}, Approvers: []string{}, Profile: proto.Profile{Tier: tier},
+	}
+	w.h.Rows.Put(tskAccGroupID, "member", id, turnMustJSON(ai))
+}
+
+func (w *profileSubmitWorld) checkBlocked() error {
+	err, ok := errors.AsType[*host.Error](w.lastErr)
+	if !ok || err.Code != "conflict" || err.Message != "Ask a stronger AI before submitting again. Candidates: \"Secretary\" (strong)." {
+		return fmt.Errorf("unexpected refusal: %v", w.lastErr)
+	}
+	if cmds := w.home.allCmds(); len(cmds) != 0 {
+		return fmt.Errorf("the refused submission sent %d commands to the home", len(cmds))
+	}
+	return nil
+}
+
+func (w *profileSubmitWorld) submitAfterAnswer() {
+	task := w.home.currentTask()
+	task.Stuck.Ask = false
+	w.home.putTask(task)
+	w.whenSubmit("Ready to submit after the answer.")
 }

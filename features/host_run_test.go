@@ -138,6 +138,12 @@ func (d *hrMemDriver) Start(ctx context.Context, l host.Launch) (host.Process, e
 	return p, nil
 }
 
+func (d *hrMemDriver) launched() []host.Launch {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.launches)
+}
+
 func (d *hrMemDriver) Interactive(l host.Launch) ([]string, string, error) {
 	return []string{"mem", l.Session}, l.Session, nil
 }
@@ -314,6 +320,7 @@ func hostRunSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 	registerIdleAndMaxOpenSteps(sc, suiteT, cleanup)
 	registerCLICrashAndSwitchSteps(sc, suiteT, cleanup)
 	registerReplaceSteps(sc, suiteT, cleanup)
+	registerGoneFolderSteps(sc, suiteT, cleanup)
 }
 
 func installHRDefaultHooks(cleanup func(func())) {
@@ -615,22 +622,7 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		return waitSessionState(h, tKey, host.Dormant)
 	})
 	sc.Step(`^the host reports turn_interrupted "crash" and task fail "crash"$`, func() error {
-		return waitUntil(5*time.Second, "the crash commands of the host", func() error {
-			var sawInt, sawFail bool
-			cmds := rh.snapshot()
-			for _, cmd := range cmds {
-				if ev, ok := cmd["event"].(map[string]any); ok && ev["code"] == "turn_interrupted" && ev["reason"] == "crash" {
-					sawInt = true
-				}
-				if cmd["t"] == "task" && cmd["op"] == "fail" && cmd["reason"] == "crash" {
-					sawFail = true
-				}
-			}
-			if !sawInt || !sawFail {
-				return fmt.Errorf("turn_interrupted=%v task fail=%v in %+v", sawInt, sawFail, cmds)
-			}
-			return nil
-		})
+		return waitUntil(5*time.Second, "the crash commands of the host", func() error { return hrCrashReported(rh, "") })
 	})
 	sc.Step(`^the next turn on the task session resumes "([^"]+)" and completes$`, func(id string) error {
 		if err := host.Runner.Turn(suiteT.Context(), h, tKey, "resume turn", host.Turn{Kind: host.ItemsTurn, Thread: hrTask1}); err != nil {
@@ -741,6 +733,74 @@ func registerReplaceSteps(sc *godog.ScenarioContext, suiteT *testing.T, cleanup 
 		}
 		return fmt.Errorf("session_replaced not reported in %+v", rh.snapshot())
 	})
+}
+
+func registerGoneFolderSteps(sc *godog.ScenarioContext, suiteT *testing.T, cleanup func(func())) {
+	var h *host.Host
+	var rh *hrHome
+	var drv *hrMemDriver
+	var folder string
+	tKey := host.SessionKey{Group: hrGroup, Member: hrAI1, Task: hrTask1}
+	turn := func() {
+		// A start in a folder that is gone is refused; the reports say so.
+		host.Runner.Turn(suiteT.Context(), h, tKey, "work", host.Turn{Kind: host.ItemsTurn, Thread: hrTask1})
+	}
+	sc.Step(`^a task session whose workspace was removed after its AI joined$`, func() (err error) {
+		var procCtx context.Context
+		if h, rh, procCtx, err = newTestHost(suiteT, cleanup, 4, 15); err != nil {
+			return err
+		}
+		drv = &hrMemDriver{parentCtx: procCtx, autoEnd: true}
+		host.Drivers = map[string]host.Driver{"claude": drv}
+		folder = filepath.Join(suiteT.TempDir(), "website")
+		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: folder, Agent: "claude", Home: "home-dev", Name: "Claude"})
+	})
+	sc.Step(`^the session of the removed workspace receives a turn$`, turn)
+	sc.Step(`^no CLI was started and the host reports turn_interrupted "crash" naming the folder and task fail "crash"$`, func() error {
+		if err := waitUntil(5*time.Second, "the crash commands of the host", func() error { return hrCrashReported(rh, folder) }); err != nil {
+			return err
+		}
+		if launches := drv.launched(); len(launches) != 0 {
+			return fmt.Errorf("the driver started %d CLIs", len(launches))
+		}
+		return waitSessionState(h, tKey, host.Dormant)
+	})
+	sc.Step(`^the workspace is back and its session receives a turn$`, func() error {
+		if err := os.MkdirAll(folder, 0o700); err != nil {
+			return err
+		}
+		turn()
+		return nil
+	})
+	sc.Step(`^the CLI started once, in the workspace, and the session is "waiting" after the turn$`, func() error {
+		if err := waitSessionState(h, tKey, host.Waiting); err != nil {
+			return err
+		}
+		if launches := drv.launched(); len(launches) != 1 || launches[0].Folder != folder {
+			return fmt.Errorf("launches %+v, want one in %s", launches, folder)
+		}
+		return nil
+	})
+}
+
+// hrCrashReported checks that the home received turn_interrupted with reason
+// crash whose detail names the folder, and task fail with reason crash.
+func hrCrashReported(rh *hrHome, folder string) error {
+	cmds := rh.snapshot()
+	interrupted := func(cmd map[string]any) bool { return hrInterrupted(cmd, folder) }
+	if !slices.ContainsFunc(cmds, interrupted) || !slices.ContainsFunc(cmds, hrTaskFailed) {
+		return fmt.Errorf("no turn_interrupted naming %s and task fail in %+v", folder, cmds)
+	}
+	return nil
+}
+
+func hrInterrupted(cmd map[string]any, folder string) bool {
+	ev, _ := cmd["event"].(map[string]any)
+	return ev["code"] == "turn_interrupted" && ev["reason"] == "crash" && strings.Contains(fmt.Sprint(ev["detail"]), folder)
+}
+
+func hrTaskFailed(cmd map[string]any) bool {
+	return cmd["t"] == "task" && cmd["op"] == "fail" && cmd["reason"] == "crash"
 }
 
 func waitSessionState(h *host.Host, key host.SessionKey, want host.State) error {

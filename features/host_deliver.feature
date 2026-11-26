@@ -12,7 +12,7 @@ Feature: Host inbox delivery and group state sync
     When the host attaches to "home-1" while sync is in flight
     And "home-1" pushes assign item 21 for "Claude Code" on task "T-1" and notice item 22 for secretary "Sec"
     Then "Claude Code" has received 0 turns and "home-1" has received 0 acknowledgements
-    When "home-1" completes sync at sequence 9 with task "T-1" already merged
+    When "home-1" completes sync at sequence 9 with task "T-1" already done
     Then the delivery audit records 1 "refused" row and 1 "delivered" row
     And "Sec" has received 1 turn and "Claude Code" has received 0 turns
 
@@ -32,3 +32,16 @@ Feature: Host inbox delivery and group state sync
     Then the open ask receives item 31 and "Claude Code" has received 0 new turns
     When the running turn of "Claude Code" finishes and calls Deliver
     Then "Claude Code" has received 1 new turn and "home-1" has received 1 acknowledgement for item 32
+
+  Scenario: A task session starts in the AI's workspace only after the group's obsolete task sessions are closed (A5.24 host half)
+    Given a paired host on disk with AI "Claude Code" in group "Website" homed on "home-1"
+    And "Claude Code" has a task session for task "T-1", which is done
+    When "home-1" pushes assign item 51 for "Claude Code" on its active task "T-2"
+    Then the host closed the session of "T-1" before the first turn of "T-2", which ran in the folder of the group session of "Claude Code"
+
+  Scenario: A review item writes its report into the review session, and submit_review names it after a restart (A5.19 host half)
+    Given a paired host on disk with AI "Claude Code" in group "Website" homed on "home-1"
+    When "home-1" pushes review item 61 for "Claude Code" of report "R-1" on task "T-1"
+    Then "Claude Code" has received 1 turn and "home-1" has received 1 acknowledgement for item 61
+    When the host restarts on its store and "Claude Code" calls submit_review with score 94
+    Then "home-1" received a review post in the thread of "T-1" naming report "R-1" with score 94

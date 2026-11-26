@@ -20,7 +20,7 @@ Feature: Two labels in a host turn across owners
       == 1 of 1 · mention · from "Q" in T-12 · instruction
       """
 
-  Scenario: Reviewed, checks and decided items in a task separate the item header from the carried line
+  Scenario: Reviewed and decided items in a task separate the item header from the carried line
     Given a two-owner host turn fixture on "Q1"
     When the host composes a reviewed turn for "Q-team" on task 12 from a review written by "P-AI"
     Then the turninfo composed text is:
@@ -28,13 +28,8 @@ Feature: Two labels in a host turn across owners
       [SoloDawn] group "Website" · you are "Q-team" · task session T-12
       == 1 of 1 · reviewed · instruction
       -- from "P-AI" (AI) in T-12 · information
-      Review round 1 on commit 9f2c1ab: score 86/90
+      Review round 1: score 86/90
       - conn/switch.go:88: No event after switching back to direct
-      """
-    When the host composes a checks turn for "Q-team" on task 12 from a checks row written by the home
-    Then the turninfo second line is:
-      """
-      -- from the home in T-12 · information
       """
     When "Q-team" posted a decision card to "Q" on task 12 and "P" chose option "A" as admin
     Then the turninfo header and second line are:

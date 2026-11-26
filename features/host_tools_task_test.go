@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,9 +23,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-// tskNoChecks is what the steps that MODEL-1126 took away say when they fail.
-const tskNoChecks = "a submission is a post of kind report and a review names the report: no worktree, checks, push, pull request or level lists (MODEL-1126 plan 1.6; host_tools_task.feature scenarios 2 and 3 become one)"
-
 func init() {
 	stepSets["host_tools_task"] = hostToolsTaskSteps
 }
@@ -35,6 +31,7 @@ const (
 	tskAccGroupID  = "rZNvy-1jH6Z-BcPqA5U5BQ"
 	tskAccTaskID   = "DrtCn6htSBwmMPrFPbHJHA"
 	tskAccWorkerID = "1PC8WineBrUQ-apCjx7tug"
+	tskAccReviewID = "LXCZmuGAXkvO-bSrOkuCfw"
 )
 
 type tskAccHome struct {
@@ -45,6 +42,7 @@ type tskAccHome struct {
 	hostDev  string
 	requests []proto.Cmd
 	handlers map[string]func(int64, string) (json.RawMessage, error)
+	queue    bool // task start makes a task that waits as busy
 }
 
 func newTskAccHome(h *host.Host) *tskAccHome {
@@ -54,8 +52,7 @@ func newTskAccHome(h *host.Host) *tskAccHome {
 		hostDev: h.Key.ID(),
 	}
 	m.handlers = map[string]func(int64, string) (json.RawMessage, error){
-		"task/start":  m.recordStart,
-		"post/review": m.recordReview,
+		"task/start": m.recordStart,
 	}
 	return m
 }
@@ -97,12 +94,20 @@ func (m *tskAccHome) applyCmd(id int64, payload string) (json.RawMessage, error)
 	return json.RawMessage(fmt.Sprintf(`{"re":%d,"ok":true}`, id)), nil
 }
 
-func (m *tskAccHome) recordStart(id int64, _ string) (json.RawMessage, error) {
+// recordStart answers task start; when queue is set it first pushes the row
+// of a task that waits for its folder, as the home does before it answers.
+func (m *tskAccHome) recordStart(id int64, payload string) (json.RawMessage, error) {
+	if m.queue {
+		var start proto.TaskStart
+		if err := proto.Decode([]byte(payload), &start); err != nil {
+			return nil, err
+		}
+		task := tskTaskRow(string(start.ID), "queued", "work")
+		task.Wait = &proto.TaskWait{Kind: "busy"}
+		raw, _ := json.Marshal(task)
+		m.h.Rows.Put(tskAccGroupID, "task", string(start.ID), raw)
+	}
 	return json.RawMessage(fmt.Sprintf(`{"re":%d,"ok":true,"num":1}`, id)), nil
-}
-
-func (m *tskAccHome) recordReview(id int64, _ string) (json.RawMessage, error) {
-	return json.RawMessage(fmt.Sprintf(`{"re":%d,"ok":true,"passed":true,"round":1}`, id)), nil
 }
 
 func (m *tskAccHome) currentTask() proto.TaskRow {
@@ -133,6 +138,8 @@ type tskScenario struct {
 	caller    host.Caller
 	lastOut   any
 	lastErr   error
+	levels    []host.Caller
+	summary   string
 }
 
 func hostToolsTaskSteps(sc *godog.ScenarioContext, f fixtures) {
@@ -142,26 +149,14 @@ func hostToolsTaskSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^the group session lists "([^"]+)" and none of "([^"]+)"$`, st.thenCallerLists)
 	sc.Step(`^the AI calls start_task with title "([^"]+)" and plan "([^"]+)"$`, st.whenStartTask)
 	sc.Step(`^start_task returns task "([^"]+)" with moved true and sends a direct task start$`, st.thenStartTaskSucceeded)
-	sc.Step(`^the host creates the task worktree and admits the task session at levels 1 and 2$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^level 1 lists none of "([^"]+)" and level 2 lists all three without "([^"]+)"$`, rewritten("AC-2", tskNoChecks))
-
-	sc.Step(`^a level-2 task session on a local repository with a project check$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^the task worktree has an uncommitted file and the AI calls run_checks$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^the task tool fails with code "([^"]+)"$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^no task checked command was sent to the home$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^the AI commits a failing change with a test file and runs run_checks then submit_task$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^run_checks reports ok false and submit_task fails with code "([^"]+)"$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^the AI commits a passing fix and runs run_checks then submit_task with summary "([^"]+)"$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^run_checks reports ok true and submit_task sends report and task submitted without a pull request$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^the AI commits one more change without re-running checks and calls submit_task$`, rewritten("AC-2", tskNoChecks))
-
-	sc.Step(`^a level-2 task session with a bare Git origin and a fake gh$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^the AI commits a passing change with a test file and calls push_branch$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^push_branch pushes the assigned branch to origin and returns its commit$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^the AI runs run_checks and submit_task with summary "([^"]+)"$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^submit_task opens pull request 31, sends report and task submitted, and reports task cloud$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^the reviewer opens the review checkout for that commit and submits a review with score (\d+)$`, rewritten("AC-2", tskNoChecks))
-	sc.Step(`^submit_review sends a signed review post for that commit and returns passed true in round 1$`, rewritten("AC-2", tskNoChecks))
+	sc.Step(`^the host admits the task session of that task at levels 1 and 3$`, st.admitTaskLevels)
+	sc.Step(`^at both levels the task session lists "([^"]+)" and none of "([^"]+)"$`, st.thenLevelsList)
+	sc.Step(`^the home queues a new task of that AI behind another task in its folder$`, func() { st.home.queue = true })
+	sc.Step(`^start_task returns task "([^"]+)" with queued true and sends a direct task start$`, st.thenStartTaskQueued)
+	sc.Step(`^a task session of "Claude Code" in its workspace for an active task at step work$`, st.givenTaskSession)
+	sc.Step(`^the AI calls submit_task with summary "([^"]+)"$`, st.whenSubmit)
+	sc.Step(`^the task tool fails with code "([^"]+)" and nothing was sent to the home$`, st.thenFailedQuietly)
+	sc.Step(`^submit_task returns ok and the home received only that summary, as a post of kind report in the task's thread$`, st.thenReported)
 }
 
 func (st *tskScenario) initHost() error {
@@ -258,7 +253,15 @@ func (st *tskScenario) whenStartTask(title, plan string) {
 }
 
 func (st *tskScenario) thenStartTaskSucceeded(wantTask string) error {
-	if err := st.expectResultJSON(fmt.Sprintf(`{"task":%q,"moved":true}`, wantTask)); err != nil {
+	return st.thenStartTask(fmt.Sprintf(`{"task":%q,"moved":true}`, wantTask))
+}
+
+func (st *tskScenario) thenStartTaskQueued(wantTask string) error {
+	return st.thenStartTask(fmt.Sprintf(`{"task":%q,"queued":true}`, wantTask))
+}
+
+func (st *tskScenario) thenStartTask(want string) error {
+	if err := st.expectResultJSON(want); err != nil {
 		return err
 	}
 	cmds := st.home.allCmds()
@@ -282,14 +285,104 @@ func tskVerifyStartPayload(payload string) error {
 	return nil
 }
 
-func (st *tskScenario) setScenarioEnv(key, val string) {
-	old, had := os.LookupEnv(key)
-	st.cleanup(func() {
-		if had {
-			os.Setenv(key, old)
-		} else {
-			os.Unsetenv(key)
+func tskTaskRow(id, state, step string) proto.TaskRow {
+	return proto.TaskRow{
+		RowHeader: proto.RowHeader{Type: "task", ID: id, Seq: 2},
+		Group:     tskAccGroupID, Num: 1, Title: "Fix path", Origin: "direct", Plan: "Add path status and tests.",
+		State: state, Step: step, Assignee: tskAccWorkerID, Reviewer: tskAccReviewID, Pass: 90, Depends: []string{},
+		Stats: proto.TaskStats{Started: 1_763_600_000_000}, Created: 1_763_600_000_000,
+	}
+}
+
+// admitTask admits the task session of tskAccTaskID in the workspace at level.
+func (st *tskScenario) admitTask(level int) (host.Caller, error) {
+	key := host.SessionKey{Group: tskAccGroupID, Member: tskAccWorkerID, Task: tskAccTaskID}
+	if _, ok := st.h.Sessions.Get(key); !ok {
+		s := host.Session{SessionKey: key, Kind: host.TaskSession, Folder: st.workspace, Agent: "claude", Home: "home-dev", Name: "Claude Code"}
+		if err := st.h.Sessions.Create(s); err != nil {
+			return host.Caller{}, err
 		}
-	})
-	os.Setenv(key, val)
+	}
+	caller, ok := st.h.Sessions.Caller(st.h.Sessions.Admit(key, level, false))
+	if !ok {
+		return caller, fmt.Errorf("the task session at level %d was not admitted", level)
+	}
+	return caller, nil
+}
+
+func (st *tskScenario) admitTaskLevels() error {
+	st.home.putTask(tskTaskRow(tskAccTaskID, "active", "work"))
+	st.levels = nil
+	for _, level := range []int{1, 3} {
+		caller, err := st.admitTask(level)
+		if err != nil {
+			return err
+		}
+		st.levels = append(st.levels, caller)
+	}
+	return nil
+}
+
+func (st *tskScenario) thenLevelsList(mustHave, mustNotCSV string) error {
+	for _, caller := range st.levels {
+		st.caller = caller
+		if err := st.thenCallerLists(mustHave, mustNotCSV); err != nil {
+			return fmt.Errorf("level %d: %w", caller.Level, err)
+		}
+	}
+	return nil
+}
+
+func (st *tskScenario) givenTaskSession() (err error) {
+	if err := st.initHost(); err != nil {
+		return err
+	}
+	st.home.putTask(tskTaskRow(tskAccTaskID, "active", "work"))
+	st.caller, err = st.admitTask(3)
+	return err
+}
+
+func (st *tskScenario) whenSubmit(summary string) {
+	st.summary = summary
+	st.callTool("submit_task", map[string]string{"summary": summary})
+}
+
+func (st *tskScenario) thenFailedQuietly(code string) error {
+	if err := checkHostErrorCode(st.lastErr, code); err != nil {
+		return err
+	}
+	if cmds := st.home.allCmds(); len(cmds) != 0 {
+		return fmt.Errorf("the home received %d commands", len(cmds))
+	}
+	return nil
+}
+
+// thenReported checks that the one command the home received is the report:
+// a post of kind report in the task's thread, by the assignee, whose text is
+// the summary as the AI wrote it and whose body is empty.
+func (st *tskScenario) thenReported() error {
+	if err := st.expectResultJSON(`{"ok":true}`); err != nil {
+		return err
+	}
+	cmds := st.home.allCmds()
+	if len(cmds) != 1 {
+		return fmt.Errorf("the home received %d commands, want 1", len(cmds))
+	}
+	var post proto.Post[json.RawMessage]
+	if err := proto.Decode([]byte(cmds[0].Env.Payload), &post); err != nil {
+		return err
+	}
+	got := fmt.Sprintf("%s|%s|%s|%s|%s|%d", post.Type, post.Kind, threadOf(post.Thread), post.As, post.Body, len(post.Mentions))
+	if want := fmt.Sprintf("post|report|%s|%s|{}|0", tskAccTaskID, tskAccWorkerID); got != want || post.Text != st.summary {
+		return fmt.Errorf("got %s with text %q, want %s with text %q", got, post.Text, want, st.summary)
+	}
+	return nil
+}
+
+// threadOf is the thread a post names, empty for the main line.
+func threadOf(thread *proto.ID) string {
+	if thread == nil {
+		return ""
+	}
+	return string(*thread)
 }

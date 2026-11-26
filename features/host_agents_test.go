@@ -187,7 +187,7 @@ func hostAgentsSteps(sc *godog.ScenarioContext, f fixtures) {
 		return h.Sessions.Create(host.Session{
 			SessionKey: sessKey,
 			Kind:       host.GroupSession,
-			Folder:     "repo",
+			Folder:     handFolder,
 			Agent:      agent,
 			Home:       "home-1",
 			Name:       "AI",

@@ -3,6 +3,7 @@
 package features
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -10,8 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +33,7 @@ func init() {
 var joinGroupIDs = map[string]proto.ID{
 	"Website": "rZNvy-1jH6Z-BcPqA5U5BQ",
 	"Backend": "H46nb5YsBesaWbHkHmZLow",
+	"Docs":    "c2pDh5u3Q0mVfYtRk9wLzA",
 }
 
 type joinScenarioHome struct {
@@ -39,6 +44,7 @@ type joinScenarioHome struct {
 	refuseAgent  string
 	refuseCode   string
 	memberAgents map[string]string
+	added        []proto.MemberAddAI
 }
 
 func newJoinScenarioHome(h *host.Host) *joinScenarioHome {
@@ -111,6 +117,7 @@ func (jh *joinScenarioHome) answerAddAI(re int64, payload string) (json.RawMessa
 		return nil, err
 	}
 	jh.memberAgents[string(add.ID)] = add.CLI
+	jh.added = append(jh.added, add)
 	return json.RawMessage(accJSON(proto.CmdResult{Success: proto.Success{Re: re, OK: true}})), nil
 }
 
@@ -125,6 +132,8 @@ type joinScenarioWorld struct {
 	key           identity.Key
 	remoteDevice  string
 	remoteHome    *joinScenarioHome
+	homes         map[string]*joinScenarioHome // by device, remoteHome among them
+	joined        map[string]string            // the folder each AI was joined with, by name
 	mu            sync.Mutex
 	dials         map[string][]context.Context
 	restartedHost *host.Host
@@ -132,9 +141,12 @@ type joinScenarioWorld struct {
 	lastJoinErr   error
 	lastLeaveErr  error
 	nonceSeq      byte
+	atOnce        []error
 }
 
 func (w *joinScenarioWorld) nextNonce() proto.ID {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.nonceSeq++
 	var raw [16]byte
 	raw[15] = w.nonceSeq
@@ -144,22 +156,32 @@ func (w *joinScenarioWorld) nextNonce() proto.ID {
 func (w *joinScenarioWorld) connect(ctx context.Context, device string) {
 	w.mu.Lock()
 	w.dials[device] = append(w.dials[device], ctx)
-	jh := w.remoteHome
-	match := device == w.remoteDevice
+	jh := w.homes[device]
 	w.mu.Unlock()
-	if match && jh != nil {
+	if jh != nil {
 		w.h.Attach(device, jh)
 	}
 }
 
 func (w *joinScenarioWorld) join(agent, name string, secretary bool, groupName, homeDevice string) error {
+	workspace, err := aiWorkspace(w.root, joinGroupIDs[groupName], name)
+	if err != nil {
+		return err
+	}
+	if err := w.joinIn(agent, name, secretary, groupName, homeDevice, workspace); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	w.joined[name] = workspace
+	w.mu.Unlock()
+	return nil
+}
+
+// joinIn sends host.join for an AI with the folder as the owner gave it.
+func (w *joinScenarioWorld) joinIn(agent, name string, secretary bool, groupName, homeDevice, workspace string) error {
 	gid, ok := joinGroupIDs[groupName]
 	if !ok {
 		return fmt.Errorf("unknown scenario group %q", groupName)
-	}
-	workspace, err := aiWorkspace(w.root, gid, name)
-	if err != nil {
-		return err
 	}
 	payload := json.RawMessage(accJSON(proto.HostJoin{
 		HostCommand: proto.HostCommand{
@@ -219,11 +241,16 @@ func hostJoinSteps(sc *godog.ScenarioContext, _ fixtures) {
 	registerJoinSetupSteps(sc, w, cleanup)
 	registerJoinAssertionSteps(sc, w)
 	registerLeaveScenarioSteps(sc, w)
+	registerJoinFolderSteps(sc, w)
 }
 
 func registerJoinSetupSteps(sc *godog.ScenarioContext, w *joinScenarioWorld, cleanup func(func())) {
 	sc.Step(`^a paired host on disk with declared agents "([^"]+)" and "([^"]+)" and a remote home "([^"]+)"$`, func(a1, a2, remote string) error {
 		return w.initHostOnDisk(a1, a2, remote, cleanup)
+	})
+	sc.Step(`^remote home "([^"]+)" hosts project group "([^"]+)"$`, func(remote, name string) error {
+		w.homes[remote] = newJoinScenarioHome(w.h)
+		return w.createRemoteGroup(remote, name)
 	})
 	sc.Step(`^remote home "([^"]+)" hosts project groups "([^"]+)" and "([^"]+)"$`, func(remote, g1, g2 string) error {
 		for _, name := range []string{g1, g2} {
@@ -258,6 +285,8 @@ func (w *joinScenarioWorld) initHostOnDisk(a1, a2, remote string, cleanup func(f
 	}
 	w.root, w.db, w.h, w.key = realRoot, db, h, key
 	w.remoteDevice, w.remoteHome = remote, newJoinScenarioHome(h)
+	w.homes = map[string]*joinScenarioHome{remote: w.remoteHome}
+	w.joined = map[string]string{}
 	w.dials = map[string][]context.Context{}
 	h.Connect = w.connect
 	return seedScenarioAgents(db, a1, a2)
@@ -285,7 +314,7 @@ func (w *joinScenarioWorld) createRemoteGroup(remote, name string) error {
 	if !ok {
 		return fmt.Errorf("unknown group %q", name)
 	}
-	w.remoteHome.groups[string(gid)] = proto.GroupRow{
+	w.homes[remote].groups[string(gid)] = proto.GroupRow{
 		RowHeader:      proto.RowHeader{Type: "group", ID: string(gid), Seq: 1},
 		Name:           name,
 		Home:           remote,
@@ -316,9 +345,10 @@ func (w *joinScenarioWorld) restartAndReconnect() error {
 }
 
 func registerJoinAssertionSteps(sc *godog.ScenarioContext, w *joinScenarioWorld) {
-	sc.Step(`^the host dialled "([^"]+)" (\d+) times? and cloned "([^"]+)" and "([^"]+)" once each$`, rewritten("AC-2", "a join records the workspace of the AI and clones nothing (MODEL-1126 plan 3.2: host_join.feature)"))
+	sc.Step(`^the host dialled "([^"]+)" (\d+) times? and the home added each AI with the folder it was joined with$`, w.checkAddedFolders)
+	sc.Step(`^each group session runs in the folder its AI was joined with, and the node's data directory holds no project folder$`, w.checkSessionFolders)
 	sc.Step(`^the host holds (\d+) dormant group sessions and (\d+) stored homes entries$`, func(wantSessions, wantHomes int) error {
-		if err := checkDormantGroupSessions(w.h.Sessions.All(), wantSessions); err != nil {
+		if err := w.checkDormantGroupSessions(w.h.Sessions.All(), wantSessions); err != nil {
 			return err
 		}
 		homes, err := w.storedHomes()
@@ -334,7 +364,7 @@ func registerJoinAssertionSteps(sc *godog.ScenarioContext, w *joinScenarioWorld)
 		if gotDials != wantDials {
 			return fmt.Errorf("restarted host dialled %s %d times, want %d", remote, gotDials, wantDials)
 		}
-		return checkDormantGroupSessions(w.restartedHost.Sessions.All(), wantSessions)
+		return w.checkDormantGroupSessions(w.restartedHost.Sessions.All(), wantSessions)
 	})
 }
 
@@ -348,20 +378,44 @@ func (w *joinScenarioWorld) checkDialCount(remote string, wantDials int) error {
 	return nil
 }
 
-func checkDormantGroupSessions(all []host.Session, want int) error {
+func (w *joinScenarioWorld) checkDormantGroupSessions(all []host.Session, want int) error {
 	if len(all) != want {
 		return fmt.Errorf("got %d sessions, want %d", len(all), want)
 	}
 	for _, s := range all {
-		if !isDormantGroupRepoSession(s) {
+		if s.Kind != host.GroupSession || s.State != host.Dormant || s.Folder != w.joined[s.Name] {
 			return fmt.Errorf("unexpected session %+v", s)
 		}
 	}
 	return nil
 }
 
-func isDormantGroupRepoSession(s host.Session) bool {
-	return s.Kind == host.GroupSession && s.State == host.Dormant && s.Folder == "repo"
+// checkAddedFolders checks that each member add_ai the home received carries
+// the folder its AI was joined with.
+func (w *joinScenarioWorld) checkAddedFolders(remote string, wantDials int) error {
+	if err := w.checkDialCount(remote, wantDials); err != nil {
+		return err
+	}
+	added := w.homes[remote].added
+	if len(added) != len(w.joined) {
+		return fmt.Errorf("the home added %d AIs, want %d", len(added), len(w.joined))
+	}
+	for _, add := range added {
+		if add.Workspace != w.joined[add.Name] {
+			return fmt.Errorf("%q was added with folder %q, want %q", add.Name, add.Workspace, w.joined[add.Name])
+		}
+	}
+	return nil
+}
+
+func (w *joinScenarioWorld) checkSessionFolders() error {
+	if err := w.checkDormantGroupSessions(w.h.Sessions.All(), len(w.joined)); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(w.root, "projects")); !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("the data directory holds projects/ (%v)", err)
+	}
+	return nil
 }
 
 func registerLeaveScenarioSteps(sc *godog.ScenarioContext, w *joinScenarioWorld) {
@@ -402,6 +456,103 @@ func registerLeaveScenarioSteps(sc *godog.ScenarioContext, w *joinScenarioWorld)
 	sc.Step(`^"([^"]+)" has (\d+) sessions, stored homes is empty, and the connection to "([^"]+)" is closed$`, func(groupName string, wantSessions int, remote string) error {
 		return w.checkFinalClosedStatus(groupName, wantSessions, remote)
 	})
+}
+
+func registerJoinFolderSteps(sc *godog.ScenarioContext, w *joinScenarioWorld) {
+	sc.Step(`^the owner joins "([^"]+)" as "([^"]+)" to "([^"]+)" on "([^"]+)" in folder "([^"]+)"$`, func(agent, name, group, home, folder string) error {
+		dir, err := w.folder(folder)
+		w.lastJoinErr = cmp.Or(err, w.joinIn(agent, name, false, group, home, dir))
+		return nil
+	})
+	sc.Step(`^the owner joins "([^"]+)" as "([^"]+)" to "([^"]+)" on "([^"]+)" in a folder that does not exist$`, func(agent, name, group, home string) {
+		w.lastJoinErr = w.joinIn(agent, name, false, group, home, filepath.Join(w.root, "folders", "gone"))
+	})
+	sc.Step(`^the owner joins "([^"]+)" as "([^"]+)" to "([^"]+)" on "([^"]+)" in the relative folder "([^"]+)"$`, func(agent, name, group, home, folder string) {
+		w.lastJoinErr = w.joinIn(agent, name, false, group, home, folder)
+	})
+	sc.Step(`^the join command fails with code "([^"]+)" and the home added no AI$`, func(code string) error {
+		return errors.Join(checkHostErrorCode(w.lastJoinErr, code), w.checkNoneAdded(""))
+	})
+	sc.Step(`^the join command fails with code "conflict" naming the group "([^"]+)" and the home added no AI to "([^"]+)"$`, func(named, group string) error {
+		if err := checkHostErrorCode(w.lastJoinErr, "conflict"); err != nil {
+			return err
+		}
+		if !strings.Contains(w.lastJoinErr.Error(), fmt.Sprintf("%q", named)) {
+			return fmt.Errorf("the refusal %q does not name %q", w.lastJoinErr, named)
+		}
+		return w.checkNoneAdded(string(joinGroupIDs[group]))
+	})
+	sc.Step(`^the join succeeded and "([^"]+)" has (\d+) sessions? in folder "([^"]+)"$`, w.checkJoinedIn)
+	sc.Step(`^the join succeeded and "([^"]+)" has a session in folder "([^"]+)"$`, func(group, folder string) error { return w.checkJoinedIn(group, 1, folder) })
+	sc.Step(`^the owner joins "([^"]+)" to "([^"]+)" on "([^"]+)" and to "([^"]+)" on "([^"]+)" at once, both in folder "([^"]+)"$`, w.joinAtOnce)
+	sc.Step(`^exactly one of the two joins succeeded and the other failed with code "([^"]+)"$`, func(code string) error {
+		failed := slices.IndexFunc(w.atOnce, func(err error) bool { return err != nil })
+		if failed < 0 || w.atOnce[1-failed] != nil {
+			return fmt.Errorf("the joins answered %v", w.atOnce)
+		}
+		return checkHostErrorCode(w.atOnce[failed], code)
+	})
+	sc.Step(`^"([^"]+)" and "([^"]+)" leave "([^"]+)"$`, func(first, second, group string) error {
+		return errors.Join(w.leave(first, group), w.leave(second, group))
+	})
+}
+
+// folder is a folder of that name that is there now.
+func (w *joinScenarioWorld) folder(name string) (string, error) {
+	dir := filepath.Join(w.root, "folders", name)
+	return dir, os.MkdirAll(dir, 0o700)
+}
+
+// checkNoneAdded checks that no home received member add_ai for the group,
+// or for any group when group is empty.
+func (w *joinScenarioWorld) checkNoneAdded(group string) error {
+	for device, jh := range w.homes {
+		for _, add := range jh.added {
+			if group == "" || string(add.Group) == group {
+				return fmt.Errorf("%s added %q to %s", device, add.Name, add.Group)
+			}
+		}
+	}
+	return nil
+}
+
+// checkJoinedIn checks that the last join succeeded and that the group has
+// want sessions in the folder.
+func (w *joinScenarioWorld) checkJoinedIn(group string, want int, folder string) error {
+	if w.lastJoinErr != nil {
+		return w.lastJoinErr
+	}
+	dir, err := w.folder(folder)
+	if got := w.sessionsIn(group, dir); err == nil && got != want {
+		err = fmt.Errorf("%s has %d sessions in %s, want %d", group, got, dir, want)
+	}
+	return err
+}
+
+func (w *joinScenarioWorld) sessionsIn(group, dir string) int {
+	n := 0
+	for _, s := range w.h.Sessions.All() {
+		if s.Group == string(joinGroupIDs[group]) && s.Folder == dir {
+			n++
+		}
+	}
+	return n
+}
+
+// joinAtOnce sends two joins of one agent for one folder and two groups at
+// the same time.
+func (w *joinScenarioWorld) joinAtOnce(agent, group1, home1, group2, home2, folder string) error {
+	dir, err := w.folder(folder)
+	if err != nil {
+		return err
+	}
+	w.atOnce = make([]error, 2)
+	var wg sync.WaitGroup
+	for i, target := range [][2]string{{group1, home1}, {group2, home2}} {
+		wg.Go(func() { w.atOnce[i] = w.joinIn(agent, agent+" "+target[0], false, target[0], target[1], dir) })
+	}
+	wg.Wait()
+	return nil
 }
 
 func (w *joinScenarioWorld) clearAccountAndAttemptJoin(agent, groupName, remote string) error {

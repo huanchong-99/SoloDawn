@@ -27,3 +27,10 @@ Feature: Host session runtime
     Given a task session whose stored CLI session id is no longer resumable
     When the task session receives a turn
     Then the host reports session_replaced and delivers a "replaced" turn on a fresh session
+
+  Scenario: A session whose folder is gone starts no CLI and fails its task, and starts there once the folder is back (A3.13 host half)
+    Given a task session whose workspace was removed after its AI joined
+    When the session of the removed workspace receives a turn
+    Then no CLI was started and the host reports turn_interrupted "crash" naming the folder and task fail "crash"
+    When the workspace is back and its session receives a turn
+    Then the CLI started once, in the workspace, and the session is "waiting" after the turn
