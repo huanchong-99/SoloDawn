@@ -3,7 +3,7 @@ package host
 import (
 	"encoding/json"
 	"errors"
-	"path/filepath"
+	"os"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -13,19 +13,23 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-func putExternalMember(h *Host, hostID, id string) {
+// putExternalMember makes id an external AI of the group whose workspace is
+// folder, in place of a managed AI of that id.
+func putExternalMember(h *Host, hostID, id, folder string) {
 	m := proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: 20}, Group: testGroup1, Kind: "ai", Name: "Scout"},
 		CLI:       externalAgent, Tool: "ZCode", Host: hostID, HostName: "n", Account: "api_key", Allow: []string{}, Approvers: []string{}, State: "offline", Path: "local",
 	}
 	h.Rows.Put(testGroup1, "member", id, json.RawMessage(marshalWire(m)))
-	h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: id}, Kind: GroupSession, Folder: "repo", Agent: externalAgent, Name: "Scout"})
+	key := SessionKey{Group: testGroup1, Member: id}
+	h.Sessions.End(key)
+	h.Sessions.Create(Session{SessionKey: key, Kind: GroupSession, Folder: folder, Agent: externalAgent, Name: "Scout"})
 }
 
 func newExternalRig(t *testing.T, disk bool) *deliverRig {
 	r := newDeliverRig(t, disk)
 	r.seedGroupAndMembers()
-	putExternalMember(r.h, r.hostKey.ID(), testAI1)
+	putExternalMember(r.h, r.hostKey.ID(), testAI1, r.folder)
 	r.h.Sessions.Update(SessionKey{Group: testGroup1, Member: testAI1}, func(s *Session) { s.Home = r.homeKey.ID() })
 	return r
 }
@@ -39,11 +43,6 @@ func (r *deliverRig) pushExternalItem(it proto.Item) {
 	before := r.h.QueuedCount(testGroup1, testAI1)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, it, msg)
 	r.waitUntil("item held", func() bool { return r.h.QueuedCount(testGroup1, testAI1) == before+1 })
-}
-
-func (r *deliverRig) putMissingRepo() {
-	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 2}, Name: "Proj", Kind: "project", Base: "main", Forge: "none",
-		Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}, Repo: filepath.Join(r.t.TempDir(), "missing")})
 }
 
 func mustState(t *testing.T, h *Host, wantState, wantTask string) {
@@ -64,7 +63,7 @@ func TestExternalHandOutAndRunEnds(t *testing.T) {
 		t.Fatal("an external AI was given a turn")
 	}
 	got, ok, err := h.ExternalTake(testGroup1, testAI1)
-	want := proto.Handout{Run: 5, Kind: "group", Folder: filepath.Join(projectDir(h, testGroup1), "repo"),
+	want := proto.Handout{Run: 5, Kind: "group", Folder: r.folder,
 		Context: groupInstructions + "\n" + externalInstructions + "\ngroup:0", Text: "group:1"}
 	if !ok || err != nil || got != want {
 		t.Fatalf("take = %+v %v %v, want %+v", got, ok, err, want)
@@ -102,7 +101,7 @@ func TestExternalHandOutAndRunEnds(t *testing.T) {
 }
 
 func TestExternalTakeWithoutHandOut(t *testing.T) {
-	task := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "T", Slug: "t", Origin: "brief", State: "active", Step: "work", Assignee: testAI2}
+	task := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "T", Origin: "brief", State: "active", Step: "work", Assignee: testAI2}
 	t.Run("stale item", func(t *testing.T) {
 		r := newExternalRig(t, false)
 		r.putTask(task)
@@ -111,9 +110,9 @@ func TestExternalTakeWithoutHandOut(t *testing.T) {
 			t.Fatalf("stale take = %v %v", ok, err)
 		}
 	})
-	t.Run("task folder fails", func(t *testing.T) {
-		r := newExternalRig(t, true)
-		r.putMissingRepo()
+	t.Run("the folder of a task run is gone", func(t *testing.T) {
+		r := newExternalRig(t, false)
+		tskNoErr(t, os.Remove(r.folder))
 		mine := task
 		mine.Assignee = testAI1
 		r.putTask(mine)
@@ -121,16 +120,45 @@ func TestExternalTakeWithoutHandOut(t *testing.T) {
 		if _, ok, err := r.h.ExternalTake(testGroup1, testAI1); ok || err != nil || r.h.QueuedCount(testGroup1, testAI1) != 0 {
 			t.Fatalf("failed task take = %v %v", ok, err)
 		}
-		if cmds := strings.Join(r.home.cmdPayloads(), "\n"); !strings.Contains(cmds, `"op":"fail"`) {
+		if cmds := strings.Join(r.home.cmdPayloads(), "\n"); !strings.Contains(cmds, `"code":"turn_interrupted"`) || !strings.Contains(cmds, `"op":"fail"`) {
 			t.Fatalf("task not failed: %s", cmds)
 		}
 	})
-	t.Run("group clone fails", func(t *testing.T) {
-		r := newExternalRig(t, true)
-		r.putMissingRepo()
+	t.Run("the folder of a group run is gone", func(t *testing.T) {
+		r := newExternalRig(t, false)
+		tskNoErr(t, os.Remove(r.folder))
 		r.pushExternalItem(proto.Item{Item: 9, Why: "mention", Msg: testMsg1})
+		if _, ok, err := r.h.ExternalTake(testGroup1, testAI1); ok || err != nil || r.h.QueuedCount(testGroup1, testAI1) != 0 {
+			t.Fatalf("failed group take = %v %v", ok, err)
+		}
+		if cmds := strings.Join(r.home.cmdPayloads(), "\n"); !strings.Contains(cmds, `"code":"turn_interrupted"`) || strings.Contains(cmds, `"op":"fail"`) {
+			t.Fatalf("group run not reported as a crash alone: %s", cmds)
+		}
+	})
+	t.Run("the folder is gone and the delivery cannot be recorded", func(t *testing.T) {
+		r := newExternalRig(t, false)
+		tskNoErr(t, os.Remove(r.folder))
+		addAuditBlockTrigger(t, r.db)
+		r.pushExternalItem(proto.Item{Item: 12, Why: "mention", Msg: testMsg1})
+		if _, ok, err := r.h.ExternalTake(testGroup1, testAI1); ok || err != nil || r.h.QueuedCount(testGroup1, testAI1) != 1 {
+			t.Fatalf("take = %v %v", ok, err)
+		}
+		if cmds := strings.Join(r.home.cmdPayloads(), "\n"); strings.Contains(cmds, `"code":"turn_interrupted"`) {
+			t.Fatalf("a start whose items were not recorded was reported: %s", cmds)
+		}
+	})
+	t.Run("the session cannot be recorded", func(t *testing.T) {
+		r := newExternalRig(t, false)
+		mine := task
+		mine.Assignee = testAI1
+		r.putTask(mine)
+		r.pushExternalItem(proto.Item{Item: 11, Why: "assign", Task: testTask1})
+		tskNoErr(t, r.db.Write(func(tx *store.Tx) error {
+			_, err := tx.Exec(`CREATE TRIGGER block_session BEFORE INSERT ON session BEGIN SELECT RAISE(ABORT, 'blocked'); END`)
+			return err
+		}))
 		if _, ok, err := r.h.ExternalTake(testGroup1, testAI1); ok || err == nil || r.h.QueuedCount(testGroup1, testAI1) != 1 {
-			t.Fatalf("clone failure take = %v %v", ok, err)
+			t.Fatalf("take without a session row = %v %v", ok, err)
 		}
 	})
 	t.Run("compose fails", func(t *testing.T) {
@@ -158,10 +186,10 @@ func externalBubble(t *testing.T) *Host {
 	}
 	t.Cleanup(h.Settle)
 	h.Rows.Put(testGroup1, "group", testGroup1, json.RawMessage(marshalWire(proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Kind: "project", Base: "main", Forge: "none",
-		Home: "home", Secretary: testSec, Checks: []string{}, Limits: proto.Limits{TurnMinutes: 1},
+		RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj",
+		Home: "home", Secretary: testSec, Limits: proto.Limits{TurnMinutes: 1},
 	})))
-	putExternalMember(h, h.Key.ID(), testAI1)
+	putExternalMember(h, h.Key.ID(), testAI1, t.TempDir())
 	return h
 }
 
@@ -228,10 +256,8 @@ func TestSettleExternalWaitsForItsTimersAndArmsNoMore(t *testing.T) {
 }
 
 func TestExternalTaskHandOutNamesTheTaskByItsNumber(t *testing.T) {
-	r := newExternalRig(t, true)
-	initTestOriginAndGroupRepo(t, r, "none")
-	putExternalMember(r.h, r.hostKey.ID(), testAI1)
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 7, Title: "T", Slug: "t", Origin: "brief", State: "active", Step: "work", Assignee: testAI1})
+	r := newExternalRig(t, false)
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 7, Title: "T", Origin: "brief", State: "active", Step: "work", Assignee: testAI1})
 	r.pushExternalItem(proto.Item{Item: 8, Why: "assign", Task: testTask1})
 	got, ok, err := r.h.ExternalTake(testGroup1, testAI1)
 	if !ok || err != nil || got.Kind != "task" || got.Task != "T-7" {

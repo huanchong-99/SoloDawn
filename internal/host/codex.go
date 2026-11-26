@@ -91,7 +91,7 @@ func (codexDriver) Start(ctx context.Context, l Launch) (Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	kill := killCheckTree(cmd)
+	kill := treeKiller(cmd)
 	p := &codexProcess{
 		launch:    l,
 		sandbox:   sandbox,

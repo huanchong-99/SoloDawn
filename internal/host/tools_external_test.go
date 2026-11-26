@@ -69,8 +69,8 @@ func TestExternalToolCalls(t *testing.T) {
 	if json.Unmarshal([]byte(call("next_item", nil)), &ho); ho.Run != 5 || ho.Kind != "group" {
 		t.Fatalf("hand-out = %+v", ho)
 	}
-	if got := callToolErrorText(t, cs, &mcp.CallToolParams{Name: "run_checks"}); got != "conflict: run_checks needs a task run" {
-		t.Fatalf("run_checks = %s", got)
+	if got := callToolErrorText(t, cs, &mcp.CallToolParams{Name: "submit_task", Arguments: map[string]any{"summary": "Done."}}); got != "conflict: submit_task needs a task run" {
+		t.Fatalf("submit_task = %s", got)
 	}
 	if got := callToolErrorText(t, cs, &mcp.CallToolParams{Name: "submit_review", Arguments: map[string]any{"score": 5, "items": []any{}}}); got != "conflict: submit_review needs a review run" {
 		t.Fatalf("submit_review = %s", got)
@@ -164,10 +164,8 @@ func TestExternalCallsGoToThePlaceOfTheRun(t *testing.T) {
 			[]string{"text main 0", "progress main 0", noThread, "text main 0", "call main 2"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := newExternalRig(t, true)
-			initTestOriginAndGroupRepo(t, r, "none")
-			putExternalMember(r.h, r.hostKey.ID(), testAI1)
-			r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 7, Title: "T", Slug: "t", Origin: "brief", State: "active", Step: "work", Assignee: testAI1})
+			r := newExternalRig(t, false)
+			r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 7, Title: "T", Origin: "brief", State: "active", Step: "work", Assignee: testAI1})
 			composeExternalTurn(tc.turn)
 			r.pushExternalItem(tc.item)
 			r.h.ExternalTake(testGroup1, testAI1)

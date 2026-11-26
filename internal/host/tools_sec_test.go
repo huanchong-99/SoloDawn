@@ -82,12 +82,8 @@ func newSecFixture(t *testing.T) (*Host, *secTestHome) {
 	secPutJSON(h, "group", secGroupID, proto.GroupRow{
 		RowHeader:      proto.RowHeader{Type: "group", ID: secGroupID, Seq: 1},
 		Name:           "Website",
-		Kind:           "project",
-		Base:           "main",
-		Forge:          "none",
 		Home:           "home-dev",
 		Secretary:      secSecID,
-		Checks:         []string{},
 		Pass:           85,
 		PassFoundation: 70,
 		Created:        seamStart,
@@ -117,14 +113,14 @@ func newSecFixture(t *testing.T) (*Host, *secTestHome) {
 	h.Rows.Put(secGroupID, "member", "gone-member", json.RawMessage(`{"r":"member","id":"gone-member","seq":7,"gone":true}`))
 	secPutJSON(h, "task", secTask12ID, proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: secTask12ID, Seq: 8},
-		Group:     secGroupID, Num: 12, Title: "Show path", Slug: "show-path", Origin: "brief", Brief: secBriefID,
-		State: "active", Step: "local_check", Assignee: secClaudeID, Reviewer: secCodexID, Pass: 85, Depends: []string{},
+		Group:     secGroupID, Num: 12, Title: "Show path", Origin: "brief", Brief: secBriefID,
+		State: "active", Step: "work", Assignee: secClaudeID, Reviewer: secCodexID, Pass: 85, Depends: []string{},
 		Stats: proto.TaskStats{Started: seamStart}, Created: seamStart,
 	})
 	secPutJSON(h, "task", secTask2ID, proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: secTask2ID, Seq: 9},
-		Group:     secGroupID, Num: 2, Title: "Direct fix", Slug: "direct-fix", Origin: "direct",
-		State: "paused", Step: "branch", Assignee: secCodexID, Pass: 85, Depends: []string{},
+		Group:     secGroupID, Num: 2, Title: "Direct fix", Origin: "direct",
+		State: "paused", Step: "work", Assignee: secCodexID, Pass: 85, Depends: []string{},
 		Stats: proto.TaskStats{Started: seamStart}, Created: seamStart,
 	})
 	h.Rows.Put(secGroupID, "task", "gone-task", json.RawMessage(`{"r":"task","id":"gone-task","seq":10,"gone":true}`))
@@ -514,8 +510,8 @@ func TestSetTaskValidationRefusals(t *testing.T) {
 
 	secPutJSON(h, "task", secTask2ID, proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: secTask2ID, Seq: 1},
-		Group:     secGroupID, Num: 2, Title: "T", Slug: "t", Origin: "direct",
-		State: "active", Step: "branch", Assignee: secCodexID, Pass: 85, Depends: []string{},
+		Group:     secGroupID, Num: 2, Title: "T", Origin: "direct",
+		State: "active", Step: "work", Assignee: secCodexID, Pass: 85, Depends: []string{},
 	})
 	_, err = Tools["set_task"].Call(t.Context(), h, c, json.RawMessage(`{"task":"T-9","action":"pause"}`))
 	secMustTrue(t, strings.Contains(err.Error(), "valid: T-2)"), err.Error())

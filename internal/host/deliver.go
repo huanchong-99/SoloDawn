@@ -6,11 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -80,16 +76,14 @@ type preemption struct {
 	told    bool       // task preempted is sent, or not to be sent
 }
 
-// delivery holds per-host sync cursors, held queues, open pre-emptions and active merges via Part[delivery](h).
-// mu guards in-memory state only and is never held across store, session, row, hold or Git calls.
+// delivery holds per-host sync cursors, held queues and open pre-emptions via Part[delivery](h).
+// mu guards in-memory state only and is never held across store, session, row or hold calls.
 type delivery struct {
 	mu            sync.Mutex
 	wg            sync.WaitGroup
 	groups        map[string]*groupSync
 	held          map[aiGroupKey][]verifiedItem
 	pre           map[aiGroupKey][]*preemption // the interrupted turns of an AI, the latest last
-	merges        map[string][]verifiedItem
-	merging       map[string]bool
 	busy, recheck map[aiGroupKey]bool
 	giving        map[aiGroupKey]bool // the AIs whose items or owed turn delivery has read the holds for
 	cancels       map[string]*homeSync
@@ -99,8 +93,7 @@ func deliv(h *Host) *delivery {
 	d := Part[delivery](h)
 	d.mu.Lock()
 	if d.groups == nil {
-		d.groups, d.held, d.merges = map[string]*groupSync{}, map[aiGroupKey][]verifiedItem{}, map[string][]verifiedItem{}
-		d.merging, d.cancels = map[string]bool{}, map[string]*homeSync{}
+		d.groups, d.held, d.cancels = map[string]*groupSync{}, map[aiGroupKey][]verifiedItem{}, map[string]*homeSync{}
 		d.busy, d.recheck, d.giving = map[aiGroupKey]bool{}, map[aiGroupKey]bool{}, map[aiGroupKey]bool{}
 		d.pre = map[aiGroupKey][]*preemption{}
 	}
@@ -229,7 +222,6 @@ func (d *delivery) dropLocked(group string, gs *groupSync) {
 		close(ch)
 	}
 	maps.DeleteFunc(d.held, func(key aiGroupKey, _ []verifiedItem) bool { return key.group == group })
-	delete(d.merges, group)
 }
 
 // forget drops a group this node no longer reads.
@@ -447,9 +439,6 @@ func (d *delivery) advanceLiveCursor(group, home string, seq int64) {
 func afterGroupState(h *Host, d *delivery, group string) {
 	interruptPausedTurns(h, d, group)
 	cleanupGroupState(h, d, group)
-	stepMerges(h, d, group)
-	resumeGroupMerges(h, d, group)
-	resumeGroupHostedChecks(h, d, group)
 	for _, key := range d.sweepKeys() {
 		deliverPair(h, d, key)
 	}
@@ -494,19 +483,6 @@ func cleanupGroupState(h *Host, d *delivery, group string) {
 	cleanupGoneMembers(h, group)
 	cleanupTaskSessions(h, group)
 	handBackSaved(h, group)
-	tasks := liveTasks(h, group)
-	if len(tasks) == 0 {
-		return
-	}
-	pDir := projectDir(h, group)
-	if !hasGitClone(pDir) {
-		return
-	}
-	grp, _ := lookupRow[proto.GroupRow](h, group, "group", group)
-	for _, task := range tasks {
-		cleanupTaskFolder(context.Background(), h, pDir, grp, task)
-		cleanupReviewFolder(context.Background(), pDir, task)
-	}
 }
 
 func cleanupGoneMembers(h *Host, group string) {
@@ -519,6 +495,9 @@ func cleanupGoneMembers(h *Host, group string) {
 	}
 }
 
+// cleanupTaskSessions ends the task and review sessions of a group whose task
+// is final or has another AI in that role, and waits for their processes to
+// exit (flows/agent-turn.md step 17). Nothing is removed from a folder.
 func cleanupTaskSessions(h *Host, group string) {
 	for _, s := range h.Sessions.All() {
 		if s.Group == group && s.Task != "" && sessionTaskObsolete(h, group, s) {
@@ -537,73 +516,7 @@ func sessionTaskObsolete(h *Host, group string, s Session) bool {
 	if s.Kind == TaskSession {
 		role = task.Assignee
 	}
-	return ok && (task.State == "merged" || task.State == "cancelled" || role != s.Member)
-}
-
-func cleanupTaskFolder(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, task proto.TaskRow) {
-	name := strconv.Itoa(task.Num) + "-" + string(task.Slug)
-	wtPath := filepath.Join(pDir, "wt", name)
-	if !pathExists(wtPath) {
-		return
-	}
-	if task.State == "merged" {
-		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), newSlot(pDir, "wt", name, "", "").holder(ctx), TaskMerged)
-		(ReviewedMerge{Repo: filepath.Join(pDir, "repo"), Branch: "task/" + name, Commit: task.Commit}).DeleteBranch(ctx)
-		return
-	}
-	if task.State == "cancelled" {
-		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), newSlot(pDir, "wt", name, "", "").holder(ctx), TaskCancelled)
-		return
-	}
-	handOver(ctx, h, pDir, grp, task, name)
-}
-
-// handOver publishes what the AI that had a task committed in its worktree
-// here, once another is the assignee, and removes that worktree (flows/task.md
-// "Reassignment"). The new assignee's session does it too, before it makes its
-// own worktree. A push that fails is told in the task's thread; the commits
-// stay on the branch of this node.
-func handOver(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, task proto.TaskRow, name string) {
-	holder, err := releaseGivenAway(ctx, h, pDir, grp, task, name)
-	if err == nil {
-		return
-	}
-	log.Printf("host: push of task %s handed over by %s: %v", task.ID, holder, err)
-	sendMemberStatus(ctx, h, stateOf(h), grp.Home, task.Group, holder, proto.TurnInterruptedEvent{
-		SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: "crash", Task: proto.ID(task.ID), Detail: RedactSecrets(err.Error()),
-	})
-}
-
-// releaseGivenAway reads the assignee under the clone's lock: it may have
-// waited there while the task went on to another AI, which made its worktree.
-func releaseGivenAway(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, task proto.TaskRow, name string) (holder string, pushErr error) {
-	_, unlock := lockClone(pDir)
-	defer unlock()
-	s := newSlot(pDir, "wt", name, "", "")
-	s.ai = s.holder(ctx)
-	now, known := lookupTaskRow(h, task.Group, task.ID)
-	if !known || s.ai == now.Assignee || !pathExists(s.path) {
-		return "", nil
-	}
-	if grp.Forge != "none" && s.ai != "" {
-		pushErr = (TaskForge{Worktree: s.path, Branch: "task/" + name, Base: grp.Base, Templates: grp.Templates}).push(ctx)
-	}
-	s.release(ctx, TaskGivenAway)
-	return s.ai, pushErr
-}
-
-func cleanupReviewFolder(ctx context.Context, pDir string, task proto.TaskRow) {
-	numStr := strconv.Itoa(task.Num)
-	if pathExists(filepath.Join(pDir, "review", numStr)) {
-		if hld := newSlot(pDir, "review", numStr, "", "").holder(ctx); task.State == "merged" || task.State == "cancelled" || hld != task.Reviewer {
-			RemoveReviewWorkspace(ctx, pDir, task.Num, hld)
-		}
-	}
-}
-
-func pathExists(path string) bool {
-	_, err := os.Lstat(path)
-	return err == nil
+	return ok && (task.State == "done" || task.State == "cancelled" || role != s.Member)
 }
 
 type rawInboxFrame struct {
@@ -702,26 +615,11 @@ func tryOpenWait(h *Host, v verifiedItem, agent string) bool {
 }
 
 func enqueueVerified(h *Host, d *delivery, v verifiedItem) {
-	if v.item.Why == "merge" {
-		d.enqueueMerge(v)
-	} else {
-		key := aiGroupKey{group: v.group, member: string(v.item.AI)}
-		d.mu.Lock()
-		d.held[key] = enqueueHeld(d.held[key], v)
-		d.mu.Unlock()
-	}
-	h.bg(d.wg.Go, "deliver", func() { deliverNow(h, v.group, string(v.item.AI)) }, "g", v.group)
-}
-
-func (d *delivery) enqueueMerge(v verifiedItem) {
+	key := aiGroupKey{group: v.group, member: string(v.item.AI)}
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	for _, existing := range d.merges[v.group] {
-		if existing.item.Item == v.item.Item {
-			return
-		}
-	}
-	d.merges[v.group] = append(d.merges[v.group], v)
+	d.held[key] = enqueueHeld(d.held[key], v)
+	d.mu.Unlock()
+	h.bg(d.wg.Go, "deliver", func() { deliverNow(h, v.group, string(v.item.AI)) }, "g", v.group)
 }
 
 func enqueueHeld(queue []verifiedItem, incoming verifiedItem) []verifiedItem {
@@ -777,20 +675,11 @@ func deliverNow(h *Host, group, member string) {
 	d := deliv(h)
 	primary := aiGroupKey{group: group, member: member}
 	deliverPair(h, d, primary)
-	for _, g := range d.mergeGroups() {
-		stepMerges(h, d, g)
-	}
 	for _, other := range d.sweepKeys() {
 		if other != primary {
 			deliverPair(h, d, other)
 		}
 	}
-}
-
-func (d *delivery) mergeGroups() []string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return slices.Sorted(maps.Keys(d.merges))
 }
 
 func deliverPair(h *Host, d *delivery, key aiGroupKey) {
@@ -883,7 +772,7 @@ func routeSessionItem(h *Host, ai aiInfo, v verifiedItem) routedTarget {
 }
 
 func isTaskWorkWhy(why string) bool {
-	return why == "assign" || why == "checks" || why == "reviewed" || why == "resume"
+	return why == "assign" || why == "reviewed" || why == "resume"
 }
 
 func routeDecidedItem(h *Host, group, member, task string) routedTarget {
@@ -972,8 +861,8 @@ func jumpRunningTurn(h *Host, d *delivery, key aiGroupKey, ai aiInfo, running Se
 }
 
 func canPrepare(h *Host, ai aiInfo, target routedTarget, v verifiedItem) bool {
-	_, gitErr, err := prepareTargetSession(h, ai, target, v.home, []verifiedItem{v})
-	return gitErr == nil && err == nil
+	s, err := prepareTargetSession(h, ai, target, v.home)
+	return err == nil && missingFolder(s) == ""
 }
 
 // firstJump returns the first jump item that at most a running turn holds. An
@@ -1077,7 +966,7 @@ func taskPreempted(h *Host, s Session) bool {
 
 // reportPreempted reports task preempted for an interrupted task session,
 // once, when the first jump turn can start (flows/agent-turn.md step 12). A
-// refusal, as at step merge, is not an error.
+// refusal, as of a task that is no longer active, is not an error.
 func reportPreempted(h *Host, d *delivery, key aiGroupKey, ai aiInfo) {
 	p := d.lastPreemption(key)
 	if p == nil || p.told {
@@ -1323,11 +1212,8 @@ func deliverTargetBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo, target 
 	if len(current) == 0 {
 		return consumed
 	}
-	session, gitErr, err := prepareTargetSession(h, ai, target, current[0].home, current)
-	if gitErr != nil && target.kind != GroupSession {
-		return failTargetSession(h, d, key, ai.agent, target, current, gitErr)
-	}
-	if gitErr != nil || err != nil {
+	session, err := prepareTargetSession(h, ai, target, current[0].home)
+	if err != nil {
 		d.prependHeld(key, current)
 		return false
 	}
@@ -1360,7 +1246,7 @@ func classifyBatchEntry(h *Host, agent string, v verifiedItem, kept, held []veri
 }
 
 func checkStillCurrent(h *Host, v verifiedItem) (string, bool) {
-	if !isTaskWorkWhy(v.item.Why) && v.item.Why != "review" && v.item.Why != "merge" {
+	if !isTaskWorkWhy(v.item.Why) && v.item.Why != "review" {
 		return "", false
 	}
 	task, ok := lookupTaskRow(h, v.group, string(v.item.Task))
@@ -1378,43 +1264,20 @@ func matchesTaskRole(task proto.TaskRow, it proto.Item) bool {
 		return false
 	}
 	ai := string(it.AI)
-	switch it.Why {
-	case "review":
-		return matchesStepCommit(task.Reviewer == ai, task, "review", it.Commit)
-	case "merge":
-		return matchesStepCommit(task.Assignee == ai, task, "merge", it.Commit)
-	default:
-		return task.Assignee == ai
+	if it.Why == "review" {
+		return task.Reviewer == ai && task.Step == "review" && task.Report == string(it.Msg)
 	}
+	return task.Assignee == ai
 }
 
-func matchesStepCommit(inRole bool, task proto.TaskRow, step, commit string) bool {
-	return inRole && task.Step == step && task.Commit == commit
-}
-
-func prepareTargetSession(h *Host, ai aiInfo, target routedTarget, home string, batch []verifiedItem) (Session, error, error) {
-	ctx := context.Background()
-	grp, _ := lookupRow[proto.GroupRow](h, target.key.Group, "group", target.key.Group)
-	pDir := projectDir(h, target.key.Group)
-	if err := ensureCloneIfConfigured(ctx, pDir, grp); err != nil {
-		return Session{}, err, nil
+// prepareTargetSession returns the session a batch is for, as the rows say its
+// AI is, and records one that does not exist yet.
+func prepareTargetSession(h *Host, ai aiInfo, target routedTarget, home string) (Session, error) {
+	s, exists, err := followMember(h, ai, target.key)
+	if err == nil && !exists {
+		s, err = createSession(h, ai, target, home)
 	}
-	existing, exists, err := followMember(h, ai, target.key)
-	if err != nil {
-		return Session{}, nil, err
-	}
-	folder, branchToReport, err := prepareSessionFolder(ctx, h, pDir, grp, target, exists, existing, batch)
-	if err != nil {
-		return Session{}, err, nil
-	}
-	session, err := ensureSessionRow(h, ai, target, folder, home, exists, existing)
-	if err != nil {
-		return Session{}, nil, err
-	}
-	if err := reportInitialBranch(ctx, h, home, target.key.Group, target.key.Task, branchToReport); err != nil {
-		return Session{}, nil, err
-	}
-	return session, nil, nil
+	return s, err
 }
 
 // followMember returns a session as the rows say its AI is: its name, and
@@ -1436,140 +1299,26 @@ func followMember(h *Host, ai aiInfo, key SessionKey) (Session, bool, error) {
 	return s, ok, err
 }
 
-func ensureSessionRow(h *Host, ai aiInfo, target routedTarget, folder, home string, exists bool, existing Session) (Session, error) {
-	if exists {
-		return existing, nil
+// createSession records a new session of an AI. Its folder is the member's
+// workspace, copied from the row of the AI's group session, which host.join
+// wrote. Before a task session is recorded, the group's obsolete task sessions
+// are closed: the first turn of a task never runs beside the last turn of an
+// earlier one in the same folder (flows/agent-turn.md step 4).
+func createSession(h *Host, ai aiInfo, target routedTarget, home string) (Session, error) {
+	joined, ok := h.Sessions.Get(SessionKey{Group: target.key.Group, Member: target.key.Member})
+	if !ok {
+		return Session{}, &Error{"not_found", "the AI has no group session on this node"}
 	}
-	s := Session{SessionKey: target.key, Kind: target.kind, Folder: folder, Agent: ai.agent, Home: home, Name: ai.name, Secretary: ai.secretary}
+	if target.kind == TaskSession {
+		cleanupTaskSessions(h, target.key.Group)
+	}
+	s := Session{SessionKey: target.key, Kind: target.kind, Folder: joined.Folder, Agent: ai.agent, Home: home, Name: ai.name, Secretary: ai.secretary}
 	if err := h.Sessions.Create(s); err != nil {
 		log.Printf("host: create session %v: %v", target.key, err)
 		return Session{}, err
 	}
-	existing, exists = h.Sessions.Get(target.key)
-	return existing, nil
-}
-
-func ensureCloneIfConfigured(ctx context.Context, projectDir string, grp proto.GroupRow) error {
-	if projectDir == "" || grp.Repo == "" {
-		return nil
-	}
-	_, err := EnsureGroupWorkspace(ctx, projectDir, grp.Repo, grp.Base)
-	return err
-}
-
-func hasGitClone(projectDir string) bool {
-	if projectDir == "" {
-		return false
-	}
-	_, err := os.Stat(filepath.Join(projectDir, "repo", ".git"))
-	return err == nil
-}
-
-func prepareSessionFolder(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, target routedTarget, exists bool, existing Session, batch []verifiedItem) (string, string, error) {
-	remote := grp.Forge != "none"
-	switch target.kind {
-	case TaskSession:
-		return prepareTaskFolder(ctx, h, pDir, grp, target.key, exists, existing.Folder)
-	case ReviewSession:
-		return prepareReviewFolder(ctx, h, pDir, grp.Base, remote, target.key, batch)
-	default:
-		return prepareGroupFolder(ctx, pDir, grp.Base, remote, exists, existing.State)
-	}
-}
-
-func prepareGroupFolder(ctx context.Context, pDir, base string, remote, exists bool, state State) (string, string, error) {
-	if hasGitClone(pDir) && (!exists || state == Dormant) {
-		if err := RefreshGroupWorkspace(ctx, pDir, base, remote); err != nil {
-			return "", "", err
-		}
-	}
-	return "repo", "", nil
-}
-
-func prepareTaskFolder(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, key SessionKey, exists bool, folder string) (string, string, error) {
-	task, _ := lookupTaskRow(h, key.Group, key.Task)
-	name := strings.TrimPrefix(folder, "wt/")
-	if !exists {
-		var err error
-		if name, err = taskName(task.Num, string(task.Slug)); err != nil {
-			return "", "", err
-		}
-		if err := createTaskFolder(ctx, h, pDir, grp, task, key.Member, name); err != nil {
-			return "", "", err
-		}
-		folder = "wt/" + name
-	}
-	if task.Step == "branch" {
-		return folder, "task/" + name, nil
-	}
-	return folder, "", nil
-}
-
-// createTaskFolder makes a task's worktree for its assignee, after the
-// assignee before it on this node has ended its session and handed over.
-func createTaskFolder(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, task proto.TaskRow, ai, name string) error {
-	if !hasGitClone(pDir) {
-		return nil
-	}
-	cleanupTaskSessions(h, task.Group)
-	handOver(ctx, h, pDir, grp, task, name)
-	_, err := CreateTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), ai, grp.Base, grp.Forge != "none")
-	return err
-}
-
-func prepareReviewFolder(ctx context.Context, h *Host, pDir, base string, remote bool, key SessionKey, batch []verifiedItem) (string, string, error) {
-	commit := ""
-	for _, v := range batch {
-		if v.item.Why == "review" {
-			commit = v.item.Commit
-		}
-	}
-	task, _ := lookupTaskRow(h, key.Group, key.Task)
-	folder := "review/" + strconv.Itoa(task.Num)
-	if hasGitClone(pDir) && commit != "" {
-		_, err := PrepareReviewWorkspace(ctx, pDir, task.Num, key.Member, commit, base, remote)
-		return folder, "", err
-	}
-	return folder, "", nil
-}
-
-func reportInitialBranch(ctx context.Context, h *Host, home, group, taskID, branch string) error {
-	if branch == "" {
-		return nil
-	}
-	cmd := proto.TaskBranch{TaskCommand: hostTaskCommand(h, group, "branch", taskID), Branch: branch}
-	return sendHostCommand(ctx, h, home, marshalWire(cmd))
-}
-
-func failTargetSession(h *Host, d *delivery, key aiGroupKey, agent string, target routedTarget, batch []verifiedItem, gitErr error) bool {
-	log.Printf("host: prepare workspace %v: %v", target.key, gitErr)
-	if err := commitTurnItems(h, agent, batch); err != nil {
-		log.Printf("host: commit failed-workspace items %v: %v", target.key, err)
-		d.prependHeld(key, batch)
-		return false
-	}
-	ackBatch(h, batch)
-	reportWorkspaceFailure(context.Background(), h, batch[0].home, target, RedactSecrets(gitErr.Error()))
-	return true
-}
-
-func reportWorkspaceFailure(ctx context.Context, h *Host, home string, target routedTarget, detail string) {
-	state := "dormant"
-	if aiHasState(h, aiGroupKey{group: target.key.Group, member: target.key.Member}, Waiting) {
-		state = "waiting"
-	}
-	var path string
-	if conn, ok := h.Home(home); ok {
-		path = conn.Path()
-	}
-	hc := homeHeader(h, target.key.Group, "", "member")
-	mc := proto.MemberCommand{HomeCommand: hc, Op: "status", ID: proto.ID(target.key.Member)}
-	ev := &proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: "crash", Task: proto.ID(target.key.Task), Detail: detail}
-	sendHostCommand(ctx, h, home, marshalWire(proto.MemberStatus[proto.TurnInterruptedEvent]{MemberCommand: mc, State: state, Path: path, Event: ev}))
-	if target.kind == TaskSession {
-		fail := proto.TaskFail{TaskCommand: hostTaskCommand(h, target.key.Group, "fail", target.key.Task), Reason: "crash", Detail: detail}
-		sendHostCommand(ctx, h, home, marshalWire(fail))
-	}
+	s, _ = h.Sessions.Get(target.key)
+	return s, nil
 }
 
 func sendHostCommand(ctx context.Context, h *Host, home, payload string) error {
@@ -1593,7 +1342,7 @@ func runSessionTurn(h *Host, d *delivery, key aiGroupKey, ai aiInfo, session Ses
 	if jumping {
 		turn.Jump = true
 	}
-	if err := commitTurnItems(h, ai.agent, batch); err != nil {
+	if err := commitTurnItems(h, ai.agent, session.SessionKey, batch); err != nil {
 		log.Printf("host: commit delivered %v: %v", session.SessionKey, err)
 		d.prependHeld(key, batch)
 		return false
@@ -1615,17 +1364,29 @@ func collectRawItems(batch []verifiedItem) ([]json.RawMessage, bool) {
 	return raw, jumping
 }
 
-func commitTurnItems(h *Host, agent string, batch []verifiedItem) error {
-	run := func(tx *store.Tx) error {
+// commitTurnItems records the items of a session's turn as delivered. In the
+// same transaction a review item writes the report it carries into the row of
+// its session, where submit_review reads it (contracts/storage.md section 3).
+func commitTurnItems(h *Host, agent string, key SessionKey, batch []verifiedItem) error {
+	return h.Sessions.Write(func(tx *Tx) error {
 		for _, v := range batch {
 			row := AuditRow{Group: v.group, Agent: agent, What: AuditDelivered, Item: v.item.Item, Home: v.home, Detail: v.item.Why, By: v.home}
-			if _, err := h.Audit(tx, row); err != nil {
+			if _, err := h.Audit(tx.Tx, row); err != nil {
+				return err
+			}
+			if err := noteReport(tx, key, v.item); err != nil {
 				return err
 			}
 		}
 		return nil
+	})
+}
+
+func noteReport(tx *Tx, key SessionKey, it proto.Item) error {
+	if it.Why != "review" {
+		return nil
 	}
-	return h.Store.Write(run)
+	return tx.Update(key, func(s *Session) { s.Report = string(it.Msg) })
 }
 
 func ackBatch(h *Host, batch []verifiedItem) {
@@ -1669,113 +1430,6 @@ func refuseItem(h *Host, v verifiedItem, agent, detail string) {
 	}
 }
 
-func mergeHeldNow(h *Host, d *delivery, group, member string) bool {
-	if d.groupSyncActive(group) || groupIsPaused(h, group) {
-		return true
-	}
-	reason, held := h.Held(SessionKey{Group: group, Member: member})
-	return held && reason == "offline"
-}
-
-func stepMerges(h *Host, d *delivery, group string) {
-	d.mu.Lock()
-	pending := slices.Clone(d.merges[group])
-	d.mu.Unlock()
-	for _, v := range pending {
-		if !mergeHeldNow(h, d, group, string(v.item.AI)) && d.takeQueuedMerge(group, v.item.Item) {
-			takeOneMerge(h, d, v)
-		}
-	}
-}
-
-func (d *delivery) takeQueuedMerge(group string, item int64) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	match := func(v verifiedItem) bool { return v.item.Item == item }
-	idx := slices.IndexFunc(d.merges[group], match)
-	if idx < 0 {
-		return false
-	}
-	setQueue(d.merges, group, slices.Delete(d.merges[group], idx, idx+1))
-	return true
-}
-
-func takeOneMerge(h *Host, d *delivery, v verifiedItem) {
-	ai, local, present := lookupLocalAI(h, v.group, string(v.item.AI))
-	if !local {
-		if present {
-			refuseItem(h, v, "", "not_hosted_here")
-		} else {
-			d.enqueueMerge(v)
-		}
-		return
-	}
-	reason, hold := checkStillCurrent(h, v)
-	if hold {
-		d.enqueueMerge(v)
-		return
-	}
-	if reason != "" {
-		refuseItem(h, v, ai.agent, reason)
-		return
-	}
-	runClaimedMerge(h, d, ai.agent, v)
-}
-
-func runClaimedMerge(h *Host, d *delivery, agent string, v verifiedItem) {
-	task, _ := lookupTaskRow(h, v.group, string(v.item.Task))
-	mKey := v.group + "\x00" + task.ID + "\x00" + v.item.Commit
-	if !d.claimMerge(mKey) {
-		d.enqueueMerge(v)
-		return
-	}
-	written, err := recordMergeTaken(h, agent, v, task.ID)
-	if err != nil {
-		d.unclaimMerge(mKey)
-		log.Printf("host: audit merge item %d: %v", v.item.Item, err)
-		d.enqueueMerge(v)
-		return
-	}
-	sendAck(h, v.home, v.group, v.item.Item)
-	if written {
-		runReviewedMerge(h, v.home, v.group, task, v.item.Commit, v.item.PR, false, time.Time{})
-	}
-	d.unclaimMerge(mKey)
-	stepMerges(h, d, v.group)
-}
-
-func (d *delivery) claimMerge(key string) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.merging[key] {
-		return false
-	}
-	d.merging[key] = true
-	return true
-}
-
-func (d *delivery) unclaimMerge(key string) {
-	d.mu.Lock()
-	delete(d.merging, key)
-	d.mu.Unlock()
-}
-
-func recordMergeTaken(h *Host, agent string, v verifiedItem, taskID string) (bool, error) {
-	var written bool
-	write := func(tx *store.Tx) error {
-		delivRow := AuditRow{Group: v.group, Agent: agent, What: AuditDelivered, Item: v.item.Item, Home: v.home, Detail: "merge", By: v.home}
-		var err error
-		written, err = h.Audit(tx, delivRow)
-		if err != nil || !written {
-			return err
-		}
-		_, err = h.Audit(tx, AuditRow{Group: v.group, Agent: agent, What: AuditMerge, Detail: taskID + " " + v.item.Commit})
-		return err
-	}
-	err := h.Store.Write(write)
-	return written, err
-}
-
 // homes returns the home of each group this node reads the state of.
 func (d *delivery) homes() map[string]string {
 	d.mu.Lock()
@@ -1796,28 +1450,6 @@ func (d *delivery) groupHome(group string) string {
 	return ""
 }
 
-func resumeGroupMerges(h *Host, d *delivery, group string) {
-	home := d.groupHome(group)
-	if home == "" {
-		return
-	}
-	for _, task := range liveTasks(h, group) {
-		if task.State == "active" && task.Step == "merge" {
-			resumeOneMerge(h, d, home, group, task)
-		}
-	}
-}
-
-func resumeGroupHostedChecks(h *Host, d *delivery, group string) {
-	home := d.groupHome(group)
-	if home == "" {
-		return
-	}
-	for _, hc := range HostedChecksToResume(liveTasks(h, group), localGroupAIs(h, group)) {
-		startHostedCheck(h, home, group, hc)
-	}
-}
-
 func localGroupAIs(h *Host, group string) []string {
 	var ais []string
 	for _, raw := range h.Rows.Of(group, "member") {
@@ -1828,95 +1460,6 @@ func localGroupAIs(h *Host, group string) []string {
 		}
 	}
 	return ais
-}
-
-func resumeOneMerge(h *Host, d *delivery, home, group string, task proto.TaskRow) {
-	_, local, _ := lookupLocalAI(h, group, task.Assignee)
-	if !local || mergeHeldNow(h, d, group, task.Assignee) {
-		return
-	}
-	ts, found := findAuditMergeTS(h.Store, group, task.ID+" "+task.Commit)
-	if !found {
-		return
-	}
-	mKey := group + "\x00" + task.ID + "\x00" + task.Commit
-	if !d.claimMerge(mKey) {
-		return
-	}
-	runReviewedMerge(h, home, group, task, task.Commit, task.PR, true, time.UnixMilli(ts))
-	d.unclaimMerge(mKey)
-	stepMerges(h, d, group)
-}
-
-func findAuditMergeTS(db *store.Store, group, detail string) (int64, bool) {
-	var ts int64
-	read := func(tx *store.Tx) error {
-		return tx.QueryRow("SELECT coalesce((SELECT ts FROM audit WHERE g = ? AND what = ? AND detail = ? ORDER BY id DESC LIMIT 1), 0)",
-			group, AuditMerge, detail).Scan(&ts)
-	}
-	db.Write(read)
-	return ts, ts != 0
-}
-
-func runReviewedMerge(h *Host, home, group string, task proto.TaskRow, commit string, pr int, inspectOnly bool, taken time.Time) {
-	ctx := context.Background()
-	grp, _ := lookupRow[proto.GroupRow](h, group, "group", group)
-	pDir := projectDir(h, group)
-	if pDir == "" {
-		return
-	}
-	if err := ensureCloneIfConfigured(ctx, pDir, grp); err != nil {
-		log.Printf("host: ensure merge clone %s: %v", group, err)
-		return
-	}
-	rm := buildReviewedMerge(pDir, grp, task, commit, pr, taken)
-	var res MergeResult
-	var err error
-	if inspectOnly {
-		res, err = rm.Inspect(ctx)
-	} else {
-		res, err = rm.Apply(ctx)
-	}
-	if err != nil {
-		log.Printf("host: merge %s %s: %v", group, task.ID, err)
-		return
-	}
-	reportMergeOutcome(ctx, h, home, group, task, commit, res)
-}
-
-func buildReviewedMerge(pDir string, grp proto.GroupRow, task proto.TaskRow, commit string, pr int, taken time.Time) ReviewedMerge {
-	var branch string
-	if name, err := taskName(task.Num, string(task.Slug)); err == nil {
-		branch = "task/" + name
-	}
-	var forgePR int
-	var ghRepo string
-	if grp.Forge != "none" {
-		forgePR, ghRepo = pr, githubRepo(grp.Repo)
-	}
-	return ReviewedMerge{
-		Repo: filepath.Join(pDir, "repo"), Base: grp.Base, Branch: branch,
-		Task: task.ID, Commit: commit, PR: forgePR, GitHubRepo: ghRepo, Taken: taken, Templates: grp.Templates,
-	}
-}
-
-func reportMergeOutcome(ctx context.Context, h *Host, home, group string, task proto.TaskRow, commit string, res MergeResult) {
-	if res.MergeCommit != "" {
-		stats := proto.DiffStats{Added: task.Stats.Added, Removed: task.Stats.Removed}
-		sendHostCommand(ctx, h, home, marshalWire(proto.TaskMerged{TaskCommand: hostTaskCommand(h, group, "merged", task.ID), Commit: commit, MergeCommit: res.MergeCommit, Stats: stats}))
-		return
-	}
-	sendHostCommand(ctx, h, home, marshalWire(proto.TaskConflict{TaskCommand: hostTaskCommand(h, group, "conflict", task.ID), Commit: commit, Detail: res.Conflict}))
-}
-
-func githubRepo(raw string) string {
-	trimmed := strings.TrimSuffix(strings.TrimRight(raw, `/\`), ".git")
-	sep := func(r rune) bool { return r == '/' || r == ':' || r == '\\' }
-	parts := strings.FieldsFunc(trimmed, sep)
-	if len(parts) < 2 {
-		return ""
-	}
-	return parts[len(parts)-2] + "/" + parts[len(parts)-1]
 }
 
 func hostTaskCommand(h *Host, group, op, taskID string) proto.TaskCommand {

@@ -167,7 +167,7 @@ func startClaudeProcess(ctx context.Context, l Launch, args []string) (Process, 
 	stdinRead, stdinWrite, _ := os.Pipe()
 	cmd.Stdin = stdinRead
 	stdout, _ := cmd.StdoutPipe()
-	var stderr checkTail
+	var stderr outputTail
 	cmd.Stderr = &stderr
 	err := cmd.Start()
 	stdinRead.Close()
@@ -177,7 +177,7 @@ func startClaudeProcess(ctx context.Context, l Launch, args []string) (Process, 
 		stdout.Close()
 		return nil, err
 	}
-	killTree := killCheckTree(cmd)
+	killTree := treeKiller(cmd)
 	p := &claudeProcess{
 		in:      stdinWrite,
 		closeIn: sync.OnceValue(stdinWrite.Close),
@@ -276,7 +276,19 @@ func (p *claudeProcess) takeInterrupted() bool {
 	return was
 }
 
-func (p *claudeProcess) readLoop(cmd *exec.Cmd, stdout io.Reader, stderr *checkTail, killTree func()) {
+// outputTail keeps the last 64 KiB written to it.
+type outputTail []byte
+
+const outputTailSize = 64 << 10
+
+func (t *outputTail) Write(p []byte) (int, error) {
+	n := len(p)
+	p = p[max(0, n-outputTailSize):]
+	*t = append((*t)[max(0, len(*t)+len(p)-outputTailSize):], p...)
+	return n, nil
+}
+
+func (p *claudeProcess) readLoop(cmd *exec.Cmd, stdout io.Reader, stderr *outputTail, killTree func()) {
 	reportedDiag := p.readLines(bufio.NewReader(stdout))
 	waitErr := cmd.Wait()
 	killTree()

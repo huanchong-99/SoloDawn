@@ -32,7 +32,7 @@ func probeModels(ctx context.Context, agent string, args []string, read func(*bu
 	if err != nil {
 		return []proto.Model{}
 	}
-	defer killCheckTree(cmd)()
+	defer treeKiller(cmd)()
 	stop := context.AfterFunc(ctx, func() { out.Close() })
 	defer stop()
 	models, err := read(bufio.NewReader(out), json.NewEncoder(in))

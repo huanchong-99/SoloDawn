@@ -38,13 +38,21 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(RunShim(os.Args[2:], dial, os.Stdin, os.Stdout, os.Stderr))
 	}
-	// A fixture's git command leaves no maintenance process behind, which
-	// would write on in a temporary directory that is being removed.
-	for _, setting := range foregroundGC() {
-		name, value, _ := strings.Cut(setting, "=")
-		os.Setenv(name, value)
-	}
-	os.Exit(m.Run())
+	runRoot, _ = os.MkdirTemp("", "host-test")
+	code := m.Run()
+	os.RemoveAll(runRoot)
+	os.Exit(code)
+}
+
+// runRoot holds the folders of the sessions the tests start, since nothing
+// starts in a folder that is gone.
+var runRoot string
+
+// runFolder returns the folder name under runRoot, made if it is not there.
+func runFolder(name string) string {
+	path := filepath.Join(runRoot, name)
+	os.MkdirAll(path, 0o700)
+	return path
 }
 
 func saveTools(t *testing.T, next map[string]Tool) {
@@ -179,9 +187,7 @@ func registerSupersetTools(t *testing.T, lists proto.ToolLists) {
 		"kb_put":           {Description: "save a kb doc", Schema: find(lists.Secretary, "kb_put"), Call: noop},
 		"kb_search":        {Description: "search kb", Schema: find(lists.Secretary, "kb_search"), Call: noop},
 		"start_task":       {Description: "start a task", Schema: find(lists.Group, "start_task"), For: func(c Caller) bool { return c.Kind == GroupSession && !c.Secretary }, Call: noop},
-		"push_branch":      {Description: "push branch", Schema: nil, For: func(c Caller) bool { return c.Kind == TaskSession && c.Level > 1 }, Call: noop},
-		"run_checks":       {Description: "run checks", Schema: nil, For: func(c Caller) bool { return c.Kind == TaskSession && c.Level > 1 }, Call: noop},
-		"submit_task":      {Description: "submit task", Schema: find(lists.TaskLevel23, "submit_task"), For: func(c Caller) bool { return c.Kind == TaskSession && c.Level > 1 }, Call: noop},
+		"submit_task":      {Description: "submit task", Schema: find(lists.Task, "submit_task"), For: func(c Caller) bool { return c.Kind == TaskSession }, Call: noop},
 		"submit_review":    {Description: "submit review", Schema: find(lists.Review, "submit_review"), For: func(c Caller) bool { return c.Kind == ReviewSession }, Call: noop},
 		"request_decision": {Description: "request a decision", Schema: find(lists.Secretary, "request_decision"), Call: noop},
 		"net_status":       {Description: "network status", Schema: nil, Call: noop},
@@ -217,27 +223,21 @@ func TestToolListsMatchGoldenSchemas(t *testing.T) {
 		},
 		{
 			name:    "review",
-			session: Session{SessionKey: SessionKey{Group: "g1", Member: "m2", Task: "t9"}, Kind: ReviewSession, Folder: "review/9", Agent: "codex", Home: "h1", Name: "Codex"},
+			session: Session{SessionKey: SessionKey{Group: "g1", Member: "m2", Task: "t9"}, Kind: ReviewSession, Folder: "repo", Agent: "codex", Home: "h1", Name: "Codex"},
 			level:   1,
 			want:    lists.Review,
 		},
 		{
 			name:    "task_level_1",
-			session: Session{SessionKey: SessionKey{Group: "g1", Member: "m3", Task: "t1"}, Kind: TaskSession, Folder: "wt/1-a", Agent: "claude", Home: "h1", Name: "Claude"},
+			session: Session{SessionKey: SessionKey{Group: "g1", Member: "m3", Task: "t1"}, Kind: TaskSession, Folder: "repo", Agent: "claude", Home: "h1", Name: "Claude"},
 			level:   1,
-			want:    lists.TaskLevel1,
-		},
-		{
-			name:    "task_level_2",
-			session: Session{SessionKey: SessionKey{Group: "g1", Member: "m3", Task: "t2"}, Kind: TaskSession, Folder: "wt/2-b", Agent: "claude", Home: "h1", Name: "Claude"},
-			level:   2,
-			want:    lists.TaskLevel23,
+			want:    lists.Task,
 		},
 		{
 			name:    "task_level_3",
-			session: Session{SessionKey: SessionKey{Group: "g1", Member: "m3", Task: "t3"}, Kind: TaskSession, Folder: "wt/3-c", Agent: "claude", Home: "h1", Name: "Claude"},
+			session: Session{SessionKey: SessionKey{Group: "g1", Member: "m3", Task: "t3"}, Kind: TaskSession, Folder: "repo", Agent: "claude", Home: "h1", Name: "Claude"},
 			level:   3,
-			want:    lists.TaskLevel23,
+			want:    lists.Task,
 		},
 	}
 

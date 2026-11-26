@@ -28,7 +28,7 @@ func serve(ctx context.Context, folder string, env []string, name string, args .
 		out.Close()
 		return nil, nil, err
 	}
-	kill := killCheckTree(cmd)
+	kill := treeKiller(cmd)
 	return out, func() {
 		cmd.Wait()
 		kill()

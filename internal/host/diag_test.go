@@ -125,8 +125,8 @@ func TestDiagDeliveryLines(t *testing.T) {
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 9, AI: testAI1, Why: "mention", Msg: testCall1}, nil)
 	r.waitUntil("item 9 acknowledged", func() bool { return r.home.ackCountFor(9) == 1 })
 
-	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 2}, Name: "Proj", Kind: "project", Base: "main", Forge: "none",
-		Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}, Paused: &proto.GroupPause{By: testHuman, At: testStartMS}})
+	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 2}, Name: "Proj",
+		Home: r.homeKey.ID(), Secretary: testSec, Paused: &proto.GroupPause{By: testHuman, At: testStartMS}})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 10, AI: testAI1, Why: "mention", Msg: testCard1}, r.makeTextMsg(testCard1, nil, "hi"))
 	take10 := "inbox.take " + g + " ai=" + testAI1 + ` task="" took="" left=10 paused=true`
 	r.waitUntil("item 10 left", func() bool { return d.count(d.is(take10)) > 0 })
@@ -234,7 +234,7 @@ func TestDiagToolLine(t *testing.T) {
 	d := captureDiag(t)
 	r := newDeliverRig(t, false)
 	key := SessionKey{Group: testGroup1, Member: testAI1}
-	if err := r.h.Sessions.Create(Session{SessionKey: key, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"}); err != nil {
+	if err := r.h.Sessions.Create(Session{SessionKey: key, Kind: GroupSession, Folder: runFolder("repo"), Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"}); err != nil {
 		t.Fatal(err)
 	}
 	saveTools(t, map[string]Tool{"probe": {Call: func(context.Context, *Host, Caller, json.RawMessage) (any, error) {
@@ -273,7 +273,7 @@ func TestDiagProcessAndInterruptLines(t *testing.T) {
 				h, _, drv, shutdown := setupLimBubble(t, base)
 				defer shutdown()
 				drv.ignoreInterrupt = true
-				session := makeRunSession(key, TaskSession, "wt/1")
+				session := makeRunSession(key, TaskSession, runFolder("wt/1"))
 				if end.resume {
 					session.CLISession = "old"
 				}
@@ -342,16 +342,6 @@ func TestDiagReleasedSlotDeliveryLines(t *testing.T) {
 	takeoverState(r.h).release(r.h, aiSlot{group: testGroup1, member: testAI1}, &takeover{})
 	r.h.Settle()
 	d.ran(t, 1, "node="+r.hostKey.ID()[:8], "deliver g="+testGroup1)
-}
-
-func TestDiagCloudPollLines(t *testing.T) {
-	d := captureDiag(t)
-	h, _, _ := customForgeHost(t)
-	fakeForgeGH(t, forgeAnswer{})
-	startHostedCheck(h, "home-device", tskTestGroupID, HostedCheck{Task: testTask1, Branch: "task/1-poll", Commit: "head", PR: 7, Since: time.Now()})
-	node, work := "node="+h.Key.ID()[:8], "cloud_poll g="+tskTestGroupID+" task="+testTask1
-	d.wait(t, "bg.stop "+node+" name="+work)
-	d.ran(t, 1, node, work)
 }
 
 func TestDiagAskLines(t *testing.T) {

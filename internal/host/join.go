@@ -1,9 +1,13 @@
 package host
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -26,9 +30,8 @@ type joinStart struct {
 }
 
 type joinConfig struct {
-	account    string
-	projectDir string
-	approvers  []string
+	account   string
+	approvers []string
 }
 
 const joinConfigQuerySQL = `SELECT
@@ -39,10 +42,13 @@ const joinHomesSettingSQL = `SELECT coalesce((SELECT value FROM setting WHERE ke
 
 // joinPart holds per-host home connection tracking and Attach waiters.
 //
-// Lock order: syncMu serializes connection reconciliation across Store reads;
-// mu is a strict leaf lock that guards only joinPart fields and never calls
-// into Host, Sessions, Rows, Store, Connect or cancel funcs.
+// Lock order: joining is taken before the others and lets one host.join at a
+// time check its folder, send member add_ai and write the group session's
+// row; syncMu serializes connection reconciliation across Store reads; mu is
+// a strict leaf lock that guards only joinPart fields and never calls into
+// Host, Sessions, Rows, Store, Connect or cancel funcs.
 type joinPart struct {
+	joining  sync.Mutex
 	syncMu   sync.Mutex
 	mu       sync.Mutex
 	conns    map[string]context.CancelFunc
@@ -197,11 +203,35 @@ func handleHostJoin(ctx context.Context, h *Host, _ Owner, by string, data json.
 	if err != nil {
 		return nil, err
 	}
+	if p.Workspace, err = resolveWorkspace(p.Workspace); err != nil {
+		return nil, err
+	}
 	cfg, err := joinLoadConfig(h, p)
 	if err != nil {
 		return nil, err
 	}
 	return nil, joinExecuteJoin(ctx, h, joinStateOf(h), p, cfg, by)
+}
+
+// resolveWorkspace returns the folder at path with its symbolic links
+// resolved: the form in which a workspace is kept and compared
+// (contracts/local.md section 7). It answers bad_request for a path that is
+// not absolute and not_found where no folder is now.
+func resolveWorkspace(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", &Error{Code: "bad_request", Message: "the workspace is not an absolute path: " + path}
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil || !isFolder(resolved) {
+		return "", &Error{Code: "not_found", Message: "no folder at " + path}
+	}
+	return resolved, nil
+}
+
+// isFolder reports whether a folder is at path now.
+func isFolder(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func joinParseJoin(data json.RawMessage) (proto.HostJoin, error) {
@@ -238,11 +268,7 @@ func joinLoadConfig(h *Host, p proto.HostJoin) (joinConfig, error) {
 	if err := json.Unmarshal([]byte(listJSON), &approvers); err != nil {
 		return joinConfig{}, err
 	}
-	return joinConfig{
-		account:    account,
-		projectDir: projectDir(h, string(p.Group)),
-		approvers:  approvers,
-	}, nil
+	return joinConfig{account: account, approvers: approvers}, nil
 }
 
 func joinExecuteJoin(ctx context.Context, h *Host, jp *joinPart, p proto.HostJoin, cfg joinConfig, by string) error {
@@ -256,17 +282,37 @@ func joinExecuteJoin(ctx context.Context, h *Host, jp *joinPart, p proto.HostJoi
 	if err != nil {
 		return err
 	}
-	if grp.Kind == "team" {
-		return &Error{Code: "conflict", Message: "a team group has no AI members"}
-	}
-	if err := joinPrepareWorkspace(ctx, cfg.projectDir, grp); err != nil {
+	return joinAddToGroup(ctx, h, jp, p, cfg, grp.Name, by)
+}
+
+// joinAddToGroup adds the AI with its folder, p.Workspace as resolved. The
+// lock is held from the check that the folder serves no other group until the
+// row of the group session is written, so two joins for one folder and two
+// groups cannot both pass (contracts/local.md section 7).
+func joinAddToGroup(ctx context.Context, h *Host, jp *joinPart, p proto.HostJoin, cfg joinConfig, groupName, by string) error {
+	jp.joining.Lock()
+	defer jp.joining.Unlock()
+	if err := joinFolderFree(h, string(p.Group), p.Workspace); err != nil {
 		return err
 	}
 	memberID, err := joinSendAddAI(ctx, h, p, cfg)
 	if err != nil {
 		return err
 	}
-	return joinFinishJoined(h, p, string(memberID), grp.Name, by)
+	return joinFinishJoined(h, p, string(memberID), groupName, by)
+}
+
+// joinFolderFree refuses a folder that is the workspace of an AI of another
+// group on this node, whichever home that group has, and names the group.
+// Every session of an AI has the folder of its group session.
+func joinFolderFree(h *Host, group, folder string) error {
+	for _, s := range h.Sessions.All() {
+		if s.Group != group && s.Folder == folder {
+			other, _ := joinCachedGroup(h, s.Group)
+			return &Error{Code: "conflict", Message: fmt.Sprintf("the folder is the workspace of an AI of the group %q", cmp.Or(other.Name, s.Group))}
+		}
+	}
+	return nil
 }
 
 func joinFinishJoined(h *Host, p proto.HostJoin, member, groupName, by string) error {
@@ -346,13 +392,6 @@ func joinCachedGroup(h *Host, group string) (proto.GroupRow, bool) {
 	return grp, proto.Decode(raw, &grp) == nil
 }
 
-func joinPrepareWorkspace(ctx context.Context, projectDir string, grp proto.GroupRow) error {
-	if _, err := EnsureGroupWorkspace(ctx, projectDir, grp.Repo, grp.Base); err != nil {
-		return &Error{Code: "cli", Message: RedactSecrets(err.Error())}
-	}
-	return nil
-}
-
 func joinSendAddAI(ctx context.Context, h *Host, p proto.HostJoin, cfg joinConfig) (proto.ID, error) {
 	memberID := proto.NewNonce()
 	cmd := proto.MemberAddAI{
@@ -364,6 +403,7 @@ func joinSendAddAI(ctx context.Context, h *Host, p proto.HostJoin, cfg joinConfi
 		CLI:        p.Agent,
 		Tool:       p.Tool,
 		Name:       p.Name,
+		Workspace:  p.Workspace,
 		Account:    cfg.account,
 		Secretary:  p.Secretary,
 		Approvers:  cfg.approvers,
@@ -379,7 +419,7 @@ func joinCommitJoined(h *Host, p proto.HostJoin, member, groupName, by string) e
 		session := Session{
 			SessionKey: SessionKey{Group: group, Member: member},
 			Kind:       GroupSession,
-			Folder:     "repo",
+			Folder:     p.Workspace,
 			Agent:      p.Agent,
 			Home:       p.Home,
 			Name:       p.Name,

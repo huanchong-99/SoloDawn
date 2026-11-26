@@ -124,12 +124,7 @@ func askPutGroup(h *Host, group string, limits proto.Limits) {
 	row := proto.GroupRow{
 		RowHeader:      proto.RowHeader{Type: "group", ID: group, Seq: 1},
 		Name:           "Website",
-		Kind:           "project",
-		Repo:           "https://git.example/team/website.git",
-		Base:           "main",
-		Forge:          "github",
 		Home:           "home-device",
-		Checks:         []string{},
 		Pass:           90,
 		PassFoundation: 70,
 		Limits:         limits,
@@ -252,11 +247,10 @@ func checkAskListedForCaller(t *testing.T, c Caller) {
 func TestAskAndReplySchemasMatchToolsGolden(t *testing.T) {
 	lists := loadGoldenToolLists(t)
 	named := map[string]proto.ToolList{
-		"secretary":      lists.Secretary,
-		"group":          lists.Group,
-		"review":         lists.Review,
-		"task_level_1":   lists.TaskLevel1,
-		"task_level_2_3": lists.TaskLevel23,
+		"secretary": lists.Secretary,
+		"group":     lists.Group,
+		"review":    lists.Review,
+		"task":      lists.Task,
 	}
 	for label, list := range named {
 		checkAskSchemaInGoldenList(t, label, list, "ask")

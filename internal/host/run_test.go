@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -509,13 +510,14 @@ func waitDeliveredSlot(t *testing.T, delivered <-chan aiSlot, want aiSlot) {
 	}
 }
 
-func assertFirstTurnLaunch(t *testing.T, h *Host, drv *fakeDriver, dataDir string) string {
+func assertFirstTurnLaunch(t *testing.T, h *Host, drv *fakeDriver) string {
 	t.Helper()
 	if drv.count() != 1 {
 		t.Fatalf("starts = %d, want 1", drv.count())
 	}
 	l1 := drv.lastLaunch()
-	wantDir := filepath.Join(dataDir, "projects", runGroup1, "wt/1-paths")
+	// The CLI starts in the session's folder, as its row has it.
+	wantDir := runFolder("website")
 	got := [7]any{l1.Folder, l1.Session, l1.Level, slices.Equal(l1.Shim[:2], []string{"solodawn", "mcp"}), l1.Instructions, l1.RepoConfig, l1.ToolTimeout}
 	want := [7]any{wantDir, "", 3, true, "prompt:task", true, 60 * time.Minute}
 	if got != want {
@@ -570,7 +572,7 @@ func verifySecondTurnAfterStrayEnd(t *testing.T, h *Host, rh *runHome, drv *fake
 }
 
 func TestStartResumeEventsStrayTurnEndedAndDeliver(t *testing.T) {
-	h, rh, drv, dataDir := setupRunEnv(t)
+	h, rh, drv, _ := setupRunEnv(t)
 	Instructions = func(s Session) string { return "prompt:" + string(s.Kind) }
 
 	// Single reader: waitReportedKind on the test goroutine.
@@ -581,14 +583,14 @@ func TestStartResumeEventsStrayTurnEndedAndDeliver(t *testing.T) {
 	Deliver = func(_ *Host, g, m string) { delivered <- aiSlot{g, m} }
 
 	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	if err := h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1-paths")); err != nil {
+	if err := h.Sessions.Create(makeRunSession(key, TaskSession, runFolder("website"))); err != nil {
 		t.Fatal(err)
 	}
 	turn1 := Turn{Kind: ItemsTurn, Thread: runTask1, Depth: 1}
 	if err := Runner.Turn(t.Context(), h, key, "first message", turn1); err != nil {
 		t.Fatal(err)
 	}
-	tok1 := assertFirstTurnLaunch(t, h, drv, dataDir)
+	tok1 := assertFirstTurnLaunch(t, h, drv)
 	assertMemberStatusCmd(t, rh, "working", runTask1)
 
 	p1 := drv.proc(0)
@@ -627,8 +629,8 @@ func TestDeliverOnTurnEndEvictsSameProcessWithoutDeadlock(t *testing.T) {
 
 	grpKey := SessionKey{Group: runGroup1, Member: runAI1}
 	taskKey := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	h.Sessions.Create(makeRunSession(grpKey, GroupSession, "repo"))
-	h.Sessions.Create(makeRunSession(taskKey, TaskSession, "wt/1-task"))
+	h.Sessions.Create(makeRunSession(grpKey, GroupSession, runFolder("repo")))
+	h.Sessions.Create(makeRunSession(taskKey, TaskSession, runFolder("wt/1-task")))
 
 	taskTurnErr := make(chan error, 1)
 	var once sync.Once
@@ -672,8 +674,8 @@ func TestTwoHostsInOneProcessAreIsolated(t *testing.T) {
 	h1 := newRunHost(t, db1)
 	h2 := newRunHost(t, db2)
 	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	h1.Sessions.Create(makeRunSession(key, TaskSession, "wt/1"))
-	h2.Sessions.Create(makeRunSession(key, TaskSession, "wt/1"))
+	h1.Sessions.Create(makeRunSession(key, TaskSession, runFolder("wt/1")))
+	h2.Sessions.Create(makeRunSession(key, TaskSession, runFolder("wt/1")))
 
 	if err := Runner.Turn(t.Context(), h1, key, "only host 1", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatal(err)
@@ -710,7 +712,7 @@ func assertKindLaunches(t *testing.T, h *Host, drv *fakeDriver, keys [3]SessionK
 }
 
 func TestLaunchConfigLevelsRepoConfigAndTimeout(t *testing.T) {
-	h, _, drv, dataDir := setupRunEnv(t)
+	h, _, drv, _ := setupRunEnv(t)
 	drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
 		p := newFakeProc(ctx, l)
 		p.autoComplete = true
@@ -722,23 +724,21 @@ func TestLaunchConfigLevelsRepoConfigAndTimeout(t *testing.T) {
 		{Group: runGroup1, Member: runAI1, Task: runTask2},
 		{Group: runGroup1, Member: runAI1, Task: runTask1},
 	}
-	h.Sessions.Create(makeRunSession(keys[0], GroupSession, "repo"))
-	h.Sessions.Create(makeRunSession(keys[1], ReviewSession, "review/12"))
-	h.Sessions.Create(makeRunSession(keys[2], TaskSession, "wt/12-paths"))
+	h.Sessions.Create(makeRunSession(keys[0], GroupSession, runFolder("repo")))
+	h.Sessions.Create(makeRunSession(keys[1], ReviewSession, runFolder("review/12")))
+	h.Sessions.Create(makeRunSession(keys[2], TaskSession, runFolder("wt/12-paths")))
 
 	// 1. Fresh store defaults every session kind to level 3; task and review enable RepoConfig while group does not.
 	grpRow := proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: runGroup1, Seq: 1},
-		Name:      "Website", Kind: "project", Base: "main", Forge: "none", Home: "home-dev",
-		Checks: []string{}, Limits: proto.Limits{TurnMinutes: 17},
+		Name:      "Website", Home: "home-dev", Limits: proto.Limits{TurnMinutes: 17},
 	}
 	rawGrp, _ := json.Marshal(grpRow)
 	h.Rows.Put(runGroup1, "group", runGroup1, rawGrp)
 
 	grpLaunch := assertKindLaunches(t, h, drv, keys, 3)
-	wantGrpDir := filepath.Join(dataDir, "projects", runGroup1, "repo")
-	if grpLaunch.Folder != wantGrpDir || grpLaunch.ToolTimeout != 17*time.Minute {
-		t.Fatalf("group launch: %+v, want dir %s", grpLaunch, wantGrpDir)
+	if grpLaunch.Folder != runFolder("repo") || grpLaunch.ToolTimeout != 17*time.Minute {
+		t.Fatalf("group launch: %+v, want the folder of the session's row", grpLaunch)
 	}
 
 	// 2. default_level=2 applies when perm is absent; TurnMinutes=0 falls back to 60m.
@@ -757,7 +757,7 @@ func TestLaunchConfigLevelsRepoConfigAndTimeout(t *testing.T) {
 
 	// 4. all_level3=true overrides perm=1 to 3; malformed group JSON falls back to 60m.
 	putSetting(t, h.Store, "all_level3", "true")
-	h.Rows.Put(runGroup1, "group", runGroup1, json.RawMessage(`{"t":"group","id":"`+runGroup1+`","seq":1,"name":"W","kind":"project","base":"main","forge":"none","home":"home-dev","checks":[],"limits":{"turn_minutes":17},"extra":1}`))
+	h.Rows.Put(runGroup1, "group", runGroup1, json.RawMessage(`{"t":"group","id":"`+runGroup1+`","seq":1,"name":"W","home":"home-dev","limits":{"turn_minutes":17},"extra":1}`))
 	all3Launch := runAndCheckLaunch(t, h, drv, keys[1], 3, true)
 	if all3Launch.ToolTimeout != 60*time.Minute {
 		t.Fatalf("all_level3 launch: %+v", all3Launch)
@@ -781,7 +781,7 @@ func TestDormancyVirtualClockIdleGuardsAndSpontaneousExit(t *testing.T) {
 			return p, nil
 		}
 		key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-		h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1"))
+		h.Sessions.Create(makeRunSession(key, TaskSession, runFolder("wt/1")))
 
 		if err := Runner.Turn(t.Context(), h, key, "hi", Turn{Kind: ItemsTurn}); err != nil {
 			t.Fatal(err)
@@ -838,7 +838,7 @@ func TestDormancyVirtualClockIdleGuardsAndSpontaneousExit(t *testing.T) {
 		}
 		drv.mu.Unlock()
 		kEnded := SessionKey{Group: runGroup2, Member: runAI1}
-		h.Sessions.Create(makeRunSession(kEnded, GroupSession, "repo"))
+		h.Sessions.Create(makeRunSession(kEnded, GroupSession, runFolder("repo")))
 		if err := Runner.Turn(t.Context(), h, kEnded, "end-mid-turn", Turn{Kind: ItemsTurn}); err != nil {
 			t.Fatal(err)
 		}
@@ -876,7 +876,7 @@ func checkIdleAndArmGuards(t *testing.T) {
 	t.Helper()
 	h, rh, drv, _ := setupRunEnv(t)
 	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1"))
+	h.Sessions.Create(makeRunSession(key, TaskSession, runFolder("wt/1")))
 	if err := Runner.Turn(t.Context(), h, key, "turn", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatal(err)
 	}
@@ -958,7 +958,7 @@ func TestMaxOpenBoundariesLongestWaitingAndBlockingWait(t *testing.T) {
 	keys := make([]SessionKey, 5)
 	for i := range keys {
 		keys[i] = SessionKey{Group: runGroup1, Member: "ai-" + strconv.Itoa(i)}
-		h.Sessions.Create(makeRunSession(keys[i], GroupSession, "repo"))
+		h.Sessions.Create(makeRunSession(keys[i], GroupSession, runFolder("repo")))
 	}
 	for i := range 4 {
 		if err := Runner.Turn(t.Context(), h, keys[i], "hi", Turn{Kind: ItemsTurn}); err != nil {
@@ -1007,8 +1007,8 @@ func TestMaxOpenBoundariesLongestWaitingAndBlockingWait(t *testing.T) {
 		putSetting(t, h2.Store, "max_open", "1")
 		kA := SessionKey{Group: runGroup1, Member: runAI1}
 		kB := SessionKey{Group: runGroup1, Member: runAI2}
-		h2.Sessions.Create(makeRunSession(kA, GroupSession, "repo"))
-		h2.Sessions.Create(makeRunSession(kB, GroupSession, "repo"))
+		h2.Sessions.Create(makeRunSession(kA, GroupSession, runFolder("repo")))
+		h2.Sessions.Create(makeRunSession(kB, GroupSession, runFolder("repo")))
 
 		if err := Runner.Turn(t.Context(), h2, kA, "a1", Turn{Kind: ItemsTurn}); err != nil {
 			t.Fatal(err)
@@ -1048,9 +1048,9 @@ func checkSlotGuardOperands(t *testing.T) {
 	k1 := SessionKey{Group: runGroup1, Member: runAI1}
 	k2 := SessionKey{Group: runGroup1, Member: runAI2}
 	kOtherGrp := SessionKey{Group: runGroup2, Member: runAI1}
-	h.Sessions.Create(makeRunSession(k1, GroupSession, "repo"))
-	h.Sessions.Create(makeRunSession(k2, GroupSession, "repo"))
-	h.Sessions.Create(makeRunSession(kOtherGrp, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(k1, GroupSession, runFolder("repo")))
+	h.Sessions.Create(makeRunSession(k2, GroupSession, runFolder("repo")))
+	h.Sessions.Create(makeRunSession(kOtherGrp, GroupSession, runFolder("repo")))
 
 	checkReserveSlotStartingAndGroups(t, h, rt, k1, k2, kOtherGrp)
 	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "completed"})
@@ -1064,10 +1064,10 @@ func checkProcLessWaitingClose(t *testing.T) {
 	putSetting(t, h.Store, "max_open", "1")
 	kA := SessionKey{Group: runGroup1, Member: runAI1}
 	kB := SessionKey{Group: runGroup1, Member: runAI2}
-	h.Sessions.Create(makeRunSession(kA, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(kA, GroupSession, runFolder("repo")))
 	h.Sessions.Move(kA, Dormant, Working)
 	h.Sessions.Move(kA, Working, Waiting)
-	h.Sessions.Create(makeRunSession(kB, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(kB, GroupSession, runFolder("repo")))
 	drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
 		p := newFakeProc(ctx, l)
 		p.autoComplete = true
@@ -1160,8 +1160,8 @@ func TestCloseTimeoutOnAllPathsAuditAndC6SwitchOrdering(t *testing.T) {
 
 		taskKey := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
 		grpKey := SessionKey{Group: runGroup1, Member: runAI2}
-		h.Sessions.Create(makeRunSession(taskKey, TaskSession, "wt/1"))
-		h.Sessions.Create(makeRunSession(grpKey, GroupSession, "repo"))
+		h.Sessions.Create(makeRunSession(taskKey, TaskSession, runFolder("wt/1")))
+		h.Sessions.Create(makeRunSession(grpKey, GroupSession, runFolder("repo")))
 
 		if err := Runner.Turn(t.Context(), h, taskKey, "t1", Turn{Kind: ItemsTurn}); err != nil {
 			t.Fatal(err)
@@ -1216,7 +1216,7 @@ func checkHungInitialWriteAndNoSessionKill(t *testing.T) {
 			return p, nil
 		}
 		key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-		h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1"))
+		h.Sessions.Create(makeRunSession(key, TaskSession, runFolder("wt/1")))
 
 		turnDone := make(chan error, 1)
 		go func() {
@@ -1254,7 +1254,7 @@ func checkHungInitialWriteAndNoSessionKill(t *testing.T) {
 			return p, nil
 		}
 		key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-		s := makeRunSession(key, TaskSession, "wt/1")
+		s := makeRunSession(key, TaskSession, runFolder("wt/1"))
 		s.CLISession = "stale-hung"
 		h.Sessions.Create(s)
 
@@ -1283,7 +1283,7 @@ func checkC6SwitchOrdering(t *testing.T) {
 		h, _, drv, shutdown := setupBubbleEnv(t, base)
 		defer shutdown()
 		key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-		h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1"))
+		h.Sessions.Create(makeRunSession(key, TaskSession, runFolder("wt/1")))
 
 		slowExit := make(chan struct{})
 		var eventsLog []string
@@ -1359,9 +1359,9 @@ func TestCrashRedactionLoginInvalidOnceAndReportSaved(t *testing.T) {
 	taskKey := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
 	revKey := SessionKey{Group: runGroup1, Member: runAI2, Task: runTask2}
 	grpKey := SessionKey{Group: runGroup2, Member: runAI1}
-	h.Sessions.Create(makeRunSession(taskKey, TaskSession, "wt/1"))
-	h.Sessions.Create(makeRunSession(revKey, ReviewSession, "review/2"))
-	h.Sessions.Create(makeRunSession(grpKey, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(taskKey, TaskSession, runFolder("wt/1")))
+	h.Sessions.Create(makeRunSession(revKey, ReviewSession, runFolder("review/2")))
+	h.Sessions.Create(makeRunSession(grpKey, GroupSession, runFolder("repo")))
 
 	// 1. TaskSession mid-turn exit with secret -> turn_interrupted(crash) + task fail(crash), both redacted.
 	if err := Runner.Turn(t.Context(), h, taskKey, "run", Turn{Kind: ItemsTurn, Thread: runTask1}); err != nil {
@@ -1612,7 +1612,7 @@ func TestNoSessionFailedResumeSyncAsyncAndFailures(t *testing.T) {
 	// 1. Async NoSession (Claude style: Turn succeeds, then NoSession arrives on Events).
 	h, rh, drv, _ := setupRunEnv(t)
 	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	s := makeRunSession(key, TaskSession, "wt/1")
+	s := makeRunSession(key, TaskSession, runFolder("wt/1"))
 	s.CLISession = "stale-id"
 	h.Sessions.Create(s)
 
@@ -1667,7 +1667,7 @@ func checkSyncNoSessionAndFailurePaths(t *testing.T) {
 	// 2. Sync NoSession (Codex style: Turn returns error while NoSession is emitted).
 	h, _, drv, _ := setupRunEnv(t)
 	key := SessionKey{Group: runGroup1, Member: runAI1}
-	s := makeRunSession(key, GroupSession, "repo")
+	s := makeRunSession(key, GroupSession, runFolder("repo"))
 	s.CLISession = "stale-codex"
 	h.Sessions.Create(s)
 
@@ -1692,7 +1692,7 @@ func checkSyncNoSessionAndFailurePaths(t *testing.T) {
 
 	// 3. NoSession on a non-resumed start (CLISession == "") is NOT treated as resume replacement.
 	hFresh, _, drvFresh, _ := setupRunEnv(t)
-	hFresh.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+	hFresh.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo")))
 	drvFresh.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
 		p := newFakeProc(ctx, l)
 		p.turnErr = errors.New("broken start")
@@ -1712,7 +1712,7 @@ func checkReplacementErrors(t *testing.T) {
 
 	// (a) Compose returns error
 	h1, _, drv1, _ := setupRunEnv(t)
-	s := makeRunSession(key, GroupSession, "repo")
+	s := makeRunSession(key, GroupSession, runFolder("repo"))
 	s.CLISession = "bad-1"
 	h1.Sessions.Create(s)
 	Compose = func(*Host, Session, TurnKind, []json.RawMessage) (string, Turn, error) {
@@ -1732,7 +1732,7 @@ func checkReplacementErrors(t *testing.T) {
 	// (b) Replacement Start error, (c) replacement Turn error, and (d) readLaunchConfig error during replacement
 	for _, mode := range []string{"start-err", "turn-err", "cfg-err"} {
 		h2, _, drv2, _ := setupRunEnv(t)
-		s2 := makeRunSession(key, GroupSession, "repo")
+		s2 := makeRunSession(key, GroupSession, runFolder("repo"))
 		s2.CLISession = "bad-2"
 		h2.Sessions.Create(s2)
 		drv2.makeProc = func(ctx context.Context, idx int, l Launch) (*fakeProc, error) {
@@ -1757,7 +1757,7 @@ func checkReplacementErrors(t *testing.T) {
 
 	// (e) Session ended while NoSession was draining, and (f) Update trigger error
 	h3, _, drv3, _ := setupRunEnv(t)
-	s3 := makeRunSession(key, GroupSession, "repo")
+	s3 := makeRunSession(key, GroupSession, runFolder("repo"))
 	s3.CLISession = "bad-3"
 	h3.Sessions.Create(s3)
 	drv3.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
@@ -1772,7 +1772,7 @@ func checkReplacementErrors(t *testing.T) {
 	}
 
 	h4, _, drv4, _ := setupRunEnv(t)
-	s4 := makeRunSession(key, GroupSession, "repo")
+	s4 := makeRunSession(key, GroupSession, runFolder("repo"))
 	s4.CLISession = "bad-4"
 	h4.Sessions.Create(s4)
 	drv4.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
@@ -1795,9 +1795,9 @@ func TestMemberStatusPriorityAnswerAndTurnRefusals(t *testing.T) {
 	kGrp := SessionKey{Group: runGroup1, Member: runAI1}
 	kT1 := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
 	kT2 := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask2}
-	h.Sessions.Create(makeRunSession(kGrp, GroupSession, "repo"))
-	h.Sessions.Create(makeRunSession(kT1, TaskSession, "wt/1"))
-	h.Sessions.Create(makeRunSession(kT2, TaskSession, "wt/2"))
+	h.Sessions.Create(makeRunSession(kGrp, GroupSession, runFolder("repo")))
+	h.Sessions.Create(makeRunSession(kT1, TaskSession, runFolder("wt/1")))
+	h.Sessions.Create(makeRunSession(kT2, TaskSession, runFolder("wt/2")))
 	seamIn(t, h.Sessions, SessionKey{Group: runGroup2, Member: runAI1}, Takeover)
 	seamIn(t, h.Sessions, SessionKey{Group: runGroup1, Member: runAI2}, Takeover)
 
@@ -1902,13 +1902,13 @@ func checkTurnFailurePaths(t *testing.T) {
 	h, _, drv, _ := setupRunEnv(t)
 	kGrp := SessionKey{Group: runGroup1, Member: runAI1}
 	kTask := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	h.Sessions.Create(makeRunSession(kGrp, GroupSession, "repo"))
-	h.Sessions.Create(makeRunSession(kTask, TaskSession, "wt/1"))
+	h.Sessions.Create(makeRunSession(kGrp, GroupSession, runFolder("repo")))
+	h.Sessions.Create(makeRunSession(kTask, TaskSession, runFolder("wt/1")))
 
 	seamCode(t, Runner.Turn(t.Context(), h, SessionKey{Group: "missing"}, "x", Turn{Kind: ItemsTurn}), "not_found")
 
 	badAgentKey := SessionKey{Group: runGroup2, Member: runAI2}
-	badSess := makeRunSession(badAgentKey, GroupSession, "repo")
+	badSess := makeRunSession(badAgentKey, GroupSession, runFolder("repo"))
 	badSess.Agent = "unknown-cli"
 	h.Sessions.Create(badSess)
 	seamCode(t, Runner.Turn(t.Context(), h, badAgentKey, "x", Turn{Kind: ItemsTurn}), "bad_request")
@@ -1951,7 +1951,7 @@ func checkTurnFailurePaths(t *testing.T) {
 
 	// Orphan Waiting session: first Move(Waiting, Dormant) fails via trigger, then recovers to Working.
 	kOrphan := SessionKey{Group: runGroup2, Member: runAI1}
-	h.Sessions.Create(makeRunSession(kOrphan, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(kOrphan, GroupSession, runFolder("repo")))
 	h.Sessions.Move(kOrphan, Dormant, Working)
 	h.Sessions.Move(kOrphan, Working, Waiting)
 	seamSQL(t, h.Store, "CREATE TRIGGER stop_move BEFORE INSERT ON session BEGIN SELECT RAISE(ABORT, 'move blocked'); END")
@@ -1967,7 +1967,7 @@ func checkTurnFailurePaths(t *testing.T) {
 
 	// startFromDormant Move failure & readLaunchConfig failure when setting table is dropped.
 	kDorm := SessionKey{Group: runGroup2, Member: "m-dorm"}
-	h.Sessions.Create(makeRunSession(kDorm, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(kDorm, GroupSession, runFolder("repo")))
 	seamSQL(t, h.Store, "CREATE TRIGGER stop_start BEFORE INSERT ON session BEGIN SELECT RAISE(ABORT, 'start move blocked'); END")
 	if err := Runner.Turn(t.Context(), h, kDorm, "x", Turn{Kind: ItemsTurn}); err == nil || !strings.Contains(err.Error(), "start move blocked") {
 		t.Fatalf("got %v, want start move blocked", err)
@@ -1997,7 +1997,7 @@ func checkRunnerCloseNoopAndWaiting(t *testing.T, h *Host, drv *fakeDriver, deli
 	t.Helper()
 	Runner.Close(h, SessionKey{Group: runGroup1, Member: "missing"})
 	kStray := SessionKey{Group: runGroup1, Member: "m-stray"}
-	h.Sessions.Create(makeRunSession(kStray, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(kStray, GroupSession, runFolder("repo")))
 	Runner.Close(h, kStray)
 	h.Sessions.Move(kStray, Dormant, Working)
 	h.Sessions.Move(kStray, Working, Waiting)
@@ -2007,7 +2007,7 @@ func checkRunnerCloseNoopAndWaiting(t *testing.T, h *Host, drv *fakeDriver, deli
 	}
 
 	kWait := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	h.Sessions.Create(makeRunSession(kWait, TaskSession, "wt/1-a"))
+	h.Sessions.Create(makeRunSession(kWait, TaskSession, runFolder("wt/1-a")))
 	if err := Runner.Turn(t.Context(), h, kWait, "w1", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatal(err)
 	}
@@ -2026,7 +2026,7 @@ func checkRunnerCloseNoopAndWaiting(t *testing.T, h *Host, drv *fakeDriver, deli
 func checkRunnerCloseActiveTurn(t *testing.T, h *Host, rh *runHome, drv *fakeDriver, deliveredCh <-chan struct{}) {
 	t.Helper()
 	kWork := SessionKey{Group: runGroup1, Member: runAI2, Task: runTask2}
-	h.Sessions.Create(makeRunSession(kWork, TaskSession, "wt/2-b"))
+	h.Sessions.Create(makeRunSession(kWork, TaskSession, runFolder("wt/2-b")))
 	if err := Runner.Turn(t.Context(), h, kWork, "w2", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatal(err)
 	}
@@ -2056,7 +2056,7 @@ func checkConcurrentAndKilledClose(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h, _, drv, _ := setupRunEnv(t)
 		kActive := SessionKey{Group: runGroup1, Member: runAI1}
-		h.Sessions.Create(makeRunSession(kActive, GroupSession, "repo"))
+		h.Sessions.Create(makeRunSession(kActive, GroupSession, runFolder("repo")))
 		var gate chan struct{}
 		drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
 			p := newFakeProc(ctx, l)
@@ -2126,8 +2126,8 @@ func TestSettleEndsEveryCLIBeforeTheStoreCloses(t *testing.T) {
 	h.Attach("home-dev", rh)
 	waitKey := SessionKey{Group: runGroup1, Member: runAI1}
 	dormKey := SessionKey{Group: runGroup1, Member: runAI2}
-	h.Sessions.Create(makeRunSession(waitKey, GroupSession, "repo"))
-	h.Sessions.Create(makeRunSession(dormKey, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(waitKey, GroupSession, runFolder("repo")))
+	h.Sessions.Create(makeRunSession(dormKey, GroupSession, runFolder("repo")))
 	if err := Runner.Turn(t.Context(), h, waitKey, "hi", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatal(err)
 	}
@@ -2172,7 +2172,7 @@ func TestSettleWaitsForRuntimeDelivery(t *testing.T) {
 			<-release
 		}
 		key := SessionKey{Group: runGroup1, Member: runAI1}
-		if err := h.Sessions.Create(makeRunSession(key, GroupSession, "repo")); err != nil {
+		if err := h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo"))); err != nil {
 			t.Fatal(err)
 		}
 		if err := Runner.Turn(t.Context(), h, key, "hi", Turn{Kind: ItemsTurn}); err != nil {
@@ -2207,7 +2207,7 @@ func TestSettleWaitsForDeliveryAfterAnExitMidTurn(t *testing.T) {
 			<-release
 		}
 		key := SessionKey{Group: runGroup1, Member: runAI1}
-		assertEqual(t, h.Sessions.Create(makeRunSession(key, GroupSession, "repo")), nil)
+		assertEqual(t, h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo"))), nil)
 		assertEqual(t, Runner.Turn(t.Context(), h, key, "hi", Turn{Kind: ItemsTurn}), nil)
 		drv.lastProc().finishExit()
 		<-started
@@ -2233,7 +2233,7 @@ func TestSettleUnblocksAWaitingOpenSlot(t *testing.T) {
 		h, _, _, shutdown := setupBubbleEnv(t, base)
 		defer shutdown()
 		key := SessionKey{Group: runGroup1, Member: runAI1}
-		assertEqual(t, h.Sessions.Create(makeRunSession(key, GroupSession, "repo")), nil)
+		assertEqual(t, h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo"))), nil)
 		assertEqual(t, h.Sessions.Move(key, Dormant, Working), nil)
 		rt := stateOf(h)
 		result := make(chan error, 1)
@@ -2250,7 +2250,7 @@ func TestSettleUnblocksAWaitingOpenSlot(t *testing.T) {
 func TestSettleDuringDriverStart(t *testing.T) {
 	h, _, drv, _ := setupRunEnv(t)
 	key := SessionKey{Group: runGroup1, Member: runAI1}
-	assertEqual(t, h.Sessions.Create(makeRunSession(key, GroupSession, "repo")), nil)
+	assertEqual(t, h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo"))), nil)
 	drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
 		h.Settle()
 		return newFakeProc(ctx, l), nil
@@ -2259,4 +2259,57 @@ func TestSettleDuringDriverStart(t *testing.T) {
 	<-drv.lastProc().exitedCh
 	_, ok := h.Sessions.Caller(tokenFromLaunch(drv.lastLaunch()))
 	assertEqual(t, ok, false)
+}
+
+// Nothing starts in a folder that is gone (contracts/local.md section 7):
+// every start of the runtime, a turn for items, a continue turn or the
+// hand-back after a takeover, fails as a crash whose detail names the folder,
+// redacted like every text the host writes, and a task session fails its
+// task. The session is dormant. With the folder back, the next turn starts.
+func TestMissingFolderFailsTheStart(t *testing.T) {
+	h, rh, drv, _ := setupRunEnv(t)
+	folder := filepath.Join(t.TempDir(), "ghp_"+strings.Repeat("a", 36))
+	detail := "the folder " + filepath.Join(filepath.Dir(folder), "[redacted]") + " does not exist"
+	taskKey := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
+	revKey := SessionKey{Group: runGroup1, Member: runAI2, Task: runTask2}
+	h.Sessions.Create(makeRunSession(taskKey, TaskSession, folder))
+	h.Sessions.Create(makeRunSession(revKey, ReviewSession, folder))
+	crash := func(key SessionKey, turn Turn) {
+		t.Helper()
+		if err := Runner.Turn(t.Context(), h, key, "go", turn); err == nil || !strings.Contains(err.Error(), "does not exist") {
+			t.Fatalf("a start in a folder that is gone = %v", err)
+		}
+		var st proto.MemberStatus[proto.TurnInterruptedEvent]
+		tskNoErr(t, proto.Decode([]byte(rh.waitCmd(t).raw), &st))
+		want := proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: "crash", Task: proto.ID(key.Task), Detail: detail}
+		if s, _ := h.Sessions.Get(key); st.State != "dormant" || st.Event == nil || *st.Event != want || s.State != Dormant {
+			t.Fatalf("status %+v and session %s, want the crash %+v", st, s.State, want)
+		}
+	}
+	taskFail := func() {
+		t.Helper()
+		var fail proto.TaskFail
+		tskNoErr(t, proto.Decode([]byte(rh.waitCmd(t).raw), &fail))
+		if fail.Op != "fail" || fail.ID != runTask1 || fail.Reason != "crash" || fail.Detail != detail {
+			t.Fatalf("task fail %+v", fail)
+		}
+	}
+
+	crash(taskKey, Turn{Kind: ItemsTurn, Thread: runTask1})
+	taskFail()
+	crash(taskKey, Turn{Kind: ContinueTurn, Thread: runTask1})
+	taskFail()
+	tskNoErr(t, h.Sessions.Move(taskKey, Dormant, Takeover))
+	crash(taskKey, Turn{Kind: HandbackTurn, Thread: runTask1})
+	taskFail()
+	crash(revKey, Turn{Kind: ItemsTurn, Thread: runTask2})
+	if cmds := rh.snapshotCmds(); drv.count() != 0 || len(cmds) != 7 || strings.Contains(fmt.Sprint(cmds), "ghp_") {
+		t.Fatalf("a CLI started, or a review failed its task, or a secret left the host: %d starts, %v", drv.count(), cmds)
+	}
+
+	tskNoErr(t, os.Mkdir(folder, 0o700))
+	tskNoErr(t, Runner.Turn(t.Context(), h, taskKey, "go", Turn{Kind: ItemsTurn, Thread: runTask1}))
+	if drv.count() != 1 || drv.lastLaunch().Folder != folder {
+		t.Fatalf("starts %d, want 1 in the folder that is back", drv.count())
+	}
 }

@@ -55,7 +55,6 @@ type turnCtx struct {
 	s               Session
 	kind            TurnKind
 	owner           string
-	teams           string
 	itemTasks       map[string]proto.TaskRow
 	confirmations   []proto.MsgRow
 	confirmsFetched bool
@@ -82,7 +81,6 @@ var itemBuilders = map[string]itemBuilder{
 	"assign":    (*turnCtx).buildAssign,
 	"review":    (*turnCtx).buildReview,
 	"reviewed":  (*turnCtx).buildCarried,
-	"checks":    (*turnCtx).buildCarried,
 	"resume":    (*turnCtx).buildResume,
 	"decided":   (*turnCtx).buildDecided,
 	"confirmed": (*turnCtx).buildConfirmed,
@@ -92,8 +90,6 @@ var itemBuilders = map[string]itemBuilder{
 var msgFormatters = map[string]func(proto.MsgRow) (string, error){
 	"brief":    formatBriefMsg,
 	"review":   formatReviewMsg,
-	"checks":   formatChecksMsg,
-	"handback": formatHandbackMsg,
 	"system":   formatSystemMsg,
 	"decision": formatDecisionMsg,
 	"approval": formatApprovalMsg,
@@ -119,16 +115,11 @@ func newTurnCtx(h *Host, s Session, kind TurnKind) (*turnCtx, error) {
 	if err != nil {
 		return nil, err
 	}
-	teams, err := teamGroupsLine(h, s)
-	if err != nil {
-		return nil, err
-	}
 	return &turnCtx{
 		h:         h,
 		s:         s,
 		kind:      kind,
 		owner:     owner,
-		teams:     teams,
 		itemTasks: map[string]proto.TaskRow{},
 	}, nil
 }
@@ -268,7 +259,7 @@ func renderBlock(index, total int, b itemBlock) string {
 func (c *turnCtx) sessionHeader() string {
 	header := fmt.Sprintf("[SoloDawn] group %q · you are %q · %s", c.groupName(), c.s.Name, c.sessionLabel())
 	if c.s.Secretary {
-		return header + "\n" + c.profileRoster() + c.teams
+		return header + "\n" + c.profileRoster()
 	}
 	return header
 }
@@ -477,10 +468,7 @@ func (c *turnCtx) firstAssignBody(task proto.TaskRow, msg *proto.MsgRow) (string
 func (c *turnCtx) taskStartLines(task proto.TaskRow) ([]string, error) {
 	lines := []string{
 		fmt.Sprintf("Task T-%d %q", task.Num, task.Title),
-		fmt.Sprintf("Branch: task/%d-%s (this folder is its worktree)", task.Num, task.Slug),
-	}
-	if task.Origin == "takeover" {
-		return append(lines, "Your owner is about to work with you directly in the terminal."), nil
+		fmt.Sprintf("Folder: %s (your workspace in this group)", c.s.Folder),
 	}
 	spec, preset, err := c.taskSpecLines(task)
 	if err != nil {
@@ -569,29 +557,51 @@ func formatBriefMsg(msg proto.MsgRow) (string, error) {
 
 func (c *turnCtx) buildReview(p parsedItem, _ bool) (itemBlock, int, error) {
 	task, ok := c.lookupTask(string(p.item.Task))
-	if !ok {
-		return itemBlock{}, 0, &Error{"bad_request", "review item requires task"}
+	if !ok || p.msg == nil {
+		return itemBlock{}, 0, &Error{"bad_request", "review item requires task and report"}
 	}
-	lines, err := c.reviewLines(task, p.item.Commit)
+	lines, err := c.reviewLines(task, p.msg.By)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	return itemBlock{why: "review", authority: "instruction", body: strings.Join(lines, "\n")}, 0, nil
+	body, err := c.appendCarriedMsg(lines, p.msg)
+	return itemBlock{why: "review", authority: "instruction", body: body}, 0, err
 }
 
-func (c *turnCtx) reviewLines(task proto.TaskRow, commit string) ([]string, error) {
-	lines := []string{
-		fmt.Sprintf("Task T-%d %q", task.Num, task.Title),
-		"Commit: " + commit,
-		"Diff: .solodawn-review.diff",
-	}
+// reviewLines is what a review turn says before the report: the task's
+// request, the pass score, and where the work of the report's author is.
+func (c *turnCtx) reviewLines(task proto.TaskRow, author string) ([]string, error) {
+	lines := []string{fmt.Sprintf("Task T-%d %q", task.Num, task.Title)}
 	spec, preset, err := c.taskSpecLines(task)
 	if err != nil {
 		return nil, err
 	}
 	lines = append(lines, spec...)
 	lines = append(lines, "Pass score: "+strconv.Itoa(task.Pass))
-	return appendReviewPreset(lines, preset), nil
+	return append(appendReviewPreset(lines, preset), c.workLines(author)...), nil
+}
+
+// workLines says where the work under review is: the name, the computer and
+// the folder of the member who wrote the report, read from that member's row,
+// and how that folder lies for this session (contracts/drivers.md section 3).
+// The author may be another AI than the task's assignee is now. A member who
+// has left the group has no row, and no line.
+func (c *turnCtx) workLines(author string) []string {
+	ai, ok := lookupRow[proto.AIMemberRow](c.h, c.s.Group, "member", author)
+	if !ok {
+		return nil
+	}
+	return []string{fmt.Sprintf("Work: by %q on %s, in %s", ai.Name, ai.HostName, ai.Workspace), c.workPlace(ai)}
+}
+
+func (c *turnCtx) workPlace(ai proto.AIMemberRow) string {
+	switch {
+	case ai.Host != c.h.Key.ID():
+		return "The work is on another computer. Get it the way the report says it is shared (with Git and a remote: fetch the branch the report names), and read it without changing what this folder holds."
+	case ai.Workspace != c.s.Folder:
+		return "The work is in another folder on this computer. Read it there; change nothing in it."
+	}
+	return "The work is in this folder."
 }
 
 func (c *turnCtx) buildCarried(p parsedItem, _ bool) (itemBlock, int, error) {
@@ -734,7 +744,7 @@ func formatReviewMsg(msg proto.MsgRow) (string, error) {
 	if proto.Decode(msg.Body, &body) != nil {
 		return "", &Error{"bad_request", "invalid review body"}
 	}
-	lines := []string{fmt.Sprintf("Review round %d on commit %s: score %d/%d", body.Round, body.Commit, body.Score, body.Pass)}
+	lines := []string{fmt.Sprintf("Review round %d: score %d/%d", body.Round, body.Score, body.Pass)}
 	for _, it := range body.Items {
 		lines = append(lines, formatReviewItem(it))
 	}
@@ -763,52 +773,6 @@ func formatReviewLoc(file *string, line *int) string {
 		return *file
 	}
 	return fmt.Sprintf("%s:%d", *file, *line)
-}
-
-func formatChecksMsg(msg proto.MsgRow) (string, error) {
-	var body proto.ChecksBody
-	if proto.Decode(msg.Body, &body) != nil {
-		return "", &Error{"bad_request", "invalid checks body"}
-	}
-	outcome := "failed"
-	if body.OK {
-		outcome = "passed"
-	}
-	lines := []string{fmt.Sprintf("Checks (%s) on commit %s: %s", body.Stage, body.Commit, outcome)}
-	for _, it := range body.Items {
-		lines = append(lines, formatCheckItem(it))
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
-func formatCheckItem(it proto.CheckItem) string {
-	res := "fail"
-	if it.OK {
-		res = "pass"
-	}
-	line := fmt.Sprintf("- %s: %s", it.Name, res)
-	if detail := strVal(it.Detail); detail != "" {
-		line += "\n" + detail
-	}
-	return line
-}
-
-func formatHandbackMsg(msg proto.MsgRow) (string, error) {
-	var body proto.HandbackBody
-	if proto.Decode(msg.Body, &body) != nil {
-		return "", &Error{"bad_request", "invalid handback body"}
-	}
-	lines := []string{fmt.Sprintf("Changes: +%d -%d (%d files, %d commits)", body.Added, body.Removed, len(body.Files), len(body.Commits))}
-	for _, cm := range body.Commits {
-		lines = append(lines, "- "+cm.SHA+" "+cm.Subject)
-	}
-	if len(body.Files) != 0 {
-		lines = append(lines, "Files: "+strings.Join(body.Files, ", "))
-	}
-	if msg.Text != "" {
-		lines = append(lines, msg.Text)
-	}
-	return strings.Join(lines, "\n"), nil
 }
 
 func formatSystemMsg(msg proto.MsgRow) (string, error) {
@@ -852,7 +816,11 @@ func (c *turnCtx) replacedSessionLines() ([]string, error) {
 		if !ok {
 			return nil, &Error{"bad_request", "replaced review session requires task row"}
 		}
-		return c.reviewLines(task, task.Commit)
+		report, err := fetchMsg[proto.EmptyBody](c, c.s.Report, "report")
+		if err != nil {
+			return nil, err
+		}
+		return c.reviewLines(task, report.By)
 	default:
 		return nil, nil
 	}
@@ -921,22 +889,28 @@ func fetchFrom(ctx context.Context, h *Host, device string, build func(id int64)
 	return fetched, nil
 }
 
-func (c *turnCtx) fetchBrief(briefID string) (proto.BriefBody, error) {
-	build := func(id int64) any {
-		return proto.FetchRow{FetchPage: c.fetchPage(id, 0, 1), Row: "msg", RowID: briefID}
+// fetchMsg fetches one message of the group by its id; what names its kind
+// in an error.
+func fetchMsg[B any](c *turnCtx, id, what string) (msg proto.MessageRow[B, *proto.CardState], err error) {
+	build := func(n int64) any {
+		return proto.FetchRow{FetchPage: c.fetchPage(n, 0, 1), Row: "msg", RowID: id}
 	}
 	fetched, err := fetchFrom(context.Background(), c.h, c.s.Home, build)
 	if err != nil {
-		return proto.BriefBody{}, err
+		return msg, err
 	}
 	if len(fetched.Rows) == 0 {
-		return proto.BriefBody{}, &Error{"not_found", "brief not found"}
+		return msg, &Error{"not_found", what + " not found"}
 	}
-	var msg proto.MessageRow[proto.BriefBody, *proto.CardState]
 	if proto.Decode(fetched.Rows[0], &msg) != nil {
-		return proto.BriefBody{}, &Error{"bad_request", "invalid brief row"}
+		return msg, &Error{"bad_request", "invalid " + what + " row"}
 	}
-	return msg.Body, nil
+	return msg, nil
+}
+
+func (c *turnCtx) fetchBrief(briefID string) (proto.BriefBody, error) {
+	msg, err := fetchMsg[proto.BriefBody](c, briefID, "brief")
+	return msg.Body, err
 }
 
 func (c *turnCtx) fetchNotes() ([]string, error) {

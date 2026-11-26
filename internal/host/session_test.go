@@ -293,7 +293,7 @@ func TestSessionTable(t *testing.T) {
 	db := seamStore(t)
 	h, _ := seamHost(t, db)
 	full := Session{SessionKey: seamTask, Kind: TaskSession, Folder: "wt/12-paths", Agent: "codex", Home: "home-device",
-		Name: "Codex", Secretary: true, CLISession: "thread-1", State: Takeover, LastActive: 5, TakeoverAt: "9f2c1ab"}
+		Name: "Codex", Secretary: true, CLISession: "thread-1", State: Takeover, LastActive: 5, Report: "Zk3JiT9mQ0C1x8yq2uVb7A"}
 	if err := h.Sessions.Create(full); err != nil {
 		t.Fatal(err)
 	}
@@ -328,14 +328,14 @@ func TestSessionTable(t *testing.T) {
 
 	// Update writes what its caller changed and nothing else.
 	err := h.Sessions.Update(seamGroup, func(s *Session) {
-		s.CLISession, s.TakeoverAt, s.Secretary = "8d1f", "c0ffee1", true
+		s.CLISession, s.Report, s.Secretary = "8d1f", "KaiCW9JC8UOG7lKNduDo8Q", true
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	changed, _ := h.Sessions.Get(seamGroup)
 	want := Session{SessionKey: seamGroup, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: "home-device", Name: "Claude Code",
-		Secretary: true, CLISession: "8d1f", State: Dormant, LastActive: seamStart + 4000, TakeoverAt: "c0ffee1"}
+		Secretary: true, CLISession: "8d1f", State: Dormant, LastActive: seamStart + 4000, Report: "KaiCW9JC8UOG7lKNduDo8Q"}
 	if changed != want {
 		t.Fatalf("got %+v, want %+v", changed, want)
 	}
@@ -386,7 +386,7 @@ func TestSessionTableKeepsMemoryAndStoreAlike(t *testing.T) {
 }
 
 func TestSessionTableThatCannotBeLoaded(t *testing.T) {
-	columns := "(g, member, task, kind, folder, agent, home, name, secretary, cli_session, state, last_active, takeover_at)"
+	columns := "(g, member, task, kind, folder, agent, home, name, secretary, cli_session, state, last_active, report)"
 	cases := map[string][]string{
 		"no such table": {"DROP TABLE session"},
 		"the test refuses the update": {
@@ -527,7 +527,7 @@ func TestSessionChangesCommitWithTheirTransaction(t *testing.T) {
 		if err := tx.Create(seamSession(seamReview)); err != nil {
 			t.Error(err)
 		}
-		if err := tx.Update(seamTask, func(s *Session) { s.TakeoverAt = "9f2c1ab" }); err != nil {
+		if err := tx.Update(seamTask, func(s *Session) { s.Report = "Zk3JiT9mQ0C1x8yq2uVb7A" }); err != nil {
 			t.Error(err)
 		}
 		if err := tx.End(seamGroup); err != nil {

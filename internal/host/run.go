@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -37,8 +36,6 @@ type launchConfig struct {
 	maxOpen int
 	level   int
 }
-
-const queryMainDBFileSQL = `SELECT coalesce((SELECT file FROM pragma_database_list WHERE name = 'main'), '')`
 
 const queryLaunchConfigSQL = `SELECT
 	coalesce((SELECT json_extract(value, '$') FROM setting WHERE key = 'max_open'), 4),
@@ -177,22 +174,6 @@ func readLaunchConfig(h *Host, agent, group string) (launchConfig, error) {
 		return tx.QueryRow(queryLaunchConfigSQL, agent, group).Scan(&cfg.maxOpen, &cfg.level)
 	}
 	return cfg, h.Store.Write(scan)
-}
-
-func projectDir(h *Host, group string) string {
-	var dbFile string
-	scan := func(tx *store.Tx) error {
-		return tx.QueryRow(queryMainDBFileSQL).Scan(&dbFile)
-	}
-	h.Store.Write(scan)
-	if dbFile == "" {
-		return ""
-	}
-	return filepath.Join(filepath.Dir(dbFile), "projects", group)
-}
-
-func sessionDir(h *Host, s Session) string {
-	return filepath.Join(projectDir(h, s.Group), s.Folder)
 }
 
 func readIdleDuration(h *Host) time.Duration {
@@ -428,8 +409,12 @@ func unclaimWaitingProc(h *Host, rt *runtimePart, lp *liveProc) {
 }
 
 // startFromDormant starts the CLI of a dormant session, or of one handed back
-// from takeover, for a turn.
+// from takeover, for a turn. Nothing starts in a folder that is gone.
 func startFromDormant(h *Host, rt *runtimePart, s Session, cfg launchConfig, text string, turn Turn) error {
+	if gone := missingFolder(s); gone != "" {
+		rt.releaseStarting(s.SessionKey)
+		return failStart(h, rt, s, gone)
+	}
 	err := h.Sessions.Move(s.SessionKey, s.State, Working)
 	rt.releaseStarting(s.SessionKey)
 	if err != nil {
@@ -445,6 +430,24 @@ func startFromDormant(h *Host, rt *runtimePart, s Session, cfg launchConfig, tex
 	}
 	sendMemberStatus(context.Background(), h, rt, fresh.Home, fresh.Group, fresh.Member, nil)
 	return deliverInitialTurn(h, lp, text, turn)
+}
+
+// missingFolder is empty while the session's folder exists, and otherwise
+// says that it does not (contracts/local.md section 7).
+func missingFolder(s Session) string {
+	if isFolder(s.Folder) {
+		return ""
+	}
+	return "the folder " + s.Folder + " does not exist"
+}
+
+// failStart reports a start in a folder that is gone as a crash: the session
+// goes dormant, the member reports turn_interrupted with the path, and a task
+// session fails its task (flows/agent-turn.md E). A dormant session stays so.
+func failStart(h *Host, rt *runtimePart, s Session, gone string) error {
+	h.Sessions.Move(s.SessionKey, s.State, Dormant)
+	reportOrQueueCrash(context.Background(), h, rt, pendingCrash{session: s, detail: RedactSecrets(gone)})
+	return &Error{"cli", gone}
 }
 
 func (rt *runtimePart) releaseStarting(key SessionKey) {
@@ -475,7 +478,7 @@ func launchSessionProcess(h *Host, rt *runtimePart, s Session, cfg launchConfig,
 	}
 	token := h.Sessions.Admit(s.SessionKey, cfg.level, false)
 	launch := Launch{
-		Folder: sessionDir(h, s), Session: s.CLISession,
+		Folder: s.Folder, Session: s.CLISession,
 		Level: cfg.level, Shim: append(slices.Clone(h.Shim), "--token", token), Instructions: Instructions(s),
 		RepoConfig: s.Kind != GroupSession, ToolTimeout: groupToolTimeout(h, s.Group),
 	}

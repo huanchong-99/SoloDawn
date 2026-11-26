@@ -58,8 +58,9 @@ func usesApproveTool(agent string) bool {
 }
 
 // checkTakeover checks a driver's takeover declaration for takeover.start
-// before its relay, busy and cli checks, and reports whether a working AI
-// without an unfinished task runs its assign turn in structured mode first
+// before its relay, busy and cli checks, and reports whether the CLI cannot
+// start a new session in a terminal, so that a session that has never run
+// needs one turn in structured mode first
 // (planning/contracts/step-3/drivers.md section 5).
 func checkTakeover(agent string) (assignFirst bool, err error) {
 	switch DriverCaps[agent].Takeover {

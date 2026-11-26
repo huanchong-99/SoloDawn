@@ -42,6 +42,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: not looked into. The connection time-outs fit the entry "On a Mac with the Application Firewall, a UDP write can block every connection on one local address"; the `home_unreachable` ones may be the class of `features/s2_watch_test.go` `prepareBulletin` (a command sent before P2's host attached to P1).
 - Status: open; found while reproducing the entry "A9.27 failed once on Linux: P2 held a later member row than the export".
 
+### 2026-11-26 · limitation · A hand-back or continue turn whose CLI must start in a folder that is gone is not reported
+
+- Symptom: the host checks a session's folder where delivery prepares a turn, where an external hand-out is made and at `takeover.start` (`prepareTargetSession`, `internal/host/deliver.go`). A structured start that no item causes is not checked: the hand-back turn after a takeover, a continue turn of a session that went dormant, the replacement of a session the CLI could not resume. There the CLI fails to start, the session goes `dormant` and the error is logged, with no `turn_interrupted` and no `task fail`. The check also runs before every turn, not only before a start: a session whose CLI is still open gets no turn in a folder that is gone, and stays `waiting`.
+- Cause: `planning/contracts/local.md` section 7 puts the check "before a CLI starts". Unit HS-A put it where delivery already records the outcome of a batch (delivered, acknowledged, failure reported), which is one place for managed AIs, external hand-outs and takeovers. The runtime's own starts (`startFromDormant`, `internal/host/run.go`) report no failed start of any kind.
+- Status: resolved by the review of HS-A: the check is in `startFromDormant` (`internal/host/run.go`), the one place every start of the runtime passes, and reports the crash there; delivery no longer checks before a turn, so a session whose CLI is still open gets its turn. `TestMissingFolderFailsTheStart` (`internal/host/run_test.go`) covers a turn for items, a continue turn and a hand-back.
+
+### 2026-11-26 · deviation · Between HS-A and HS-B: a Codex group session that has never run cannot be taken over, and the instructions name removed tools
+
+- Symptom: `takeover.start` for a working AI without an unfinished task opens its group session and creates no task. For a CLI whose takeover is `resume` (Codex) and a group session that has never run, the start answers `cli` (`codex: interactive takeover requires an existing thread id`). `internal/host/instructions/*.md` and the hand-back sentence of `ownTurnBody` (`internal/host/turn.go`) still name `push_branch`, `run_checks`, the review diff and "run the checks".
+- Cause: unit HS-A removed the takeover task, its structured `assign` turn and the Git facts (`internal/host/takeover.go`) only as far as package `host` needed to compile. The structured first turn of a group session, the turn texts and the instructions are unit HS-B's.
+- Status: open until HS-B.
+
+### 2026-11-26 · bug (test) · The owed-turn line of `delivery.forget` was covered by a race
+
+- Symptom: with the merge steps gone from `afterGroupState`, `go test -cover ./internal/host/` reported `forget` (`internal/host/deliver.go`) at 85.7%: the line that drops the owed turns of a forgotten group did not run.
+- Cause: `TestGroupItsOwnerWasRemovedFromIsLeft` opens a pre-emption and then lets two background goroutines race: `afterGroupState`, whose sweep drops a pre-emption that has not ended (`dropUninterrupted`), and `leaveGroup`, which calls `forget`. Whichever came first removed the owed turn, and the test accepts both.
+- Status: resolved. `TestGroupWhoseHomeRefusesItIsLeft` calls `forget` with a turn owed in the group and one owed in another group, and checks that the first alone is dropped.
+
 ### 2026-11-26 · bug · FLAKY-33: A9.8 failed once: a browser's ICE agent stood still for 5 × 7.8 s
 
 - Symptom: CI run 45727940554 (`acceptance-race`, Linux, PR #417), A9.8 `Given the confirmation cast with Q`: Q's test browser and P1 exchanged the offer, the answer and all candidates in 35 ms; no pair was selected; P1 gave up at 30 s (`ice_failed`), then the browser. The browser's pion ICE agent loop was blocked five times for 7.8 s, the time a pion TURN request takes to give up (retransmissions at 0.2 ... 7.8 s, `pion/turn/v5@v5.1.3/internal/client/transaction.go`). Not reproduced in 434 runs of the outline (Mac `-race`, Linux in colima, Linux under CPU stress).

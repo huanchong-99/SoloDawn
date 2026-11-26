@@ -69,6 +69,7 @@ type tkRig struct {
 	home      *runHome
 	drv       *fakeDriver
 	owner     *tkOwner
+	folder    string // the workspace of every AI of the rig
 	mu        sync.Mutex
 	opened    []Launch
 	ptyErr    error
@@ -78,7 +79,7 @@ type tkRig struct {
 func newTkRig(t *testing.T) *tkRig {
 	t.Helper()
 	h, rh, drv, _ := setupRunEnv(t)
-	r := &tkRig{t: t, h: h, home: rh, drv: drv, owner: newTkOwner("direct"), delivered: make(chan aiSlot, 64)}
+	r := &tkRig{t: t, h: h, home: rh, drv: drv, owner: newTkOwner("direct"), folder: t.TempDir(), delivered: make(chan aiSlot, 64)}
 	Holds["takeover"] = takeoverHold
 	Deliver = func(_ *Host, g, m string) {
 		select {
@@ -95,10 +96,7 @@ func newTkRig(t *testing.T) *tkRig {
 	}}
 	prevAttach := takeoverAttach
 	t.Cleanup(func() { takeoverAttach = prevAttach })
-	rh.cmdFn = func(p map[string]any) (json.RawMessage, error) {
-		if p["t"] == "task" && p["op"] == "start" {
-			return json.RawMessage(`{"re":1,"ok":true,"num":7}`), nil
-		}
+	rh.cmdFn = func(map[string]any) (json.RawMessage, error) {
 		return json.RawMessage(`{"re":1,"ok":true}`), nil
 	}
 	drain := make(chan struct{})
@@ -116,7 +114,7 @@ func newTkRig(t *testing.T) *tkRig {
 		h.Settle()
 		close(drain)
 	})
-	r.putGroup(tkOrigin(t))
+	r.putGroup()
 	r.putMember(runAI1, "claude", false)
 	r.putMember(runAI2, "codex", false)
 	r.putMember(tkSec, "claude", true)
@@ -128,23 +126,10 @@ func newTkRig(t *testing.T) *tkRig {
 	return r
 }
 
-func tkOrigin(t *testing.T) string {
-	t.Helper()
-	ctx := t.Context()
-	origin, seed := filepath.Join(t.TempDir(), "origin.git"), t.TempDir()
-	bareRepo(t, origin, "main")
-	mustGit(t, ctx, "", "init", "--initial-branch=main", seed)
-	os.WriteFile(filepath.Join(seed, "README.md"), []byte("one\n"), 0o600)
-	mustGit(t, ctx, seed, "add", "README.md")
-	mustGit(t, ctx, seed, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-m", "initial")
-	mustGit(t, ctx, seed, "push", origin, "main")
-	return origin
-}
-
-func (r *tkRig) putGroup(repo string) {
+func (r *tkRig) putGroup() {
 	grp := proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: runGroup1, Seq: 1}, Name: "Website", Kind: "project",
-		Repo: repo, Base: "main", Forge: "none", Home: "home-dev", Secretary: tkSec, Checks: []string{}, Pass: 85,
+		RowHeader: proto.RowHeader{Type: "group", ID: runGroup1, Seq: 1}, Name: "Website",
+		Home: "home-dev", Secretary: tkSec, Pass: 85,
 	}
 	r.h.Rows.Put(runGroup1, "group", runGroup1, json.RawMessage(marshalWire(grp)))
 }
@@ -155,12 +140,13 @@ func (r *tkRig) putMember(id, cli string, sec bool) {
 		CLI:       cli, Host: r.h.Key.ID(), Secretary: sec, Allow: []string{}, Approvers: []string{},
 	}
 	r.h.Rows.Put(runGroup1, "member", id, json.RawMessage(marshalWire(m)))
+	// The group session, as host.join records it.
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: runGroup1, Member: id}, Kind: GroupSession, Folder: r.folder, Agent: cli, Home: "home-dev", Name: cli, Secretary: sec})
 }
 
 func (r *tkRig) putTask(id, state, assignee, reviewer string, num int) {
 	task := proto.TaskRow{
-		RowHeader: proto.RowHeader{Type: "task", ID: id, Seq: 3}, Group: runGroup1, Num: num, Title: "Fix it",
-		Slug: "fix-it", Origin: "direct", State: state, Step: "local_check", Assignee: assignee, Reviewer: reviewer, Depends: []string{},
+		RowHeader: proto.RowHeader{Type: "task", ID: id, Seq: 3}, Group: runGroup1, Num: num, Title: "Fix it", Origin: "direct", State: state, Step: "work", Assignee: assignee, Reviewer: reviewer, Depends: []string{},
 	}
 	r.h.Rows.Put(runGroup1, "task", id, json.RawMessage(marshalWire(task)))
 }
@@ -260,15 +246,6 @@ func (r *tkRig) session(key SessionKey) Session {
 	return s
 }
 
-func (r *tkRig) newTaskKey(member string) SessionKey {
-	r.t.Helper()
-	starts := r.sent("task", "start")
-	if len(starts) == 0 {
-		r.t.Fatal("no task start sent")
-	}
-	return SessionKey{Group: runGroup1, Member: member, Task: starts[len(starts)-1]["id"].(string)}
-}
-
 func tkCode(t *testing.T, err error, code string) {
 	t.Helper()
 	if got, ok := errors.AsType[*Error](err); !ok || got.Code != code {
@@ -289,35 +266,18 @@ func TestTakeoverStartRefusals(t *testing.T) {
 	tkCode(t, r.start(runAI1, ""), "busy")
 	takeoverState(r.h).open = map[aiSlot]*takeover{}
 
-	r.putTask(tkTask, "active", runAI1, runAI2, 1)
-	d := deliv(r.h)
-	d.mu.Lock()
-	d.merging[runGroup2+"\x00"+tkTask+"\x00c1"] = true
-	d.mu.Unlock()
 	cases := []struct {
 		member, task, state, code string
 	}{
 		{runAI1, tkOther, "active", "not_found"},
 		{runAI1, tkTask, "queued", "conflict"},
-		{runAI1, tkTask, "merged", "conflict"},
-		{tkSec, tkTask, "active", "busy"},
+		{runAI1, tkTask, "done", "conflict"},
 		{runAI2, tkTask, "active", "conflict"},
 		{runAI2, tkTask, "paused", "conflict"},
 	}
 	for i, c := range cases {
 		r.putTask(tkTask, c.state, runAI1, runAI2, 1)
-		if i == 3 {
-			r.putTask(tkTask, c.state, tkSec, runAI2, 1)
-			d.mu.Lock()
-			d.merging[runGroup1+"\x00"+tkTask+"\x00c1"] = true
-			d.mu.Unlock()
-		}
 		tkCode(t, r.start(c.member, c.task), c.code)
-		if i == 3 {
-			d.mu.Lock()
-			delete(d.merging, runGroup1+"\x00"+tkTask+"\x00c1")
-			d.mu.Unlock()
-		}
 		if r.held(c.member) {
 			t.Fatalf("case %d holds %s after a refusal", i, c.member)
 		}
@@ -327,26 +287,21 @@ func TestTakeoverStartRefusals(t *testing.T) {
 	}
 }
 
-func TestTakeoverOfAWorkingAIWithoutATaskIsCancelledWhenNothingChanged(t *testing.T) {
+// A working AI without an unfinished task is taken over in its group session:
+// no task is created, and nothing is read from its folder (flows/takeover.md A).
+func TestTakeoverOfAWorkingAIWithoutATaskOpensItsGroupSession(t *testing.T) {
 	r := newTkRig(t)
+	r.putTask(tkTask, "queued", runAI1, "", 1)
 	if err := r.start(runAI1, ""); err != nil {
 		t.Fatal(err)
 	}
-	start := r.sent("task", "start")
-	if len(start) != 1 || start[0]["title"] != "Owner takeover" || start[0]["plan"] != "" || start[0]["origin"] != "takeover" || start[0]["as"] != runAI1 {
-		t.Fatalf("task start = %v", start)
-	}
-	key := r.newTaskKey(runAI1)
+	key := SessionKey{Group: runGroup1, Member: runAI1}
 	s := r.session(key)
-	head := strings.TrimSpace(mustGit(t, t.Context(), sessionDir(r.h, s), "rev-parse", "HEAD"))
-	if s.Kind != TaskSession || s.Folder != "wt/7-owner-takeover" || s.State != Takeover || s.TakeoverAt != head || s.CLISession != "new-session" {
-		t.Fatalf("session = %+v, head %s", s, head)
-	}
-	if b := r.sent("task", "branch"); len(b) != 1 || b[0]["branch"] != "task/7-owner-takeover" {
-		t.Fatalf("task branch = %v", b)
+	if s.Kind != GroupSession || s.Folder != r.folder || s.State != Takeover || s.CLISession != "new-session" || len(r.h.Sessions.All()) != 3 {
+		t.Fatalf("session = %+v of %s", s, sessionStates(r.h))
 	}
 	l := r.lastOpened()
-	if l.Folder != sessionDir(r.h, s) || l.Session != "" || l.Level != 3 || !l.RepoConfig || !slices.Contains(l.Shim, "--token") {
+	if l.Folder != r.folder || l.Session != "" || l.Level != 3 || l.RepoConfig || !slices.Contains(l.Shim, "--token") {
 		t.Fatalf("interactive launch = %+v", l)
 	}
 	if c, ok := r.h.Sessions.Caller(tokenFromLaunch(l)); !ok || !c.Interactive {
@@ -365,34 +320,14 @@ func TestTakeoverOfAWorkingAIWithoutATaskIsCancelledWhenNothingChanged(t *testin
 	_, err = r.h.ReplayTakeover(t.Context(), r.owner, "owner-dev", json.RawMessage(strings.Replace(string(replay), "Nn"+runAI1[2:], "Oo"+runAI1[2:], 1)))
 	tkCode(t, err, "conflict")
 
-	cancelling := make(chan struct{})
-	letCancel := sync.OnceFunc(func() { close(cancelling) })
-	t.Cleanup(letCancel)
-	r.home.cmdFn = func(p map[string]any) (json.RawMessage, error) {
-		if p["op"] == "cancel" {
-			<-cancelling
-		}
-		return json.RawMessage(`{"re":1,"ok":true}`), nil
-	}
 	r.end(runAI1)
-	r.waitFor("the cancel", func() bool { return len(r.sent("task", "cancel")) == 1 })
-	p := takeoverState(r.h)
-	p.mu.Lock()
-	free := p.open[aiSlot{group: runGroup1, member: runAI1}].free
-	p.mu.Unlock()
-	if r.held(runAI1) || !free {
-		t.Fatal("the takeover still held its slot when it reported the cancel")
-	}
-	letCancel()
 	r.waitReleased(runAI1)
-	if c := r.sent("task", "cancel"); len(c) != 1 || c[0]["id"] != key.Task || c[0]["as"] != nil {
-		t.Fatalf("task cancel = %v", c)
+	posts := r.sent("post", "handback")
+	if len(posts) != 1 || posts[0]["thread"] != nil || posts[0]["text"] != "" || posts[0]["as"] != runAI1 || !jsonEqual(posts[0]["body"], map[string]any{}) {
+		t.Fatalf("hand-back of the group session = %v", posts)
 	}
-	if _, ok := r.h.Sessions.Get(key); ok || len(r.sent("post", "")) != 0 || r.drv.count() != 0 {
-		t.Fatal("an unchanged takeover task kept its session, posted, or started a hand-back turn")
-	}
-	if state := r.lastState(runAI1); state != "dormant" {
-		t.Fatalf("member state after the cancelled takeover = %v, want dormant", state)
+	if s := r.session(key); s.State != Waiting || len(r.sent("task", "")) != 0 || r.drv.count() != 1 {
+		t.Fatalf("after the hand-back: %+v, task commands %v, turns %d", s, r.sent("task", ""), r.drv.count())
 	}
 	if _, ok := r.h.Sessions.Caller(tokenFromLaunch(l)); ok {
 		t.Fatal("the interactive token outlived the terminal")
@@ -402,30 +337,26 @@ func TestTakeoverOfAWorkingAIWithoutATaskIsCancelledWhenNothingChanged(t *testin
 	r.waitFor("delivery after the hand-back", func() bool { return len(r.delivered) > 0 })
 }
 
-func TestTakeoverHandBackAfterACommitPostsTheFacts(t *testing.T) {
+// The hand-back is the AI's own account: the node adds no facts to it.
+func TestTakeoverHandBackPostsTheAIsAccount(t *testing.T) {
 	r := newTkRig(t)
 	r.drv.makeProc = nil
-	if err := r.start(runAI1, ""); err != nil {
+	r.putTask(tkTask, "active", runAI1, "", 1)
+	if err := r.start(runAI1, tkTask); err != nil {
 		t.Fatal(err)
 	}
-	key := r.newTaskKey(runAI1)
-	dir := sessionDir(r.h, r.session(key))
+	key := SessionKey{Group: runGroup1, Member: runAI1, Task: tkTask}
 	ctx := t.Context()
-	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n\nvar x = 1\n"), 0o600)
-	mustGit(t, ctx, dir, "add", "a.go")
-	mustGit(t, ctx, dir, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-m", "Add a")
-	sha := strings.TrimSpace(mustGit(t, ctx, dir, "rev-parse", "--short", "HEAD"))
-	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("n\n"), 0o600)
 
 	term := newPTYTestTerminal("pty:" + runGroup1 + ":" + runAI1)
 	go r.h.ServeTerminal(term)
-	term.waitContains(t, "WD:7-owner-takeover")
+	term.waitContains(t, "WD:"+filepath.Base(r.folder))
 	term.inW.Write([]byte("quit\r"))
 	term.waitContains(t, "BYE-NOW")
 
 	r.waitFor("the hand-back turn", func() bool { return r.drv.count() == 1 })
 	proc := r.drv.lastProc()
-	if text := <-proc.turnCh; text != "replaced-default" || r.session(key).State != Working || r.session(key).TakeoverAt != "" {
+	if text := <-proc.turnCh; text != "replaced-default" || r.session(key).State != Working || r.session(key).Folder != r.folder {
 		t.Fatalf("hand-back turn %q in %+v", text, r.session(key))
 	}
 	caller, _ := r.h.Sessions.Caller(tokenFromLaunch(r.drv.lastLaunch()))
@@ -435,16 +366,11 @@ func TestTakeoverHandBackAfterACommitPostsTheFacts(t *testing.T) {
 	proc.emit(Event{Kind: TurnEnded, Status: "completed"})
 	r.waitReleased(runAI1)
 	posts := r.sent("post", "handback")
-	want := map[string]any{
-		"files":   []any{"a.go", "notes.txt"},
-		"commits": []any{map[string]any{"sha": sha, "subject": "Add a"}},
-		"added":   float64(3), "removed": float64(0),
-	}
-	if len(posts) != 1 || posts[0]["text"] != "Owner asked for a." || posts[0]["thread"] != key.Task || !jsonEqual(posts[0]["body"], want) {
+	if len(posts) != 1 || posts[0]["text"] != "Owner asked for a." || posts[0]["thread"] != key.Task || !jsonEqual(posts[0]["body"], map[string]any{}) {
 		t.Fatalf("hand-back posts = %v", posts)
 	}
-	if s := r.session(key); s.State != Waiting || len(r.sent("task", "cancel")) != 0 {
-		t.Fatalf("after hand-back: %+v, cancels %v", s, r.sent("task", "cancel"))
+	if s := r.session(key); s.State != Waiting || len(r.sent("task", "")) != 0 {
+		t.Fatalf("after hand-back: %+v, task commands %v", s, r.sent("task", ""))
 	}
 }
 
@@ -458,14 +384,13 @@ func TestTakeoverFallbackPostsAndFailedHandBackTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	secKey := SessionKey{Group: runGroup1, Member: tkSec}
-	if s := r.session(secKey); s.Kind != GroupSession || s.Folder != "repo" || r.lastOpened().RepoConfig || len(r.sent("task", "")) != 0 {
+	if s := r.session(secKey); s.Kind != GroupSession || s.Folder != r.folder || r.lastOpened().RepoConfig || len(r.sent("task", "")) != 0 {
 		t.Fatalf("secretary takeover = %+v, launch %+v", s, r.lastOpened())
 	}
 	r.end(tkSec)
 	r.waitReleased(tkSec)
 	posts := r.sent("post", "handback")
-	if len(posts) != 1 || posts[0]["thread"] != nil || posts[0]["text"] != "" || posts[0]["as"] != tkSec ||
-		!jsonEqual(posts[0]["body"], map[string]any{"files": []any{}, "commits": []any{}, "added": 0, "removed": 0}) {
+	if len(posts) != 1 || posts[0]["thread"] != nil || posts[0]["text"] != "" || posts[0]["as"] != tkSec || !jsonEqual(posts[0]["body"], map[string]any{}) {
 		t.Fatalf("secretary fallback = %v", posts)
 	}
 	if s := r.session(secKey); s.State != Waiting {
@@ -500,57 +425,6 @@ func TestTakeoverFallbackPostsAndFailedHandBackTurns(t *testing.T) {
 	}
 }
 
-func TestTakeoverWarmsUpACLIThatCannotStartInATerminal(t *testing.T) {
-	r := newTkRig(t)
-	var items []json.RawMessage
-	Compose = func(_ *Host, s Session, kind TurnKind, in []json.RawMessage) (string, Turn, error) {
-		items = in
-		return "warm", Turn{Kind: kind, Thread: s.Task}, nil
-	}
-	if err := r.start(runAI2, ""); err != nil {
-		t.Fatal(err)
-	}
-	key := r.newTaskKey(runAI2)
-	var item proto.InboxItem
-	proto.Decode(items[0], &item)
-	if len(items) != 1 || item.Item.Why != "assign" || string(item.Item.Task) != key.Task || item.Task == nil || item.Task.Origin != "takeover" {
-		t.Fatalf("warm-up items = %s", items)
-	}
-	if l := r.lastOpened(); l.Session != "thread-1" || r.drv.count() != 1 || r.session(key).State != Takeover {
-		t.Fatalf("terminal after warm-up = %+v", l)
-	}
-	r.end(runAI2)
-	r.waitReleased(runAI2)
-}
-
-// The terminal opens only once the warm-up turn has ended (flows/takeover.md section A).
-func TestTakeoverWaitsForTheWarmUpTurn(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		r := newTkRig(t)
-		r.drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
-			p := newFakeProc(ctx, l)
-			p.autoReadyID = "thread-1"
-			return p, nil
-		}
-		opened := make(chan Launch, 1)
-		Drivers["codex"] = tkDriver{r.drv, func(l Launch) ([]string, string, error) {
-			opened <- l
-			return nil, "", errors.New("no terminal")
-		}}
-		done := make(chan error, 1)
-		go func() { done <- r.start(runAI2, "") }()
-		synctest.Wait()
-		if len(opened) != 0 || len(done) != 0 {
-			t.Fatal("the terminal opened during the warm-up turn")
-		}
-		r.drv.lastProc().emit(Event{Kind: TurnEnded, Status: "completed"})
-		tkCode(t, <-done, "cli")
-		if l := <-opened; l.Session != "thread-1" {
-			t.Fatalf("terminal after warm-up = %+v", l)
-		}
-	})
-}
-
 func TestTakeoverStartFailures(t *testing.T) {
 	r := newTkRig(t)
 	r.putTask(tkTask, "active", runAI1, runAI2, 1)
@@ -565,34 +439,27 @@ func TestTakeoverStartFailures(t *testing.T) {
 		t.Fatalf("member state after a failed start = %v, want dormant", state)
 	}
 
-	r.putTask(tkTask, "merged", runAI1, runAI2, 1)
-	tkCode(t, r.start(runAI1, ""), "cli")
-	created := r.newTaskKey(runAI1)
-	if c := r.sent("task", "cancel"); len(c) != 1 || c[0]["id"] != created.Task {
-		t.Fatalf("cancel of the created task = %v", c)
+	// The folder is gone: the answer names it, and no terminal is tried.
+	r.ptyErr = nil
+	opened := len(r.opened)
+	if err := os.Remove(r.folder); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := r.h.Sessions.Get(created); ok {
-		t.Fatal("the created task's session outlived the failed start")
-	}
-}
-
-func TestTakeoverCancelsItsTaskWhenTheWorkspaceFails(t *testing.T) {
-	r := newTkRig(t)
-	r.putGroup(filepath.Join(t.TempDir(), "missing.git"))
-	if err := r.start(runAI1, ""); err == nil || len(r.sent("task", "cancel")) != 1 || r.held(runAI1) {
-		t.Fatalf("a failed workspace = %v, cancels %v", err, r.sent("task", "cancel"))
+	err = r.start(runAI1, tkTask)
+	tkCode(t, err, "cli")
+	if !strings.Contains(err.Error(), r.folder) || len(r.opened) != opened || r.held(runAI1) || r.session(key).State != Dormant {
+		t.Fatalf("a takeover in a folder that is gone = %v, session %+v", err, r.session(key))
 	}
 
-	r.home.cmdFn = func(map[string]any) (json.RawMessage, error) {
-		return json.RawMessage(`{"re":1,"err":{"code":"forbidden","msg":"no"}}`), nil
-	}
-	tkCode(t, r.start(runAI2, ""), "forbidden")
+	// An AI without a group session on this node is not taken over.
+	r.h.Sessions.End(SessionKey{Group: runGroup1, Member: runAI2})
+	tkCode(t, r.start(runAI2, ""), "not_found")
 }
 
 func TestTakeoverRefusedWhileAnotherSessionOfTheAIIsTakenOver(t *testing.T) {
 	r := newTkRig(t)
 	r.putTask(tkTask, "active", runAI1, runAI2, 1)
-	other := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1, Task: tkOther}, TaskSession, "wt/9-x")
+	other := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1, Task: tkOther}, TaskSession, r.folder)
 	r.h.Sessions.Create(other)
 	r.h.Sessions.Move(other.SessionKey, Dormant, Takeover)
 	tkCode(t, r.start(runAI1, tkTask), "busy")
@@ -609,15 +476,13 @@ func TestTakeoverPicksTheTaskSessionUsedLast(t *testing.T) {
 	}
 	r.putTask(tkTask, "active", runAI1, "", 1)
 	r.putTask(tkOther, "failed", runAI1, "", 2)
-	r.putTask("TkMergedAAAAAAAAAAAAAA", "merged", runAI1, "", 3)
-	for i, id := range []string{tkTask, tkOther, "TkMergedAAAAAAAAAAAAAA"} {
-		s := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1, Task: id}, TaskSession, "wt/x")
+	r.putTask("TkDoneAAAAAAAAAAAAAAAA", "done", runAI1, "", 3)
+	for i, id := range []string{tkTask, tkOther, "TkDoneAAAAAAAAAAAAAAAA"} {
+		s := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1, Task: id}, TaskSession, r.folder)
 		r.h.Sessions.Create(s)
 		r.h.Sessions.Update(s.SessionKey, func(s *Session) { s.LastActive = int64([]int{20, 10, 30}[i]) })
 	}
-	gs := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1}, GroupSession, "repo")
-	r.h.Sessions.Create(gs)
-	r.h.Sessions.Update(gs.SessionKey, func(s *Session) { s.LastActive = 40 })
+	r.h.Sessions.Update(SessionKey{Group: runGroup1, Member: runAI1}, func(s *Session) { s.LastActive = 40 })
 	if got := lastTask(r.h, slot); got != tkTask {
 		t.Fatalf("lastTask = %q, want %q", got, tkTask)
 	}
@@ -627,42 +492,24 @@ func TestTakeoverPicksTheTaskSessionUsedLast(t *testing.T) {
 	}
 }
 
-func TestTakeoverKeepsAHomeRowThatArrivedFirst(t *testing.T) {
-	r := newTkRig(t)
-	r.home.cmdFn = func(p map[string]any) (json.RawMessage, error) {
-		if p["op"] == "start" {
-			row := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: p["id"].(string), Seq: 9}, Group: runGroup1, Num: 4, Title: "Owner takeover",
-				Slug: "owner-takeover", Origin: "takeover", State: "active", Step: "branch", Assignee: runAI1, Depends: []string{}}
-			r.h.Rows.Put(runGroup1, "task", row.ID, json.RawMessage(marshalWire(row)))
-			return json.RawMessage(`{"re":1,"ok":true,"num":4}`), nil
-		}
-		return json.RawMessage(`{"re":1,"ok":true}`), nil
-	}
-	id, err := startTakeoverTask(t.Context(), r.h, aiSlot{group: runGroup1, member: runAI1}, "home-dev")
-	if task, _ := lookupTaskRow(r.h, runGroup1, id); err != nil || task.Seq != 9 {
-		t.Fatalf("row = %+v, %v", task, err)
-	}
-}
-
 func TestTakeoverNamedTasksOfAssigneeAndReviewer(t *testing.T) {
 	r := newTkRig(t)
 	r.putTask(tkTask, "paused", runAI1, runAI2, 1)
 	reviewKey := SessionKey{Group: runGroup1, Member: runAI2, Task: tkTask}
-	rs := makeRunSession(reviewKey, ReviewSession, "review/1")
+	rs := makeRunSession(reviewKey, ReviewSession, r.folder)
 	rs.Agent, rs.CLISession = "codex", "thread-r"
 	r.h.Sessions.Create(rs)
-	os.MkdirAll(sessionDir(r.h, rs), 0o700)
 	if err := r.start(runAI2, tkTask); err != nil {
 		t.Fatal(err)
 	}
-	if s := r.session(reviewKey); s.Kind != ReviewSession || s.State != Takeover || s.TakeoverAt != "" || r.lastOpened().Session != "thread-r" {
+	if s := r.session(reviewKey); s.Kind != ReviewSession || s.State != Takeover || r.lastOpened().Session != "thread-r" {
 		t.Fatalf("review takeover = %+v", s)
 	}
 	tkCode(t, Runner.Turn(t.Context(), r.h, reviewKey, "x", Turn{Kind: ItemsTurn}), "conflict")
 	if err := r.start(runAI1, tkTask); err != nil {
 		t.Fatal(err)
 	}
-	if s := r.session(SessionKey{Group: runGroup1, Member: runAI1, Task: tkTask}); s.Kind != TaskSession || s.State != Takeover || s.Folder != "wt/1-fix-it" {
+	if s := r.session(SessionKey{Group: runGroup1, Member: runAI1, Task: tkTask}); s.Kind != TaskSession || s.State != Takeover || s.Folder != r.folder {
 		t.Fatalf("assignee takeover = %+v", s)
 	}
 	r.end(runAI2)
@@ -684,7 +531,6 @@ func TestTakeoverInterruptsTheRunningTurnFirst(t *testing.T) {
 	r := newTkRig(t)
 	r.drv.makeProc = nil
 	gKey := SessionKey{Group: runGroup1, Member: runAI1}
-	r.h.Sessions.Create(makeRunSession(gKey, GroupSession, "repo"))
 	if err := Runner.Turn(t.Context(), r.h, gKey, "busy", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +557,7 @@ func TestInterruptTurnClosesACLIThatDoesNotEndIt(t *testing.T) {
 		h, _, drv, shutdown := setupBubbleEnv(t, t.TempDir())
 		defer shutdown()
 		key := SessionKey{Group: runGroup1, Member: runAI1}
-		h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+		h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo")))
 		Runner.Turn(t.Context(), h, key, "busy", Turn{Kind: ItemsTurn})
 		start := time.Now()
 		interruptTurn(t.Context(), h, aiSlot{group: runGroup1, member: runAI1})
@@ -752,7 +598,7 @@ func TestTakeoverClosesOnRelayOnALostConnectionAndUnattached(t *testing.T) {
 	}
 	term := newPTYTestTerminal("pty:" + runGroup1 + ":" + tkSec)
 	go r.h.ServeTerminal(term)
-	term.waitContains(t, "WD:repo")
+	term.waitContains(t, "WD:"+filepath.Base(r.folder))
 	closeUnattached(ptyState(r.h).lookup(aiSlot{group: runGroup1, member: tkSec}))
 	if !r.open(tkSec) {
 		t.Fatal("an attached terminal closed at the attach timeout")
@@ -792,8 +638,7 @@ func TestTakeoverSettleLeavesTheRowForTheNextStart(t *testing.T) {
 	rt.mu.Lock()
 	rt.settling = false
 	rt.mu.Unlock()
-	busy := makeRunSession(SessionKey{Group: runGroup1, Member: tkSec}, GroupSession, "repo")
-	r.h.Sessions.Create(busy)
+	busy := r.session(SessionKey{Group: runGroup1, Member: tkSec})
 	r.h.Sessions.Move(busy.SessionKey, Dormant, Takeover)
 	p.claim(r.h, aiSlot{group: runGroup1, member: tkSec}, &takeover{}, true)
 	elsewhere := makeRunSession(SessionKey{Group: runGroup2, Member: runAI2}, GroupSession, "repo")
@@ -839,7 +684,7 @@ func TestQueuedCountCountsHeldItems(t *testing.T) {
 func TestHandBackTurnFailsWithoutItsLaunchConfig(t *testing.T) {
 	h, _, _, _ := setupRunEnv(t)
 	key := SessionKey{Group: runGroup1, Member: runAI1}
-	h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo")))
 	h.Sessions.Move(key, Dormant, Takeover)
 	seamSQL(t, h.Store, "DROP TABLE perm")
 	if err := Runner.Turn(t.Context(), h, key, "x", Turn{Kind: HandbackTurn}); err == nil {
@@ -1075,7 +920,7 @@ func TestTakeoverStartIsBusyWhileDeliveryGivesATurn(t *testing.T) {
 			}
 			return jumpCompose(h, s, kind, items)
 		}
-		r.putTask(runTask1, "active", "local_check", "")
+		r.putTask(runTask1, "active", "work", "")
 		r.push(proto.Item{Item: 1, Why: "assign", Task: runTask1})
 		close(leave)
 		synctest.Wait()
@@ -1091,7 +936,7 @@ func TestTakeoverStartIsBusyWhileDeliveryGivesATurn(t *testing.T) {
 // The turn of its own of an interrupted session is given like any other.
 func TestTakeoverIsBusyWhileATurnOfItsOwnIsComposed(t *testing.T) {
 	jumpTest(t, func(t *testing.T, r *jumpRig) {
-		task := r.work(1, runTask1, "local_check")
+		task := r.work(1, runTask1, "work")
 		r.push(jumpMention(2, testMsg1, "", true))
 		r.end(task, "interrupted")
 		var claimed bool
@@ -1111,8 +956,8 @@ func TestTakeoverIsBusyWhileATurnOfItsOwnIsComposed(t *testing.T) {
 // at them.
 func TestAIWithHeldItemsCanBeTakenOver(t *testing.T) {
 	jumpTest(t, func(t *testing.T, r *jumpRig) {
-		r.end(r.work(1, runTask1, "local_check"), "completed")
-		r.putTask(runTask1, "paused", "local_check", "manual")
+		r.end(r.work(1, runTask1, "work"), "completed")
+		r.putTask(runTask1, "paused", "work", "manual")
 		r.push(jumpMention(2, testMsg1, runTask1, false))
 		r.wantHeld(2)
 		if !takeoverState(r.h).claim(r.h, aiSlot{group: runGroup1, member: runAI1}, &takeover{}, true) {

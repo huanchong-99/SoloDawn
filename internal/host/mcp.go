@@ -191,16 +191,8 @@ func projectCallerSchema(caller Caller, name string, root map[string]any) {
 		dropSessionDefaults(root)
 	}
 	if name == "post" && !caller.Secretary {
-		projectPostSchema(postKind(caller), root)
+		projectPostSchema(caller.External, root)
 	}
-}
-
-// postKind gives an external caller the post kinds of a group session.
-func postKind(c Caller) Kind {
-	if c.External {
-		return GroupSession
-	}
-	return c.Kind
 }
 
 func dropSessionDefaults(root map[string]any) {
@@ -218,29 +210,27 @@ func isSessionDefault(item any) bool {
 	return item == "task" || item == "to"
 }
 
-func projectPostSchema(kind Kind, root map[string]any) {
+func projectPostSchema(external bool, root map[string]any) {
 	if props, ok := root["properties"].(map[string]any); ok {
 		delete(props, "task")
-		delete(props, "group")
-		trimPostKinds(kind, props)
+		trimPostKinds(external, props)
 	}
 }
 
-func trimPostKinds(kind Kind, props map[string]any) {
+func trimPostKinds(external bool, props map[string]any) {
 	if kindSchema, ok := props["kind"].(map[string]any); ok {
 		if enum, ok := kindSchema["enum"].([]any); ok {
 			kindSchema["enum"] = slices.DeleteFunc(enum, func(item any) bool {
-				return dropPostKind(kind, item)
+				return dropPostKind(external, item)
 			})
 		}
 	}
 }
 
-func dropPostKind(kind Kind, item any) bool {
-	if item == "summary" {
-		return true
-	}
-	return kind == GroupSession && item == "handback"
+// dropPostKind leaves summary to the secretary, and gives an external AI,
+// which no takeover reaches, no handback (contracts/mcp-tools.md section 5).
+func dropPostKind(external bool, item any) bool {
+	return item == "summary" || external && item == "handback"
 }
 
 type mcpTransport struct {

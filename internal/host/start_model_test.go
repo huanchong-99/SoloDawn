@@ -2,7 +2,6 @@ package host
 
 import (
 	"encoding/json"
-	"os"
 	"slices"
 	"testing"
 
@@ -115,7 +114,7 @@ func TestCodexRefusedResumeValueIsNotALostSession(t *testing.T) {
 func TestMemberChoiceWaitsForNextProcessStart(t *testing.T) {
 	h, rh, drv, _ := setupRunEnv(t)
 	key := SessionKey{Group: runGroup1, Member: runAI1}
-	s := makeRunSession(key, GroupSession, "repo")
+	s := makeRunSession(key, GroupSession, runFolder("repo"))
 	s.CLISession = "existing"
 	agtCheck(t, h.Sessions.Create(s))
 	putStartProfile(h, key, "opus", "high")
@@ -155,9 +154,8 @@ func testRefusedModelCrash(t *testing.T, agent string) {
 	modelBinaries(t)
 	Drivers = map[string]Driver{"claude": claudeDriver{}, "codex": codexDriver{}}
 	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	s := makeRunSession(key, TaskSession, "repo")
+	s := makeRunSession(key, TaskSession, t.TempDir())
 	s.Agent, s.CLISession = agent, "existing"
-	agtCheck(t, os.MkdirAll(sessionDir(h, s), 0700))
 	agtCheck(t, h.Sessions.Create(s))
 	putStartProfile(h, key, "refused", "high")
 	script := `{"session":"existing","steps":[{"dir":"stdin","msg":{"type":"user"}}],"exit":1}`
@@ -184,7 +182,7 @@ func TestJoinPassesProfilesAndLeaveSelectsDistinctMembers(t *testing.T) {
 	r := newJoinRig(t)
 	r.setAgent("claude", "version", joinStr("personal"))
 	fh := r.addHome("home-1")
-	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", r.makeRepo("profile", "main"), "main"))
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
 	profile := proto.ProfileSet{Model: joinStr("unlisted"), Effort: joinStr("high"), Tier: joinStr("strong"), Skills: joinStr("Go")}
 	for _, name := range []string{"One", "Two"} {
 		r.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: name, ProfileSet: profile})
