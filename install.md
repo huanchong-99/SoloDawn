@@ -4,7 +4,8 @@ From the [SoloDawn releases](https://github.com/huanchong-99/SoloDawn/releases),
 download `SHA256SUMS` and the binary for your computer **from the same release**.
 Save both in an empty directory. Each binary is named
 `solodawn_<version>_<os>_<arch>`, with an extra `.exe` on Windows.
-`<version>` is the full stable release tag, including its leading `v`.
+`<version>` is the release's tag as the releases page shows it, including its
+leading `v`. A tag ending in `-rc.N` is a release candidate, a pre-release for testing.
 For example, a Linux x86-64 binary for `v1.10.2` is named
 `solodawn_v1.10.2_linux_amd64`.
 
