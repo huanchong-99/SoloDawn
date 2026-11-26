@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · limitation · A9.12 failed once with `home_unreachable`: P1's ICE agent stood in a UDP write
+
+- Symptom: a full acceptance run on this Mac at a 1-minute load of about 2 failed A9.12 in `Given the confirmation cast with Q` with `join Q-personal: ... home_unreachable`. Repeats on `batch/model-1126` 591d32812: A9.12 alone 469 times (6 to 10 processes at a time, load 12 to 22, 49 of them under `-race`), no `home_unreachable`; the scenarios of `s2_confirm.feature` up to A9.19, 160 processes of 14 casts, 8 at a time beside 8 busy loops (load 14 to 20): one, `host.join` of Q-personal on Q1 in A9.13 answered after 15,003 ms. The other 4,462 joins of Q-personal and P-work to P1 took 6 to 664 ms, median 615.
+- Cause: the case of the entry "On a Mac with the Application Firewall, a UDP write can block every connection on one local address". Q1 offered 4 ms after `home.add`; P1 answered, both exchanged candidates within 10 ms and went to ICE `connecting`, and neither logged anything more in the 15 s. P1's goroutine dump holds that connection's agent loop in a write to `127.0.0.1` that waits for the socket (`sendBindingRequest` → pion ice v4.4.8 `udp_mux.go:337` → `WriteToInet4`). An answered attempt is left to ICE (`flows/connect.md` step 15), which fails it after 30 s, so Q1 offers again after `host.join` has stopped waiting for the home (`joinAttachTimeout`, `internal/host/join.go:19`; `joinWaitHome`, `join.go:340-350`). The step and the product do what their contracts say: the cast sends `host.join` after `home.add` answers, and `host.join` waits for the attachment. Two `timed out after 3m0s waiting for ctl` failures of A9.19 in the same runs had the same write blocked in P1 (under `sendBindingSuccess` and `sendBindingRequest`).
+- Status: open, accepted for the local machine with the parent entry: CI decides; nothing changed.
+
+### 2026-11-27 · bug · A node of the step-2 cast sometimes exits at start: its own rendezvous answers 400 or 404
+
+- Symptom: in the same repeats, 9 of about 2,700 casts failed in `Given the confirmation cast with Q` because P1 or Q1 never opened its socket; the node's stderr held only `failed to WebSocket dial: expected handshake response status code 101 but got 400` (or `404`). Also seen in the stress of FLAKY-33 above.
+- Cause: not found. The node listens on `:0`, every address (`listenNodeHTTP`, `internal/node/node.go:423-431`), dials its local rendezvous at `127.0.0.1:<port>` (`startLocalHTTP`, `node.go:308`) and ends on that error. Whether another listener on `127.0.0.1` with the same port took the dial was not checked.
+- Status: open.
+
 ### 2026-11-27 · limitation · Acceptance scenarios of the old model fail until units AC-1 to AC-3 rewrite them
 
 - Symptom: after unit AC-0 of MODEL-1126 `features/` compiles and its fixtures follow the new model (every AI joins with a workspace folder of its own, no bare repository, no fake `gh` or forge program, hello and welcome at version 3), but scenarios of the old model fail. The steps whose bodies the model took away fail on purpose with `rewritten by AC-<n>: <reason>` (`rewritten`, `features/helpers_test.go`); others fail because their expectations name the old model: step names `branch`, `local_check` and `merge` (`home_task`, `home_machine`, `home_review`), the roster line without the folder (`host_turn`, `host_profile`, `a10_profiles`, `a10_external`), the review checkout in the turn text (`host_turn.feature:2`), and a second task of one AI that now waits as `busy` (`m4.feature:33`, `m4.feature:48`, `m6.feature:26-39`, `s3_drivers.feature:20`).
