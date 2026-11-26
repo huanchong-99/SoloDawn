@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -105,7 +106,7 @@ func (w *dispatchWorld) connect() error {
 	ice := []webrtc.ICEServer{{URLs: w.ice[0].URLs, Username: w.ice[0].Username, Credential: w.ice[0].Credential}}
 	conn := randomConn()
 	header := func(kind string) proto.SignalHeader { return w.header(kind, conn) }
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{ICEServers: ice, ICETransportPolicy: webrtc.ICETransportPolicyRelay})
+	pc, err := browserAPI(webrtc.SettingEngine{}).NewPeerConnection(webrtc.Configuration{ICEServers: ice, ICETransportPolicy: webrtc.ICETransportPolicyRelay})
 	if err != nil {
 		return err
 	}
@@ -199,25 +200,72 @@ func (w *dispatchWorld) candidates() {
 
 // channel opens a data channel from the browser and tracks it.
 func (w *dispatchWorld) channel(label string) error {
-	dc, err := w.pc.CreateDataChannel(label, nil)
+	onMessage := func(data []byte, _ bool) { w.received <- data }
+	if label == "ctl" {
+		onMessage = func(data []byte, _ bool) {
+			select {
+			case w.ctl <- json.RawMessage(data):
+			case <-w.ctx.Done():
+			}
+		}
+	}
+	c, err := openBrowserChannel(w.pc, label, onMessage)
 	if err != nil {
 		return err
 	}
-	opened, closed := make(chan struct{}), make(chan struct{})
-	w.channels[label], w.opened[label], w.closed[label] = dc, opened, closed
-	dc.OnOpen(func() { close(opened) })
-	dc.OnClose(func() { close(closed) })
-	if label != "ctl" {
-		dc.OnMessage(func(m webrtc.DataChannelMessage) { w.received <- m.Data })
-	} else {
-		dc.OnMessage(func(m webrtc.DataChannelMessage) {
-			select {
-			case w.ctl <- json.RawMessage(m.Data):
-			case <-w.ctx.Done():
-			}
-		})
-	}
+	w.channels[label], w.opened[label], w.closed[label] = c.DataChannel, c.opened, c.closed
 	return nil
+}
+
+// browserChannel is a data channel a test browser opens, read as a browser
+// reads it: no message is lost. pion drops a message that arrives before
+// OnMessage is set, and on a connected PeerConnection CreateDataChannel opens
+// the channel before it returns, so a node that writes as soon as the channel
+// opens (an interactive CLI's first output, A7.4) could lose its first bytes.
+// A detached channel keeps them in its stream until they are read; the
+// PeerConnection's API must detach data channels (browserAPI).
+type browserChannel struct {
+	*webrtc.DataChannel
+	opened chan struct{} // closed once the channel is detached
+	closed chan struct{} // closed once reading the channel ends
+}
+
+func openBrowserChannel(pc *webrtc.PeerConnection, label string, onMessage func(data []byte, isString bool)) (*browserChannel, error) {
+	dc, err := pc.CreateDataChannel(label, nil)
+	if err != nil {
+		return nil, err
+	}
+	c := &browserChannel{DataChannel: dc, opened: make(chan struct{}), closed: make(chan struct{})}
+	dc.OnOpen(func() {
+		rw, err := dc.Detach()
+		if err != nil {
+			panic(err) // the API does not detach: use browserAPI
+		}
+		close(c.opened)
+		go c.read(rw, onMessage)
+	})
+	return c, nil
+}
+
+func (c *browserChannel) read(rw interface {
+	ReadDataChannel([]byte) (int, bool, error)
+}, onMessage func([]byte, bool)) {
+	defer close(c.closed)
+	buf := make([]byte, 1<<16)
+	for {
+		n, isString, err := rw.ReadDataChannel(buf)
+		if err != nil {
+			return
+		}
+		onMessage(slices.Clone(buf[:n]), isString)
+	}
+}
+
+// browserAPI is a WebRTC stack whose data channels are read as browserChannel
+// reads them.
+func browserAPI(se webrtc.SettingEngine) *webrtc.API {
+	se.DetachDataChannels()
+	return webrtc.NewAPI(webrtc.WithSettingEngine(se))
 }
 
 func (w *dispatchWorld) openChannels(registered, unknown string) error {
