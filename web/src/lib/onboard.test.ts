@@ -209,6 +209,8 @@ describe('labels, URLs, prompts and #pair= capture', () => {
     expect(accounts).toEqual(['personal', 'team', 'api_key']);
     expect(cliName('claude')).toBe('Claude Code');
     expect(cliName('codex')).toBe('Codex');
+    expect(cliName('opencode')).toBe('OpenCode');
+    expect(cliName('qwen')).toBe('Qwen Code');
     expect(cliName('custom')).toBe('custom');
 
     choose('lang', 'en');

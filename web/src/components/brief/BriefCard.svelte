@@ -33,7 +33,7 @@
   const canSendRevise = $derived(canAct && !readonly && !busy && trimmed !== '' && !overLimit);
   const revisionNote = $derived('note' in msg.state ? msg.state.note : undefined);
 
-  const nameOf = (id: string) => group.member(id)?.name ?? t('chat.gone');
+  const nameOf = (id: string) => group.nameOf(id);
   const passText = $derived.by(() => {
     const hasFoundation = msg.body.tasks.some((item) => item.foundation);
     const foundationPass = group.info?.pass_foundation;

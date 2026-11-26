@@ -1,7 +1,7 @@
 // Terminal takeover: the commands, the byte channel, the takeover of one page and what it shows
 // (planning/flows/takeover.md, planning/contracts/datachannel.md sections 1 and 7,
 // planning/contracts/commands.md section 2).
-import { lost, newId, type Group, type Home } from './groups.svelte';
+import { find, lost, newId, type Group, type Home } from './groups.svelte';
 import type { Path } from './net.svelte';
 import { t } from './prefs.svelte';
 import type * as p from './proto';
@@ -92,6 +92,13 @@ export const hasSession = (task: p.TaskRow) => ['active', 'paused', 'failed'].in
 export function terminalTask(group: Group, ai: p.AIMemberRow): string | undefined {
   const task = group.task(ai.task);
   return task && hasSession(task) ? task.id : undefined;
+}
+
+/** Whether the terminal of `member` in group `g` is watched from here: it is another person's AI. */
+export function watches(g: string | undefined, member: string | undefined) {
+  const group = find(g);
+  const ai = group?.member(member);
+  return ai?.kind === 'ai' && ai.user !== group!.home.me.user;
 }
 
 /** The line under the page's title: `computer · T-<num> · branch`. */

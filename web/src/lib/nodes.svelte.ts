@@ -10,7 +10,7 @@ import { setAccount, signalUrlOf, type AccountKind } from './onboard.svelte';
 import type * as p from './proto';
 
 /** Visual states of the connection indicator. */
-export type ConnKind = 'ok' | 'limited' | 'linking' | 'down' | 'offline';
+export type ConnKind = 'ok' | 'some' | 'limited' | 'linking' | 'down' | 'offline';
 
 /** What the connection indicator shows: its state, and the round-trip latency when direct. */
 export interface ConnStatus {
@@ -41,14 +41,15 @@ function summary(paths: (Path | undefined)[]): ConnStatus {
 }
 
 /** The connection state to show in the indicator: `offline` while another tab holds the device
- *  lock; for an open group chat, its home; otherwise the summary across `net.homes`, or `undefined`
- *  before any home is known. */
+ *  lock; for an open group chat, its home; otherwise the summary across `net.homes`, `some` while
+ *  only part of them is connected, or `undefined` before any home is known. */
 export function indicator(net: Net, group?: Group): ConnStatus | undefined {
   if (net.otherTab) return { st: 'offline' };
   const targets = group ? [group.home] : net.homes;
   if (targets.length === 0) return undefined;
   const online = targets.filter((home) => home.ctl);
   if (online.length === 0) return { st: 'down' };
+  if (online.length < targets.length) return { st: 'some' };
   return summary(online.map((home) => net.path(home)));
 }
 

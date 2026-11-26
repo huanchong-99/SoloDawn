@@ -7,7 +7,7 @@ import { Device, ed25519, encode, loadDevice, verifyEnvelope } from '../src/lib/
 import { loadOwner } from '../src/lib/owner';
 import { mac, newSecret, parseSecret, room, shown, verifyPair } from '../src/lib/pairing';
 import type { Devlog, Pair } from '../src/lib/proto';
-import { all, closePage, one, openPage, texts } from './page';
+import { all, closePage, go, one, openPage, texts } from './page';
 import { FakePC } from './peer-fakes';
 
 const feature = await loadFeature('../features/web_onboarding.feature');
@@ -385,10 +385,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         });
       });
 
-      And('"Create your first group" leads to "#/groups"', () => {
+      And('"Create your first group" leads to "#/groups" and opens the create-group dialog', () => {
         const done = one<HTMLAnchorElement>('.done-btn');
         expect(done.textContent!.trim()).toBe('Create your first group');
         expect(done.getAttribute('href')).toBe('#/groups');
+        done.click();
+        // The browser tells the page that the address changed; the test DOM does not.
+        go('#/groups');
+        flushSync();
+        const dialog = one<HTMLDialogElement>('dialog');
+        expect(dialog.open).toBe(true);
+        dialog.close();
       });
     },
   );

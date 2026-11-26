@@ -538,10 +538,20 @@ export async function pairPrimaryBrowser(
   await page.locator('input[name="acct-claude"][value="personal"]').check();
   await poll(() => page.locator('fieldset.acct').first().isDisabled()).toBe(false);
   await page.locator('input[name="acct-codex"][value="api_key"]').check();
+  await finishOnboarding(page);
+  await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
+}
+
+/** Presses the onboarding's last button, which opens the group list with the create-group dialog
+ *  open. `keep` leaves the dialog to the test; otherwise Escape closes it, for the plain list. */
+export async function finishOnboarding(page: Page, keep = false): Promise<void> {
   await poll(() => page.locator('a.done-btn').count()).toBe(1);
   await page.locator('a.done-btn').click();
   await poll(() => page.url()).toContain('#/groups');
-  await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
+  await poll(() => page.locator('dialog.dlg[open]').count()).toBe(1);
+  if (keep) return;
+  await page.keyboard.press('Escape');
+  await poll(() => page.locator('dialog.dlg[open]').count()).toBe(0);
 }
 
 /** Waits for modal dialogs to close and composer to enable, fills `text`, and submits it. */

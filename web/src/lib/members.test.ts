@@ -420,6 +420,8 @@ describe('AI status and path projections', () => {
     });
     expect(waitingOnOther(group, ai, tNullWait)).toBe('Waiting · T-13 Clean up');
     expect(waitingOnOther(group, ai, tNoWho)).toBe('Waiting · T-14 Review step');
+    const takeover = { ...tNoWho, origin: 'takeover', title: 'Owner takeover' } as p.TaskRow;
+    expect(waitingOnOther(group, ai, takeover)).toBe('Waiting · T-14 Terminal takeover');
     expect(waitingOnOther(group, ai, undefined)).toBe('Waiting');
 
     // Main-line non-pending, plain text, and another AI's pending card are skipped
@@ -886,6 +888,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
     const { group } = makeGroup({ secretary: undefined });
     expect(suggestedName(group, undefined, false)).toBe('');
     expect(suggestedName(group, 'claude', false)).toBe('Claude Code');
+    expect(suggestedName(group, 'qwen', false)).toBe('Qwen Code');
     expect(suggestedName(group, 'claude', true)).toBe('Secretary');
 
     const { group: noInfo } = makeGroup({ withInfo: false });

@@ -3,7 +3,7 @@ import { Group, Home } from './groups.svelte';
 import { goldens } from './mock';
 import { prefs } from './prefs.svelte';
 import { decode, Row, type TaskRow } from './proto';
-import { reviewLine, taskBadge, taskSteps, threadPreview, waitBadge } from './task';
+import { reviewLine, taskBadge, taskSteps, taskTitle, threadPreview, waitBadge } from './task';
 
 const row = <T extends Row = Row>(name: string, changes: object = {}) =>
   ({ ...decode(Row, goldens[name]), ...changes }) as T;
@@ -25,6 +25,16 @@ function makeGroup(forge = 'github', withGroupRow = true) {
 
 describe('task helpers', () => {
   prefs.lang = 'en';
+
+  it("shows a takeover's task title in the reader's language and any other as written", () => {
+    const base = row<TaskRow>('row-task');
+    const takeover = { ...base, origin: 'takeover', title: 'Owner takeover' } as TaskRow;
+    expect(taskTitle(base)).toBe(base.title);
+    expect(taskTitle(takeover)).toBe('Terminal takeover');
+    prefs.lang = 'zh-CN';
+    expect(taskTitle(takeover)).toBe('终端接管');
+    prefs.lang = 'en';
+  });
 
   it('computes badges across terminal, paused, queued, waiting and active states', () => {
     const { group, owner } = makeGroup();

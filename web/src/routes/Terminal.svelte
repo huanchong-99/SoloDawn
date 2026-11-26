@@ -22,6 +22,7 @@
     Takeover,
     takeoverBarState,
     targetOf,
+    watches,
   } from '../lib/terminal.svelte';
   import { now } from '../lib/when';
 
@@ -49,7 +50,7 @@
   const group = $derived(find(params.g));
   const member = $derived(group?.member(params.member));
   const ai = $derived(member?.kind === 'ai' ? member : undefined);
-  const watching = $derived(Boolean(ai && group && ai.user !== group.home.me.user));
+  const watching = $derived(watches(params.g, params.member));
   const host = $derived(ai ? hostHomeOf(net.homes, ai.host) : undefined);
   const path = $derived(host ? net.path(host) : undefined);
   const task = $derived(sessionTaskOf(group, ai, params.task));

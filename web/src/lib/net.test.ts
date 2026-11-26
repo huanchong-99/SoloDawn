@@ -1105,6 +1105,13 @@ describe('start (live)', () => {
       'wss://rv-updated.example/rv',
     ]);
 
+    // One of the two homes is reached: the indicator says some are not.
+    await vi.waitFor(() => {
+      flushSync();
+      expect(host.querySelector('.conn')?.getAttribute('data-st')).toBe('some');
+    });
+    homes.splice(homes.indexOf(preExisting), 1);
+
     // Path is reactive: Indicator updates from direct (8 ms) to relay (45 ms).
     await vi.waitFor(() => {
       flushSync();
@@ -1122,6 +1129,7 @@ describe('start (live)', () => {
       expect(net.path(homeA)).toMatchObject({ kind: 'relay', rtt: 45 });
       expect(host.querySelector('.conn')?.getAttribute('data-st')).toBe('limited');
     });
+    homes.unshift(preExisting);
 
     // Answer initial sync and push a message row and a groups update; verify Home routes commands.
     const syncReq = pcA.ctl.frames().find((f) => f.t === 'sync' && f.g === websiteId)!;

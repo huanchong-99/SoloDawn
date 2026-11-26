@@ -15,6 +15,8 @@
   "people.role.member": "Make member",
   "people.remove": "Remove",
   "people.leave": "Leave",
+  "people.remove.confirm": "Confirm removal",
+  "people.leave.confirm": "Confirm leaving",
   "people.conflict": "A person cannot leave or be removed while one of their AIs is assigned to or reviewing an unfinished task.",
   "people.join.badge": "Group invitation",
   "people.join.body": "Choose the name people in this group will see.",
@@ -24,6 +26,12 @@
   "people.join.onboarding": "Connect a computer before joining. Then return to this invitation.",
   "people.join.invalid": "This invitation link is invalid.",
   "people.join.failure": "Could not join ({step}: {code}).",
+  "people.join.fail.forbidden": "This invitation is no longer open: it has expired, has been used or is for another group. Ask for a new link.",
+  "people.join.fail.conflict": "You are already in this group, or someone in it already uses this name. Try another name.",
+  "people.join.fail.stale": "This device's clock is more than a day off. Set the right time and try again.",
+  "people.join.fail.version": "The group's home runs another version of SoloDawn. Update both to the same version.",
+  "people.join.fail.timeout": "The group's home did not answer. It may be off, or the invitation may have expired: ask for a new link.",
+  "people.join.fail.lost": "The connection to the group's home broke off. Try again.",
   "people.join.notifications": "You joined the group, but not all of your connected computers were notified.",
   "people.join.open": "Open group"
 }

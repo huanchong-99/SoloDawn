@@ -121,7 +121,7 @@ describe('indicator', () => {
     expect(indicator(netWith([relayed], paths))).toStrictEqual({ st: 'limited' });
   });
 
-  it('reports ok with the first measured rtt, or undefined rtt, ignoring offline homes', () => {
+  it('reports ok with the first measured rtt, or undefined rtt, and some while a home is away', () => {
     const unmeasured = new Home(me);
     const measured = new Home(me);
     const offline = new Home(me);
@@ -132,9 +132,9 @@ describe('indicator', () => {
       [measured, { kind: 'direct', rtt: 18, since: 100 }],
     ]);
     expect(indicator(netWith([unmeasured, measured, offline], paths))).toStrictEqual({
-      st: 'ok',
-      rtt: 18,
+      st: 'some',
     });
+    expect(indicator(netWith([unmeasured, measured], paths))).toStrictEqual({ st: 'ok', rtt: 18 });
     expect(indicator(netWith([unmeasured], paths))).toStrictEqual({
       st: 'ok',
       rtt: undefined,
@@ -151,7 +151,7 @@ describe('indicator', () => {
 
     const paths = new Map<Home, Path | undefined>([[up, { kind: 'direct', rtt: 9, since: 50 }]]);
     const net = netWith([up, down], paths);
-    expect(indicator(net)).toStrictEqual({ st: 'ok', rtt: 9 });
+    expect(indicator(net)).toStrictEqual({ st: 'some' });
     expect(indicator(net, down.groups[0])).toStrictEqual({ st: 'down' });
     expect(indicator(net, up.groups[0])).toStrictEqual({ st: 'ok', rtt: 9 });
   });

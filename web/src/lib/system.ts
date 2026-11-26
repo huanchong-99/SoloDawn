@@ -9,8 +9,12 @@ type SystemMsg = Extract<MsgRow, { kind: 'system' }>;
 type Body = SystemMsg['body'];
 type Wording<B> = (group: Group, body: B, ts: number) => string;
 
-const who = (group: Group, id: string) => group.member(id)?.name ?? t('chat.gone');
+const who = (group: Group, id: string) => group.nameOf(id);
 const join = (...items: (string | undefined)[]) => items.filter(Boolean).join(' · ');
+
+/** The secretary's name, or the word for one while the group has none. */
+export const secretaryName = (group: Group) =>
+  group.member(group.info?.secretary)?.name ?? t('chat.secretary');
 
 /** A task's number; of one that is not held, the start of its id. */
 export function taskTag(group: Group, id: string) {
@@ -27,7 +31,8 @@ function removed(group: Group, name: string, by: string | undefined) {
     .replace('{who}', () => name);
 }
 
-// `task_merged` is drawn by its row, and `cap_reached` is postponed: both are named by their code.
+// `cap_reached` is postponed: it is named by its code. `task_merged` is drawn by its row; this is
+// its line elsewhere.
 const words: { [B in Body as B['code']]?: Wording<B> } = {
   task_failed: (group, { reason, task }) =>
     t(`thread.sys.task_failed.${reason === 'review_rounds' ? reason : 'failures'}`).replace(
@@ -70,6 +75,8 @@ const words: { [B in Body as B['code']]?: Wording<B> } = {
       .replace('{who}', () => who(group, member)),
   member_removed: (group, { name, by }) => removed(group, name, by),
   no_secretary: () => t('thread.sys.no_secretary'),
+  task_merged: (group, { task }) =>
+    `${secretaryName(group)} ${t('thread.sys.task_merged').replace('{task}', taskTag(group, task))}`,
 };
 
 /** A notice in the reader's language. */

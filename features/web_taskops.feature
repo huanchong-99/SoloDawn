@@ -41,7 +41,7 @@ Feature: What a person does with a task: answer in its thread, stop it, carry it
     When Alex picks "Pause"
     Then the home receives "pause" for T-12 and focus is on its menu button
     When T-12 is paused by hand
-    Then its card says "The secretary or an admin paused it. Its AIs stay stopped until one of them resumes it." with "Resume"
+    Then its card says "Paused by hand. Its AIs stay stopped until it is resumed." with "Resume"
     And the menu of T-12 offers "Resume", "Reassign" and "Cancel task"
     When Alex presses "Resume"
     Then the home receives "resume" for T-12

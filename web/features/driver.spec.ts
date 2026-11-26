@@ -102,7 +102,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(texts('section.card h2.kind')).toEqual([
           'Connection status',
           'How does Claude Code sign in?',
-          'How does opencode sign in?',
+          'How does OpenCode sign in?',
         ]);
         expect(choices()).toEqual(offered);
       });

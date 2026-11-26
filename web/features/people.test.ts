@@ -95,6 +95,43 @@ it('recommends pairing when unpaired and shows the link after partial notificati
 });
 
 it.each([
+  [
+    'join',
+    'forbidden',
+    'This invitation is no longer open: it has expired, has been used or is for another group. Ask for a new link.',
+  ],
+  [
+    'join',
+    'conflict',
+    'You are already in this group, or someone in it already uses this name. Try another name.',
+  ],
+  [
+    'join',
+    'stale',
+    "This device's clock is more than a day off. Set the right time and try again.",
+  ],
+  [
+    'hello',
+    'version',
+    "The group's home runs another version of SoloDawn. Update both to the same version.",
+  ],
+  [
+    'room',
+    'timeout',
+    "The group's home did not answer. It may be off, or the invitation may have expired: ask for a new link.",
+  ],
+  ['hello', 'lost', "The connection to the group's home broke off. Try again."],
+  ['join', 'internal', 'Could not join (join: internal).'],
+] as const)('says in words why the home refused a join at %s with %s', async (step, code, said) => {
+  openPage(hash);
+  join.mockRejectedValueOnce(new JoinError(step, code));
+  fill(name(), 'Reader');
+  flushSync();
+  submit().click();
+  await vi.waitFor(() => expect(text('main [role=alert]')).toBe(said));
+});
+
+it.each([
   ['owner', [], ['Make admin', 'Remove'], ['Make member', 'Remove']],
   ['admin', ['Leave'], ['Remove'], []],
   ['member', ['Leave'], [], []],

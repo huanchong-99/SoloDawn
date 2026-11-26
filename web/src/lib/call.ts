@@ -50,7 +50,7 @@ function waited(msg: CallMsg): number {
 }
 
 function nameOf(group: Group, id: string): string {
-  return group.member(id)?.name ?? t('chat.gone');
+  return group.nameOf(id);
 }
 
 function buildReply(group: Group, replyId: string): ReplyView | undefined {

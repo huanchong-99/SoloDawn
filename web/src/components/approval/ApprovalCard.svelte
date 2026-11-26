@@ -43,9 +43,7 @@
       .filter((name): name is string => Boolean(name))
       .join(t('approval.sep')),
   );
-  const actor = $derived(
-    'by' in msg.state ? (group.member(msg.state.by)?.name ?? t('approval.gone')) : '',
-  );
+  const actor = $derived('by' in msg.state ? group.nameOf(msg.state.by) : '');
   const at = $derived('at' in msg.state ? clock(msg.state.at, prefs.lang) : '');
 
   async function settleFocus() {
@@ -108,7 +106,7 @@
           cli={ai?.cli ?? ''}
           size="sm"
         />
-        <span>{ai?.name ?? t('approval.gone')}</span>
+        <span>{group.nameOf(msg.body.ai)}</span>
         {#if aiMeta}<span class="muted">{aiMeta}</span>{/if}
       </span>
     </dd>

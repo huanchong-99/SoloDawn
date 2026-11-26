@@ -182,7 +182,7 @@ describe('why a task stands still', () => {
     const paused = (kind: string) => task({ state: 'paused', wait: wait(kind) });
     expect(taskHold(group, paused('manual'))).toEqual({
       kind: 'manual',
-      text: 'The secretary or an admin paused it. Its AIs stay stopped until one of them resumes it.',
+      text: 'Paused by hand. Its AIs stay stopped until it is resumed.',
       tone: undefined,
     });
     expect(taskHold(group, { ...paused('rounds'), thread: { count: 12, rounds: 10 } })).toEqual({

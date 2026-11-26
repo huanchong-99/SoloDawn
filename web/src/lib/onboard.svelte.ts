@@ -34,7 +34,12 @@ export const browserName = 'Browser';
 export const accounts = ['personal', 'team', 'api_key'] as const;
 export type AccountKind = (typeof accounts)[number];
 
-const cliLabels: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' };
+const cliLabels: Record<string, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  qwen: 'Qwen Code',
+};
 
 /** Display label of an AI CLI identifier. */
 export const cliName = (agent: string) =>

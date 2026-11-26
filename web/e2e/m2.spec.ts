@@ -16,6 +16,7 @@ import {
   sendChatMessage,
   startDirectSurface,
   type DirectSurface,
+  finishOnboarding,
 } from './direct';
 import { startNet, type Net } from './nodes';
 
@@ -224,9 +225,7 @@ async function pairSecondBrowser(firstPage: Page, secondPage: Page, surface: Dir
   await poll(() =>
     secondPage.locator('section[aria-labelledby="st-h"] .badge').textContent(),
   ).toContain('Connected');
-  await poll(() => secondPage.locator('a.done-btn').count()).toBe(1);
-  await secondPage.locator('a.done-btn').click();
-  await poll(() => secondPage.url()).toContain('#/groups');
+  await finishOnboarding(secondPage);
   await poll(() => secondPage.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 }
 

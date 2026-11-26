@@ -298,10 +298,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     });
     When('T-12 is paused by hand', () => task({ state: 'paused', wait: wait('manual') }));
     Then(
-      'its card says "The secretary or an admin paused it. Its AIs stay stopped until one of them resumes it." with "Resume"',
+      'its card says "Paused by hand. Its AIs stay stopped until it is resumed." with "Resume"',
       () =>
         expect(hold()).toEqual([
-          'The secretary or an admin paused it. Its AIs stay stopped until one of them resumes it.',
+          'Paused by hand. Its AIs stay stopped until it is resumed.',
           'Resume',
         ]),
     );

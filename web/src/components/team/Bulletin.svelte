@@ -13,7 +13,7 @@
     <a href={href('chat', { g: msg.body.from })}>{msg.body.group}</a>
   </header>
   <p class="hint">
-    {t('team.computer').replace('{who}', () => group.member(msg.by)?.name ?? t('chat.gone'))}
+    {t('team.computer').replace('{who}', () => group.nameOf(msg.by))}
   </p>
   <p><Rich {group} text={msg.text} mentions={msg.mentions} /></p>
 </section>

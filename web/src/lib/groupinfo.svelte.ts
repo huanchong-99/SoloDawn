@@ -37,8 +37,7 @@ export function hasMemoryRow(group: Group, r: ForgetRowType, id: string): boolea
 }
 
 /** Author display name for a note or review, falling back to former member. */
-export const authorOf = (group: Group, by: string): string =>
-  group.member(by)?.name ?? t('chat.gone');
+export const authorOf = (group: Group, by: string): string => group.nameOf(by);
 
 /** Reason why deleting project memory is unavailable right now, or undefined when allowed. */
 export function forgetDisabledReason(group: Group): string | undefined {

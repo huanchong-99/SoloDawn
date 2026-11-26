@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { CardProps } from '../../lib/mounts.svelte';
   import { t } from '../../lib/prefs.svelte';
+  import { taskTitle } from '../../lib/task';
   import Icon from '../Icon.svelte';
 
   /** The secretary's summary card after a task is merged (contracts/messages.md 2.5). */
@@ -8,7 +9,7 @@
 
   const taskRow = $derived(group.task(msg.body.task));
   const cardLabel = $derived(
-    taskRow ? `${t('summary.kind')} · T-${taskRow.num} · ${taskRow.title}` : t('summary.kind'),
+    taskRow ? `${t('summary.kind')} · T-${taskRow.num} · ${taskTitle(taskRow)}` : t('summary.kind'),
   );
 
   const rounds = $derived(
@@ -34,7 +35,7 @@
     {#if taskRow}<span class="mono">T-{taskRow.num}</span>{/if}
     <span class="badge" data-tone="ok">{t('summary.merged')}</span>
   </header>
-  {#if taskRow}<h3>{taskRow.title}</h3>{/if}
+  {#if taskRow}<h3>{taskTitle(taskRow)}</h3>{/if}
   <ul class="stats">
     <li><b>{msg.body.score}</b><span>{t('summary.score')}</span></li>
     <li><b>{rounds}</b><span>{t('summary.rounds')}</span></li>

@@ -197,12 +197,16 @@ export function reviewLine(group: Group, task: TaskRow) {
   return { meta };
 }
 
+/** A task's title. A takeover's task has the host's English one (flows/takeover.md A): it is shown
+ *  in the reader's language. */
+export const taskTitle = (task: TaskRow) =>
+  task.origin === 'takeover' ? t('task.takeover') : task.title;
+
 /** Formats the collapsed thread preview line from `task.thread`. */
 export function threadPreview(group: Group, task: TaskRow): string {
   const last = task.thread.last;
   if (!last) return task.thread.count === 0 ? t('task.thread.empty') : '';
-  const who =
-    last.by === 'system' ? t('chat.system') : (group.member(last.by)?.name ?? t('chat.gone'));
+  const who = last.by === 'system' ? t('chat.system') : group.nameOf(last.by);
   const said = last.text || t(`chat.kind.${last.kind as Kind}`);
   return t('task.thread.last').replace('{who}', who).replace('{text}', said);
 }

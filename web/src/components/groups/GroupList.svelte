@@ -1,8 +1,9 @@
 <script lang="ts">
   import { flip } from 'svelte/animate';
   import { prefersReducedMotion } from 'svelte/motion';
-  import { homes, recent, subject, type Group } from '../../lib/groups.svelte';
+  import { homes, recent, type Group } from '../../lib/groups.svelte';
   import type { Net } from '../../lib/net.svelte';
+  import { titleOf } from '../../lib/notify.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import type { MsgRow } from '../../lib/proto';
   import { now, shortWhen } from '../../lib/when';
@@ -19,15 +20,15 @@
   /** Who wrote a message: for a bulletin the AI it names, not the person whose computer sent it. */
   function author(group: Group, msg: MsgRow) {
     if (msg.kind === 'bulletin') return msg.body.ai;
-    return msg.by === 'system' ? t('chat.system') : group.member(msg.by)?.name;
+    return msg.by === 'system' ? t('chat.system') : group.nameOf(msg.by);
   }
 
   /** Who wrote the last message of the main line, and what it says; nothing of a group not read. */
   function preview(group: Group) {
     const last = group.main.at(-1);
     if (!last) return group.info ? t('groups.none') : '';
-    const said = subject(group, last) || t(`chat.kind.${last.kind}`);
-    return `${author(group, last) ?? t('chat.gone')}${t('groups.colon')}${said}`;
+    const said = titleOf(group, last) || t(`chat.kind.${last.kind}`);
+    return `${author(group, last)}${t('groups.colon')}${said}`;
   }
 </script>
 

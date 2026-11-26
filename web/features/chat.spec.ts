@@ -445,6 +445,27 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario(
+    'The composer suggests a request to the secretary only while the group has one',
+    ({ When, Then }) => {
+      const hint = () => one<HTMLTextAreaElement>('.composer textarea').placeholder;
+      Then('the composer suggests "Send a request to the secretary, or @ one of your AIs"', () => {
+        expect(group.info?.secretary).toBeDefined();
+        expect(hint()).toBe('Send a request to the secretary, or @ one of your AIs');
+      });
+      When('the group no longer has a secretary', () => {
+        const { secretary: _, ...info } = group.info!;
+        home.write(website, info);
+      });
+      Then('the composer suggests "@ an AI to give it work"', () =>
+        vi.waitFor(() => {
+          flushSync();
+          expect(hint()).toBe('@ an AI to give it work');
+        }),
+      );
+    },
+  );
+
+  Scenario(
     'A command that the home refuses is told to the writer',
     ({ Given, When, Then, And }) => {
       Given('the home refuses posts', () => {

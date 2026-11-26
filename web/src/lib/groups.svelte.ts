@@ -4,6 +4,7 @@
 import { SvelteMap } from 'svelte/reactivity';
 import { confirmSentence } from './confirm';
 import { encode } from './identity';
+import { t } from './prefs.svelte';
 import type * as p from './proto';
 
 /** The person at this browser: their user id, and this device, which signs their commands. */
@@ -132,9 +133,22 @@ export class Group {
     return this.members.find((member) => member.id === id);
   }
 
-  /** A person's display name in this group by user id; undefined when absent or left. */
+  /** The last row held here of each member that left, by id, oldest first: its marker carries no
+   *  name. */
+  readonly #former = new SvelteMap<string, Member>();
+
+  /** What to call a member: its name; of one that left, the name it had when this browser last
+   *  held its row; else "former member". What a removed person wrote stays theirs (people.md 2.4). */
+  nameOf(id: string | undefined) {
+    if (id === undefined) return t('chat.gone');
+    return (this.member(id) ?? this.#former.get(id))?.name ?? t('chat.gone');
+  }
+
+  /** A person's display name in this group by user id, also of one that left while this browser
+   *  held their row (the name they left with last); undefined for one it never held. */
   personName(user: string) {
-    return this.members.find((member) => member.kind === 'human' && member.user === user)?.name;
+    const person = (member: Member) => member.kind === 'human' && member.user === user;
+    return (this.members.find(person) ?? [...this.#former.values()].findLast(person))?.name;
   }
 
   /** A task by id; undefined when absent or deleted. */
@@ -158,9 +172,14 @@ export class Group {
     for (const row of rows) {
       const held = this.rows.get(key(row.r, row.id));
       if (held && held.seq >= row.seq) continue;
+      this.#keepName(held, row);
       this.rows.set(key(row.r, row.id), row);
       if (live) this.cursor = row.seq;
     }
+  }
+
+  #keepName(held: p.Row | undefined, row: p.Row) {
+    if (held && isMember(held) && !shown(row)) this.#former.set(held.id, held);
   }
 
   /** The home said to drop the cache: the cursor returns to 0 with it. */
@@ -504,6 +523,16 @@ export class Home {
 
 /** Every node this browser connects to. */
 export const homes: Home[] = $state([]);
+
+/** The end of onboarding asks the group list to open the create-group dialog when it shows. */
+export const creating = { open: false };
+
+/** Whether the create-group dialog was asked for since the group list last showed; clears it. */
+export function takeCreate() {
+  const asked = creating.open;
+  creating.open = false;
+  return asked;
+}
 
 /** Every group this person may read, the one with the newest main-line message first. */
 export const recent = () =>

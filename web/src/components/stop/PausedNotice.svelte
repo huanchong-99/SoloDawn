@@ -37,7 +37,7 @@
             ? t('stop.paused.you').replace('{time}', time)
             : t('stop.paused.by')
                 .replace('{time}', time)
-                .replace('{who}', () => group.member(paused.by)?.name ?? t('chat.gone'))}
+                .replace('{who}', () => group.nameOf(paused.by))}
         </b>
         <p>{t(admin ? 'stop.paused.body' : 'stop.paused.admin')}</p>
       </div>

@@ -1110,6 +1110,12 @@ kbd,
     border-radius: 2px;
     transform: rotate(45deg);
   }
+  /* Some computers are reached, some are not: warm, and hollow as one that is down. */
+  &[data-st='some'] i {
+    color: var(--dawn);
+    background: none;
+    border: 2px solid currentColor;
+  }
   &[data-st='down'] i {
     color: var(--danger);
     background: none;

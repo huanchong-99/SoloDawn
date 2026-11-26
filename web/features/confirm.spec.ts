@@ -180,11 +180,11 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
     When('the person asked is no longer in the group', () => {
       flushSync(() => group.apply([{ r: 'member', id: owner, seq: 1000, gone: true }]));
     });
-    Then('the decisions still show their outcomes and times', () => {
+    Then("the decisions still show their outcomes, times and the person's name", () => {
       expect(texts('.card .badge')).toEqual([
-        'Waiting for Former member',
-        `Confirmed by Former member · ${at}`,
-        `Denied by Former member · ${at}`,
+        'Waiting for Owner',
+        `Confirmed by Owner · ${at}`,
+        `Denied by Owner · ${at}`,
         `Expired · ${at}`,
       ]);
     });

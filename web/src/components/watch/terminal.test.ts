@@ -1,6 +1,6 @@
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { closePage, go, show } from '../../../features/page';
+import { closePage, go, openPage, show, texts } from '../../../features/page';
 import { Group, Home, homes } from '../../lib/groups.svelte';
 import { goldens } from '../../lib/mock';
 import { prefs } from '../../lib/prefs.svelte';
@@ -92,6 +92,17 @@ const params = ({ ai }: { ai: p.AIMemberRow }) => ({ g: ai.g, member: ai.id });
 const direct = () => ({ kind: 'direct' as const, rtt: 1, since: 0 });
 const words = (selector: string) =>
   document.querySelector(selector)?.textContent?.replace(/\s+/g, ' ').trim();
+
+it("titles the page of another person's AI as watched, and of one's own as taken over", () => {
+  const s = setup('watcher');
+  openPage(`#/terminal/${s.ai.g}/${s.ai.id}`);
+  expect(texts('#page-title')).toEqual(['Watching a terminal']);
+  expect(document.title).toBe('Watching a terminal · SoloDawn');
+  s.home.me.user = s.ai.user;
+  go(location.hash);
+  flushSync();
+  expect(texts('#page-title')).toEqual(['Terminal takeover']);
+});
 
 it('waits on the page for the consent, then reaches the computer and starts by itself', async () => {
   vi.useFakeTimers();

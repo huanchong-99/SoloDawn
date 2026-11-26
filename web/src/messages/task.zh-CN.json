@@ -60,7 +60,7 @@
   "task.op.reviewer": "派评审",
   "task.op.return": "交回 {ai}",
   "task.refused": "没有改动：任务或它的 AI 刚刚变了。",
-  "task.hold.manual": "秘书或管理员暂停了它。恢复之前，做它的 AI 都先停着。",
+  "task.hold.manual": "已手动暂停。恢复之前，做它的 AI 都先停着。",
   "task.hold.rounds": "AI 之间来回了 {n} 轮，没有人参与。在话题里说句话就会继续。",
   "task.hold.preempted": "有消息插队了，它先暂停，之后自动继续。",
   "task.hold.failed": "做它的 AI 已停下，等管理员恢复，或者换一个 AI 来做。",
@@ -83,5 +83,6 @@
   "task.assign.same": "同一个 AI 不能又做又评。",
   "task.assign.stops": "{ai} 就此停下。没提交的改动会丢，提交过的会接着用。",
   "task.assign.asked": "{ai} 是 {who} 的，要先等对方确认。",
-  "task.assign.back": "返回"
+  "task.assign.back": "返回",
+  "task.takeover": "终端接管"
 }

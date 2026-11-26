@@ -28,6 +28,11 @@ Feature: Group list and group cache of the web client
     When the browser has read both groups
     Then the list reads "Claude Code: The website is ready." under "Studio"
 
+  Scenario: The list shows a task and a notice as the chat words them
+    Given the last message of "Website" is the task T-12 "Show connection path", and the home also holds "Docs", whose last message says that "Mina" joined
+    When the browser has read both groups
+    Then the list reads "System: T-12 Show connection path" under "Website" and "System: Mina joined, invited by Alex." under "Docs"
+
   Scenario: A team group is created without a repository
     Given the person owns a second computer, "desk", which is connected
     When the person chooses "Team group" in the dialog, which then asks only for the names and the home, and creates "Studio"

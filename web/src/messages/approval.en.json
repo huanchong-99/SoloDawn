@@ -5,7 +5,6 @@
   "approval.category.network": "Network",
   "approval.category.other": "Other",
   "approval.deny": "Deny",
-  "approval.gone": "Former member",
   "approval.hint.approved": "Approved for this one request. {ai} can continue.",
   "approval.hint.approved_gone": "Approved for this one request.",
   "approval.hint.denied": "{ai} will try another way without this permission, or report back.",
