@@ -287,6 +287,17 @@ file in `src/routes/`. It edits neither the shell nor another area:
   schema (`GroupCreate`, `Post`, `Act`, `TaskStart`); a schema names the `op`, `kind` or `code`
   that selects it. `Ctl` is the interface of a `ctl` connection: numbered requests, their
   answers, and pushes.
+- **Demo.** For clicking through every flow with no node, run `pnpm dev` and open `?demo`: a
+  whole simulated world answers behind the live connection (`src/main.ts` loads
+  `features/sim/install.ts` before `boot`, which installs a fake `connect` through `simulate` of
+  `peer.ts`, a stand-in service worker registration and notifications for reminders). The "演示"
+  panel stands for what happens outside the browser: other people, the AIs and the computers.
+  Everything above the connection is the client's own code. `?demo=fresh` starts before
+  onboarding, `?demo=pairfail` with a computer the browser cannot reach, and `&reset` starts the
+  world again. The production build contains none of it. The demo writes the same IndexedDB
+  database and `localStorage` as the client on that origin, so a later plain `pnpm dev` session on
+  the same port starts paired with the demo's computers, unless you open `?demo&reset` first or
+  clear the site data.
 - **Mock connection.** `mockCtl(onpush)` in `src/lib/mock.ts` is a `Ctl` that answers from the
   files of `internal/proto/testdata`: `hello` with `welcome`; `sync` with the pushes `reset` and
   `rows`, then `synced`; `fetch` with `fetched`; `host.info` from the examples' node;
@@ -784,6 +795,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/home.ts`            | a home and an owned computer in memory for the steps; `page.ts` drives the page   |
 | `features/s2_cast.ts`         | the step 2 cast in a page, as `window.s2`                                         |
 | `features/demo.ts`            | groups with a morning of talk, for a development page                             |
+| `features/sim/`               | the world of `?demo`: computers, people, AIs and their scripts                    |
 | `features/watch.svelte.ts`    | an effect outside a component, for tests of what is reactive                      |
 | `features/shots.ts`           | screenshots of the pages from that demo, four widths                              |
 | `e2e/config.ts`               | end-to-end projects per engine, `launch`, the build of a run                      |
@@ -859,7 +871,7 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   browsers.
 - The manifest has an SVG icon only.
 - A development server (`pnpm dev`) shows the one computer and the one group of
-  the wire examples, unless the address has `?nomock`; the mock answers every command with a bare
+  the wire examples, unless the address has `?nomock` or `?demo`; the mock answers every command with a bare
   `ok` and pushes no row, so a message sent there does not appear, an account choice does not
   update `host.info`, and `pair.browser` returns no link.
 - From 768 px the top bar of an open chat says "Chats", and the chat's own

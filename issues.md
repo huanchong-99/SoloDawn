@@ -6,6 +6,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-26 · deviation · Rough edges of the web client seen while walking every flow of the demo
+
+- Symptom: walking every flow of `?demo` (`web/features/sim`, branch `web/demo-sim`) in the built-in browser showed, in the client itself:
+  1. OpenCode and Qwen Code show as `opencode` and `qwen` in Add AI, on the Computers page and in onboarding, and Add AI suggests the name `qwen`: `cliLabels` knows Claude Code and Codex only (`web/src/lib/onboard.svelte.ts:37`).
+  2. A refused join says only `无法加入（join：conflict）` (`web/src/components/people/JoinForm.svelte:56`, `people.join.failure`).
+  3. After a person is removed, their earlier messages and the `member_joined` line name "已离开的成员"; removing a person takes no confirmation (`web/src/components/people/PersonActions.svelte:50`).
+  4. An approval made void by the owner's own reassignment says the secretary reassigned it (`approval.hint.reassigned`); a task the owner paused says the secretary or an admin paused it (`task.hold.manual`).
+  5. A takeover of an idle AI shows the host's task title `Owner takeover` in English (flows/takeover.md A names it).
+  6. A watcher's terminal page is titled "终端接管".
+  7. The group list previews a task message as "系统：任务" and a system row as "系统：通知".
+  8. Onboarding's "创建第一个项目群" opens the group list without the create dialog.
+  9. The composer of a group without a secretary still suggests "发需求给 @秘书".
+  10. The connection indicator stays "直连" while one of two computers is down (`indicator` summarises online homes only, `web/src/lib/nodes.svelte.ts`).
+  11. A team bulletin reads "来自Alex的电脑" without a space.
+- Cause: not looked into one by one; each is wording or a small interaction of the client, none a fault of the demo.
+- Status: open; the items wait for a fix.
+
 ### 2026-11-26 · bug · A9.27 fails in its set-up and connections when six copies run at once on a Mac
 
 - Symptom: 60 runs of the unchanged A9.27 on this Mac, six processes in parallel (1-minute load up to about 17): 40 passed, 20 failed before or after the export, never with `group rows differ`: 10 × `timed out after 16s waiting for ctl connection`, 7 × `home_unreachable` from `JoinAI` in the step "the group has a secretary on P1, P-work on P2 ...", 2 × the browser peers following P2 in 5.9 and 6.2 s (want 5), 1 × `EOF`, 1 × `timed out after 3m0s waiting for ctl`.

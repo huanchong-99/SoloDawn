@@ -913,6 +913,9 @@ describe('sourceOf', () => {
     ['development', '?nomockery', 'mock'],
     ['development', '?nomock', 'live'],
     ['development', '?a=1&nomock=', 'live'],
+    ['development', '?demo', 'live'],
+    ['development', '?demo=fresh', 'live'],
+    ['development', '?demonstration', 'mock'],
     ['production', '', 'live'],
     ['test', '', 'live'],
   ])('is, in the mode %s at %j, %s', (mode, search, source) => {

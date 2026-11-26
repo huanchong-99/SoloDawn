@@ -50,9 +50,13 @@ type JoinResult = { notifications: Awaited<Awaited<ReturnType<typeof joinGroup>>
 type Join = NonNullable<Net['join']>;
 type WatchHost = NonNullable<Net['watchHost']>;
 
-/** The mock answers in a development server only, and not when the address has `nomock`. */
-export const sourceOf = (mode: string, search: string): Source =>
-  mode === 'development' && !new URLSearchParams(search).has('nomock') ? 'mock' : 'live';
+/** The mock answers in a development server only, and not when the address has `nomock`, nor
+ *  in the demo (`demo`), whose world answers behind the live connection (web/features/sim). */
+export const sourceOf = (mode: string, search: string): Source => {
+  const params = new URLSearchParams(search);
+  const demo = params.has('demo');
+  return mode === 'development' && !params.has('nomock') && !demo ? 'mock' : 'live';
+};
 
 /** One home answered from the wire examples, online: the examples' one group, read by the
  *  person of the examples with this browser's device key. */
