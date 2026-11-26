@@ -1,20 +1,20 @@
 // Shared end-to-end helpers for connect.spec.ts, E-M1, E-M2, E-M3, and E-M5: local STUN
 // responder, rendezvous HTTP + `/rv` WebSocket proxy (with optional TURN-only filtering and
-// downstream early-ICE reordering), node device-id reader, isolated Git identity environment, and
-// fake CLI handshake steps.
+// downstream early-ICE reordering), node device-id reader, the create-group dialog and the folder
+// list, and fake CLI handshake steps.
 import { execFile } from 'node:child_process';
 import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
 import { createSocket, type Socket as UdpSocket } from 'node:dgram';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { Browser, BrowserContext, Page } from 'playwright';
+import type { Browser, BrowserContext, Locator, Page } from 'playwright';
 import { expect, vi } from 'vitest';
 import type { BrowserName } from './config';
-import type { Env, Node, Rendezvous } from './nodes';
+import type { Node, Rendezvous } from './nodes';
 
 export const exec = promisify(execFile);
 
@@ -26,17 +26,6 @@ const ed25519Pkcs8Prefix = Buffer.from('302e020100300506032b657004220420', 'hex'
 export function poll<T>(fn: () => Promise<T> | T, timeout = 15_000) {
   return expect.poll(fn, { timeout });
 }
-
-/** Git author/committer config environment for clean CI runners with no ~/.gitconfig. */
-export const gitIdentityEnv: Env = {
-  GIT_CONFIG_COUNT: '3',
-  GIT_CONFIG_KEY_0: 'user.name',
-  GIT_CONFIG_VALUE_0: 'Alex',
-  GIT_CONFIG_KEY_1: 'user.email',
-  GIT_CONFIG_VALUE_1: 'alex@example.test',
-  GIT_CONFIG_KEY_2: 'commit.gpgsign',
-  GIT_CONFIG_VALUE_2: 'false',
-};
 
 export interface IceServer {
   urls: string[];
@@ -475,28 +464,58 @@ export async function openDirectContext(
   return context;
 }
 
-/** Creates a local Git repository initialized on branch `main` with one commit. */
-export async function initGitRepo(
-  dir: string,
-  folderName: string,
-  readme: string,
+/** Makes the folder `name` in `dir` for an AI to work in; returns its path with its links resolved,
+ *  as the node keeps it. */
+export async function makeFolder(dir: string, name: string): Promise<string> {
+  const path = join(dir, name);
+  await mkdir(path);
+  return realpath(path);
+}
+
+/** Types `folder` in the folder list of the one folder picker in `scope`, and takes it. */
+export async function chooseFolder(scope: Locator, folder: string): Promise<void> {
+  await scope.getByRole('button', { name: /^Change the folder of / }).click();
+  const list = scope.page().getByRole('dialog', { name: 'Choose a folder' });
+  await list.getByLabel('Another folder').fill(folder);
+  await list.getByRole('button', { name: 'Use this folder' }).click();
+  await poll(() => scope.locator('.path-row code').textContent()).toBe(folder);
+}
+
+/** An AI ticked in the create-group dialog: its row, by CLI and computer, and what it gets. */
+export interface GroupAI {
+  cli: string;
+  computer: string;
+  name: string;
+  folder: string;
+  secretary?: boolean;
+}
+
+/** Fills the open create-group dialog, creates the group and returns its id once its chat opens. */
+export async function createGroup(
+  page: Page,
+  {
+    name,
+    member,
+    home,
+    ais = [],
+  }: { name: string; member: string; home?: string; ais?: GroupAI[] },
 ): Promise<string> {
-  const repo = join(dir, folderName);
-  await mkdir(repo, { recursive: true });
-  await exec('git', ['init', '-b', 'main'], {
-    cwd: repo,
-    env: { ...process.env, ...gitIdentityEnv },
-  });
-  await writeFile(join(repo, 'README.md'), readme);
-  await exec('git', ['add', 'README.md'], {
-    cwd: repo,
-    env: { ...process.env, ...gitIdentityEnv },
-  });
-  await exec('git', ['commit', '-m', 'Initial commit'], {
-    cwd: repo,
-    env: { ...process.env, ...gitIdentityEnv },
-  });
-  return repo;
+  const dialog = page.getByRole('dialog', { name: 'New group' });
+  await dialog.getByLabel('Group name').fill(name);
+  await dialog.getByLabel('Your name in the group').fill(member);
+  if (home) await dialog.getByLabel('Home computer').selectOption({ label: home });
+  for (const ai of ais) await tickAI(dialog, ai);
+  await dialog.getByRole('button', { name: 'Create group' }).click();
+  await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
+  return new URL(page.url()).hash.slice('#/groups/'.length);
+}
+
+async function tickAI(dialog: Locator, { cli, computer, name, folder, secretary }: GroupAI) {
+  const row = dialog.locator('.ai').filter({ hasText: cli }).filter({ hasText: computer });
+  await row.getByRole('checkbox').check();
+  await row.getByLabel(`Name of ${cli} in the group`).fill(name);
+  await chooseFolder(row, folder);
+  if (secretary) await row.getByRole('radio', { name: `Make ${name} the secretary` }).check();
 }
 
 /** Waits for Onboarding to render a live 16-character pairing code in `#prompt`. */
@@ -554,11 +573,12 @@ export async function finishOnboarding(page: Page, keep = false): Promise<void> 
   await poll(() => page.locator('dialog.dlg[open]').count()).toBe(0);
 }
 
-/** Waits for modal dialogs to close and composer to enable, fills `text`, and submits it. */
+/** Waits for modal dialogs to close and the main line's composer to enable, fills `text`, and
+ *  submits it. */
 export async function sendChatMessage(page: Page, text: string): Promise<void> {
   await poll(() => page.locator('dialog.dlg[open]').count()).toBe(0);
-  const composer = page.locator('.composer textarea');
-  const sendBtn = page.locator('.composer button.send');
+  const composer = page.locator('.dock .composer textarea');
+  const sendBtn = page.locator('.dock .composer button.send');
   await poll(() => composer.isDisabled()).toBe(false);
   await composer.fill(text);
   expect(await sendBtn.isDisabled()).toBe(false);

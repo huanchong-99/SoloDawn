@@ -13,10 +13,12 @@ const pages: { go: () => void; oldest: Promise<string> }[] = [];
 class LateHome extends TestHome {
   override connect(push: (frame: p.Push) => void) {
     const { ctl, close } = super.connect(push);
-    const request = (req: Parameters<p.Ctl['request']>[0]) => {
-      if (req.t !== 'fetch' || req.r) return ctl.request(req);
+    // Ctl.request is overloaded per request type; this passes every type through.
+    const base = ctl.request as (req: { t: string; r?: string }) => Promise<unknown>;
+    const request = (req: { t: string; r?: string }) => {
+      if (req.t !== 'fetch' || req.r) return base(req);
       let go!: () => void;
-      const answer = new Promise<void>((resolve) => (go = resolve)).then(() => ctl.request(req));
+      const answer = new Promise<void>((resolve) => (go = resolve)).then(() => base(req));
       pages.push({ go, oldest: answer.then((page) => (page as p.Fetched).rows.at(-1)!.id) });
       return answer;
     };

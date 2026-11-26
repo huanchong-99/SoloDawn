@@ -96,6 +96,8 @@ test.each(layouts)(
       agent: 'external',
       to: host,
       name: 'Scout',
+      // The newest folder its computer lists, which the dialog takes until another is chosen.
+      workspace: '/home/dev/website',
       account: 'api_key',
       tool: 'ZCode',
       secretary: false,

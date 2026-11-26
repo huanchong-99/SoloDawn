@@ -13,5 +13,5 @@
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["src", "features", "vite.config.ts", "vitest.vectors.ts"]
+  "include": ["src", "features", "e2e", "vite.config.ts", "vitest.vectors.ts"]
 }

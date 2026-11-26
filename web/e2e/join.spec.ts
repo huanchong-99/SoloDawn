@@ -4,8 +4,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from 'vitest';
 import { launch } from './config';
 import {
-  gitIdentityEnv,
-  initGitRepo,
+  createGroup,
   openDirectContext,
   poll,
   readNodeDeviceId,
@@ -32,19 +31,10 @@ async function visit(page: Page, hash: string) {
   }, hash);
 }
 
-async function createProject(page: Page, repo: string) {
+async function createHandbook(page: Page) {
   await visit(page, '#/groups');
   await page.locator('button', { hasText: 'New group' }).first().click();
-  const form = page.locator('dialog.dlg[open]');
-  const inputs = form.locator('input.input');
-  await inputs.nth(0).fill('Handbook');
-  await inputs.nth(1).fill(repo);
-  await inputs.nth(2).fill('main');
-  await inputs.nth(3).fill('Alex');
-  await form.locator('select.input').first().selectOption('none');
-  await form.getByRole('button', { name: 'Create group' }).click();
-  await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
-  return new URL(page.url()).hash.slice('#/groups/'.length);
+  return createGroup(page, { name: 'Handbook', member: 'Alex' });
 }
 
 async function invite(page: Page) {
@@ -78,17 +68,16 @@ describe('A9.1 joining by invitation', () => {
   afterEach(() => net?.stop());
 
   test('a person joins with the #join link, and both browsers show the person and the history', async () => {
-    const active = await startNet({ nodes: 2, env: () => ({ ...gitIdentityEnv }) });
+    const active = await startNet({ nodes: 2 });
     net = active;
     surface = await startDirectSurface(active.rendezvous, inject('browser'));
     const [p1, q1] = active.nodes;
-    const repo = await initGitRepo(active.dir, 'project-repo', '# Handbook\n');
     const p = await (await openDirectContext(browser, contexts, surface)).newPage();
     const q = await (await openDirectContext(browser, contexts, surface)).newPage();
     await pair(p, surface, p1, 'P1');
     await pair(q, surface, q1, 'Q1');
 
-    const g = await createProject(p, repo);
+    const g = await createHandbook(p);
     await sendChatMessage(p, 'Welcome before Q');
     const link = await invite(p);
     const fields = new URLSearchParams(link.hash.slice(1));

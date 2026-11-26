@@ -1,17 +1,18 @@
 // End-to-end milestone 5 (E-M5): full main-line flow from owner request through brief card,
-// confirmation, two parallel tasks with 6-step progress bars, local checks, cross-AI review,
-// automatic squash-merge, task threads, and secretary summary cards (U-4, U-7, U-8, U-9, A5.1),
+// confirmation, two tasks with 3-step progress bars, each in its assignee's folder, cross-AI review,
+// done at the passed review, task threads, and secretary summary cards (U-4, U-7, U-8, U-9, A5.1),
 // plus approval card and decision card round-trip in the browser (Owner override 1).
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright';
-import { afterAll, afterEach, beforeAll, describe, expect, inject, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from 'vitest';
 import { launch } from './config';
 import {
+  chooseFolder,
   claudeInitSteps,
   codexInitSteps,
-  gitIdentityEnv,
-  initGitRepo,
+  createGroup,
+  makeFolder,
   openDirectContext,
   poll,
   readPairingCode,
@@ -58,12 +59,12 @@ function secretaryM5Script() {
             arguments: {
               title: 'Add release checklist and changelog generator',
               goal: 'Ship deterministic release notes and preflight verification.',
-              criteria: ['Both tasks pass local checks and cross-review at 90 or above'],
+              criteria: ['Both tasks pass cross-review at 90 or above'],
               scope_in: ['Release notes builder', 'Preflight checklist'],
               scope_out: ['External deployment hooks'],
+              // T-2 waits for T-1, so the secretary is woken for T-1's end before T-2's. Every
+              // reviewer's CLI starts once: each start replays its computer's script from the top.
               tasks: [
-                // T-1 uses coordinator Codex ("Reviewer"): T-2 stays in gateT2 until T-1's summary card, and
-                // deliver.go (aiGroupKey) serializes turns per AI member, so workstation Codex is busy.
                 {
                   title: 'Build release checklist',
                   assignee: 'Claude Code',
@@ -72,7 +73,8 @@ function secretaryM5Script() {
                 {
                   title: 'Build changelog generator',
                   assignee: 'Codex',
-                  reviewer: 'Claude Code',
+                  reviewer: 'Checker',
+                  depends: [0],
                 },
               ],
             },
@@ -102,7 +104,7 @@ function secretaryM5Script() {
           session_id: '$session',
         },
       },
-      // Turn 3: woken by task_merged notice for T-1.
+      // Turn 3: woken by the notice that T-1 is done.
       { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
       {
         dir: 'mcp<-cli',
@@ -115,7 +117,7 @@ function secretaryM5Script() {
             arguments: {
               kind: 'summary',
               task: 'T-1',
-              text: 'Release checklist merged cleanly.',
+              text: 'Release checklist is done.',
             },
           },
         },
@@ -131,7 +133,7 @@ function secretaryM5Script() {
           session_id: '$session',
         },
       },
-      // Turn 4: woken by task_merged notice for T-2.
+      // Turn 4: woken by the notice that T-2 is done.
       { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
       {
         dir: 'mcp<-cli',
@@ -144,7 +146,7 @@ function secretaryM5Script() {
             arguments: {
               kind: 'summary',
               task: 'T-2',
-              text: 'Changelog generator merged cleanly.',
+              text: 'Changelog generator is done.',
             },
           },
         },
@@ -180,7 +182,7 @@ function claudeTaskScript() {
             arguments: {
               kind: 'progress',
               where: 'thread',
-              text: 'Drafted checklist rules and running local checks.',
+              text: 'Drafted checklist rules and ran the project tests.',
             },
           },
         },
@@ -192,36 +194,13 @@ function claudeTaskScript() {
           jsonrpc: '2.0',
           id: 2,
           method: 'tools/call',
-          params: { name: 'run_checks', arguments: {} },
-        },
-      },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 2, result: { isError: false } } },
-      {
-        dir: 'mcp<-cli',
-        msg: {
-          jsonrpc: '2.0',
-          id: 3,
-          method: 'tools/call',
-          params: {
-            name: 'post',
-            arguments: { kind: 'progress', where: 'thread', text: 'Local checks green on T-1.' },
-          },
-        },
-      },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 3, result: { isError: false } } },
-      {
-        dir: 'mcp<-cli',
-        msg: {
-          jsonrpc: '2.0',
-          id: 4,
-          method: 'tools/call',
           params: {
             name: 'submit_task',
             arguments: { summary: 'Implemented release checklist verification.' },
           },
         },
       },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 4, result: { isError: false } } },
+      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 2, result: { isError: false } } },
       {
         dir: 'stdout',
         msg: {
@@ -253,7 +232,7 @@ function codexTaskScript() {
             arguments: {
               kind: 'progress',
               where: 'thread',
-              text: 'Built changelog formatter and running local checks.',
+              text: 'Built changelog formatter and ran the project tests.',
             },
           },
         },
@@ -265,36 +244,13 @@ function codexTaskScript() {
           jsonrpc: '2.0',
           id: 2,
           method: 'tools/call',
-          params: { name: 'run_checks', arguments: {} },
-        },
-      },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 2, result: { isError: false } } },
-      {
-        dir: 'mcp<-cli',
-        msg: {
-          jsonrpc: '2.0',
-          id: 3,
-          method: 'tools/call',
-          params: {
-            name: 'post',
-            arguments: { kind: 'progress', where: 'thread', text: 'Local checks green on T-2.' },
-          },
-        },
-      },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 3, result: { isError: false } } },
-      {
-        dir: 'mcp<-cli',
-        msg: {
-          jsonrpc: '2.0',
-          id: 4,
-          method: 'tools/call',
           params: {
             name: 'submit_task',
             arguments: { summary: 'Implemented changelog generator.' },
           },
         },
       },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 4, result: { isError: false } } },
+      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 2, result: { isError: false } } },
       {
         dir: 'stdout',
         msg: {
@@ -492,7 +448,7 @@ const turnEnd = (result: string) => ({
 });
 const turn = { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } };
 
-/** A group session: a first turn that does nothing, and one that starts a direct task. */
+/** A group session: a first turn that does nothing, and two that each start a direct task. */
 function directTaskScript() {
   return {
     steps: [
@@ -501,6 +457,9 @@ function directTaskScript() {
       turn,
       ...call(1, 'start_task', { title: 'Dismiss the notice', plan: 'Add a close button.' }),
       turnEnd('started'),
+      turn,
+      ...call(2, 'start_task', { title: 'Fade the notice', plan: 'Fade it out on close.' }),
+      turnEnd('queued'),
       { dir: 'eof' },
     ],
   };
@@ -516,6 +475,18 @@ function askingTaskScript() {
       turn,
       ...call(2, 'post', { kind: 'progress', where: 'thread', text: 'Keeping the field.' }),
       turnEnd('answered'),
+      { dir: 'eof' },
+    ],
+  };
+}
+
+/** The session of the second task, which starts once the folder is free. */
+function queuedTaskScript() {
+  return {
+    steps: [
+      ...claudeInitSteps(),
+      ...call(1, 'post', { kind: 'progress', where: 'thread', text: 'Fading the notice out.' }),
+      turnEnd('started'),
       { dir: 'eof' },
     ],
   };
@@ -539,111 +510,76 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
   afterEach(() => net?.stop());
 
   test(
-    'runs owner request -> brief confirm -> two checked, cross-reviewed, merged tasks -> summary cards',
+    'runs owner request -> brief confirm -> two cross-reviewed tasks done in their folders -> summary cards',
     { timeout: 120_000 },
     async () => {
       const scriptDir = join(inject('e2e').root, `m5-main-${Date.now()}`);
       await mkdir(scriptDir, { recursive: true });
-      const node0Claude = join(scriptDir, 'node0-claude.json');
-      const node0Codex = join(scriptDir, 'node0-codex.json');
-      const node1Claude = join(scriptDir, 'node1-claude.json');
-      const node1Codex = join(scriptDir, 'node1-codex.json');
-      const gateT1 = join(scriptDir, 'release-t1');
-      const gateT2 = join(scriptDir, 'release-t2');
-
-      await writeFile(node0Claude, JSON.stringify(claudeTaskScript()));
-      await writeFile(node0Codex, JSON.stringify(codexTaskScript()));
-      await writeFile(node1Claude, JSON.stringify(secretaryM5Script()));
-      await writeFile(node1Codex, JSON.stringify(codexReviewScript()));
+      const script = (name: string, steps: object) => {
+        const path = join(scriptDir, `${name}.json`);
+        return writeFile(path, JSON.stringify(steps)).then(() => path);
+      };
+      const workstation = {
+        SOLODAWN_FAKE_CLAUDE_SCRIPT: await script('workstation-claude', claudeTaskScript()),
+        SOLODAWN_FAKE_CODEX_SCRIPT: await script('workstation-codex', codexTaskScript()),
+      };
+      const coordinator = {
+        SOLODAWN_FAKE_CLAUDE_SCRIPT: await script('coordinator-claude', secretaryM5Script()),
+        SOLODAWN_FAKE_CODEX_SCRIPT: await script('coordinator-codex', codexReviewScript()),
+      };
+      const laptop = {
+        SOLODAWN_FAKE_CLAUDE_SCRIPT: await script('laptop-claude', claudeReviewScript()),
+      };
 
       const active = await startNet({
-        nodes: 2,
-        env: (index) =>
-          index === 0
-            ? {
-                ...gitIdentityEnv,
-                SOLODAWN_FAKE_CLAUDE_SCRIPT: node0Claude,
-                SOLODAWN_FAKE_CODEX_SCRIPT: node0Codex,
-              }
-            : {
-                ...gitIdentityEnv,
-                SOLODAWN_FAKE_CLAUDE_SCRIPT: node1Claude,
-                SOLODAWN_FAKE_CODEX_SCRIPT: node1Codex,
-              },
+        nodes: 3,
+        env: (index) => [workstation, coordinator, laptop][index],
       });
       net = active;
       const direct = await startDirectSurface(active.rendezvous, inject('browser'));
       surface = direct;
-      const [homeNode, secNode] = active.nodes;
-      const repo = await initGitRepo(active.dir, 'm5-repo', '# Release pipeline\n');
+      const folder = (name: string) => makeFolder(active.dir, name);
+      const folders = {
+        checklist: await folder('release-checklist'),
+        changelog: await folder('changelog'),
+        secretary: await folder('release-notes'),
+        reviewer: await folder('release-review'),
+        checker: await folder('release-check'),
+      };
 
       const context = await openDirectContext(browser, contexts, direct);
       const page = await context.newPage();
 
-      await pairNode(page, direct, homeNode, 'workstation');
-      await pairNode(page, direct, secNode, 'coordinator');
+      const names = ['workstation', 'coordinator', 'laptop'];
+      for (const [i, node] of active.nodes.entries()) await pairNode(page, direct, node, names[i]);
 
+      // The group is created with its AIs, each in its own folder on its computer.
       await page.locator('button', { hasText: 'New group' }).first().click();
-      const createDlg = page.locator('dialog.dlg[open]');
-      const inputs = createDlg.locator('input.input');
-      await inputs.nth(0).fill('Release Ops');
-      await inputs.nth(1).fill(repo);
-      await inputs.nth(2).fill('main');
-      await inputs.nth(3).fill('Alex');
-      await createDlg.locator('select.input').first().selectOption('none');
-      // Gate T-1 and T-2 inside run_checks on marker files (`*/1-*` relies on the host's
-      // `wt/<num>-<slug>` worktree folder naming) with a 60 s bound so orphaned shells exit.
-      const checkCmd = [
-        'test -f README.md',
-        `i=0; case "$(pwd)" in */1-*) until [ -f "${gateT1}" ] || [ $i -ge 1200 ]; do sleep 0.05; i=$((i+1)); done; test -f "${gateT1}";; *) until [ -f "${gateT2}" ] || [ $i -ge 1200 ]; do sleep 0.05; i=$((i+1)); done; test -f "${gateT2}";; esac`,
-      ].join(' && ');
-      await createDlg.locator('textarea.input').fill(checkCmd);
-      await createDlg.locator('select.input').nth(1).selectOption({ label: 'workstation' });
-      await createDlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
-      await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
-
+      await createGroup(page, {
+        name: 'Release Ops',
+        member: 'Alex',
+        home: 'workstation',
+        ais: [
+          {
+            cli: 'Claude Code',
+            computer: 'workstation',
+            name: 'Claude Code',
+            folder: folders.checklist,
+          },
+          { cli: 'Codex', computer: 'workstation', name: 'Codex', folder: folders.changelog },
+          {
+            cli: 'Claude Code',
+            computer: 'coordinator',
+            name: 'Secretary',
+            folder: folders.secretary,
+            secretary: true,
+          },
+          { cli: 'Codex', computer: 'coordinator', name: 'Reviewer', folder: folders.reviewer },
+          { cli: 'Claude Code', computer: 'laptop', name: 'Checker', folder: folders.checker },
+        ],
+      });
       const members = page.locator('#chat-side .members');
-
-      // Add Secretary on coordinator (Node 1), Claude Code on workstation (Node 0), Codex on workstation (Node 0).
-      await members.locator('button', { hasText: 'Add AI' }).click();
-      const addDlg = page.locator('dialog.dlg[open]');
-      await poll(() => addDlg.locator('.choice').count()).toBe(6);
-      await addDlg
-        .locator('.choice', { hasText: 'Claude Code · coordinator' })
-        .locator('input')
-        .check();
-      await addDlg.locator('.sec-opt input[type="checkbox"]').check();
-      await poll(() =>
-        addDlg.getByRole('textbox', { name: 'Name in the group' }).inputValue(),
-      ).toBe('Secretary');
-      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.count()).toBe(0);
-      await poll(() => members.locator('.member').count()).toBe(1);
-
-      await members.locator('button', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.locator('.choice').count()).toBe(6);
-      await addDlg
-        .locator('.choice', { hasText: 'Claude Code · workstation' })
-        .locator('input')
-        .check();
-      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.count()).toBe(0);
-      await poll(() => members.locator('.member').count()).toBe(2);
-
-      await members.locator('button', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.locator('.choice').count()).toBe(6);
-      await addDlg.locator('.choice', { hasText: 'Codex · workstation' }).locator('input').check();
-      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.count()).toBe(0);
-      await poll(() => members.locator('.member').count()).toBe(3);
-
-      await members.locator('button', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.locator('.choice').count()).toBe(6);
-      await addDlg.locator('.choice', { hasText: 'Codex · coordinator' }).locator('input').check();
-      await addDlg.getByRole('textbox', { name: 'Name in the group' }).fill('Reviewer');
-      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.count()).toBe(0);
-      await poll(() => members.locator('.member').count()).toBe(4);
+      await poll(() => members.locator('.member').count()).toBe(5);
 
       // Owner sends plain request in chat -> Secretary posts BriefCard.
       await sendChatMessage(page, 'Build the release checklist and changelog');
@@ -666,40 +602,27 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
 
       const task1Card = page.locator('.line section.card', { hasText: 'T-1' }).first();
       const task2Card = page.locator('.line section.card', { hasText: 'T-2' }).first();
-      await poll(() => task1Card.count()).toBe(1);
-      await poll(() => task2Card.count()).toBe(1);
-
-      // Wait until both task CLIs have started, swap workstation Claude to its reviewer script for
-      // T-2, then release T-1 (reviewed by Reviewer on coordinator while T-2 stays held at gateT2).
-      await vi.waitFor(
-        async () => {
-          const log = await readFile(homeNode.env.SOLODAWN_FAKECLI_LOG, 'utf8').catch(() => '');
-          expect(log).toMatch(/^start claude /m);
-          expect(log).toMatch(/^start codex /m);
-        },
-        { timeout: 15_000, interval: 25 },
-      );
-      await writeFile(node0Claude, JSON.stringify(claudeReviewScript()));
-      await writeFile(gateT1, 'ok');
-
-      // Wait until T-1 merges and Secretary posts SummaryCard #1, then release T-2.
       const summaryCards = page.locator('.line section.card', { hasText: 'Review score' });
-      await poll(() => task1Card.textContent(), 30_000).toContain('Merged · 96');
-      await poll(() => summaryCards.count(), 20_000).toBe(1);
-      await writeFile(gateT2, 'ok');
 
-      // Verify T-2 also completes local checks, passes review, merges, and gets SummaryCard #2.
-      await poll(() => task2Card.textContent(), 30_000).toContain('Merged · 94');
+      // T-1 is done at Reviewer's passed review; T-2, which waits for it, at Checker's.
+      await poll(() => task1Card.textContent(), 30_000).toContain('Done · 96');
+      await poll(() => task2Card.textContent(), 30_000).toContain('Done · 94');
       await poll(() => summaryCards.count(), 20_000).toBe(2);
 
-      expect(await task1Card.locator('.steps i').count()).toBe(6);
-      await poll(() => task1Card.textContent()).toContain('Local checks passed');
-      await poll(() => task1Card.textContent()).toContain('Round 1 · 96, passed');
-      await poll(() => task2Card.textContent()).toContain('Local checks passed');
-      await poll(() => task2Card.textContent()).toContain('Round 1 · 94, passed');
+      for (const [card, score, workspace] of [
+        [task1Card, 96, folders.checklist],
+        [task2Card, 94, folders.changelog],
+      ] as const) {
+        expect(await card.locator('.steps i').count()).toBe(3);
+        await poll(() => card.textContent()).toContain(`Round 1 · ${score}, passed`);
+        // Each task ran in its assignee's folder.
+        expect(await card.locator('.kv code').textContent()).toBe(workspace);
+      }
 
-      // No approval cards appeared during A5.1.
+      // No approval cards appeared during A5.1, and no computer made a project folder of its own.
       expect(await page.locator('section.card[aria-label="Approval"]').count()).toBe(0);
+      for (const node of active.nodes)
+        expect(await readdir(node.dataDir)).not.toContain('projects');
 
       const summaryText = (await summaryCards.allTextContents()).join('\n');
       expect(summaryText).toContain('T-1');
@@ -708,17 +631,21 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       expect(summaryText).toContain('94');
       expect(summaryText).toContain('1 round');
 
-      // Open T-1's thread fold and verify progress messages, ChecksRow, ReviewBlock, task_merged, and summary jump link.
+      // Open T-1's thread fold: progress, the report, the review, task_done under the secretary's
+      // name, and the summary jump link.
       await task1Card.locator('details.fold > summary').click();
       const thread1 = task1Card.locator('.thread');
       await poll(() => thread1.textContent()).toContain(
-        'Drafted checklist rules and running local checks.',
+        'Drafted checklist rules and ran the project tests.',
       );
-      await poll(() => thread1.textContent()).toContain('Local checks passed');
+      await poll(() => thread1.textContent()).toContain(
+        'Implemented release checklist verification.',
+      );
       await poll(() => thread1.locator('.review').textContent()).toContain(
         'Checklist assertions cover edge cases.',
       );
-      await poll(() => thread1.textContent()).toContain('Secretary merged T-1');
+      const done = thread1.locator('li.ti', { hasText: 'T-1 passed review and is done' });
+      await poll(() => done.textContent()).toContain('Secretary');
 
       const summaryJump = thread1.locator('a.tcard').first();
       await poll(() => summaryJump.count()).toBe(1);
@@ -762,7 +689,6 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       const active = await startNet({
         nodes: 1,
         env: () => ({
-          ...gitIdentityEnv,
           PATH: `${wrapperDir}${delimiter}${bin}${delimiter}${process.env.PATH ?? ''}`,
           SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath,
         }),
@@ -771,7 +697,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       const direct = await startDirectSurface(active.rendezvous, inject('browser'));
       surface = direct;
       const [node] = active.nodes;
-      const repo = await initGitRepo(active.dir, 'cards-repo', '# Card Roundtrip\n');
+      const workspace = await makeFolder(active.dir, 'cards');
 
       const context = await openDirectContext(browser, contexts, direct);
       const page = await context.newPage();
@@ -779,15 +705,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await pairNode(page, direct, node, 'workstation');
 
       await page.locator('button', { hasText: 'New group' }).first().click();
-      const createDlg = page.locator('dialog.dlg[open]');
-      const inputs = createDlg.locator('input.input');
-      await inputs.nth(0).fill('Card Roundtrip');
-      await inputs.nth(1).fill(repo);
-      await inputs.nth(2).fill('main');
-      await inputs.nth(3).fill('Alex');
-      await createDlg.locator('select.input').first().selectOption('none');
-      await createDlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
-      await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
+      await createGroup(page, { name: 'Card Roundtrip', member: 'Alex' });
 
       const members = page.locator('#chat-side .members');
       await members.locator('button', { hasText: 'Add AI' }).click();
@@ -797,6 +715,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
         .locator('.choice', { hasText: 'Claude Code · workstation' })
         .locator('input')
         .check();
+      await chooseFolder(addDlg, workspace);
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(1);
@@ -852,7 +771,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
   );
 
   test(
-    "answers an AI's question in its task's thread, then pauses and cancels the task from its card",
+    "answers an AI's question in its task's thread, pauses and cancels the task from its card, and the task that waited for its folder starts",
     { timeout: 90_000 },
     async () => {
       const scriptDir = join(inject('e2e').root, `m5-thread-${Date.now()}`);
@@ -862,27 +781,19 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
 
       const active = await startNet({
         nodes: 1,
-        env: () => ({ ...gitIdentityEnv, SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath }),
+        env: () => ({ SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath }),
       });
       net = active;
       const direct = await startDirectSurface(active.rendezvous, inject('browser'));
       surface = direct;
       const [node] = active.nodes;
-      const repo = await initGitRepo(active.dir, 'thread-repo', '# Thread\n');
+      const workspace = await makeFolder(active.dir, 'thread');
       const context = await openDirectContext(browser, contexts, direct);
       const page = await context.newPage();
       await pairNode(page, direct, node, 'workstation');
 
       await page.locator('button', { hasText: 'New group' }).first().click();
-      const createDlg = page.locator('dialog.dlg[open]');
-      const inputs = createDlg.locator('input.input');
-      await inputs.nth(0).fill('Thread');
-      await inputs.nth(1).fill(repo);
-      await inputs.nth(2).fill('main');
-      await inputs.nth(3).fill('Alex');
-      await createDlg.locator('select.input').first().selectOption('none');
-      await createDlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
-      await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
+      await createGroup(page, { name: 'Thread', member: 'Alex' });
       const members = page.locator('#chat-side .members');
       await members.locator('button', { hasText: 'Add AI' }).click();
       const addDlg = page.locator('dialog.dlg[open]');
@@ -891,6 +802,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
         .locator('.choice', { hasText: 'Claude Code · workstation' })
         .locator('input')
         .check();
+      await chooseFolder(addDlg, workspace);
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => members.locator('.member').count()).toBe(1);
 
@@ -900,7 +812,11 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await writeFile(claudePath, JSON.stringify(askingTaskScript()));
       await sendChatMessage(page, '@Claude Code let the notice be dismissed');
 
-      const card = page.locator('.line section.card', { hasText: 'T-1' });
+      const taskCard = (num: string) =>
+        page
+          .locator('.line section.card')
+          .filter({ has: page.locator('.card-head .mono', { hasText: num }) });
+      const card = taskCard('T-1');
       await poll(() => card.locator('.card-head').textContent(), 30_000).toContain('In progress');
       await card.locator('details.fold > summary').click();
       const thread = card.locator('.thread');
@@ -917,12 +833,22 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
         '@Claude Code yes, keep it.',
       );
 
+      // A second direct request while T-1 holds the folder: T-2 waits for the folder (A5.20).
+      await writeFile(claudePath, JSON.stringify(queuedTaskScript()));
+      await sendChatMessage(page, '@Claude Code also let the notice fade out');
+      const queued = taskCard('T-2');
+      await poll(() => queued.locator('.card-head').textContent(), 30_000).toContain('Queued');
+      await poll(() => queued.locator('.hold').textContent()).toContain(
+        'Waits for its folder, which T-1 is using.',
+      );
+
       const more = card.getByRole('button', { name: 'Actions on T-1' });
       const item = (name: string) => card.locator('.menu .item', { hasText: name });
       await more.click();
       await item('Pause').click();
-      await poll(() => card.locator('.hold').textContent()).toContain('Paused by hand.');
+      await poll(() => card.locator('.hold').textContent()).toContain('Alex paused the task.');
       await poll(() => card.locator('.card-head').textContent()).toContain('Paused');
+      expect(await queued.locator('.card-head').textContent()).toContain('Queued');
 
       await more.click();
       await item('Cancel task').click();
@@ -932,6 +858,13 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await question.getByRole('button', { name: 'Cancel task' }).click();
       await poll(() => card.locator('.card-head').textContent()).toContain('Cancelled');
       await poll(() => more.count()).toBe(0);
+
+      // The folder is free: T-2 starts by itself, in a session of its own.
+      await poll(() => queued.locator('.card-head').textContent(), 30_000).toContain('In progress');
+      await queued.locator('details.fold > summary').click();
+      await poll(() => queued.locator('.thread').textContent(), 30_000).toContain(
+        'Fading the notice out.',
+      );
     },
   );
 });

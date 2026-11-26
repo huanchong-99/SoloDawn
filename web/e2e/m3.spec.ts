@@ -1,5 +1,6 @@
-// End-to-end milestone 3 (E-M3): AI member panel, add-AI dialog, mentioning Claude Code and Codex
-// with session continuity, 1-minute idle dormancy, and resume with memory (U-3, A3.1, A3.4).
+// End-to-end milestone 3 (E-M3): AI member panel, add-AI dialog with each AI's folder, mentioning
+// Claude Code and Codex with session continuity, 1-minute idle dormancy, and resume with memory
+// (U-3, A3.1, A3.4).
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright';
@@ -7,10 +8,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from '
 import { launch } from './config';
 import {
   claudeInitSteps,
+  chooseFolder,
   codexInitSteps,
+  createGroup,
   exec,
-  gitIdentityEnv,
-  initGitRepo,
+  makeFolder,
   openDirectContext,
   poll,
   readPairingCode,
@@ -33,7 +35,7 @@ async function setNodeIdleMinutes(node: Node, minutes: number) {
   await exec(process.execPath, ['--input-type=module', '-e', script, dbPath, String(minutes)]);
 }
 
-async function pairAndCreateGroup(page: Page, surface: DirectSurface, node: Node, repo: string) {
+async function pairAndCreateGroup(page: Page, surface: DirectSurface, node: Node) {
   await page.goto(`${surface.url}#/onboarding`);
   const code = await readPairingCode(page, surface.signal);
   const paired = await node.run(
@@ -54,15 +56,7 @@ async function pairAndCreateGroup(page: Page, surface: DirectSurface, node: Node
   await finishOnboarding(page, true);
   await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 
-  const dlg = page.locator('dialog.dlg[open]');
-  const inputs = dlg.locator('input.input');
-  await inputs.nth(0).fill('Website');
-  await inputs.nth(1).fill(repo);
-  await inputs.nth(2).fill('main');
-  await inputs.nth(3).fill('Alex');
-  await dlg.locator('select.input').first().selectOption('none');
-  await dlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
-  await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
+  await createGroup(page, { name: 'Website', member: 'Alex' });
 }
 
 function claudeTwoTurnScript() {
@@ -211,7 +205,6 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       const active = await startNet({
         nodes: 1,
         env: () => ({
-          ...gitIdentityEnv,
           SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath,
           SOLODAWN_FAKE_CODEX_SCRIPT: codexPath,
         }),
@@ -222,11 +215,12 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       const [node] = active.nodes;
       await setNodeIdleMinutes(node, 1);
 
-      const repo = await initGitRepo(active.dir, 'website-repo', '# Website\n');
+      const claudeFolder = await makeFolder(active.dir, 'website');
+      const codexFolder = await makeFolder(active.dir, 'website-api');
       const context = await openDirectContext(browser, contexts, direct);
       const page = await context.newPage();
 
-      await pairAndCreateGroup(page, direct, node, repo);
+      await pairAndCreateGroup(page, direct, node);
 
       const members = page.locator('#chat-side .members');
       await poll(() => members.textContent()).toContain('No AI in this group yet.');
@@ -243,6 +237,7 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       await poll(() =>
         addDlg.getByRole('textbox', { name: 'Name in the group' }).inputValue(),
       ).toBe('Claude Code');
+      await chooseFolder(addDlg, claudeFolder);
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(1);
@@ -256,6 +251,7 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       await poll(() =>
         addDlg.getByRole('textbox', { name: 'Name in the group' }).inputValue(),
       ).toBe('Codex');
+      await chooseFolder(addDlg, codexFolder);
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(2);
@@ -264,6 +260,8 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       const codexCard = members.locator('.member', { hasText: 'Codex' });
       await poll(() => claudeCard.textContent()).toContain('group home');
       await poll(() => claudeCard.textContent()).toContain('Personal subscription');
+      await poll(() => claudeCard.locator('dd.ws code').textContent()).toBe(claudeFolder);
+      await poll(() => codexCard.locator('dd.ws code').textContent()).toBe(codexFolder);
       await poll(() => claudeCard.locator('header .st').textContent()).toContain(
         'Sleeping · wakes when @mentioned',
       );
@@ -352,17 +350,17 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       await poll(() => offlineBanner.count()).toBe(0);
       await poll(() => claudeCard.locator('header .st').textContent()).toContain('Sleeping');
 
-      // Correct what was set at creation: the name and a check command (R-103).
+      // Correct what was set at creation: the name and the pass score; a group has no check
+      // commands (R-103).
       await page.getByRole('button', { name: 'Edit group settings' }).click();
       const settings = page.getByRole('dialog', { name: 'Edit group settings' });
+      expect(await settings.getByLabel('Check commands').count()).toBe(0);
       await settings.getByLabel('Group name').fill('Website two');
-      await settings.getByLabel('Check commands').fill('git status');
       await settings.getByLabel('Pass score').fill('85');
       await settings.getByRole('button', { name: 'Save' }).click();
       await poll(() => settings.count()).toBe(0);
       await poll(() => page.locator('.chat-head h2').textContent()).toBe('Website two');
       await page.getByRole('button', { name: 'Edit group settings' }).click();
-      expect(await settings.getByLabel('Check commands').inputValue()).toBe('git status');
       expect(await settings.getByLabel('Pass score').inputValue()).toBe('85');
       await settings.getByRole('button', { name: 'Cancel' }).click();
 
