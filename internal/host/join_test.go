@@ -47,6 +47,7 @@ type joinFakeHome struct {
 	syncs   []proto.Sync
 	addAIs  []proto.MemberAddAI
 	removes []proto.MemberCommand
+	states  []string
 }
 
 func newJoinFakeHome(h *Host, device string) *joinFakeHome {
@@ -107,6 +108,11 @@ func (f *joinFakeHome) handleSync(req proto.Sync) (json.RawMessage, error) {
 func (f *joinFakeHome) handleCmd(req proto.Cmd) (json.RawMessage, error) {
 	ok := json.RawMessage(marshalWire(proto.CmdResult{Success: proto.Success{Re: req.ID, OK: true}}))
 	if isMemberStatusCmd(req.Env.Payload) {
+		var st proto.MemberStatus[any]
+		json.Unmarshal([]byte(req.Env.Payload), &st)
+		f.mu.Lock()
+		f.states = append(f.states, st.State)
+		f.mu.Unlock()
 		return ok, nil
 	}
 	f.mu.Lock()
@@ -416,6 +422,9 @@ func TestHostJoinExternal(t *testing.T) {
 		seamCode(t, rig.callJoin(t.Context(), bad), "bad_request")
 	}
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "external", Name: "Z", Account: "team", Tool: joinStr("ZCode")})
+	fh.mu.Lock()
+	joinAssertEqual(t, "reported state", strings.Join(fh.states, ","), "offline")
+	fh.mu.Unlock()
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "external", Name: "Y", Account: "api_key"})
 	add := fh.addAIs[0]
 	joinAssertEqual(t, "add_ai cli", add.CLI, "external")

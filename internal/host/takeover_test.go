@@ -523,6 +523,34 @@ func TestTakeoverWarmsUpACLIThatCannotStartInATerminal(t *testing.T) {
 	r.waitReleased(runAI2)
 }
 
+// The terminal opens only once the warm-up turn has ended (flows/takeover.md section A).
+func TestTakeoverWaitsForTheWarmUpTurn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newTkRig(t)
+		r.drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
+			p := newFakeProc(ctx, l)
+			p.autoReadyID = "thread-1"
+			return p, nil
+		}
+		opened := make(chan Launch, 1)
+		Drivers["codex"] = tkDriver{r.drv, func(l Launch) ([]string, string, error) {
+			opened <- l
+			return nil, "", errors.New("no terminal")
+		}}
+		done := make(chan error, 1)
+		go func() { done <- r.start(runAI2, "") }()
+		synctest.Wait()
+		if len(opened) != 0 || len(done) != 0 {
+			t.Fatal("the terminal opened during the warm-up turn")
+		}
+		r.drv.lastProc().emit(Event{Kind: TurnEnded, Status: "completed"})
+		tkCode(t, <-done, "cli")
+		if l := <-opened; l.Session != "thread-1" {
+			t.Fatalf("terminal after warm-up = %+v", l)
+		}
+	})
+}
+
 func TestTakeoverStartFailures(t *testing.T) {
 	r := newTkRig(t)
 	r.putTask(tkTask, "active", runAI1, runAI2, 1)

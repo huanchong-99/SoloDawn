@@ -2476,3 +2476,24 @@ func verifyResumeGroupMergesRequiresAuditTS(t *testing.T) {
 	joinAssertEqual(t, "audited resume task id", strings.Contains(cmds[0], `"id":"`+testTask2+`"`), true)
 	r.h.Settle()
 }
+
+// A task of a group with a remote branches from the freshly fetched origin/<base>,
+// not from the clone's own <base> (local.md section 7, "task session created").
+func TestRemoteTaskBranchesFromFetchedBase(t *testing.T) {
+	r := newDeliverRig(t, true)
+	originDir, pDir, _ := initTestOriginAndGroupRepo(t, r, "github")
+	ctx := t.Context()
+	_, err := EnsureGroupWorkspace(ctx, pDir, originDir, "main")
+	tskNoErr(t, err)
+	seed := filepath.Join(t.TempDir(), "seed")
+	mustGit(t, ctx, "", "clone", originDir, seed)
+	mustGit(t, ctx, seed, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "--allow-empty", "-m", "later")
+	mustGit(t, ctx, seed, "push", "origin", "refs/heads/main:refs/heads/main")
+	later := strings.TrimSpace(mustGit(t, ctx, seed, "rev-parse", "HEAD"))
+
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "Remote", Slug: "remote", Origin: "brief", State: "active", Step: "branch", Assignee: testAI1})
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 870, AI: testAI1, Why: "assign", Task: testTask1}, nil)
+	r.waitUntil("task turn", func() bool { return len(r.runtime.recorded()) == 1 })
+	got := strings.TrimSpace(mustGit(t, ctx, filepath.Join(pDir, "wt", "1-remote"), "rev-parse", "HEAD"))
+	assertEqual(t, got, later)
+}

@@ -245,14 +245,14 @@ func openTask(task proto.TaskRow) bool {
 // lastTask returns the task of the AI's task session used last whose task is
 // unfinished, or "".
 func lastTask(h *Host, slot aiSlot) string {
-	var last Session
-	for _, s := range memberSessions(h, slot.group, slot.member) {
+	open := slices.DeleteFunc(memberSessions(h, slot.group, slot.member), func(s Session) bool {
 		task, _ := lookupTaskRow(h, s.Group, s.Task)
-		if s.Kind == TaskSession && openTask(task) && (last.Task == "" || s.LastActive > last.LastActive) {
-			last = s
-		}
+		return s.Kind != TaskSession || !openTask(task)
+	})
+	if len(open) == 0 {
+		return ""
 	}
-	return last.Task
+	return slices.MaxFunc(open, func(a, b Session) int { return cmp.Compare(a.LastActive, b.LastActive) }).Task
 }
 
 // startTakeoverTask sends task start for a task of origin takeover and keeps

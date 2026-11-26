@@ -97,8 +97,10 @@ func TestWatchLifecycle(t *testing.T) {
 			t.Fatalf("%d %v %q", n, err, owner.String())
 		}
 		synctest.Wait()
-		if got := term.output(); got != "hello" {
-			t.Fatal(got)
+		(watchFanout{&owner, p, slot}).Write([]byte(" again"))
+		synctest.Wait()
+		if got := term.output(); got != "hello again" || term.isClosed() {
+			t.Fatal(got, term.isClosed())
 		}
 		o.setPath("relay")
 		synctest.Wait()
@@ -159,8 +161,15 @@ func TestWatchItems(t *testing.T) {
 	if err := h.Sessions.Create(Session{SessionKey: key, Kind: GroupSession, Agent: "claude"}); err != nil {
 		t.Fatal(err)
 	}
+	home := newFakeDeliverHome()
+	h.mu.Lock()
+	h.homes["home"] = home
+	h.mu.Unlock()
 	v := verifiedItem{group: slot.group, home: "home", item: proto.Item{Item: 1, AI: proto.ID(slot.member), Why: "watch"}}
 	dispatchArrivedItem(h, nil, v)
+	if home.ackCountFor(1) != 1 {
+		t.Fatal("a recorded watch item was not acknowledged")
+	}
 	if got := h.Watchers(slot.group, slot.member); !reflect.DeepEqual(got, []string{}) {
 		t.Fatal(got)
 	}
@@ -200,9 +209,13 @@ func TestWatchItems(t *testing.T) {
 	if err := h.Store.Write(func(tx *store.Tx) error { _, err := tx.Exec("DROP TABLE audit"); return err }); err != nil {
 		t.Fatal(err)
 	}
+	acks := home.ackCountFor(2)
 	watchItem(h, v)
 	if got := h.Watchers(slot.group, slot.member); !reflect.DeepEqual(got, []string{}) {
 		t.Fatal(got)
+	}
+	if home.ackCountFor(2) != acks {
+		t.Fatal("an item without its audit row was acknowledged")
 	}
 	if h.Watching("stranger") {
 		t.Fatal("gone member granted an unknown device")
