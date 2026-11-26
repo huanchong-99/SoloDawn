@@ -54,6 +54,17 @@ func (d *diagLog) pos(line string) int {
 	return -1
 }
 
+func (d *diagLog) count(prefix string) (n int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, l := range d.lines {
+		if strings.HasPrefix(l, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
 // expect waits for the line, which is the event and its fields as they are
 // written, and returns where it is in the log.
 func (d *diagLog) expect(t *testing.T, line string) int {
@@ -172,6 +183,7 @@ func TestDiagRowsBeforeTheReplyAndTheInbox(t *testing.T) {
 	p.next()
 	p.next()
 	d.expect(t, "inbox.send "+n+" "+g+" "+diagDev(laptop)+" items=1")
+	equal(t, d.count("inbox.send "), 1) // the delivery that found nothing when the host took the inbox wrote no line
 	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
 	d.expect(t, "ack.recv "+n+" "+g+" "+diagDev(laptop)+" item=1")
 }

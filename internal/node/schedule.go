@@ -19,7 +19,8 @@ func (n *nodeRuntime) startRetention() {
 
 func runRetention(ctx context.Context, db *store.Store, now time.Time, tick <-chan time.Time) {
 	for {
-		if err := db.Write(func(tx *store.Tx) error { return home.Retain(tx, now.UnixMilli()) }); err != nil {
+		err := db.Write(func(tx *store.Tx) error { return home.Retain(tx, now.UnixMilli()) })
+		if err != nil {
 			log.Printf("node: retention: %v", err)
 		}
 		select {

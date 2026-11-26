@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/coder/websocket"
@@ -88,6 +90,18 @@ func checkLogRotation(t *testing.T) {
 		t.Fatalf("unexpected rotation on empty file: %v", err)
 	}
 	mustNoErr(t, bigLog.Close())
+
+	exact, err := openLog(t.TempDir())
+	mustNoErr(t, err)
+	_, err = exact.Write([]byte("01234"))
+	mustNoErr(t, err)
+	_, err = exact.Write([]byte("56789"))
+	mustNoErr(t, err)
+	checkImage(t, exact.path, "0123456789")
+	if _, err := os.Stat(exact.path + ".1"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rotation at exactly the limit: %v", err)
+	}
+	mustNoErr(t, exact.Close())
 
 	lf, err := openLog(t.TempDir())
 	mustNoErr(t, err)
@@ -532,6 +546,40 @@ func TestPairingSurfaceClientAndForegroundStop(t *testing.T) {
 
 	checkSaveRendezvousError(t, rvURL)
 	checkForegroundContextStop(t)
+}
+
+func TestOnAdoptReportsAFailedServiceInstall(t *testing.T) {
+	saved := installService
+	t.Cleanup(func() { installService = saved })
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+	n := &nodeRuntime{}
+	installService = func(string, string) error { return nil }
+	n.onAdopt("")
+	mustEqual(t, buf.String(), "")
+	installService = func(string, string) error { return errors.New("service registration failed") }
+	n.onAdopt("")
+	if !strings.HasSuffix(buf.String(), "node: install service: service registration failed\n") {
+		t.Fatalf("log = %q", buf.String())
+	}
+}
+
+// A rendezvous path that closed is no longer one of the node's while the node
+// cannot reach the server again.
+func TestRendezvousPathLeavesWhenItClosesAndTheServerIsGone(t *testing.T) {
+	srv := httptest.NewServer(rendezvous.Handler(fstest.MapFS{}))
+	n, err := openNode(t.Context(), socketRoot(t))
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	mustNoErr(t, n.saveRendezvous([]string{"ws" + strings.TrimPrefix(srv.URL, "http") + "/rv"}))
+	n.syncRendezvous()
+	waitCond(t, func() bool { return len(n.remoteRVPaths()) == 1 })
+	path := n.remoteRVPaths()[0]
+	srv.Close()
+	path.Close()
+	waitCond(t, func() bool { return len(n.remoteRVPaths()) == 0 })
 }
 
 func TestPairRoutesShareSignallingPath(t *testing.T) {
