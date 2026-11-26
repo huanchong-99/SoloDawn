@@ -337,8 +337,10 @@ program, and `host.info.update` stays `null`. A user updates by hand
   numbers. `<version>` in a file name is the exact tag, `v` included:
   `solodawn_v1.4.0_linux_amd64`. A release is newer when its three numbers,
   compared as numbers from left to right, are higher than those of the
-  running binary. Pre-release tags, such as `v1.5.0-rc.1`, are ignored. The
-  release build stamps its tag into the binary as the version. A
+  running binary. Pre-release tags, such as `v1.5.0-rc.1`, are ignored. A
+  release candidate's tag is `vMAJOR.MINOR.PATCH-rc.N` (N a decimal number
+  without leading zeros) and is built like a release. The release build
+  stamps its tag into the binary as the version. A
   development build, whose version is no release tag, never updates
   itself.
 - Once a day the node reads the latest release. If it is newer, the node

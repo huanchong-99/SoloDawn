@@ -1,13 +1,15 @@
 name: Release
 
-# For a pushed vMAJOR.MINOR.PATCH tag, builds the six binaries stamped with the
-# tag and their SHA256SUMS, and keeps them as a workflow artifact. It creates
-# no release and no tag.
+# For a pushed vMAJOR.MINOR.PATCH tag, or release candidate tag
+# vMAJOR.MINOR.PATCH-rc.N, builds the six binaries stamped with the tag and
+# their SHA256SUMS, and keeps them as a workflow artifact. It creates no
+# release and no tag.
 
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
 
 permissions:
   contents: read
@@ -18,9 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      # The tag filter above cannot refuse leading zeros: v01.2.3 matches it.
-      - name: Refuse a tag that is not vMAJOR.MINOR.PATCH
-        run: '[[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]'
+      # The tag filters above cannot refuse leading zeros: v01.2.3 and v1.2.3-rc.01 match them.
+      - name: Refuse a tag that is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N
+        run: '[[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
