@@ -64,12 +64,18 @@ Copy-Item -LiteralPath $asset -Destination (Join-Path $bin 'solodawn.exe')
 Add the installation directory to your user `Path` or run the executable
 by its full path.
 
-## Check Git identity
+## What the node needs
 
-SoloDawn commits local task merges with your Git identity. Run
-`git config --global user.email`; if it is empty, set your name and email
-with `git config --global user.name "<name>"` and
-`git config --global user.email "<email>"`.
+SoloDawn runs no Git program itself: it needs neither `git` nor `gh`, and it
+makes no clone, branch, merge or pull request. What it needs on a computer is
+the AI command-line tools you want to use (`claude`, `codex`, `opencode`,
+`qwen`), found on your `PATH` and signed in.
+
+The AIs of a group work in folders you choose, on your own computer, at full
+permission: an AI can read and change everything in its folder. The folder
+is not a copy. If your project uses Git, commit or set aside your own
+changes before you give the folder to an AI. If the AI uses Git, it does so
+by the project's own rules, so `git` must be installed for that.
 
 ## Pair with the browser
 
@@ -90,10 +96,10 @@ When pairing succeeds, the node registers itself to start at login:
 unit `solodawn.service` on Linux, and the scheduled task `SoloDawn-<user>` on
 Windows.
 
-Add only repositories you trust, because their `CLAUDE.md`, `AGENTS.md` and
-hooks are used by the AIs that work on them. A Qwen Code AI may load a
-repository's own configuration (`.qwen/settings.json`, `QWEN.md`) even in a
-group session: Qwen Code has no known switch to keep it out.
+Give an AI only folders of projects you trust, because their `CLAUDE.md`,
+`AGENTS.md` and hooks are used by the AIs that work in them. A Qwen Code AI
+may load a project's own configuration (`.qwen/settings.json`, `QWEN.md`)
+even in a group session: Qwen Code has no known switch to keep it out.
 
 ## Update
 
@@ -103,6 +109,18 @@ they are not in the binary. To update a computer, download the new release's
 things in this order: stop the node, replace the binary with the commands of
 "Verify and install" above (set `asset` to the new filename in that block),
 and start the node. Confirm the new tag with `solodawn version`.
+
+### From `v3.0.0-rc.1`
+
+A node of `v3.0.0-rc.1` cannot talk to one of a later release candidate:
+update every node and every browser together. At its first start the new
+version deletes every group on the node, with its messages, tasks, cards,
+notes, knowledge-base documents and sessions. Pairing, your own devices,
+account types and peers stay. The people who were in your groups are
+forgotten and must be invited again by link. A file made by
+`solodawn group export` on rc.1 cannot be imported. The old `projects/`
+folder in the data directory is not touched: it may hold task branches and
+worktrees that were never pushed, so copy what you need, then delete it.
 
 If the node runs in a terminal, press Ctrl+C there first, replace the binary,
 then start `solodawn node` again. If it runs as the login service, use the
