@@ -293,7 +293,7 @@ func (n *nodeRuntime) stepNetwork() error {
 	})
 	n.pairer.Peer = n.peer
 	n.host.Connect = n.sessions.connectHome(n.dialHome)
-	ln, err := listenNodeHTTP(":" + strconv.Itoa(defaultWebPort))
+	ln, err := listenNodeHTTP(strconv.Itoa(defaultWebPort))
 	if err != nil {
 		return err
 	}
@@ -417,9 +417,15 @@ func listenNodePeer(udpPort, tcpPort int, id string) (*peer.Sockets, error) {
 	return peerListen(0, 0, id)
 }
 
-func listenNodeHTTP(addr string) (net.Listener, error) {
-	if ln, err := tcpListen("tcp", addr); err == nil {
-		return ln, nil
+// listenNodeHTTP treats the port as taken when another process holds it on
+// 127.0.0.1 only: macOS and Windows still grant the wildcard bind, and the
+// node's own dial to 127.0.0.1 would then reach that process.
+func listenNodeHTTP(port string) (net.Listener, error) {
+	if probe, err := tcpListen("tcp", "127.0.0.1:"+port); err == nil {
+		probe.Close()
+		if ln, err := tcpListen("tcp", ":"+port); err == nil {
+			return ln, nil
+		}
 	}
 	return tcpListen("tcp", ":0")
 }
