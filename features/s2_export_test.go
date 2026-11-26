@@ -411,15 +411,38 @@ func (w *s2ExportWorld) checkRows() error {
 	return w.checkHome(w.c.P)
 }
 
+// compareRows checks that the node at path holds the exported rows. The node
+// serves the group meanwhile: a host that reports its member status, as P1's
+// once it reaches P2, writes a later version of an exported row.
 func (w *s2ExportWorld) compareRows(path string) error {
 	got, err := w.groupRows(path)
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(w.rows, got) {
+	if !reflect.DeepEqual(w.rows, s2RowsAtCut(w.rows, got)) {
 		return fmt.Errorf("group rows differ: want %v, got %v", w.rows, got)
 	}
 	return nil
+}
+
+// s2RowsAtCut replaces each row of got written after the cut, that is with a
+// seq above every seq of cut, by cut's row of the same r and id, and by nil if
+// cut has none.
+func s2RowsAtCut(cut, got [][]any) [][]any {
+	var head int64
+	byID := map[string][]any{}
+	for _, row := range cut {
+		head = max(head, row[3].(int64))
+		byID[fmt.Sprint(row[1], " ", row[2])] = row
+	}
+	out := make([][]any, len(got))
+	for i, row := range got {
+		out[i] = row
+		if row[3].(int64) > head {
+			out[i] = byID[fmt.Sprint(row[1], " ", row[2])]
+		}
+	}
+	return out
 }
 
 func (w *s2ExportWorld) checkHome(p *s2Person) error {

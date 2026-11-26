@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-26 · bug · A9.27 fails in its set-up and connections when six copies run at once on a Mac
+
+- Symptom: 60 runs of the unchanged A9.27 on this Mac, six processes in parallel (1-minute load up to about 17): 40 passed, 20 failed before or after the export, never with `group rows differ`: 10 × `timed out after 16s waiting for ctl connection`, 7 × `home_unreachable` from `JoinAI` in the step "the group has a secretary on P1, P-work on P2 ...", 2 × the browser peers following P2 in 5.9 and 6.2 s (want 5), 1 × `EOF`, 1 × `timed out after 3m0s waiting for ctl`.
+- Cause: not looked into. The connection time-outs fit the entry "On a Mac with the Application Firewall, a UDP write can block every connection on one local address"; the `home_unreachable` ones may be the class of `features/s2_watch_test.go` `prepareBulletin` (a command sent before P2's host attached to P1).
+- Status: open; found while reproducing the entry "A9.27 failed once on Linux: P2 held a later member row than the export".
+
 ### 2026-11-26 · bug · FLAKY-33: A9.8 failed once: a browser's ICE agent stood still for 5 × 7.8 s
 
 - Symptom: CI run 45727940554 (`acceptance-race`, Linux, PR #417), A9.8 `Given the confirmation cast with Q`: Q's test browser and P1 exchanged the offer, the answer and all candidates in 35 ms; no pair was selected; P1 gave up at 30 s (`ice_failed`), then the browser. The browser's pion ICE agent loop was blocked five times for 7.8 s, the time a pion TURN request takes to give up (retransmissions at 0.2 ... 7.8 s, `pion/turn/v5@v5.1.3/internal/client/transaction.go`). Not reproduced in 434 runs of the outline (Mac `-race`, Linux in colima, Linux under CPU stress).
@@ -873,6 +879,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `go version -m` of the `v3.0.0-rc.1` binaries shows `vcs.modified=true` and a module version ending in `+dirty` for every binary but `linux_amd64`.
 - Cause: the build loop of `.github/workflows/release.yml` writes each binary into `dist/`, which Git did not ignore, so every build after the first saw an untracked file.
 - Status: resolved on branch `ci/macos-identity`: `/dist/` is in `.gitignore`, and the release job fails unless `go version -m` of every binary shows `vcs.modified=false`.
+
+### 2026-11-26 · bug · A9.27 failed once on Linux: P2 held a later member row than the export
+
+- Symptom: CI run 45794186246 (`test`, Linux, PR #421, `batch/1126-i` 5ebd10ee7), A9.27 `Then P2 is home and has the exported rows`: `group rows differ`. One row differs: the secretary's member row, exported as seq 23 with `"path":"local"`, was seq 32 with `"path":"direct"` on P2. macOS and Windows of the same run passed.
+- Cause: the fixture, not the product. `group export --to P2` makes P1's host dial P2 at once (P1's `home.dial` to P2 in the run's log is in the same millisecond as P2's host leaving P1); once the import installs the group, P1 attaches and its host reports member status with the path it now has, `direct` (`hevUpdatedAI`, `internal/home/cmd_hostev.go:170`), as it should. P2 serves the group from the moment the import ends, so `compareRows` (`features/s2_export_test.go:414`) asked for the file's rows byte for byte at a moment when any connected host may already have written a later version. On the Linux runner P1's status (P2 `cmd.reply ... t=member/status`) landed before the step read P2's database. Batch I (pairing, release build) is not involved: it touches neither the home nor the hosts; the same race is on `rebuild`.
+- Status: resolved on branch `fix/a927-rows`. `compareRows` replaces each row whose seq is above every seq of the export by the export's row of the same type and id (`s2RowsAtCut`), so a later version of an exported row passes, while a changed row with an exported seq, a missing row or a new row still fail. It is shared by A9.27, A9.28 and the copy check on P1, where hosts write the same way. Proof: a probe that waits in `checkRows` until P2 holds the secretary's `direct` status failed 3 of 3 with the old comparison, with the CI's diff, and passed 3 of 3 with the new one.
 
 ### 2026-11-26 · bug · FLAKY-34: A7.4 failed once: the test browser dropped the interactive CLI's first output
 
