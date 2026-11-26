@@ -224,7 +224,7 @@ func (w *homeSyncWorld) cmdForget(_ *home.State, c home.Command) (home.Result, *
 func (w *homeSyncWorld) cmdTouchTask(s *home.State, _ home.Command) (home.Result, *home.Refusal) {
 	task := proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: "task-live"}, Group: s.ID, Num: 1,
-		Title: "Sync", Origin: "direct", State: "active", Step: "branch",
+		Title: "Sync", Origin: "direct", State: "active", Step: "work",
 		Assignee: w.aiID, Pass: 90, Depends: []string{}, Stats: proto.TaskStats{Started: w.now.UnixMilli()}, Created: w.now.UnixMilli(),
 	}
 	return home.Result{Rows: []home.Row{home.RowOf(task)}}, nil

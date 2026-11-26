@@ -37,6 +37,7 @@ type s2BrowserView struct {
 	devices map[string]proto.DeviceRow
 	taskID  proto.ID
 	texts   map[string]bool
+	ais     []string
 	gone    map[[2]string]bool
 }
 
@@ -91,6 +92,10 @@ func (v *s2BrowserView) recordMember(elem json.RawMessage) {
 	var hum proto.HumanMemberRow
 	if proto.Decode(elem, &hum) == nil && hum.Kind == "human" {
 		v.humans[hum.ID] = hum
+	}
+	var ai proto.AIMemberRow
+	if proto.Decode(elem, &ai) == nil && ai.Kind == "ai" {
+		v.ais = append(v.ais, ai.Name)
 	}
 }
 
@@ -173,6 +178,7 @@ func s2PeopleSteps(sc *godog.ScenarioContext, f fixtures) {
 	registerS2PeopleA91A92Steps(sc, w)
 	registerS2PeopleA93A94Steps(sc, w)
 	registerS2PeopleA95A96Steps(sc, w)
+	registerS2PeopleGroupSteps(sc, w)
 }
 
 func registerS2PeopleA91A92Steps(sc *godog.ScenarioContext, w *s2PeopleWorld) {
@@ -217,7 +223,7 @@ func registerS2PeopleA93A94Steps(sc *godog.ScenarioContext, w *s2PeopleWorld) {
 func registerS2PeopleA95A96Steps(sc *godog.ScenarioContext, w *s2PeopleWorld) {
 	sc.Step(`^the people cast where P's group "([^"]*)" on P1 has a secretary, P also has group "([^"]*)" and Q has joined only the first as "([^"]*)"$`, w.givenCastWithSecretaryAndQ)
 	sc.Step(`^Q1 joins Q-team to the people group with host\.join$`, w.q1JoinsQTeam)
-	sc.Step(`^Q-team's member row has host Q1 and user Q and Q1 holds a Git clone$`, w.verifyQTeamRowAndClone)
+	sc.Step(`^Q-team's member row has host Q1, user Q and the folder Q chose as its workspace$`, w.verifyQTeamRowAndClone)
 	sc.Step(`^Q's host\.join to Q1 for P's other group is refused with "([^"]*)"$`, w.verifyNonMemberHostAddAIRefused)
 	sc.Step(`^host\.join from Q with secretary true while the group has a secretary is refused with "([^"]*)"$`, w.verifyQSecretaryJoinRefused)
 

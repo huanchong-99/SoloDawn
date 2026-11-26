@@ -19,11 +19,10 @@ func init() {
 		sc.Step(`^the profile owner sets model "([^"]*)", effort "([^"]*)", tier "([^"]*)" and skills "([^"]*)"$`, w.edit)
 		sc.Step(`^the AI's host is forbidden to set its tier$`, w.hostEdit)
 		sc.Step(`^the profile owner cannot set tier "([^"]*)"$`, w.invalidTier)
-		sc.Step(`^a profile task with forge "([^"]*)" and secretary tier "([^"]*)"$`, w.taskWithSecretary)
+		sc.Step(`^a profile task with secretary tier "([^"]*)"$`, w.taskWithSecretary)
 		sc.Step(`^the profile assignee has called the secretary in the task thread$`, w.callSecretary)
 		sc.Step(`^the profile secretary answers the call$`, w.answerCall)
 		sc.Step(`^the profile task (fails|passes) review on "([^"]*)"$`, w.review)
-		sc.Step(`^the profile task (fails|passes) hosted checks on "([^"]*)"$`, rewritten("AC-3", "hosted checks are removed: the halves of A10.11 and A10.12 on two failed hosted checks go (MODEL-1126 plan 3.2)"))
 		sc.Step(`^the profile task is stuck on "([^"]*)" at (\d+) with ask (true|false)$`, w.stuck)
 		sc.Step(`^the profile task has no stuck counter$`, w.notStuck)
 		sc.Step(`^the profile home refuses submission of "([^"]*)" until the assignee asks$`, w.refuseSubmit)
@@ -85,7 +84,7 @@ func (w *homeProfileWorld) invalidTier(tier string) error {
 	return w.set(w.ownerKey, proto.ProfileSet{Tier: &tier}, "bad_request")
 }
 
-func (w *homeProfileWorld) taskWithSecretary(_, tier string) error {
+func (w *homeProfileWorld) taskWithSecretary(tier string) error {
 	if err := w.setup(); err != nil {
 		return err
 	}

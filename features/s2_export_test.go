@@ -58,6 +58,9 @@ func s2ExportSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^P1 is stopped and its data directory is deleted$`, w.deleteOldHome)
 	sc.Step(`^Q follows an invitation from P2 and join succeeds without adding a member row$`, w.restoreMember)
 	sc.Step(`^Q's browser peer and Q1 use P2 as the restored home$`, w.followRestored)
+	sc.Step(`^P takes a copy on P1 that carries the schema version of v3\.0\.0-rc\.1$`, w.rc1Copy)
+	sc.Step(`^importing that copy on P2 is refused in one line that says it was written by another version$`, w.rc1Refused)
+	sc.Step(`^P2 holds no row of the group$`, w.p2HoldsNothing)
 }
 
 func (w *s2ExportWorld) group(name string) error {
@@ -561,6 +564,38 @@ func (w *s2ExportWorld) checkDelivery() error {
 		"SELECT count(*) FROM inbox WHERE g=? AND ai=? AND msg=? AND why='mention'", w.g, w.qTeam, w.mention)
 	if err != nil || !reflect.DeepEqual(pending, [][]any{{int64(0)}}) {
 		return fmt.Errorf("P2 pending copies = %v, want 0: %v", pending, err)
+	}
+	return nil
+}
+
+// rc1Copy exports the group and gives the file the schema version an export
+// of v3.0.0-rc.1 has: 0, as rc.1 set none (contracts/step-2/export.md section 5).
+func (w *s2ExportWorld) rc1Copy() error {
+	if err := w.export("rc1.db"); err != nil {
+		return err
+	}
+	db, err := sql.Open("sqlite", w.file)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(w.c.Ctx, "PRAGMA user_version=0")
+	return err
+}
+
+func (w *s2ExportWorld) rc1Refused() error {
+	out, err := w.local(w.c.P2, "group", "import", w.file)
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || strings.Contains(out, "\n") || !strings.Contains(out, "written by another version of SoloDawn") {
+		return fmt.Errorf("import of the rc.1 file: want a nonzero exit and one line that names the version; got %v: %q", err, out)
+	}
+	return nil
+}
+
+func (w *s2ExportWorld) p2HoldsNothing() error {
+	rows, err := w.groupRows(s2ExportDB(w.c.P2))
+	if err != nil || len(rows) != 0 {
+		return fmt.Errorf("P2 holds %d rows of the group (%v)", len(rows), err)
 	}
 	return nil
 }

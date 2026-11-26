@@ -60,7 +60,7 @@ func init() {
 			}
 			env := key.Sign(string(raw))
 			if joining == nil {
-				w.last, err = home.Commands.Apply(w.state, homePeopleDisk{Disk: w.store, other: otherGroup}, w.store, env, w.now)
+				w.last, err = home.Commands.Apply(w.state, homePeopleDisk{Disk: w.store, other: otherGroup, logs: w.state.Logs}, w.store, env, w.now)
 			} else {
 				c := home.Command{Env: env, Disk: w.store, Joining: joining, Now: w.now.UnixMilli(), Who: home.Who{Device: key.ID(), User: joining.Log.User}}
 				if err = json.Unmarshal(raw, &c.PayloadHeader); err != nil {
@@ -135,6 +135,24 @@ func init() {
 			return apply("visitor", proto.MemberCommand{HomeCommand: proto.HomeCommand{Type: "member", Nonce: w.nextID("leave"), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.state.ID)}, Op: "remove", ID: proto.ID(member)}, nil)
 		})
 		sc.Step(`^the visitor also belongs to another group homed here$`, func() { otherGroup = true })
+		addPerson := func(user, name string) error {
+			p := proto.MemberAddPerson{HomeCommand: proto.HomeCommand{Type: "member", Nonce: w.nextID("add " + name), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.state.ID)}, Op: "add_person", User: user, Name: name}
+			if member == "" {
+				member = string(p.Nonce)
+			}
+			return apply("owner", p, nil)
+		}
+		sc.Step(`^the owner adds the visitor with add_person as "([^"]*)"$`, func(name string) error { return addPerson(w.guest.ID(), name) })
+		sc.Step(`^the owner adds a person this home does not know with add_person$`, func() error { return addPerson(exampleKey("people stranger").ID(), "stranger") })
+		sc.Step(`^the people command answers "([^"]*)"$`, func(code string) error {
+			if w.last.Answer.Code != code {
+				return fmt.Errorf("answer is %+v (%s), want %q", w.last.Answer, w.last.Msg, code)
+			}
+			return nil
+		})
+		sc.Step(`^the visitor is a member with one device row per entry of their log and a joined message by the owner$`, func() error {
+			return w.checkAdded(member)
+		})
 		sc.Step(`^only this group's device rows and device log are retired$`, func() error {
 			if !w.last.Answer.OK || len(w.last.Rows) != 3 || len(w.last.Writes) != 0 || w.state.Logs[w.guest.ID()] != nil {
 				return fmt.Errorf("unexpected group-local removal: %+v", w.last)
@@ -162,9 +180,47 @@ func init() {
 	}
 }
 
+// checkAdded checks what an accepted add_person wrote: the member row, one
+// device row per entry of the person's log, and member_joined by the owner.
+func (w *homeGroupWorld) checkAdded(member string) error {
+	person, rows := w.state.People[member], 2+len(w.state.Logs[w.guest.ID()].Entries)
+	got := [6]any{w.last.Answer.OK, w.last.GroupsChanged, w.last.InviteUsed, len(w.last.Rows), person.Role, person.User}
+	if got != [6]any{true, true, false, rows, "member", w.guest.ID()} {
+		return fmt.Errorf("unexpected add_person result: %+v", w.last)
+	}
+	var body proto.MemberJoinedBody
+	if err := json.Unmarshal(w.last.Rows[rows-1].Value().(proto.MsgRow).Body, &body); err != nil {
+		return err
+	}
+	want := proto.MemberJoinedBody{SystemCode: proto.SystemCode{Code: "member_joined"}, Member: member, By: w.ownerMember()}
+	if body != want {
+		return fmt.Errorf("joined body %+v, want %+v", body, want)
+	}
+	return nil
+}
+
+func (w *homeGroupWorld) ownerMember() string {
+	for id, person := range w.state.People {
+		if person.Role == "owner" {
+			return id
+		}
+	}
+	return ""
+}
+
 type homePeopleDisk struct {
 	home.Disk
 	other bool
+	logs  map[string]*identity.Log
 }
 
 func (d homePeopleDisk) OtherMember(string) bool { return d.other }
+
+// DeviceLog is the log the node holds of a person who is a member of another
+// group homed here.
+func (d homePeopleDisk) DeviceLog(user string) []proto.Envelope {
+	if log := d.logs[user]; d.other && log != nil {
+		return log.Entries
+	}
+	return nil
+}

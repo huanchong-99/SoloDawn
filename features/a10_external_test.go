@@ -22,9 +22,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// externalNoClone is what the steps that MODEL-1126 took away say when they fail.
-const externalNoClone = "every hand-out names the folder X was added with, not a project clone (MODEL-1126 plan 3.3, A10.18)"
-
 func init() { stepSets["a10_external"] = externalSteps }
 
 type externalWorld struct {
@@ -36,7 +33,6 @@ type externalWorld struct {
 	usageTime       time.Time
 	usagePct        int
 	approval        <-chan error
-	folder          string
 	heldMsg         proto.ID
 	interruptDetail string
 }
@@ -408,7 +404,12 @@ func externalRunnerSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^the external owner removes X$`, w.remove)
 	sc.Step(`^an external look rejects an unknown member$`, func() error { return w.missingWait(string(exampleID("unknown external"))) })
 	sc.Step(`^an external look rejects the removed member$`, func() error { return w.missingWait(w.aiByName["X"].ID) })
-	sc.Step(`^the external handout folder is the project clone$`, rewritten("AC-3", externalNoClone))
+	sc.Step(`^the external handout folder is the folder X was added with$`, func() error {
+		if w.run.Folder != w.aiByName["X"].Workspace {
+			return fmt.Errorf("handout folder %q, want X's workspace %q", w.run.Folder, w.aiByName["X"].Workspace)
+		}
+		return nil
+	})
 	sc.Step(`^the "([^"]+)" runs (\d+) queued external items(?:, with the second mention arriving while X is working on the first)?$`, w.runQueued)
 }
 

@@ -156,7 +156,7 @@ func (w *homePostWorld) writeInitialRows(tx *store.Tx, b1, node, host, guest ide
 	rows = append(rows, home.RowOf(proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.task}, Group: w.group, Num: 1, Title: "Show path",
 		Origin: "brief", Brief: string(exampleID("post brief")),
-		State: "active", Step: "local_check", Assignee: w.members["ai-one"], Reviewer: w.members["ai-two"],
+		State: "active", Step: "work", Assignee: w.members["ai-one"], Reviewer: w.members["ai-two"],
 		Pass: 90, Depends: []string{}, Stats: proto.TaskStats{Started: ms}, Created: ms,
 	}))
 	return w.putSeeded(tx, rows, ms)

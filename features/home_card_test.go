@@ -108,6 +108,8 @@ func homeCardSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the card home answers "([^"]*)"$`, w.checkAnswer)
 	sc.Step(`^the approval card is "([^"]*)" with command "([^"]*)"$`, w.checkApprovalCmd)
 	sc.Step(`^the approval card is "([^"]*)" by "([^"]*)"$`, w.checkApprovalBy)
+	sc.Step(`^(the owner|the secretary) gives the card task to "([^"]*)"$`, w.reassign)
+	sc.Step(`^the approval card ended "([^"]*)" by "([^"]*)"$`, w.checkEndedBy)
 	sc.Step(`^the decision card is "([^"]*)" with choice "([^"]*)" and text "([^"]*)"$`, func(status, choice, text string) error {
 		return w.checkDecision(status, &choice, &text)
 	})
@@ -165,7 +167,7 @@ func (w *homeCardWorld) setup(assignee string) error {
 	w.state.Tasks[w.taskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.taskID, Seq: 7}, Group: group, Num: 1,
 		Title: "Install browser tests", Origin: "brief",
-		State: "active", Step: "local_check", Assignee: w.members[assignee], Reviewer: w.members["ai-two"],
+		State: "active", Step: "work", Assignee: w.members[assignee], Reviewer: w.members["ai-two"],
 		Pass: 90, Depends: []string{}, Created: w.now.UnixMilli() - 5000, Stats: proto.TaskStats{Started: w.now.UnixMilli() - 5000},
 	}
 	w.state.Seq, w.state.Num = 7, 1
@@ -283,6 +285,35 @@ func (w *homeCardWorld) checkApprovalCmd(status, command string) error {
 func (w *homeCardWorld) checkApprovalBy(status, who string) error {
 	card, by, at := w.disk[w.approval], w.members[who], w.now.UnixMilli()
 	want := &proto.CardState{Status: status, By: &by, At: &at, Act: &w.lastAct}
+	if !reflect.DeepEqual(card.State, want) {
+		return fmt.Errorf("approval card state %+v; want %+v", card.State, want)
+	}
+	return nil
+}
+
+// reassign is task assign of the card's task, by the owner's first browser
+// or by the secretary's host.
+func (w *homeCardWorld) reassign(who, ai string) error {
+	by, as := w.devices["first"], proto.ID("")
+	if who == "the secretary" {
+		by, as = w.devices["host"], proto.ID(w.members["secretary"])
+	}
+	p := proto.TaskAssign{TaskCommand: proto.TaskCommand{
+		HomeCommand: proto.HomeCommand{Type: "task", Nonce: w.freshNonce(), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.state.ID), As: as},
+		Op:          "assign", ID: proto.ID(w.taskID),
+	}, Assignee: proto.ID(w.members[ai])}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	return w.apply(by.Sign(string(raw)))
+}
+
+// checkEndedBy checks the state of an approval card that a command ended: no
+// act, the member who sent it, and the time.
+func (w *homeCardWorld) checkEndedBy(status, who string) error {
+	card, by, at := w.disk[w.approval], w.members[who], w.now.UnixMilli()
+	want := &proto.CardState{Status: status, By: &by, At: &at}
 	if !reflect.DeepEqual(card.State, want) {
 		return fmt.Errorf("approval card state %+v; want %+v", card.State, want)
 	}

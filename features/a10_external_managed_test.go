@@ -201,7 +201,8 @@ func (w *externalWorld) checkSecretaryInput(state, usage string) error {
 		return err
 	}
 	defer f.Close()
-	prefix := fmt.Sprintf(`- "X" · external (ZCode) on %s · standard · %s`, w.aiByName["X"].HostName, state)
+	x := w.aiByName["X"]
+	prefix := fmt.Sprintf(`- "X" · external (ZCode) on %s · %s · standard · %s`, x.HostName, x.Workspace, state)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		if externalRosterLine(scanner.Bytes(), prefix, usage) {
@@ -234,6 +235,44 @@ func externalRosterMatches(line, prefix, usage string) bool {
 		want += " · " + usage
 	}
 	return line == want+" · "+externalRosterSkills
+}
+
+func (w *externalWorld) runBrief(role string) error {
+	return s3Run(func() error { return w.startBrief(role) }, func() error { return w.handleBriefRun(role) })
+}
+
+func (w *externalWorld) handleBriefRun(role string) error {
+	if role == "reviewer" {
+		return s3Run(w.awaitBriefHandout, func() error { return w.handout("review", "External work") }, w.reviewElsewhere)
+	}
+	return s3Run(w.awaitBriefHandout, func() error { return w.handout("task", "External work") }, w.workInFolder,
+		func() error { return w.tool("submit_task", `{"summary":"External task complete"}`, "ok") },
+		func() error { return w.end(w.run.Run) })
+}
+
+// workInFolder checks that X's task run is in the folder X was added with
+// and carries the brief, and leaves X's work there.
+func (w *externalWorld) workInFolder() error {
+	if w.run.Folder != w.aiByName["X"].Workspace || !strings.Contains(w.run.Context, externalCriteria) {
+		return fmt.Errorf("task run in %q with context %q, want X's folder %q and the brief's criteria", w.run.Folder, w.run.Context, w.aiByName["X"].Workspace)
+	}
+	return os.WriteFile(filepath.Join(w.run.Folder, "external.txt"), []byte("External result\n"), 0o600)
+}
+
+// reviewElsewhere checks that X's review run is in X's own folder and says
+// where the managed AI's work is, then posts a passing review.
+func (w *externalWorld) reviewElsewhere() error {
+	m := w.aiByName["M"]
+	where := fmt.Sprintf("Work: by %q on %s, in %s\nThe work is in another folder on this computer.", m.Name, m.HostName, m.Workspace)
+	if w.run.Folder != w.aiByName["X"].Workspace || !strings.Contains(w.run.Text, where) {
+		return fmt.Errorf("review run in %q with text %q, want X's folder %q and %q", w.run.Folder, w.run.Text, w.aiByName["X"].Workspace, where)
+	}
+	return s3Run(func() error { return w.tool("submit_review", `{"score":100,"items":[]}`, "ok") },
+		func() error { return w.end(w.run.Run) })
+}
+
+func (w *externalWorld) taskDone() error {
+	return w.waitExternalPush("the external task to be done", func() bool { return w.currentTask().State == "done" })
 }
 
 func (w *externalWorld) startBrief(role string) error {

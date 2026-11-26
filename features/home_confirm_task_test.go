@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
+	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -46,36 +47,20 @@ func homeRoleSteps(sc *godog.ScenarioContext) {
 	brief := func(reviewer bool) error {
 		a, r := other(), w.members["ai-two"]
 		if reviewer {
-			a, r = w.members["ai-one"], other()
+			a, r = w.members["ai-two"], other()
 		}
 		body := proto.BriefBody{Title: "Check ports", Goal: "Find the port", Criteria: []string{"Port is documented"},
 			Scope: proto.BriefScope{In: []string{"socket"}, Out: []string{}}, Pass: 90, Requester: w.members["owner"],
 			Tasks: []proto.BriefTask{{Title: "Read ports", Assignee: a, Reviewer: r, Depends: []int{}}, {Title: "Write ports", Assignee: a, Reviewer: r, Depends: []int{0}}},
 		}
-		p := proto.Post[proto.BriefBody]{HomeCommand: w.command("post", w.members["secretary"]), Kind: "brief", Mentions: []proto.ID{}, Body: body}
-		if err := w.send(w.devices["host"], p); err != nil {
+		if err := w.postAndConfirm(body); err != nil {
 			return err
 		}
-		if err := w.checkAnswer(""); err != nil {
-			return err
-		}
-		act := proto.Act{HomeCommand: w.command("act", ""), Msg: p.Nonce, Action: "confirm"}
-		if err := w.send(w.devices["first"], act); err != nil {
-			return err
-		}
-		if err := w.checkAnswer(""); err != nil {
-			return err
-		}
-		for _, row := range w.answers[len(w.answers)-1].Rows {
-			if task, ok := row.Value().(proto.TaskRow); ok {
-				if task.State == "active" {
-					active = task.ID
-				} else {
-					dependent = task.ID
-				}
-			}
-		}
+		active, dependent = homeRoleTasks(w.answers[len(w.answers)-1].Rows)
 		roleCard = w.card
+		if active == "" {
+			return fmt.Errorf("the brief started no task")
+		}
 		return nil
 	}
 	sc.Step(`^the first owner confirms a brief assigning two tasks to the other AI$`, func() error { return brief(false) })
@@ -175,5 +160,46 @@ func homeRoleSteps(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the assignee submits passing local checks$`, rewritten("AC-3", "a task is submitted by a post of kind report: there is no branch, check or submitted command (MODEL-1126 plan 1.6)"))
+	sc.Step(`^the assignee submits its report$`, func() error {
+		taskID := proto.ID(active)
+		p := proto.Post[proto.EmptyBody]{HomeCommand: w.command("post", w.state.Tasks[active].Assignee), Kind: "report", Thread: &taskID, Text: "Ready.", Mentions: []proto.ID{}, Body: proto.EmptyBody{}}
+		if err := w.send(w.devices["host"], p); err != nil {
+			return err
+		}
+		return w.checkAnswer("")
+	})
+	sc.Step(`^the first owner cancels the role task$`, func() error {
+		if err := w.send(w.devices["first"], taskCmd("cancel")); err != nil {
+			return err
+		}
+		return w.checkAnswer("")
+	})
+}
+
+// homeRoleTasks are the task the confirmation of a brief started and the one
+// it queued.
+func homeRoleTasks(rows []home.Row) (active, queued string) {
+	for _, row := range rows {
+		if task, ok := row.Value().(proto.TaskRow); ok && task.State == "active" {
+			active = task.ID
+		} else if ok {
+			queued = task.ID
+		}
+	}
+	return active, queued
+}
+
+// postAndConfirm has the secretary post the brief and the first owner confirm it.
+func (w *homeConfirmWorld) postAndConfirm(body proto.BriefBody) error {
+	p := proto.Post[proto.BriefBody]{HomeCommand: w.command("post", w.members["secretary"]), Kind: "brief", Mentions: []proto.ID{}, Body: body}
+	if err := w.send(w.devices["host"], p); err != nil {
+		return err
+	}
+	if err := w.checkAnswer(""); err != nil {
+		return err
+	}
+	if err := w.send(w.devices["first"], proto.Act{HomeCommand: w.command("act", ""), Msg: p.Nonce, Action: "confirm"}); err != nil {
+		return err
+	}
+	return w.checkAnswer("")
 }

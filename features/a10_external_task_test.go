@@ -22,18 +22,15 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// externalNoMerge is what the steps that MODEL-1126 took away say when they fail.
-const externalNoMerge = "a task runs in its assignee's workspace and is done when its review passes: no worktree, branch, checks or merge (MODEL-1126 plan 1.5, 1.6, A10.22)"
-
 const externalCriteria = "External criteria"
 
 func externalTaskSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^the external home rejects a non-owner tool edit$`, w.nonOwnerEdit)
-	sc.Step(`^a project with external X and forge "([^"]+)"$`, w.setupForge)
-	sc.Step(`^the external brief runs with X as "([^"]+)"$`, rewritten("AC-3", externalNoMerge))
+	sc.Step(`^a project with external X$`, w.setupX)
+	sc.Step(`^the external brief runs with X as "([^"]+)"$`, w.runBrief)
 	sc.Step(`^X takes the task of an external brief$`, w.takeBrief)
 	sc.Step(`^X's "([^"]+)" post "([^"]+)" appears in the external task's thread$`, w.inTaskThread)
-	sc.Step(`^the external task merges and its worktree is removed$`, rewritten("AC-3", externalNoMerge))
+	sc.Step(`^the external task is done$`, w.taskDone)
 	sc.Step(`^X starts an external task from the group run$`, w.startTask)
 	sc.Step(`^an external task run$`, w.takeTask)
 	sc.Step(`^an external task run and a managed secretary$`, w.takeTaskWithSecretary)
@@ -54,10 +51,6 @@ func externalTaskSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^removal is refused until the external task is reassigned$`, w.reassign)
 	sc.Step(`^the external member is gone and its MCP connection closes$`, w.revoked)
 	externalManagedSteps(sc, w)
-}
-
-func (w *externalWorld) setupForge(string) error {
-	return s3Run(w.setupProject, func() error { return w.join("X", "api_key", "ZCode") })
 }
 
 func (w *externalWorld) nonOwnerEdit() error {

@@ -2130,3 +2130,9 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 
 - Cause: device rows of one log have distinct versions from 1 (`planning/contracts/envelope.md` section 4), so `>=` chose the same row. A revoked device is never added again, so the latest entry is a revoke exactly when there is one.
 - Status: resolved. `watchDeviceUser` returns no user when the device has a revoke and otherwise the user of its add, with no version comparison.
+
+### 2026-11-27 · bug · An external AI's first review run cannot be handed out: "report not found"
+
+- Symptom: with X external and the reviewer of a task, `solodawn wait --member X` exits 1 with `not_found: report not found` once the assignee has submitted (`features/a10_external.feature`, the reviewer example of A10.22 and "Two tasks run from brief to done with X as one of the two AIs").
+- Cause: `extHandOut` (`internal/host/external.go:310`) composes the hand-out's context with `Compose(h, s, ReplacedTurn, nil)` before `commitTurnItems` records the item's report on the session (`noteReport`, `internal/host/deliver.go:1377-1389`). For a new review session `s.Report` is empty, so `replacedSessionLines` (`internal/host/turn.go:822`) fetches the message with id "" and fails.
+- Status: open; reported to the coordinator by AC-3. The two scenarios stay as written and fail until the host is fixed.

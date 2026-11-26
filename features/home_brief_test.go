@@ -19,9 +19,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-// homeNoMerge is what the steps that MODEL-1126 took away say when they fail.
-const homeNoMerge = "a task is done when its review passes, and the tasks that wait for it are released then: there is no merge (MODEL-1126 plan 1.6)"
-
 func init() {
 	stepSets["home_brief"] = func(sc *godog.ScenarioContext, _ fixtures) { homeBriefSteps(sc) }
 }
@@ -100,18 +97,18 @@ func homeBriefSteps(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^the home holds no task$`, func() error { return w.holds(0) })
 	sc.Step(`^the home holds (\d+) tasks$`, w.holds)
-	sc.Step(`^task 1 is "active" and task 2 is "queued" until task 1 is merged$`, w.dependent)
+	sc.Step(`^task 1 is "active" and task 2 is "queued" until task 1 is done$`, w.dependent)
 	sc.Step(`^the home has queued "([^"]*)"$`, func(items string) error {
 		return w.queued(strings.Split(items, ", "))
 	})
 	sc.Step(`^the secretary gives task 2 to "([^"]*)" while it is queued$`, w.reassign)
-	sc.Step(`^task 2 is "queued" and the home has queued nothing that makes a worktree$`, w.stillQueued)
-	sc.Step(`^task 1 is merged$`, rewritten("AC-3", homeNoMerge))
-	sc.Step(`^task 2 is "active" and the home has queued "([^"]*)"$`, func(item string) error {
-		if task := w.task(2); task.State != "active" || task.Wait != nil {
-			return fmt.Errorf("task 2 is %s, waiting for %+v", task.State, task.Wait)
+	sc.Step(`^task 2 is "queued" and the home has queued no work item$`, w.stillQueued)
+	sc.Step(`^(\d+) minutes pass and task 1 is done$`, w.done)
+	sc.Step(`^task 2 is "active", started when task 1 was done, and the home has queued "([^"]*)"$`, func(items string) error {
+		if task := w.task(2); task.State != "active" || task.Wait != nil || task.Stats.Started != w.now.UnixMilli() {
+			return fmt.Errorf("task 2 is %s, waiting for %+v, started at %d", task.State, task.Wait, task.Stats.Started)
 		}
-		return w.queued([]string{item})
+		return w.queued(strings.Split(items, ", "))
 	})
 }
 
@@ -313,16 +310,45 @@ func (w *homeBriefWorld) reassign(name string) error {
 	return nil
 }
 
-// stillQueued checks that task 2 is queued and that nothing was queued that
-// a host answers with a worktree: no work item at all.
+// stillQueued checks that task 2 is queued and that no work item was queued.
 func (w *homeBriefWorld) stillQueued() error {
 	if task := w.task(2); task.State != "queued" || task.Assignee != w.members["ai-three"] {
 		return fmt.Errorf("task 2 is %s for %s", task.State, w.name(task.Assignee))
 	}
 	for _, it := range w.items {
-		if slices.Contains([]string{"assign", "checks", "reviewed", "review", "resume", "merge"}, it.Why) {
+		if slices.Contains([]string{"assign", "reviewed", "review", "resume"}, it.Why) {
 			return fmt.Errorf("queued %+v", it)
 		}
 	}
 	return nil
+}
+
+// done lets the clock run, then task 1's assignee submits a report and its
+// reviewer passes it.
+func (w *homeBriefWorld) done(minutes int) error {
+	w.now = w.now.Add(time.Duration(minutes) * time.Minute)
+	task, laptop := w.task(1), w.keys["the owner's laptop"]
+	tid, report := proto.ID(task.ID), w.id()
+	header := func(nonce proto.ID, as string) proto.HomeCommand {
+		return proto.HomeCommand{Type: "post", Nonce: nonce, Timestamp: w.now.UnixMilli(), Group: proto.ID(w.state.ID), As: proto.ID(as)}
+	}
+	submit := proto.Post[proto.EmptyBody]{HomeCommand: header(report, task.Assignee), Kind: "report", Thread: &tid, Text: "Done.", Mentions: []proto.ID{}, Body: proto.EmptyBody{}}
+	if err := w.signed(laptop, submit); err != nil {
+		return err
+	}
+	w.items = nil
+	review := proto.Post[proto.ReviewSigned]{HomeCommand: header(w.id(), task.Reviewer), Kind: "review", Thread: &tid, Mentions: []proto.ID{},
+		Body: proto.ReviewSigned{Task: tid, Report: report, Score: 95, Items: []proto.ReviewItem{}}}
+	if err := w.signed(laptop, review); err != nil {
+		return err
+	}
+	return w.answered(1, "")
+}
+
+func (w *homeBriefWorld) signed(by identity.Key, payload any) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return w.send(by.Sign(string(raw)))
 }

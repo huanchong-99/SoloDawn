@@ -25,3 +25,13 @@ Feature: People join and leave a home group
     And the visitor also belongs to another group homed here
     And the visitor leaves the people group
     Then only this group's device rows and device log are retired
+
+  Scenario: An admin adds a person of another group on this home without an invitation (A9.46 home half)
+    Given a people home with an invited visitor
+    And the visitor also belongs to another group homed here
+    When the owner adds the visitor with add_person as "visitor"
+    Then the visitor is a member with one device row per entry of their log and a joined message by the owner
+    When the owner adds the visitor with add_person as "visitor again"
+    Then the people command answers "conflict"
+    When the owner adds a person this home does not know with add_person
+    Then the people command answers "not_found"
