@@ -18,7 +18,9 @@ DELETE FROM row WHERE r='msg' AND gone=0 AND keep=0 AND pending=0 AND ts<:cut
     AND (row.id=t.id OR row.id=t.data->>'brief'
       OR (row.data->>'kind'='confirm' AND row.data->>'$.body.what'='direct'
         AND (row.data->>'re'=t.id OR row.data->>'re'=t.data->>'brief'))));
-DELETE FROM row WHERE r='task' AND final=1 AND mt<:cut;
+DELETE FROM row WHERE r='task' AND final=1 AND mt<:cut
+  AND NOT EXISTS (SELECT 1 FROM row AS t, json_each(t.data,'$.depends') AS d
+    WHERE t.g=row.g AND t.r='task' AND t.final=0 AND d.value=row.id);
 DELETE FROM inbox WHERE created<:cut;
 DELETE FROM audit WHERE ts<:cut;
 DELETE FROM usage WHERE day<:day;
