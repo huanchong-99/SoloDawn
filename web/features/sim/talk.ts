@@ -107,7 +107,7 @@ export class Talk extends Scene {
   }
 
   /** What a brief says: a title and goal from the request, the person's note when the brief is
-   *  written again, and two tasks for the two AIs, each reviewed by the other. */
+   *  written again, and three tasks for the two AIs, each reviewed by the other. */
   #body(g: string, text: string, note: string) {
     const [first, second] = this.#pair(g);
     const entry = (title: string, assignee: string, reviewer: string) => ({
@@ -117,9 +117,11 @@ export class Talk extends Scene {
       foundation: false,
       depends: [],
     });
+    // The third task is the first AI's again: it waits for that AI's folder.
     const tasks = [
       entry(`实现：${titleOf(text)}`, first.id, second.id),
       entry(words.testsTitle, second.id, first.id),
+      entry(words.docsTitle, first.id, second.id),
     ];
     const again = note
       ? { title: `${titleOf(text)}（已按意见修改）`, criteria: [...words.criteria, note] }
@@ -202,10 +204,10 @@ export class Talk extends Scene {
     });
   }
 
-  /** Task-machine row 16: the task the AI works on pauses for the message, unless it merges. */
+  /** Task-machine row 16: the task the AI works on pauses for the message. */
   #preempt(g: string, id: string, msgId: string) {
     const t = this.task(g, this.ai(g, id)?.task);
-    if (t?.assignee !== id || t.state !== 'active' || t.step === 'merge') return undefined;
+    if (t?.assignee !== id || t.state !== 'active') return undefined;
     this.setTask(g, t.id, { state: 'paused', wait: { kind: 'preempted', since: Date.now() } });
     const by = this.message(g, msgId)!.by;
     this.post('system', { g, by: 'system', thread: t.id }, { code: 'preempted', task: t.id, by });

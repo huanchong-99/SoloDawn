@@ -70,7 +70,7 @@ const turn = {
 const welcome: Omit<Welcome, 're'> = {
   t: 'welcome',
   ok: true,
-  v: 1,
+  v: 3,
   device: node,
   name: 'workstation',
   version: 'v0.3.1',
@@ -837,7 +837,7 @@ describe('hello', () => {
   it('says who the browser is and hands the welcome to a new listener', async () => {
     const { peer, pc, listen, listeners } = await served();
     expect(pc.ctl.frames()).toStrictEqual([
-      { t: 'hello', v: 2, kind: 'browser', name: 'phone browser', addrs: [], id: 1 },
+      { t: 'hello', v: 3, kind: 'browser', name: 'phone browser', addrs: [], id: 1 },
     ]);
     expect(listen).toHaveBeenCalledTimes(1);
     expect(listeners[0].online.mock.calls).toStrictEqual([[peer, { ...welcome, re: 1 }]]);
@@ -856,33 +856,14 @@ describe('hello', () => {
     await expect(greeted).rejects.toThrow(new Error('connection lost'));
   });
 
-  it('gives up a connection whose hello the node refuses', async () => {
+  it('gives up a connection whose hello the node refuses, and never asks with a lower version', async () => {
     const { pc, conn } = await opened();
     const greeted = conn.hello();
-    pc.ctl.deliver({ re: 1, err: { code: 'version', msg: 'too new' } });
-    await flush();
-    expect(pc.ctl.frames().at(-1)).toStrictEqual({
-      t: 'hello',
-      v: 1,
-      kind: 'browser',
-      name: 'phone browser',
-      addrs: [],
-      id: 2,
-    });
-    pc.ctl.deliver({ re: 2, err: { code: 'version', msg: 'unsupported' } });
+    pc.ctl.deliver({ re: 1, err: { code: 'version', msg: 'unsupported' } });
     await expect(greeted).rejects.toThrow(new Error('hello refused: version'));
+    expect(pc.ctl.frames().map((frame) => [frame.t, frame.v])).toEqual([['hello', 3]]);
     expect(pc.closes).toBe(1);
     expect(conn.refused).toBe('version');
-  });
-
-  it('uses the same connection when the node only supports v1', async () => {
-    const { pc, conn } = await opened();
-    const greeted = conn.hello();
-    pc.ctl.deliver({ re: 1, err: { code: 'version', msg: 'too new' } });
-    await flush();
-    pc.ctl.deliver({ ...welcome, re: 2 });
-    await expect(greeted).resolves.toStrictEqual({ ...welcome, re: 2 });
-    expect(pc.closes).toBe(0);
   });
 
   it('gives up a connection whose welcome it cannot read', async () => {

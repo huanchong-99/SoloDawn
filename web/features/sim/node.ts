@@ -1,7 +1,7 @@
 // One computer of the demo world, as a browser reaches it: the home of the groups it holds
 // (TestHome and ActHome of features/home.ts answer `sync`, `fetch`, `post`, `act` and the group
 // commands as planning/flows/sync.md says) and the host of the AIs that run on it, which answers
-// `hello`, `host.info`, `watch.start` and the host commands. What its AIs do is the director's.
+// `hello`, `host.info`, `host.workspaces`, `watch.start` and the host commands. What its AIs do is the director's.
 import type * as p from '../../src/lib/proto';
 import { ActHome } from '../home';
 import type { Fields } from './rows';
@@ -17,6 +17,8 @@ export interface NodeWorld {
   /** A command the node applied as a test home does, after its answer. */
   applied(node: SimNode, payload: Fields): void;
   info(node: SimNode): p.HostInfoPush;
+  /** The folders a CLI of the node was used in, newest first. */
+  workspaces(node: SimNode, agent: string): object;
   watchStart(node: SimNode, g: string, member: string): object;
   channel(node: SimNode, label: string): p.PtyChannel | undefined;
   heard(node: SimNode, frame: p.Devlog | p.PTYResize): void;
@@ -33,7 +35,7 @@ export interface NodeSpec {
   agents: Agent[];
 }
 
-type Request = { t: string; env?: p.Envelope; g?: string; member?: string };
+type Request = { t: string; env?: p.Envelope; g?: string; member?: string; agent?: string };
 type Base = (req: Fields) => Promise<unknown>;
 
 /** One connection of a browser to the node. */
@@ -111,6 +113,7 @@ export class SimNode extends ActHome {
   async #route(base: Base, req: Request): Promise<unknown> {
     if (req.t === 'hello') return this.#welcome(await base(req));
     if (req.t === 'host.info') return { ...this.#world.info(this), re: 0, ok: true };
+    if (req.t === 'host.workspaces') return { re: 0, ...this.#world.workspaces(this, req.agent!) };
     if (req.t === 'watch.start')
       return { re: 0, ...this.#world.watchStart(this, req.g!, req.member!) };
     const moved = this.moved.get(gOf(req));
@@ -120,7 +123,7 @@ export class SimNode extends ActHome {
 
   #welcome(answer: unknown) {
     const owner = this.owner === this.#world.me;
-    return { ...(answer as Fields), v: 2, device: this.device, owner, groups: this.listed() };
+    return { ...(answer as Fields), v: 3, device: this.device, owner, groups: this.listed() };
   }
 
   async #command(base: Base, req: Request) {

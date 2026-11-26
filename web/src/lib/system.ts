@@ -31,8 +31,7 @@ function removed(group: Group, name: string, by: string | undefined) {
     .replace('{who}', () => name);
 }
 
-// `cap_reached` is postponed: it is named by its code. `task_merged` is drawn by its row; this is
-// its line elsewhere.
+// `cap_reached` is postponed: it is named by its code.
 const words: { [B in Body as B['code']]?: Wording<B> } = {
   task_failed: (group, { reason, task }) =>
     t(`thread.sys.task_failed.${reason === 'review_rounds' ? reason : 'failures'}`).replace(
@@ -75,8 +74,7 @@ const words: { [B in Body as B['code']]?: Wording<B> } = {
       .replace('{who}', () => who(group, member)),
   member_removed: (group, { name, by }) => removed(group, name, by),
   no_secretary: () => t('thread.sys.no_secretary'),
-  task_merged: (group, { task }) =>
-    `${secretaryName(group)} ${t('thread.sys.task_merged').replace('{task}', taskTag(group, task))}`,
+  task_done: (group, { task }) => t('thread.sys.task_done').replace('{task}', taskTag(group, task)),
 };
 
 /** A notice in the reader's language. */

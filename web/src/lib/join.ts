@@ -274,7 +274,7 @@ async function admit(
   { device, log }: JoinOptions,
   next: (step: JoinError['step']) => void,
 ) {
-  if (welcome.v !== 2) throw new JoinError('hello', 'version');
+  if (welcome.v !== 3) throw new JoinError('hello', 'version');
   next('devlog');
   presentLog(ctl, log);
   next('join');

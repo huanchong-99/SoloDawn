@@ -30,25 +30,16 @@ export const limitFields: LimitField[] = [
   { key: 'ask_depth', per: 1, min: 0, max: 4 },
 ];
 
-/** The commands of a text with one on each line. */
-export const commandsIn = (text: string) =>
-  text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-
 const scaled = (limits: Limits, by: (value: number, per: number) => number) =>
   Object.fromEntries(limitFields.map(({ key, per }) => [key, by(limits[key], per)])) as Limits;
 
 /** The settings of a group as its dialog edits them. */
 export const draftOf = (info: GroupRow) => ({
   name: info.name,
-  checks: info.checks.join('\n'),
   pass: info.pass,
   pass_foundation: info.pass_foundation,
   limits: scaled(info.limits, (value, per) => value / per),
   secretary: info.secretary ?? '',
-  templates: structuredClone(info.templates),
 });
 
 type Draft = ReturnType<typeof draftOf>;
@@ -56,7 +47,6 @@ type Draft = ReturnType<typeof draftOf>;
 const fieldsOf = (draft: Draft) => ({
   ...draft,
   name: draft.name.trim(),
-  checks: commandsIn(draft.checks),
   limits: scaled(draft.limits, (value, per) => Math.round(value * per)),
 });
 

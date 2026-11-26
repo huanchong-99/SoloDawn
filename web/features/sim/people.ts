@@ -1,5 +1,6 @@
 // The people of the demo world and what they do (contracts/step-2/people.md, confirm.md,
-// watch-team.md): an invitation that Leo takes a moment later, roles, removing a person or an AI,
+// watch-team.md): an invitation that Leo takes a moment later, a person added to a new group who
+// says hello there, roles, removing a person or an AI,
 // changing a group or an AI, and the `confirm` cards by which an AI's owner lets it work for someone
 // else or lets someone watch its terminal. Mina is the other person; she answers by herself.
 import { newSecret, shown } from '../../src/lib/pairing';
@@ -23,7 +24,7 @@ const aiFields = [
   'skills',
   'tool',
 ];
-const groupFields = ['name', 'checks', 'pass', 'pass_foundation', 'limits', 'templates'];
+const groupFields = ['name', 'pass', 'pass_foundation', 'limits'];
 
 /** The address of the client in demo mode, with a fragment. */
 export const here = (fragment: string) => `${location.origin}${location.pathname}?demo${fragment}`;
@@ -36,7 +37,7 @@ export class People extends Scene {
   /** Whether an AI has work it cannot leave: it does or reviews a task that is not final. */
   #engaged(g: string, ai: string) {
     return this.tasksOf(g).some(
-      (t) => !['merged', 'cancelled'].includes(t.state) && (t.assignee === ai || t.reviewer === ai),
+      (t) => !['done', 'cancelled'].includes(t.state) && (t.assignee === ai || t.reviewer === ai),
     );
   }
 
@@ -62,6 +63,13 @@ export class People extends Scene {
       { code: 'member_joined', member: ids.leo, by: ids.me },
     );
     this.world.after(2500, () => this.post('text', { g, by: ids.leo, text: words.leoHello }));
+  }
+
+  /** After `member add_person`, which the home applied: the person says hello. */
+  added(g: string, payload: Fields) {
+    this.world.after(2500, () =>
+      this.post('text', { g, by: payload.n as string, text: words.addedHello }),
+    );
   }
 
   /** `join` from this browser: the person is a member of the group already. */

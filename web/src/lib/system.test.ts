@@ -3,7 +3,7 @@ import { Group, Home } from './groups.svelte';
 import { goldens } from './mock';
 import { prefs } from './prefs.svelte';
 import * as p from './proto';
-import { systemText, taskTag } from './system';
+import { secretaryName, systemText, taskTag } from './system';
 
 const g = 'rZNvy-1jH6Z-BcPqA5U5BQ';
 const task: string = JSON.parse(goldens['row-task']).id;
@@ -98,7 +98,7 @@ describe('systemText', () => {
     ],
     [{ code: 'member_removed', user: 'u', name: "$& $'" }, "$& $' left the group."],
     [{ code: 'no_secretary' }, 'This group has no secretary AI.'],
-    [{ code: 'task_merged', task, commit: 'a1', merge_commit: 'b2' }, 'Secretary AI merged T-12'],
+    [{ code: 'task_done', task }, 'T-12 passed review and is done'],
     [{ code: 'cap_reached', ai: codex, cap: 'day' }, 'cap_reached'],
   ])('words %j', (body, text) => expect(said(body)).toBe(text));
 
@@ -114,5 +114,13 @@ describe('taskTag', () => {
   it('is the number of a task that is held, and else the start of its id', () => {
     expect(taskTag(group, task)).toBe('T-12');
     expect(taskTag(group, 'DrtCn6htSBw')).toBe('DrtCn6h');
+  });
+});
+
+describe('secretaryName', () => {
+  it('is the name of the secretary, or the word for one while the group has none', () => {
+    expect(secretaryName(group)).toBe('Secretary AI');
+    group.apply([row('row-group', { id: g, secretary: codex })]);
+    expect(secretaryName(group)).toBe("Codex $& $'");
   });
 });

@@ -21,6 +21,7 @@
   "thread.checks.merge.ok": "Merge check passed",
   "thread.checks.merge.fail": "Merge conflict",
   "thread.sys.task_merged": "merged {task}",
+  "thread.sys.task_done": "{task} passed review and is done",
   "thread.sys.task_failed.failures": "Task {task} stopped after repeated failures.",
   "thread.sys.task_failed.review_rounds": "Task {task} stopped after repeated failed reviews.",
   "thread.sys.turn_interrupted.crash": "{ai}'s turn crashed.",

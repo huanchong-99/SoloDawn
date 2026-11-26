@@ -1,14 +1,15 @@
 // The demo computers as hosts of AIs (contracts/commands.md section 2, datachannel.md section 7):
-// `host.info`, the account type of a CLI, taking every AI of a computer offline and back, adding an
-// AI to a group and removing it, the pairing link of another browser, and the terminal of a
-// takeover with its hand-back (flows/takeover.md), which Mina asks to watch.
+// `host.info`, the folders each CLI was used in, the account type of a CLI, taking every AI of a
+// computer offline and back, adding an AI to a group with its folder and removing it, the pairing
+// link of another browser, and the terminal of a takeover with its hand-back (flows/takeover.md),
+// which Mina asks to watch.
 import type * as p from '../../src/lib/proto';
 import { newId } from '../../src/lib/groups.svelte';
 import { newSecret, shown } from '../../src/lib/pairing';
-import { words } from './content';
+import { folders, homeDirs, words } from './content';
 import type { SimNode } from './node';
 import { here, type People } from './people';
-import { ai, msg, sha, task, type Fields, type Row } from './rows';
+import { ai, msg, type Fields, type Row } from './rows';
 import { Scene, type AI } from './scene';
 import type { Talk } from './talk';
 import type { Tasks } from './tasks';
@@ -18,7 +19,8 @@ import type { World } from './world';
 type Answer = { ok: true; [field: string]: unknown } | { err: { code: string; msg: string } };
 
 const ok: Answer = { ok: true };
-const refuse = (code: string): Answer => ({ err: { code, msg: `refused: ${code}` } });
+const refuse = (code: string, msg = `refused: ${code}`): Answer => ({ err: { code, msg } });
+const hour = 3_600_000;
 const accounts = ['personal', 'team', 'api_key'];
 
 export class Host extends Scene {
@@ -47,6 +49,7 @@ export class Host extends Scene {
         .map(({ g, ai }) => ({
           g,
           member: ai.id,
+          workspace: ai.workspace,
           level: 3,
           state: ai.state,
           task: ai.task,
@@ -82,6 +85,19 @@ export class Host extends Scene {
         approvers: [],
       },
     };
+  }
+
+  /** `host.workspaces`: the folders the CLI was used in here, newest first, those of its AIs among
+   *  them. None for an agent the node does not start; an agent it does not know is refused. */
+  workspaces(node: SimNode, agent: string): Answer {
+    if (agent === 'external') return { ok: true, workspaces: [] };
+    if (!node.agents.some((each) => each.agent === agent)) return refuse('bad_request');
+    const used = this.#members(node)
+      .filter(({ ai }) => ai.cli === agent)
+      .map(({ ai }) => ai.workspace);
+    const paths = [...new Set([...used, ...(folders[node.device]?.[agent] ?? [])])];
+    const workspaces = paths.map((path, i) => ({ path, used: Date.now() - (i * 26 + 1) * hour }));
+    return { ok: true, workspaces };
   }
 
   /** A host command for this computer. */
@@ -135,9 +151,27 @@ export class Host extends Scene {
     for (const g of this.world.groups()) this.talk.drainAll(g);
   }
 
-  /** `host.join`: the computer adds its CLI to the group, which says hello a moment later. */
+  /** The folder of `host.join` (contracts/commands.md section 2): an absolute path under the
+   *  person's own folder of this computer, with no `/` at its end, and no AI's of another group. */
+  #folder(node: SimNode, g: string, path: unknown): Answer | string {
+    if (typeof path !== 'string' || !path.startsWith('/'))
+      return refuse('bad_request', 'not an absolute path');
+    const workspace = path.replace(/(.)\/+$/, '$1');
+    if (!`${workspace}/`.startsWith(homeDirs[node.device])) return refuse('not_found', path);
+    const other = this.#members(node).find(
+      (each) => each.ai.workspace === workspace && each.g !== g,
+    );
+    if (!other) return workspace;
+    const name = this.world.home(other.g)!.groups.get(other.g)!.name;
+    return refuse('conflict', `the folder is the workspace of an AI of the group "${name}"`);
+  }
+
+  /** `host.join`: the computer adds its CLI to the group in the folder given, and it says hello a
+   *  moment later. */
   #join(node: SimNode, payload: Fields): Answer {
     const g = payload.g as string;
+    const workspace = this.#folder(node, g, payload.workspace);
+    if (typeof workspace !== 'string') return workspace;
     const home = this.world.home(g);
     if (!home || home.down) return refuse('home_unreachable');
     const agent = node.agents.find((each) => each.agent === payload.agent);
@@ -153,6 +187,7 @@ export class Host extends Scene {
       user: node.owner,
       host: node.device,
       hostName: node.name,
+      workspace,
       secretary,
     };
     const profile = {
@@ -192,43 +227,19 @@ export class Host extends Scene {
     return ok;
   }
 
-  /** `takeover.start` (flows/takeover.md A and B): the AI's task session, the secretary's group
-   *  session, or a new task of origin `takeover` for a working AI that has none. */
+  /** `takeover.start` (flows/takeover.md A and B): the AI's task session, or its group session
+   *  when it has no unfinished task, in its folder. A takeover creates no task. */
   #takeover(node: SimNode, payload: Fields): Answer {
     const g = payload.g as string;
     const member = this.ai(g, payload.member as string);
     if (!member || member.host !== node.device) return refuse('not_found');
     if (member.state === 'takeover') return refuse('busy');
     const current = this.task(g, (payload.task as string) ?? member.task);
-    const session =
-      current && ['active', 'paused'].includes(current.state) ? current.id : undefined;
-    const made = !session && !member.secretary ? this.#ownTask(g, member) : undefined;
-    const id = session ?? made;
-    this.world.memory.takeovers[`${g}:${member.id}`] = {
-      task: id,
-      typed: false,
-      made: Boolean(made),
-    };
-    this.setAI(g, member.id, { state: 'takeover', task: id });
+    const task = current && ['active', 'paused'].includes(current.state) ? current.id : undefined;
+    this.world.memory.takeovers[`${g}:${member.id}`] = { task };
+    this.setAI(g, member.id, { state: 'takeover', task });
     this.world.after(6000, () => this.#minaWatches(g, member.id));
     return ok;
-  }
-
-  #ownTask(g: string, member: AI) {
-    const num = Math.max(0, ...this.tasksOf(g).map((each) => each.num)) + 1;
-    const made = this.world.write(
-      g,
-      task({
-        g,
-        num,
-        title: 'Owner takeover',
-        slug: 'owner-takeover',
-        assignee: member.id,
-        origin: 'takeover',
-      }),
-    );
-    this.post('task', { g, by: 'system', id: made.id as string }, { task: made.id });
-    return made.id as string;
   }
 
   #minaWatches(g: string, member: string) {
@@ -237,8 +248,8 @@ export class Host extends Scene {
     this.people.minaAsks(g, member);
   }
 
-  /** `takeover.end` (flows/takeover.md D): the AI posts what was done, unless the takeover made
-   *  its own task and nothing was typed, which cancels it; the grants of the takeover end. */
+  /** `takeover.end` (flows/takeover.md D): the AI posts its account of what was done, in the
+   *  task's thread or the main line; the grants of the takeover end. */
   #handback(payload: Fields): Answer {
     const g = payload.g as string;
     const key = `${g}:${payload.member}`;
@@ -249,8 +260,7 @@ export class Host extends Scene {
     this.world.memory.grants = this.world.memory.grants.filter(
       (each) => !(each.g === g && each.member === member.id),
     );
-    if (open.made && !open.typed) this.#drop(g, open.task!);
-    else this.#report(g, member, open.task);
+    this.#handbackPost(g, member, open.task);
     const t = this.task(g, open.task);
     this.setAI(g, member.id, {
       state: t?.state === 'active' ? 'working' : 'waiting',
@@ -261,39 +271,19 @@ export class Host extends Scene {
     return ok;
   }
 
-  #drop(g: string, id: string) {
-    const t = this.task(g, id);
-    if (t)
-      this.setTask(g, id, {
-        state: 'cancelled',
-        wait: null,
-        stats: { ...t.stats, ended: Date.now() },
-      });
-  }
-
-  #report(g: string, member: AI, id: string | undefined) {
-    const body = {
-      files: ['src/routes/Home.svelte'],
-      commits: [{ sha: sha().slice(0, 7), subject: '主人在终端里调整首页文案' }],
-      added: 6,
-      removed: 2,
-    };
+  /** The hand-back message is the AI's own account: the node reads nothing from the folder. */
+  #handbackPost(g: string, member: AI, id: string | undefined) {
     const say = { g, by: member.id, thread: id ?? null, text: words.handback };
-    if (id) this.post('handback', say, body);
-    else this.world.write(g, msg('handback', say, body) as Row);
+    if (id) this.post('handback', say);
+    else this.world.write(g, msg('handback', say) as Row);
   }
 
   /** A browser of the person opens a terminal channel on this computer. */
   channel(node: SimNode, label: string) {
     const [kind, g, member] = label.split(':');
     if (kind === 'watch') return this.#watch(g, member);
-    const open = this.world.memory.takeovers[`${g}:${member}`];
     const cli = this.ai(g, member)?.cli ?? 'claude';
-    if (!open) return undefined;
-    return takeoverTerminal(cli, () => {
-      open.typed = true;
-      this.world.changed();
-    });
+    return this.world.memory.takeovers[`${g}:${member}`] ? takeoverTerminal(cli) : undefined;
   }
 
   #watch(g: string, member: string) {

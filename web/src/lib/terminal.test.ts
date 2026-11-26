@@ -191,13 +191,12 @@ describe('the parts of a terminal page', () => {
 
   it('writes the header line and the link line', () => {
     const ai = row<p.AIMemberRow>('row-member-ai', { host_name: 'MacBook' });
-    const task = row<p.TaskRow>('row-task', { num: 12, branch: 'task/12-conn' });
+    const task = row<p.TaskRow>('row-task', { num: 12 });
 
     expect(headerSubtitle(undefined, task)).toBe('');
     expect(headerSubtitle(undefined, task, 'Website')).toBe('Website');
     expect(headerSubtitle(ai, undefined, 'Website')).toBe('MacBook');
-    expect(headerSubtitle(ai, { ...task, branch: undefined })).toBe('MacBook · T-12');
-    expect(headerSubtitle(ai, task)).toBe('MacBook · T-12 · task/12-conn');
+    expect(headerSubtitle(ai, task)).toBe('MacBook · T-12');
 
     expect(linkBadgeOf(false, direct)).toEqual({ st: 'down', text: 'Offline' });
     expect(linkBadgeOf(true, undefined)).toEqual({ st: 'linking', text: 'Connecting' });

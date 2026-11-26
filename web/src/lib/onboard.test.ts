@@ -675,11 +675,7 @@ describe('PairingSession live role a and role b flows', () => {
     const requests: unknown[] = [];
     const ctl = makeCtl(async (req) => {
       requests.push(req);
-      if (req.t === 'hello') {
-        return 'v' in req && req.v === 2
-          ? { err: { code: 'version', msg: 'unsupported version' } }
-          : welcomeOf(node1.id, true, 'Mac One');
-      }
+      if (req.t === 'hello') return welcomeOf(node1.id, true, 'Mac One');
       return hostInfoOf(node1.id, [
         {
           agent: 'claude',
@@ -714,10 +710,8 @@ describe('PairingSession live role a and role b flows', () => {
     expect(session.enrolled).toBe(true);
 
     const hello = { t: 'hello', kind: 'browser', name: 'Browser', addrs: [] };
-    expect(requests.slice(0, 2)).toEqual([
-      { ...hello, v: 2 },
-      { ...hello, v: 1 },
-    ]);
+    expect(requests[0]).toEqual({ ...hello, v: 3 });
+    expect(requests[1]).not.toMatchObject({ t: 'hello' });
 
     // Late signalling frames after enrolment are ignored; non-onboarding pushes and devlog in role a are ignored.
     hub.options.heard!(url, { t: 'ready', ice: [], ttl: 60 });

@@ -5,7 +5,7 @@ import { owner } from '../home';
 
 export const ids = {
   site: 'BsebuFCdYvLaA9AbRCg9dA',
-  team: 'sAMBSgZyIJo0pKEACZb8tA',
+  talk: 'sAMBSgZyIJo0pKEACZb8tA',
   /** The person at this browser, in every group: the member id the test homes write for them. */
   me: owner,
   secretary: 'geb2UHpWAhcQHK7NLhk4Og',
@@ -13,7 +13,7 @@ export const ids = {
   codex: 'nssBhjqOr_QUjZFlhuZ-MA',
   mina: 'ybVgSvDrNjzeUp1A5jvMVg',
   minaAi: 'ClIbmHyJqjLSWCFIrynHQg',
-  minaTeam: '7doctR3yhr0PKuGiENYJ0Q',
+  minaTalk: '7doctR3yhr0PKuGiENYJ0Q',
   leo: 'ZTOztQLrN05IQixJLCmskA',
 };
 

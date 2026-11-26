@@ -71,7 +71,7 @@ class FakePeer {
       return this.#try(4000);
     }
     const line = node!.open((frame) => this.#push(frame));
-    const hello = { t: 'hello', v: 2, kind: 'browser', name: 'Browser', addrs: [] };
+    const hello = { t: 'hello', v: 3, kind: 'browser', name: 'Browser', addrs: [] };
     const welcome = roundTrip('hello', await line.request(hello));
     if (welcome.err) return this.listen().refused?.(welcome.err.code);
     this.#line = line;

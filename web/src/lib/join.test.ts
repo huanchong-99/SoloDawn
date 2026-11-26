@@ -66,7 +66,7 @@ const welcome: Welcome = {
   t: 'welcome',
   re: 1,
   ok: true,
-  v: 2,
+  v: 3,
   name: 'Home',
   version: 'test',
   time: 1,
@@ -163,9 +163,9 @@ it('does not contact rendezvous after cancellation', async () => {
 });
 
 it.each([
-  [1, { re: 2, ok: true }, { step: 'hello', code: 'version' }],
+  [2, { re: 2, ok: true }, { step: 'hello', code: 'version' }],
   [
-    2,
+    3,
     { re: 2, err: { code: 'forbidden', msg: 'invalid log' } },
     { step: 'join', code: 'forbidden' },
   ],

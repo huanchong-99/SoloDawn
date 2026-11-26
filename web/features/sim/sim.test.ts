@@ -1,6 +1,8 @@
 // The scripts of the demo world, driven through a computer's connection as the client drives
-// them: a confirmed brief becomes tasks that reach `merged`, a denied approval stays denied and the
-// task goes on without it, a message let go first pauses the busy AI's task, and a saved world
+// them: a group made with a person and connected AIs, each in a folder of its computer; a
+// confirmed brief whose tasks go through work, report and review to done, one task at a time per
+// folder; a denied approval that stays denied while the task goes on without it; a message let go
+// first that pauses the busy AI's task; who paused or reassigned a task; and a saved world that
 // comes back as it was. Every row the world writes has the shape the client reads.
 import * as v from 'valibot';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,7 +11,7 @@ import * as p from '../../src/lib/proto';
 import { user } from '../home';
 import { words } from './content';
 import { Director } from './director';
-import { devices, ids } from './ids';
+import { devices, ids, users } from './ids';
 import type { Line } from './node';
 import type { Fields, Row } from './rows';
 import { seed } from './seed';
@@ -46,10 +48,16 @@ const say = (text: string, mentions: string[] = []) =>
 const rows = (kind: string) => world.rows(g).filter((row) => row.kind === kind) as Row[];
 const status = (row: Row) => (row.state as { status?: string } | null)?.status;
 const pending = (kind: string) => rows(kind).filter((row) => status(row) === 'pending');
-const tasks = () => world.rows(g).filter((row) => row.r === 'task' && row.state !== 'merged');
+const tasks = () => world.rows(g).filter((row) => row.r === 'task' && row.state !== 'done');
+const made = () => world.rows(g).filter((row) => row.r === 'task' && (row.num as number) > 1);
+const parses = () => {
+  for (const each of world.groups())
+    for (const row of world.rows(each))
+      expect(v.safeParse(p.Row, structuredClone(row)).issues).toBe(undefined);
+};
 
 /** Lets the scripts run, deciding each card that waits for the person as `decide` says, until
- *  every task of the group is merged or a minute has passed. */
+ *  every task of the group is done or a minute has passed. */
 async function run(decide: (card: Row) => Fields) {
   for (let i = 0; i < 60 && tasks().length; i += 1) {
     for (const card of [...pending('approval'), ...pending('decision')])
@@ -70,17 +78,36 @@ const approve = (card: Row) =>
   card.kind === 'approval' ? { action: 'approve' } : { action: 'choose', arg: 'B' };
 
 describe('the demo world', () => {
-  it('takes a confirmed brief to merged tasks, each with its summary', async () => {
+  it('takes a confirmed brief through work, report and review to done, one task per folder', async () => {
     await confirmedBrief();
+    const [first, second, third] = made();
+    expect(made().map((row) => row.state)).toEqual(['active', 'active', 'queued']);
+    expect(third.wait).toMatchObject({ kind: 'busy' });
+    expect([first.assignee, second.assignee, third.assignee]).toEqual([
+      ids.claude,
+      ids.codex,
+      ids.claude,
+    ]);
     await run(approve);
-    const made = world.rows(g).filter((row) => row.r === 'task' && (row.num as number) > 1);
-    expect(made.map((row) => row.state)).toEqual(['merged', 'merged']);
+    expect(made().map((row) => row.state)).toEqual(['done', 'done', 'done']);
+    const ended = (row: Row) => (row.stats as { started: number; ended: number }).ended;
+    const started = (row: Row) => (row.stats as { started: number }).started;
+    expect(started(world.find<Row>(g, 'task', third.id)!)).toBeGreaterThanOrEqual(
+      ended(world.find<Row>(g, 'task', first.id)!),
+    );
     const summaries = rows('summary').map((row) => (row.body as { task: string }).task);
-    expect(summaries).toEqual(expect.arrayContaining(made.map((row) => row.id)));
-    const failed = rows('checks').filter((row) => !(row.body as { ok: boolean }).ok);
-    expect(failed).toHaveLength(1);
-    for (const row of world.rows(g))
-      expect(v.safeParse(p.Row, structuredClone(row)).issues).toBe(undefined);
+    expect(summaries).toEqual(expect.arrayContaining(made().map((row) => row.id)));
+    const reviews = rows('review').map((row) => row.body as { ok: boolean; report: string });
+    expect(reviews.filter((review) => !review.ok)).toHaveLength(1);
+    const reports = rows('report').map((row) => row.id);
+    expect(reports).toHaveLength(made().length + 2);
+    for (const review of reviews) expect(reports).toContain(review.report);
+    for (const row of made()) expect(reports).toContain(row.report);
+    const done = rows('system').filter(
+      (row) => (row.body as { code: string }).code === 'task_done',
+    );
+    expect(done).toHaveLength(made().length + 1);
+    parses();
   });
 
   it('shows a denied approval as denied, and the AI works on without it', async () => {
@@ -117,5 +144,88 @@ describe('the demo world', () => {
     expect(again.rows(g)).toEqual(world.rows(g));
     expect(again.memory.flags).toEqual(world.memory.flags);
     again.stop();
+  });
+
+  it('says who paused a task and who gave it to another AI; a busy folder takes none', async () => {
+    await confirmedBrief();
+    const [first] = made();
+    await vi.advanceTimersByTimeAsync(9000);
+    const [approval] = pending('approval');
+    expect(await send({ t: 'task', op: 'pause', id: first.id })).toMatchObject({ ok: true });
+    expect(world.find<Row>(g, 'task', first.id)!.wait).toMatchObject({
+      kind: 'manual',
+      by: ids.me,
+    });
+    expect(await send({ t: 'task', op: 'resume', id: first.id })).toMatchObject({ ok: true });
+    const codex = { t: 'task', op: 'assign', id: first.id, assignee: ids.codex };
+    expect(await send(codex)).toMatchObject({ err: { code: 'conflict' } });
+    const mina = { ...codex, assignee: ids.minaAi };
+    expect(await send(mina)).toMatchObject({ ok: true });
+    expect(world.find<Row>(g, 'msg', approval.id)!.state).toMatchObject({
+      status: 'reassigned',
+      by: ids.me,
+    });
+    parses();
+  });
+
+  it('makes a group with a person and a connected AI in a folder of its computer', async () => {
+    const docs = newId();
+    const create = { t: 'group', op: 'create', g: docs, name: '博客', member_name: 'Alex' };
+    expect(await send(create)).toMatchObject({ ok: true });
+    const add = (user: string, name: string) =>
+      send({ t: 'member', op: 'add_person', g: docs, user, name });
+    expect(await add(users.mina, 'Mina')).toMatchObject({ ok: true });
+    expect(await add(users.mina, 'Mina 2')).toMatchObject({ err: { code: 'conflict' } });
+    expect(await add(users.leo, 'Leo')).toMatchObject({ err: { code: 'not_found' } });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(world.rows(docs).map((row) => [row.r, row.kind])).toEqual([
+      ['group', undefined],
+      ['member', 'human'],
+      ['member', 'human'],
+      ['msg', 'system'],
+      ['msg', 'text'],
+    ]);
+
+    const listed = (await line.request({ t: 'host.workspaces', agent: 'claude' })) as {
+      workspaces: { path: string }[];
+    };
+    expect(listed.workspaces.map((folder) => folder.path)).toEqual([
+      '/Users/alex/dev/solodawn-site',
+      '/Users/alex/dev/blog',
+      '/Users/alex/dev/design-system',
+      '/Users/alex/notes',
+    ]);
+    const none = await line.request({ t: 'host.workspaces', agent: 'external' });
+    expect(none).toMatchObject({ ok: true, workspaces: [] });
+    const unknown = await line.request({ t: 'host.workspaces', agent: 'gemini' });
+    expect(unknown).toMatchObject({ err: { code: 'bad_request' } });
+
+    const join = (workspace: string) =>
+      send({
+        t: 'host.join',
+        to: devices.macbook,
+        g: docs,
+        home: devices.macbook,
+        agent: 'claude',
+        name: 'Claude Code',
+        secretary: true,
+        workspace,
+      });
+    expect(await join('dev/blog')).toMatchObject({ err: { code: 'bad_request' } });
+    expect(await join(undefined as never)).toMatchObject({ err: { code: 'bad_request' } });
+    expect(await join('/tmp/blog')).toMatchObject({ err: { code: 'not_found' } });
+    expect(await join('/Users/alex/dev/solodawn-site/')).toMatchObject({
+      err: {
+        code: 'conflict',
+        msg: 'the folder is the workspace of an AI of the group "官网改版"',
+      },
+    });
+    expect(await join('/Users/alex/dev/blog/')).toMatchObject({ ok: true });
+    const ai = world.rows(docs).find((row) => row.kind === 'ai')!;
+    expect(ai.workspace).toBe('/Users/alex/dev/blog');
+    const info = world.info(world.node(devices.macbook)!);
+    const entry = info.agents.flatMap((agent) => agent.groups).find((each) => each.g === docs);
+    expect(entry).toMatchObject({ member: ai.id, workspace: '/Users/alex/dev/blog' });
+    parses();
   });
 });

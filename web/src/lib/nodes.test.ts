@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { watch } from '../../features/watch.svelte';
-import { Home, homes, lost } from './groups.svelte';
+import { Group, Home, homes, lost } from './groups.svelte';
 import { goldens } from './mock';
 import type { Net, Path } from './net.svelte';
 import { indicator, Nodes, nodes, outdated } from './nodes.svelte';
@@ -311,7 +311,7 @@ describe('Nodes', () => {
       await settle();
     }
 
-    it('names the home of a foreign group and of a team group to each owned node that lacks it', async () => {
+    it('names the home of a foreign group to each owned node that lacks it, and no own one', async () => {
       const foreign = new Home(me);
       const first = new Home(me);
       const second = new Home(me);
@@ -334,17 +334,13 @@ describe('Nodes', () => {
       expect(told(firstConn.asked)).toEqual([notice('first', website, 'foreign', 'Website')]);
       expect(told(secondConn.asked)).toEqual([notice('second', website, 'foreign', 'Website')]);
 
-      // The rows of the two groups of `first` arrive: a project and a team.
-      for (const [i, row] of ['row-group', 'row-group-team'].entries()) {
-        const group = first.groups[i];
-        group.apply([{ ...p.decode(p.GroupRow, goldens[row]), id: group.g }]);
-      }
+      // The rows of the two groups of `first` arrive: the AIs of `second` that join them name
+      // their home in `host.join`.
+      for (const group of first.groups)
+        group.apply([{ ...p.decode(p.GroupRow, goldens['row-group']), id: group.g }]);
       await settle();
       expect(told(firstConn.asked)).toHaveLength(1);
-      expect(told(secondConn.asked)).toEqual([
-        notice('second', website, 'foreign', 'Website'),
-        notice('second', studio, 'first', 'Studio'),
-      ]);
+      expect(told(secondConn.asked)).toEqual([notice('second', website, 'foreign', 'Website')]);
       expect(told(foreignConn.asked)).toEqual([]);
     });
 
@@ -576,6 +572,45 @@ describe('Nodes', () => {
     // Offline home resolves to lost() without sending.
     link.offline();
     expect(await store.pairBrowser(home, deviceId)).toStrictEqual(lost());
+    expect(asked).toHaveLength(3);
+  });
+
+  it('asks a computer for the folders a CLI was used in, each with who has it there', async () => {
+    const store = new Nodes();
+    const home = new Home(me);
+    const { asked, link } = connectHome(home, { owner: true });
+    const group = new Group(home, website);
+    const ai = p.decode(p.AIMemberRow, goldens['row-member-ai']);
+    const scout = p.decode(p.AIMemberRow, goldens['row-member-ai-external']);
+    group.apply([ai, scout]);
+    store.infos.set(home, hostAnswer({ homes: [{ g: 'other-group', home: 'x', name: 'Docs' }] }));
+
+    const listing = store.folders(home, 'claude', group);
+    expect(asked.map((ask) => ask.req)).toEqual([{ t: 'host.workspaces', agent: 'claude' }]);
+    asked[0].answer(p.decodeAnswer('host.workspaces', goldens['host-workspaces-answer']));
+    expect(await listing).toEqual([
+      // Two AIs of the group share it, and both are named.
+      { path: '/home/dev/website', used: 1763599940000, ais: [ai.name, scout.name] },
+      { path: '/home/dev/notes', used: 1763513600000 },
+    ]);
+
+    // While a group is being made, an AI's folder is another group's, named from host.info.
+    expect(store.holder(home, '/home/dev/website')).toEqual({ other: 'rZNvy-1jH6Z-BcPqA5U5BQ' });
+    const info = hostAnswer();
+    store.infos.set(home, info);
+    expect(store.holder(home, '/home/dev/website')).toEqual({ other: 'Website' });
+    expect(store.holder(home, '/home/dev/notes', group)).toEqual({});
+    expect(store.holder(new Home(me), '/home/dev/website', group)).toEqual({});
+
+    const refused = store.folders(home, 'nobody');
+    const error = { re: 2, err: { code: 'bad_request', msg: 'no such agent' } };
+    asked[1].answer(error);
+    expect(await refused).toEqual(error);
+    const failing = store.folders(home, 'claude');
+    asked[2].fail();
+    expect(await failing).toEqual(lost());
+    link.offline();
+    expect(await store.folders(home, 'claude')).toEqual(lost());
     expect(asked).toHaveLength(3);
   });
 

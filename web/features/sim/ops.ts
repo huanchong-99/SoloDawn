@@ -1,6 +1,8 @@
 // What a person does to a task (contracts/commands.md 1.5; task-machine rows 11, 12, 13 and 15):
-// pause, resume, cancel and give it to other AIs. A role given to another person's AI waits for
-// that person's word (contracts/step-2/confirm.md section 7), which Mina gives a moment later.
+// pause, resume, cancel and give it to other AIs. The person's member id is the one they have in
+// every group of the world. A role given to another person's AI waits for that person's word
+// (contracts/step-2/confirm.md section 7), which Mina gives a moment later.
+import { ids } from './ids';
 import { msg, type Fields } from './rows';
 import { Scene, type Task } from './scene';
 import type { Tasks } from './tasks';
@@ -10,7 +12,7 @@ type Answer = { ok: true } | { err: { code: string; msg: string } };
 
 const ok: Answer = { ok: true };
 const refuse = (code: string): Answer => ({ err: { code, msg: `refused: ${code}` } });
-const final = (t: Task) => ['merged', 'cancelled'].includes(t.state);
+const final = (t: Task) => ['done', 'cancelled'].includes(t.state);
 
 export class Ops extends Scene {
   constructor(
@@ -33,10 +35,12 @@ export class Ops extends Scene {
     return ops[payload.op as string]?.() ?? refuse('bad_request');
   }
 
+  /** Row 12: the paused wait names who paused the task. */
   #pause(g: string, t: Task) {
-    if (t.state !== 'active' || t.step === 'merge') return refuse('conflict');
-    const kept = ['reviewer', 'conflict'].includes(t.wait?.kind ?? '') ? t.wait!.kind : undefined;
-    this.setTask(g, t.id, { state: 'paused', wait: { kind: 'manual', since: Date.now(), kept } });
+    if (t.state !== 'active') return refuse('conflict');
+    const kept = t.wait?.kind === 'reviewer' ? t.wait.kind : undefined;
+    const wait = { kind: 'manual', since: Date.now(), kept, by: ids.me };
+    this.setTask(g, t.id, { state: 'paused', wait });
     this.setAI(g, t.assignee, { state: 'paused' });
     return ok;
   }
@@ -58,6 +62,7 @@ export class Ops extends Scene {
     for (const id of [t.assignee, t.reviewer])
       if (id && this.ai(g, id)?.task === t.id)
         this.setAI(g, id, { state: 'waiting', task: undefined });
+    this.tasks.start(g);
     return ok;
   }
 
@@ -70,12 +75,16 @@ export class Ops extends Scene {
       .filter((row) => (row.body as { task?: string }).task === id);
   }
 
-  /** Row 11. A new assignee stops the old one; its pending approvals become `reassigned`. */
+  /** Row 11. A new assignee stops the old one; its pending approvals become `reassigned`, by the
+   *  person. A started task never goes back to the queue: an assignee whose folder is busy with
+   *  another task is refused. */
   #assign(g: string, t: Task, payload: Fields) {
-    if (final(t) || t.step === 'merge') return refuse('conflict');
+    if (final(t)) return refuse('conflict');
     const assignee = (payload.assignee as string | undefined) ?? t.assignee;
     const reviewer = (payload.reviewer as string | undefined) ?? t.reviewer;
     if (assignee === reviewer) return refuse('conflict');
+    const moved = assignee !== t.assignee && t.state !== 'queued';
+    if (moved && this.tasks.busy(g, assignee, t.id)) return refuse('conflict');
     if (assignee !== t.assignee) this.#handOver(g, t, assignee);
     const state = t.state === 'failed' ? 'active' : t.state;
     this.setTask(g, t.id, {
@@ -85,6 +94,7 @@ export class Ops extends Scene {
       wait: state === 'active' ? this.tasks.wait(g, t.id) : t.wait,
     });
     for (const id of [assignee, reviewer]) this.#askOwner(g, t, id);
+    this.tasks.start(g);
     this.tasks.kick(g, t.id, 1500);
     return ok;
   }
@@ -92,7 +102,7 @@ export class Ops extends Scene {
   #handOver(g: string, t: Task, assignee: string) {
     for (const card of this.#pendingCards(g, t.id))
       if (card.kind === 'approval')
-        this.decide(g, card.id as string, { status: 'reassigned', at: Date.now() });
+        this.decide(g, card.id as string, { status: 'reassigned', by: ids.me, at: Date.now() });
     if (this.ai(g, t.assignee)?.task === t.id)
       this.setAI(g, t.assignee, { state: 'waiting', task: undefined });
     this.tasks

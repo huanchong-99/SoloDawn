@@ -17,11 +17,9 @@ const opsOf: Record<string, TaskOp[]> = {
 };
 
 /** What the reader may do to the task as it is: an admin, rows 11 to 13 and 15 of
- *  contracts/task-machine.md section 3. From step `merge` there is only the cancel. */
-export function taskOps(group: Group, task: TaskRow): TaskOp[] {
-  const ops = isAdmin(group) ? (opsOf[task.state] ?? []) : [];
-  return task.step === 'merge' ? ops.filter((op) => op === 'cancel') : ops;
-}
+ *  contracts/task-machine.md section 3. */
+export const taskOps = (group: Group, task: TaskRow): TaskOp[] =>
+  isAdmin(group) ? (opsOf[task.state] ?? []) : [];
 
 /** Who does the work and who reviews it. */
 export type Roles = Partial<Pick<TaskRow, 'assignee' | 'reviewer'>>;
@@ -36,37 +34,66 @@ export const workingAIs = (group: Group) =>
 
 /** Why a task stands still and what moves it on, when no card says it. */
 export interface Hold {
-  kind:
-    'manual' | 'rounds' | 'preempted' | 'failed' | 'depends' | 'reviewer' | 'conflict' | 'denied';
+  kind: 'manual' | 'rounds' | 'preempted' | 'failed' | 'depends' | 'busy' | 'reviewer' | 'denied';
   text: string;
   tone?: 'dawn' | 'danger';
 }
 
 const num = (task: TaskRow) => `T-${task.num}`;
 const nums = (tasks: TaskRow[]) => tasks.map(num).join(t('task.sep'));
+const tasksOf = (group: Group) =>
+  [...group.rows.values()].filter((row): row is TaskRow => row.r === 'task');
 
 function dependsHold(group: Group, task: TaskRow): string | undefined {
   const open = task.depends.flatMap((id) => group.task(id) ?? []);
   const never = open.filter(({ state }) => state === 'cancelled');
   if (never.length) return t('task.hold.depends.never').replace('{tasks}', nums(never));
-  const left = open.filter(({ state }) => state !== 'merged');
+  const left = open.filter(({ state }) => state !== 'done');
   return left.length ? t('task.hold.depends').replace('{tasks}', nums(left)) : undefined;
+}
+
+/** The folder of a task: its assignee's computer and workspace (contracts/task-machine.md
+ *  section 2). */
+function folderOf(group: Group, task: TaskRow) {
+  const ai = group.member(task.assignee) as AIMemberRow;
+  return `${ai.host} ${ai.workspace}`;
+}
+
+/** The started tasks that keep a queued task's folder busy. */
+function busyHold(group: Group, task: TaskRow): string | undefined {
+  const folder = folderOf(group, task);
+  const holders = tasksOf(group).filter(
+    (other) => other !== task && hasSession(other) && folderOf(group, other) === folder,
+  );
+  return holders.length ? t('task.hold.busy').replace('{tasks}', nums(holders)) : undefined;
 }
 
 const holdTones: Partial<Record<Hold['kind'], Hold['tone']>> = {
   rounds: 'dawn',
   failed: 'danger',
 };
-const stateHolds: Record<string, Hold['kind']> = { failed: 'failed', queued: 'depends' };
-const waitHolds = ['manual', 'rounds', 'preempted', 'reviewer', 'conflict'] as const;
+const waitHolds = ['manual', 'rounds', 'preempted', 'reviewer', 'depends', 'busy'] as const;
 
 const holdKind = (task: TaskRow): Hold['kind'] | undefined =>
-  stateHolds[task.state] ?? waitHolds.find((kind) => kind === task.wait?.kind);
+  task.state === 'failed' ? 'failed' : waitHolds.find((kind) => kind === task.wait?.kind);
+
+/** The holds whose words need more than the task's rounds. A manual pause names who paused the
+ *  task, also a member who has left since (contracts/rows.md section 4). */
+const holdTexts: Partial<
+  Record<Hold['kind'], (group: Group, task: TaskRow) => string | undefined>
+> = {
+  depends: dependsHold,
+  busy: busyHold,
+  manual: (group, task) =>
+    t('task.hold.manual').replace('{who}', () => group.nameOf(task.wait?.by)),
+  failed: (group) => t(isAdmin(group) ? 'task.hold.failed.admin' : 'task.hold.failed'),
+};
 
 function holdText(group: Group, task: TaskRow, kind: Hold['kind']): string | undefined {
-  if (kind === 'depends') return dependsHold(group, task);
-  if (kind === 'failed' && isAdmin(group)) return t('task.hold.failed.admin');
-  return t(`task.hold.${kind}`).replace('{n}', `${task.thread.rounds}`);
+  const words = holdTexts[kind];
+  return words
+    ? words(group, task)
+    : t(`task.hold.${kind}`).replace('{n}', `${task.thread.rounds}`);
 }
 
 const ownerName = (group: Group, ai: AIMemberRow) => group.personName(ai.user) ?? t('chat.gone');
@@ -107,14 +134,11 @@ export function taskHold(group: Group, task: TaskRow): Hold | undefined {
 
 /** What cancelling the task does, in sentences. */
 export function cancelNotes(group: Group, task: TaskRow): string[] {
-  // Only a task is ever `queued`.
-  const waiting = ([...group.rows.values()] as TaskRow[]).filter(
+  const waiting = tasksOf(group).filter(
     ({ state, depends }) => state === 'queued' && depends.includes(task.id),
   );
   return [
-    ...(task.step === 'merge' ? [t('task.cancel.merging')] : []),
     t(task.state === 'queued' ? 'task.cancel.queued' : 'task.cancel.body'),
-    ...(task.branch ? [t('task.cancel.branch')] : []),
     ...(waiting.length ? [t('task.cancel.depends').replace('{tasks}', nums(waiting))] : []),
   ];
 }
@@ -127,11 +151,11 @@ export function changedRoles(task: TaskRow, next: Roles): Roles {
   return Object.fromEntries(changed.map((role) => [role, next[role]]));
 }
 
-/** What giving the task to other AIs does, in sentences: the assignee that stops, and the owners
- *  who are asked (contracts/step-2/confirm.md section 6). */
+/** What giving the task to other AIs does, in sentences: the assignee of a started task that stops,
+ *  and the owners who are asked (contracts/step-2/confirm.md section 6). */
 export function assignNotes(group: Group, task: TaskRow, roles: Roles): string[] {
   const old = group.member(task.assignee)?.name;
-  const stops = roles.assignee && task.branch && old;
+  const stops = roles.assignee && hasSession(task) && old;
   const asked = workingAIs(group).filter(
     (ai) => ai.user !== group.home.me.user && Object.values(roles).includes(ai.id),
   );

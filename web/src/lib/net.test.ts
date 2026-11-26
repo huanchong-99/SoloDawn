@@ -233,7 +233,7 @@ function welcomeFrame(
     t: 'welcome',
     re,
     ok: true,
-    v: 1,
+    v: 3,
     device,
     name,
     version: 'v0.5.0',
@@ -472,9 +472,8 @@ describe('the homes that an own computer knows', () => {
     const refuse = (re: number) =>
       pc.ctl.deliver({ re, err: { code: 'version', msg: 'update needed' } });
     refuse(1);
-    await vi.waitFor(() => expect(pc.ctl.frames()).toHaveLength(2));
-    refuse(2);
     await vi.waitFor(() => expect(pc.closes).toBe(1));
+    expect(pc.ctl.frames()).toHaveLength(1);
     expect([homeOf(foreign.id), home.ctl, home.groups.map(({ g }) => g)]).toEqual([
       home,
       undefined,
@@ -545,7 +544,7 @@ describe('the homes that an own computer knows', () => {
     ]);
     expect(pc.closes).toBe(0);
     const groups = [{ g: websiteId, name: 'Website', seq: 3 }];
-    pc.ctl.deliver({ ...welcomeFrame(1, restored.id, 'P2', groups), owner: false, v: 2 });
+    pc.ctl.deliver({ ...welcomeFrame(1, restored.id, 'P2', groups), owner: false, v: 3 });
     await vi.waitFor(() => expect(pc.ctl.frames().at(-1)?.t).toBe('cmd'));
     pc.ctl.deliver({ t: 'cmd', re: pc.ctl.frames().at(-1)!.id, ok: true });
     const home = homeOf(restored.id)!;
@@ -736,10 +735,10 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   });
   const pc = await answerNode(rv, home, browser.id, 1);
   expect(rv.known(home.id)).toBe(true);
-  pc.ctl.deliver({ ...welcomeFrame(1, home.id, 'Foreign home'), owner: false, v: 2 });
+  pc.ctl.deliver({ ...welcomeFrame(1, home.id, 'Foreign home'), owner: false, v: 3 });
   await vi.waitFor(() => expect(pc.ctl.frames().at(-1)?.t).toBe('cmd'));
   const [hello, devlog, command] = pc.ctl.frames();
-  expect(hello).toMatchObject({ t: 'hello', v: 2 });
+  expect(hello).toMatchObject({ t: 'hello', v: 3 });
   expect(devlog).toEqual({ t: 'devlog', user: browser.id, entries: log.entries });
   expect(JSON.parse(command.env.p)).toMatchObject({ t: 'join', g: websiteId, name: 'Joiner' });
   expect(command.env.k).toBe(browser.id);
@@ -803,7 +802,7 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   reconnected.ctl.deliver({
     ...welcomeFrame(1, home.id, 'Foreign home', groups),
     owner: false,
-    v: 2,
+    v: 3,
   });
   await vi.waitFor(() =>
     expect(reconnected.ctl.frames()).toContainEqual({
@@ -863,12 +862,12 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   rv.receive(rv.url, pairing);
   await vi.waitFor(() => expect(rv.offersFor(home.id)).toHaveLength(3));
   const wrongVersion = await answerNode(rv, home, browser.id, undefined);
-  wrongVersion.ctl.deliver({ ...welcomeFrame(1, home.id, 'Foreign home'), owner: false });
+  wrongVersion.ctl.deliver({ ...welcomeFrame(1, home.id, 'Foreign home'), owner: false, v: 2 });
   await refusal;
   expect(rv.closed).toBe(false);
   await vi.waitFor(() => expect(rv.offersFor(home.id)).toHaveLength(4));
   const restored = await answerNode(rv, home, browser.id, undefined);
-  restored.ctl.deliver({ ...welcomeFrame(1, home.id, 'Foreign home', groups), owner: false, v: 2 });
+  restored.ctl.deliver({ ...welcomeFrame(1, home.id, 'Foreign home', groups), owner: false, v: 3 });
   await vi.waitFor(() => expect(sharedHome.groups.map(({ g }) => g)).toEqual([websiteId]));
 
   const pending = client.net.join!(invitation, 'Joiner', new AbortController().signal);
@@ -928,7 +927,7 @@ describe('mockHome', () => {
     const { home, online } = await mockHome();
     expect(home.me.user).toBe(person);
     expect(asked).toStrictEqual([
-      { t: 'hello', v: 2, kind: 'browser', name: 'development', addrs: [] },
+      { t: 'hello', v: 3, kind: 'browser', name: 'development', addrs: [] },
     ]);
     const env = await home.me.sign('{"t":"cmd"}');
     expect(env.p).toBe('{"t":"cmd"}');

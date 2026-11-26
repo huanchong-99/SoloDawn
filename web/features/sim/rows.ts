@@ -53,6 +53,8 @@ export interface AISpec {
   user: string;
   host: string;
   hostName: string;
+  /** Its folder on `host`. */
+  workspace: string;
   secretary?: boolean;
   account?: string;
   model?: string;
@@ -91,24 +93,14 @@ export interface GroupSpec {
   g: string;
   name: string;
   home: string;
-  kind?: 'project' | 'team';
-  repo?: string;
-  checks?: string[];
   secretary?: string;
   created?: number;
 }
 
-/** What a group of each kind starts with: a team group has no repository or forge. */
-const kinds = {
-  project: { example: 'row-group', base: 'main', forge: 'github' },
-  team: { example: 'row-group-team', base: '', forge: 'none', repo: undefined },
-};
-
-/** A group's own row. */
+/** A group's own row: one kind of group, with no repository and no check. */
 export function group(spec: GroupSpec): Row {
-  const { g, kind = 'project', ...rest } = { checks: [], created: Date.now(), ...given(spec) };
-  const { example, ...shape } = kinds[kind];
-  return row(example, { ...rest, id: g, ...shape, secretary: spec.secretary, paused: null });
+  const { g, ...rest } = { created: Date.now(), ...given(spec) };
+  return row('row-group', { ...rest, id: g, secretary: spec.secretary, paused: null });
 }
 
 /** What a new task is: its number, title, roles and the brief it came from. */
@@ -117,7 +109,6 @@ export interface TaskSpec {
   id?: string;
   num: number;
   title: string;
-  slug: string;
   assignee: string;
   reviewer?: string;
   brief?: string;
@@ -126,38 +117,33 @@ export interface TaskSpec {
   origin?: string;
 }
 
-/** What a task has before any step: no branch, commit, checks or review. */
+/** What a task has before any step: no report, no review. */
 const fresh = {
   plan: undefined,
-  step: 'branch',
-  commit: undefined,
+  step: 'work',
+  report: undefined,
   asked: undefined,
   foundation: false,
-  branch: undefined,
-  pr: undefined,
-  pr_url: undefined,
-  checks: {},
   review: undefined,
   failures: 0,
   stuck: undefined,
   thread: { count: 0, rounds: 0 },
 };
 
-/** A task that has just been created, at step `branch`; a queued one waits for what it depends on. */
-export function task(spec: TaskSpec, state = 'active'): Row {
+/** A task that has just been created, at step `work`: active, or queued for what `waits` says, a
+ *  task it depends on or its folder (contracts/task-machine.md section 2). */
+export function task(spec: TaskSpec, waits?: 'depends' | 'busy'): Row {
   const now = Date.now();
   const defaults = { id: newId(), origin: 'brief', pass: 90, depends: [] };
-  const wait = { queued: { kind: 'depends', since: now } }[state] ?? null;
-  const stats = { added: 0, removed: 0, started: now, ended: null };
   const roles = { brief: spec.brief, reviewer: spec.reviewer };
   return row('row-task', {
     ...fresh,
     ...defaults,
     ...given(spec),
     ...roles,
-    state,
-    wait,
-    stats,
+    state: waits ? 'queued' : 'active',
+    wait: waits ? { kind: waits, since: now } : null,
+    stats: { started: now, ended: null },
     created: now,
   });
 }
@@ -165,9 +151,3 @@ export function task(spec: TaskSpec, state = 'active'): Row {
 /** A system message of a code with its fields. */
 export const system = (g: string, body: Fields, thread: string | null = null) =>
   msg('system', { g, by: 'system', thread }, body);
-
-/** A commit id that looks like one. */
-export function sha(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(20));
-  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-}

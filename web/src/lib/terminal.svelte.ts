@@ -101,7 +101,7 @@ export function watches(g: string | undefined, member: string | undefined) {
   return ai?.kind === 'ai' && ai.user !== group!.home.me.user;
 }
 
-/** The line under the page's title: `computer · T-<num> · branch`. */
+/** The line under the page's title: `computer · T-<num>`. */
 export function headerSubtitle(
   ai: p.AIMemberRow | undefined,
   task: p.TaskRow | undefined,
@@ -110,7 +110,6 @@ export function headerSubtitle(
   if (!ai) return groupName;
   const parts = [ai.host_name];
   if (task) parts.push(`T-${task.num}`);
-  if (task?.branch) parts.push(task.branch);
   return parts.join(' · ');
 }
 
