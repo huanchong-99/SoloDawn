@@ -31,8 +31,13 @@ const (
 	turnAIID    = "1PC8WineBrUQ-apCjx7tug"
 	turnPeerID  = "LXCZmuGAXkvO-bSrOkuCfw"
 	turnOwnerM  = "4xq2Q8RPeg7IJLWdEZTWDQ"
+	turnReport  = "Jq0Rk7uT2vW4xY6zA8bC1Q"
 	turnTimeMS  = 1_763_600_000_000
+	turnFolder  = "/home/dev/website"
 )
+
+// turnWorkspaces are the folders the AI members of the fixture were added with.
+var turnWorkspaces = map[string]string{turnAIID: turnFolder, turnPeerID: "/home/dev/website-review", turnSecID: turnFolder}
 
 type turnStepWorld struct {
 	h        *host.Host
@@ -88,6 +93,8 @@ func hostTurnSteps(sc *godog.ScenarioContext, _ fixtures) {
 	sc.Step(`^the host composes a "continue" turn and a "handback" turn for task 12$`, w.composeOwnTurns)
 	sc.Step(`^the continue turn instructs the AI to continue the task$`, w.checkContinue)
 	sc.Step(`^the hand-back turn asks for a handback post and to continue the task$`, w.checkHandback)
+	sc.Step(`^"Claude Code" in "([^"]+)" on (this computer|"[^"]+") reported task 12 and "Codex" reviews it in "([^"]+)"$`, w.composeReview)
+	sc.Step(`^the review turn says where the work is:$`, w.checkWorkLines)
 }
 
 func turnSeedKey(b byte) identity.Key {
@@ -139,7 +146,7 @@ func (w *turnStepWorld) seedRows() {
 	for _, m := range []struct{ id, name, cli string }{{turnAIID, "Claude Code", "claude"}, {turnPeerID, "Codex", "codex"}, {turnSecID, "Secretary", "claude"}} {
 		w.h.Rows.Put(turnGroupID, "member", m.id, turnMustJSON(proto.AIMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: m.id, Seq: 3}, Group: turnGroupID, Kind: "ai", User: w.ownerID, Name: m.name, LastSeen: turnTimeMS},
-			CLI:       m.cli, Host: w.homeKey.ID(), HostName: "node", Secretary: m.id == turnSecID, Account: "personal", Allow: []string{}, Approvers: []string{w.ownerID}, State: "waiting", Path: "local",
+			CLI:       m.cli, Host: w.homeKey.ID(), HostName: "node", Workspace: turnWorkspaces[m.id], Secretary: m.id == turnSecID, Account: "personal", Allow: []string{}, Approvers: []string{w.ownerID}, State: "waiting", Path: "local",
 		}))
 	}
 	w.h.Rows.Put(turnGroupID, "task", turnTaskID, turnMustJSON(w.taskRow()))
@@ -150,7 +157,7 @@ func (w *turnStepWorld) taskRow() proto.TaskRow {
 		RowHeader: proto.RowHeader{Type: "task", ID: turnTaskID, Seq: 5},
 		Group:     turnGroupID, Num: 12, Title: "Node: report connection path changes",
 		Origin: "brief", Brief: turnBriefID,
-		State: "active", Step: "branch", Assignee: turnAIID, Reviewer: turnPeerID,
+		State: "active", Step: "work", Assignee: turnAIID, Reviewer: turnPeerID,
 		Pass: 90, Depends: []string{}, Created: turnTimeMS,
 	}
 }
@@ -174,7 +181,7 @@ func (w *turnStepWorld) briefRowJSON() json.RawMessage {
 func (w *turnStepWorld) sessionFor(role string) host.Session {
 	s := host.Session{
 		SessionKey: host.SessionKey{Group: turnGroupID, Member: turnAIID},
-		Kind:       host.GroupSession, Home: w.homeKey.ID(), Name: "Claude Code",
+		Kind:       host.GroupSession, Home: w.homeKey.ID(), Name: "Claude Code", Folder: turnFolder,
 	}
 	switch role {
 	case "task":
@@ -299,4 +306,43 @@ func turnMustJSON(v any) json.RawMessage {
 		panic(err)
 	}
 	return b
+}
+
+// composeReview composes the review turn of Codex, in folder, for the report
+// that Claude Code wrote in workspace on computer: this one, or another one
+// of that name.
+func (w *turnStepWorld) composeReview(workspace, computer, folder string) (err error) {
+	raw, _ := w.h.Rows.Get(turnGroupID, "member", turnAIID)
+	var ai proto.AIMemberRow
+	if err := proto.Decode(raw, &ai); err != nil {
+		return err
+	}
+	ai.Workspace, ai.Host, ai.HostName = workspace, w.homeKey.ID(), "node"
+	if computer != "this computer" {
+		ai.Host, ai.HostName = turnSeedKey(3).ID(), strings.Trim(computer, `"`)
+	}
+	w.h.Rows.Put(turnGroupID, "member", turnAIID, turnMustJSON(ai))
+	task := w.taskRow()
+	task.Step, task.Report = "review", turnReport
+	w.h.Rows.Put(turnGroupID, "task", turnTaskID, turnMustJSON(task))
+	thread := turnTaskID
+	report := turnMustJSON(proto.MessageRow[proto.EmptyBody, proto.NoCard]{
+		RowHeader: proto.RowHeader{Type: "msg", ID: turnReport, Seq: 15},
+		Pos:       15, Group: turnGroupID, Thread: &thread, By: turnAIID, Kind: "report", Timestamp: turnTimeMS,
+		Text: "Ran go test ./...: 42 passed. Commit 9f2c1ab on branch t12-path-events.", Mentions: []string{},
+	})
+	item := proto.Item{Item: 5, AI: proto.ID(turnPeerID), Why: "review", Task: proto.ID(turnTaskID), Msg: proto.ID(turnReport)}
+	s := host.Session{
+		SessionKey: host.SessionKey{Group: turnGroupID, Member: turnPeerID, Task: turnTaskID},
+		Kind:       host.ReviewSession, Home: w.homeKey.ID(), Name: "Codex", Folder: folder,
+	}
+	w.text, w.turn, err = host.Compose(w.h, s, host.ItemsTurn, []json.RawMessage{turnMustJSON(proto.InboxItem{Item: item, Msg: report})})
+	return err
+}
+
+func (w *turnStepWorld) checkWorkLines(doc *godog.DocString) error {
+	if !strings.Contains(w.text, "\nPass score: 90\n"+doc.Content+"\n-- from \"Claude Code\" (AI) in T-12 · information\n") {
+		return fmt.Errorf("got:\n%s\nwant the lines after the pass score:\n%s", w.text, doc.Content)
+	}
+	return nil
 }

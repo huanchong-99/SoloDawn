@@ -13,3 +13,10 @@ Feature: Node ctl session and device-log adoption
     And the browser sends hello again
     Then welcome reports owner true
     And host.info and a host command succeed with a stored receipt
+
+  Scenario: A hello of protocol version 1 or 2 is answered version, and version 3 is welcomed (A8.7 node half)
+    Given an unowned node and a pairing browser connected over ctl
+    When the browser sends hello with protocol version 1, then 2
+    Then both were answered "version"
+    When the browser sends hello before any device log arrives
+    Then welcome reports owner false

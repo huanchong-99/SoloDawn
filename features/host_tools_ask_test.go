@@ -207,7 +207,7 @@ func (w *askStepWorld) caller(name string, depth int) host.Caller {
 		Session: host.Session{
 			SessionKey: host.SessionKey{Group: w.groupID, Member: w.members[name], Task: w.taskID},
 			Kind:       host.TaskSession,
-			Folder:     "wt/12-path",
+			Folder:     handFolder,
 			Agent:      "claude",
 			Home:       "home-device",
 			Name:       name,

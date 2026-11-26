@@ -5,6 +5,7 @@ package features
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -42,6 +43,7 @@ type nodeSessionWorld struct {
 	b1Conn          *peer.Connection
 	lastWelcome     proto.Welcome
 	cmdRuns         int
+	oldAnswers      []json.RawMessage
 }
 
 func nodeSessionSteps(sc *godog.ScenarioContext) {
@@ -59,6 +61,31 @@ func nodeSessionSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the browser sends a device log whose add entry for the node is signed by the pairing browser$`, w.sendValidAdoptionLog)
 	sc.Step(`^the browser sends hello again$`, func() error { return w.sendHello(w.b1Conn) })
 	sc.Step(`^host\.info and a host command succeed with a stored receipt$`, w.checkAdoptedSurfaceAndReceipt)
+	sc.Step(`^the browser sends hello with protocol version (\d+), then (\d+)$`, w.sendOldHellos)
+	sc.Step(`^both were answered "([^"]+)"$`, w.checkOldHellos)
+}
+
+// sendOldHellos sends the hello of v3.0.0-rc.1, at each version it spoke.
+func (w *nodeSessionWorld) sendOldHellos(first, second int) error {
+	w.oldAnswers = nil
+	for _, v := range []int{first, second} {
+		raw, err := requestWait(w.ctx, w.b1Conn, nil, func(id int64) any {
+			return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: v, Kind: "browser", Name: "Owner Browser", Addrs: []string{}}
+		})
+		if err != nil {
+			return err
+		}
+		w.oldAnswers = append(w.oldAnswers, raw)
+	}
+	return nil
+}
+
+func (w *nodeSessionWorld) checkOldHellos(code string) error {
+	var errs []error
+	for _, raw := range w.oldAnswers {
+		errs = append(errs, checkWireError(raw, code))
+	}
+	return errors.Join(errs...)
 }
 
 func (w *nodeSessionWorld) initRelayAndNode() error {

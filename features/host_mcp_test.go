@@ -91,7 +91,7 @@ func hostMCPSteps(sc *godog.ScenarioContext, t *testing.T) {
 	sc.Step(`^MCP failure tools "([^"]+)" and "([^"]+)"$`, func(conflictName, crashName string) {
 		host.Tools[conflictName] = host.Tool{
 			Call: func(context.Context, *host.Host, host.Caller, json.RawMessage) (any, error) {
-				return nil, &host.Error{Code: "conflict", Message: "the worktree has uncommitted changes"}
+				return nil, &host.Error{Code: "conflict", Message: "the task is not active"}
 			},
 		}
 		host.Tools[crashName] = host.Tool{
@@ -211,11 +211,7 @@ func hostMCPSteps(sc *godog.ScenarioContext, t *testing.T) {
 }
 
 func (m *mcpHarness) start(cleanup func(func()), level int) error {
-	base := os.TempDir()
-	if runtime.GOOS == "darwin" {
-		base = "/tmp"
-	}
-	root, err := os.MkdirTemp(base, "sdm")
+	root, err := os.MkdirTemp(socketBase(), "sdm")
 	if err != nil {
 		return err
 	}
@@ -240,10 +236,31 @@ func (m *mcpHarness) start(cleanup func(func()), level int) error {
 		return err
 	}
 	m.h = h
-	err = h.Sessions.Create(host.Session{
+	if err := m.admitWorking(level); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cleanup(cancel)
+	go acceptLocalMCP(ctx, local, h)
+	return nil
+}
+
+// socketBase is where the socket's folder is made: a short path on macOS,
+// whose limit on a socket path the temporary folder there would pass.
+func socketBase() string {
+	if runtime.GOOS == "darwin" {
+		return "/tmp"
+	}
+	return os.TempDir()
+}
+
+// admitWorking records the task session in the workspace, working on a turn,
+// and admits it at level.
+func (m *mcpHarness) admitWorking(level int) error {
+	err := m.h.Sessions.Create(host.Session{
 		SessionKey: m.key,
 		Kind:       host.TaskSession,
-		Folder:     "wt/12-mcp",
+		Folder:     handFolder,
 		Agent:      "claude",
 		Home:       "home-device",
 		Name:       "Claude Code",
@@ -251,14 +268,10 @@ func (m *mcpHarness) start(cleanup func(func()), level int) error {
 	if err != nil {
 		return err
 	}
-	if err := h.Sessions.Move(m.key, host.Dormant, host.Working); err != nil {
+	if err := m.h.Sessions.Move(m.key, host.Dormant, host.Working); err != nil {
 		return err
 	}
-	m.token = h.Sessions.Admit(m.key, level, false)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cleanup(cancel)
-	go acceptLocalMCP(ctx, local, h)
+	m.token = m.h.Sessions.Admit(m.key, level, false)
 	return nil
 }
 

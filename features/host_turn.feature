@@ -5,11 +5,23 @@ Feature: A host composes session instructions and turn text
     Then the instructions are under 60 lines and include "<expected>"
 
     Examples:
-      | role      | expected              |
-      | group     | start_task            |
-      | task      | submit_task           |
-      | review    | .solodawn-review.diff |
-      | secretary | propose_brief         |
+      | role      | expected                                                                                                       |
+      | group     | start_task                                                                                                     |
+      | group     | `start_task` may answer that the task is queued behind another one in this folder                              |
+      | task      | submit_task                                                                                                    |
+      | task      | Work only in this folder; it is your workspace in this group.                                                  |
+      | task      | with Git, `git pull --ff-only`                                                                                 |
+      | task      | never stash, reset, clean, `git add -A`, `git add .`, `git commit -a`, check out over files, rebase            |
+      | task      | stage and commit only your own files, by path. Never rewrite history that was published.                       |
+      | task      | never push to a branch that others use (such as `main`) before the review has passed                           |
+      | task      | SoloDawn runs no checks for you.                                                                               |
+      | task      | Call `submit_task` last                                                                                        |
+      | task      | After it, end your turn.                                                                                       |
+      | review    | Change nothing in the assignee's folder                                                                        |
+      | review    | do not score what you have not read                                                                            |
+      | secretary | propose_brief                                                                                                  |
+      | secretary | One folder takes one task at a time: order parts that must come together with `depends`.                       |
+      | secretary | Nothing is merged by the platform                                                                              |
 
   Scenario: The first turn of a brief task session carries goal, criteria, scope and newest notes
     Given a host turn fixture
@@ -19,7 +31,7 @@ Feature: A host composes session instructions and turn text
       [SoloDawn] group "Website" · you are "Claude Code" · task session T-12
       == 1 of 1 · assign · instruction
       Task T-12 "Node: report connection path changes"
-      Branch: task/12-node-report-connection-path-changes (this folder is its worktree)
+      Folder: /home/dev/website (your workspace in this group)
       Goal: Show the connection path and warn when relayed.
       Acceptance criteria:
       1. Indicator follows a path change within 1 s
@@ -45,10 +57,10 @@ Feature: A host composes session instructions and turn text
     Then the composed turn text is:
       """
       [SoloDawn] group "Website" · you are "Secretary" · secretary session
-      AI members (CLI on computer · tier · state · skills):
-      - "Claude Code" · claude on node · standard · waiting
-      - "Codex" · codex on node · standard · waiting
-      - "Secretary" · claude on node · standard · waiting
+      AI members (CLI on computer · folder · tier · state · skills):
+      - "Claude Code" · claude on node · /home/dev/website · standard · waiting
+      - "Codex" · codex on node · /home/dev/website-review · standard · waiting
+      - "Secretary" · claude on node · /home/dev/website · standard · waiting
       == 1 of 1 · confirmed · instruction
       -- from "owner" in main · instruction
       Brief "Connection path" (id KaiCW9JC8UOG7lKNduDo8Q) confirmed.
@@ -60,10 +72,10 @@ Feature: A host composes session instructions and turn text
     Then the composed turn text is:
       """
       [SoloDawn] group "Website" · you are "Secretary" · secretary session
-      AI members (CLI on computer · tier · state · skills):
-      - "Claude Code" · claude on node · standard · waiting
-      - "Codex" · codex on node · standard · waiting
-      - "Secretary" · claude on node · standard · waiting
+      AI members (CLI on computer · folder · tier · state · skills):
+      - "Claude Code" · claude on node · /home/dev/website · standard · waiting
+      - "Codex" · codex on node · /home/dev/website-review · standard · waiting
+      - "Secretary" · claude on node · /home/dev/website · standard · waiting
       == 1 of 1 · decided · instruction
       -- from "owner" in main · instruction
       Decision (id Zk3m8vN2pQ5rT7wX9yB1cA): Where should the notice go?
@@ -76,3 +88,35 @@ Feature: A host composes session instructions and turn text
     When the host composes a "continue" turn and a "handback" turn for task 12
     Then the continue turn instructs the AI to continue the task
     And the hand-back turn asks for a handback post and to continue the task
+
+  Scenario: A review turn says where the work is, by where the reporter's folder lies (A5.21 host)
+    Given a host turn fixture
+    When "Claude Code" in "/home/dev/website" on this computer reported task 12 and "Codex" reviews it in "/home/dev/website-review"
+    Then the composed turn text is:
+      """
+      [SoloDawn] group "Website" · you are "Codex" · review session T-12
+      == 1 of 1 · review · instruction
+      Task T-12 "Node: report connection path changes"
+      Goal: Show the connection path and warn when relayed.
+      Acceptance criteria:
+      1. Indicator follows a path change within 1 s
+      In scope: node
+      Out of scope: relay
+      Pass score: 90
+      Work: by "Claude Code" on node, in /home/dev/website
+      The work is in another folder on this computer. Read it there; change nothing in it.
+      -- from "Claude Code" (AI) in T-12 · information
+      Ran go test ./...: 42 passed. Commit 9f2c1ab on branch t12-path-events.
+      """
+    When "Claude Code" in "/home/dev/website" on this computer reported task 12 and "Codex" reviews it in "/home/dev/website"
+    Then the review turn says where the work is:
+      """
+      Work: by "Claude Code" on node, in /home/dev/website
+      The work is in this folder.
+      """
+    When "Claude Code" in "/home/dev/website" on "laptop" reported task 12 and "Codex" reviews it in "/home/dev/website"
+    Then the review turn says where the work is:
+      """
+      Work: by "Claude Code" on laptop, in /home/dev/website
+      The work is on another computer. Get it the way the report says it is shared (with Git and a remote: fetch the branch the report names), and read it without changing what this folder holds.
+      """

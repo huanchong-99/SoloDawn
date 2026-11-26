@@ -172,7 +172,7 @@ func (w *hostCapsWorld) thenMCPToolListing(toolName, agent, wantStruct, wantInte
 	_ = w.h.Sessions.Create(host.Session{
 		SessionKey: sKey,
 		Kind:       host.TaskSession,
-		Folder:     "wt/1-caps",
+		Folder:     handFolder,
 		Agent:      agent,
 		Home:       "home-1",
 		Name:       agent,

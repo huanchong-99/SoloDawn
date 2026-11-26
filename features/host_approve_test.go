@@ -291,14 +291,16 @@ func (w *approveAccWorld) buildDecisionDecidedRaw(signer identity.Key, card prot
 	})
 }
 
-func parseSessionKind(name string) (host.Kind, string, bool) {
+// parseSessionKind is the kind of a session and whether its AI is the
+// secretary. Every kind runs in the AI's workspace.
+func parseSessionKind(name string) (host.Kind, bool) {
 	switch name {
 	case "group":
-		return host.GroupSession, "repo", true
+		return host.GroupSession, true
 	case "review":
-		return host.ReviewSession, "review/1", false
+		return host.ReviewSession, false
 	default:
-		return host.TaskSession, "wt/1-test", false
+		return host.TaskSession, false
 	}
 }
 
@@ -338,7 +340,7 @@ func (w *approveAccWorld) initHostAndSession(cli, sessionName string, waitS int)
 	}
 	w.fakeHome = newApproveAccHome()
 	w.h.Attach(w.homeDev.ID(), w.fakeHome)
-	kind, folder, secretary := parseSessionKind(sessionName)
+	kind, secretary := parseSessionKind(sessionName)
 	w.seedGroupRows(w.h, waitS, secretary)
 	task := w.taskID
 	if kind == host.GroupSession {
@@ -346,7 +348,7 @@ func (w *approveAccWorld) initHostAndSession(cli, sessionName string, waitS int)
 	}
 	w.sessKey = host.SessionKey{Group: w.groupID, Member: w.memberID, Task: task}
 	return w.h.Sessions.Create(host.Session{
-		SessionKey: w.sessKey, Kind: kind, Folder: folder, Agent: cli,
+		SessionKey: w.sessKey, Kind: kind, Folder: handFolder, Agent: cli,
 		Home: w.homeDev.ID(), Name: "Worker", Secretary: secretary,
 	})
 }

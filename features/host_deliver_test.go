@@ -34,6 +34,8 @@ const (
 	accSecID   = "CCCCCCCCCCCCCCCCCCCCCQ"
 	accTaskID  = "DDDDDDDDDDDDDDDDDDDDDQ"
 	accCallID  = "EEEEEEEEEEEEEEEEEEEEEQ"
+	accTask2ID = "FFFFFFFFFFFFFFFFFFFFFQ"
+	accReport  = "GGGGGGGGGGGGGGGGGGGGGQ"
 	accNowMS   = int64(1763600000000)
 )
 
@@ -46,6 +48,7 @@ type accHome struct {
 	mu       sync.Mutex
 	done     chan struct{}
 	acks     []proto.Ack
+	cmds     []string // the payloads of the commands received
 	sinces   []int64
 	started  chan struct{} // single reader: attachNoWait
 	finished chan struct{} // single reader: attachAndFinishSync / sync steps
@@ -75,7 +78,13 @@ func (f *accHome) PathChanged() <-chan struct{} { return nil }
 func (f *accHome) Done() <-chan struct{}        { return f.done }
 
 func (f *accHome) Request(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
-	s, ok := build(1).(proto.Sync)
+	frame := build(1)
+	if cmd, ok := frame.(proto.Cmd); ok {
+		f.mu.Lock()
+		f.cmds = append(f.cmds, cmd.Env.Payload)
+		f.mu.Unlock()
+	}
+	s, ok := frame.(proto.Sync)
 	if !ok {
 		return json.RawMessage(`{"re":1,"ok":true}`), nil
 	}
@@ -135,15 +144,18 @@ func (f *accHome) allAcks() int {
 type accRunner struct {
 	mu    sync.Mutex
 	turns map[string]int
+	log   []string // "close <task>" and "turn <task> in <folder>", in order
 }
 
 func (r *accRunner) Turn(_ context.Context, h *host.Host, key host.SessionKey, _ string, _ host.Turn) error {
-	if s, ok := h.Sessions.Get(key); ok && s.State == host.Dormant {
+	s, ok := h.Sessions.Get(key)
+	if ok && s.State == host.Dormant {
 		h.Sessions.Move(key, host.Dormant, host.Working)
 		h.Sessions.Move(key, host.Working, host.Waiting)
 	}
 	r.mu.Lock()
 	r.turns[key.Member]++
+	r.log = append(r.log, "turn "+key.Task+" in "+s.Folder)
 	r.mu.Unlock()
 	return nil
 }
@@ -154,6 +166,15 @@ func (r *accRunner) Close(h *host.Host, key host.SessionKey) {
 	if s, ok := h.Sessions.Get(key); ok && s.State != host.Dormant {
 		h.Sessions.Move(key, s.State, host.Dormant)
 	}
+	r.mu.Lock()
+	r.log = append(r.log, "close "+key.Task)
+	r.mu.Unlock()
+}
+
+func (r *accRunner) logged() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.log)
 }
 
 func (r *accRunner) count(member string) int {
@@ -285,11 +306,15 @@ func accMemberRowJSON(id, name, hostID string, sec bool, seq int64) string {
 }
 
 func accTaskRowJSON(state string, seq int64) string {
-	return accJSON(proto.TaskRow{
-		RowHeader: proto.RowHeader{Type: "task", ID: accTaskID, Seq: seq},
-		Group:     accGroupID, Num: 1, Title: "Fix", Origin: "brief",
-		State: state, Step: "branch", Assignee: accMember1, Depends: []string{},
-	})
+	return accJSON(accTaskRow(accTaskID, 1, state, seq))
+}
+
+func accTaskRow(id string, num int, state string, seq int64) proto.TaskRow {
+	return proto.TaskRow{
+		RowHeader: proto.RowHeader{Type: "task", ID: id, Seq: seq},
+		Group:     accGroupID, Num: num, Title: "Fix", Origin: "brief",
+		State: state, Step: "work", Assignee: accMember1, Depends: []string{},
+	}
 }
 
 func accJSON(v any) string {
@@ -326,6 +351,7 @@ func hostDeliverSteps(sc *godog.ScenarioContext, f fixtures) {
 	registerDeliverGivenSteps(sc, f, cleanup, env, installHooks)
 	registerDeliverWhenSteps(sc, env)
 	registerDeliverThenSteps(sc, env)
+	registerDeliverSessionSteps(sc, env)
 }
 
 func registerDeliverGivenSteps(sc *godog.ScenarioContext, f fixtures, cleanup func(func()), env *accDeliverEnv, installHooks func()) {
@@ -433,16 +459,16 @@ func registerSyncFlowSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 	})
 	sc.Step(`^"home-1" pushes assign item (\d+) for "Claude Code" on task "T-1" and notice item (\d+) for secretary "Sec"$`, func(aNum, nNum int) {
 		aIt := proto.Item{Item: int64(aNum), AI: accMember1, Why: "assign", Task: accTaskID}
-		nIt := proto.Item{Item: int64(nNum), AI: accSecID, Why: "notice", Task: accTaskID, Code: "task_merged"}
+		nIt := proto.Item{Item: int64(nNum), AI: accSecID, Why: "notice", Task: accTaskID, Code: "task_done"}
 		env.pushSignedItem(env.homeKey, env.homeKey.ID(), aIt, nil)
 		env.pushSignedItem(env.homeKey, env.homeKey.ID(), nIt, nil)
 	})
-	sc.Step(`^"home-1" completes sync at sequence (\d+) with task "T-1" already merged$`, func(seq int) error {
+	sc.Step(`^"home-1" completes sync at sequence (\d+) with task "T-1" already done$`, func(seq int) error {
 		rows := []json.RawMessage{
 			json.RawMessage(accGroupRowJSON(env.homeKey.ID(), 1)),
 			json.RawMessage(accMemberRowJSON(accMember1, "Claude Code", env.hostKey.ID(), false, 2)),
 			json.RawMessage(accMemberRowJSON(accSecID, "Sec", env.hostKey.ID(), true, 3)),
-			json.RawMessage(accTaskRowJSON("merged", int64(seq))),
+			json.RawMessage(accTaskRowJSON("done", int64(seq))),
 		}
 		env.h.Push(env.homeKey.ID(), json.RawMessage(accJSON(proto.Rows{Type: "rows", Group: accGroupID, Rows: rows})))
 		ans := accJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: accGroupID, Seq: int64(seq)})
@@ -552,4 +578,99 @@ func registerDeliverThenSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 			return env.runner.count(accMember1) == wantTurns && env.home.ackCount(int64(item)) == wantAcks
 		})
 	})
+}
+
+// registerDeliverSessionSteps covers the sessions that delivery makes: a task
+// session after the obsolete ones are closed, and a review session that keeps
+// the report it was given.
+func registerDeliverSessionSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
+	sc.Step(`^"Claude Code" has a task session for task "T-1", which is done$`, func() error {
+		env.pushRows(accTaskRow(accTaskID, 1, "done", 4))
+		key := host.SessionKey{Group: accGroupID, Member: accMember1, Task: accTaskID}
+		return env.h.Sessions.Create(host.Session{SessionKey: key, Kind: host.TaskSession, Folder: handFolder, Agent: "claude", Home: env.homeKey.ID(), Name: "Claude Code"})
+	})
+	sc.Step(`^"home-1" pushes assign item (\d+) for "Claude Code" on its active task "T-2"$`, func(num int) {
+		env.pushRows(accTaskRow(accTask2ID, 2, "active", 5))
+		env.pushSignedItem(env.homeKey, env.homeKey.ID(), proto.Item{Item: int64(num), AI: accMember1, Why: "assign", Task: accTask2ID}, nil)
+	})
+	sc.Step(`^the host closed the session of "T-1" before the first turn of "T-2", which ran in the folder of the group session of "Claude Code"$`, env.checkClosedFirst)
+	sc.Step(`^"home-1" pushes review item (\d+) for "Claude Code" of report "R-1" on task "T-1"$`, func(num int) {
+		task := accTaskRow(accTaskID, 1, "active", 4)
+		task.Assignee, task.Reviewer, task.Step, task.Report = accSecID, accMember1, "review", accReport
+		env.pushRows(task)
+		thread := accTaskID
+		report := &proto.MsgRow{
+			RowHeader: proto.RowHeader{Type: "msg", ID: accReport, Seq: 5}, Pos: 5, Group: accGroupID, Thread: &thread,
+			By: accSecID, Kind: "report", Timestamp: accNowMS, Text: "Done in this folder.", Mentions: []string{}, Body: json.RawMessage(`{}`),
+		}
+		env.pushSignedItem(env.homeKey, env.homeKey.ID(), proto.Item{Item: int64(num), AI: accMember1, Why: "review", Task: accTaskID, Msg: accReport}, report)
+	})
+	sc.Step(`^the host restarts on its store and "Claude Code" calls submit_review with score (\d+)$`, env.reviewAfterRestart)
+	sc.Step(`^"home-1" received a review post in the thread of "T-1" naming report "R-1" with score (\d+)$`, env.checkReviewPost)
+}
+
+func (e *accDeliverEnv) pushRows(rows ...proto.TaskRow) {
+	raw := make([]json.RawMessage, len(rows))
+	for i, row := range rows {
+		raw[i] = json.RawMessage(accJSON(row))
+	}
+	e.h.Push(e.homeKey.ID(), json.RawMessage(accJSON(proto.Rows{Type: "rows", Group: accGroupID, Rows: raw})))
+}
+
+func (e *accDeliverEnv) checkClosedFirst() error {
+	group, _ := e.h.Sessions.Get(host.SessionKey{Group: accGroupID, Member: accMember1})
+	want := []string{"close " + accTaskID, "turn " + accTask2ID + " in " + group.Folder}
+	err := waitUntil(2*time.Second, "the first turn of T-2", func() error {
+		if got := e.runner.logged(); !slices.Equal(got, want) {
+			return fmt.Errorf("the runner did %q, want %q", got, want)
+		}
+		return nil
+	})
+	if _, open := e.h.Sessions.Get(host.SessionKey{Group: accGroupID, Member: accMember1, Task: accTaskID}); err == nil && open {
+		err = errors.New("the session of T-1 is still there")
+	}
+	return err
+}
+
+// reviewAfterRestart opens a host on the same store, as after a restart of
+// the node, and submits the review from the session the item made.
+func (e *accDeliverEnv) reviewAfterRestart(score int) error {
+	if err := e.startHost(); err != nil {
+		return err
+	}
+	e.seedLiveGroup()
+	key := host.SessionKey{Group: accGroupID, Member: accMember1, Task: accTaskID}
+	caller, ok := e.h.Sessions.Caller(e.h.Sessions.Admit(key, 3, false))
+	if !ok || caller.Kind != host.ReviewSession {
+		return fmt.Errorf("no review session after the restart: %+v", caller)
+	}
+	_, err := host.Tools["submit_review"].Call(context.Background(), e.h, caller, json.RawMessage(fmt.Sprintf(`{"score":%d,"items":[]}`, score)))
+	return err
+}
+
+func (e *accDeliverEnv) checkReviewPost(score int) error {
+	posts := e.home.posts()
+	if len(posts) != 1 {
+		return fmt.Errorf("the home received %d posts, want one", len(posts))
+	}
+	p := posts[0]
+	got := fmt.Sprintf("%s|%s|%s|%s|%d", p.Kind, threadOf(p.Thread), p.Body.Task, p.Body.Report, p.Body.Score)
+	if want := fmt.Sprintf("review|%s|%s|%s|%d", accTaskID, accTaskID, accReport, score); got != want {
+		return fmt.Errorf("the home received the post %s, want %s", got, want)
+	}
+	return nil
+}
+
+// posts are the posts among the commands the home received.
+func (f *accHome) posts() []proto.Post[proto.ReviewSigned] {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var posts []proto.Post[proto.ReviewSigned]
+	for _, cmd := range f.cmds {
+		var post proto.Post[proto.ReviewSigned]
+		if proto.Decode([]byte(cmd), &post) == nil && post.Type == "post" {
+			posts = append(posts, post)
+		}
+	}
+	return posts
 }

@@ -172,14 +172,14 @@ func (w *secScenarioWorld) seedRows(secName, ai1, ai2, ownerName, hostDev string
 	put("task", w.taskID, proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.taskID, Seq: 10},
 		Group:     w.home.groupID, Num: 12, Title: "Show path", Origin: "brief", Brief: w.home.briefID,
-		State: "active", Step: "local_check", Assignee: w.home.claudeMID, Reviewer: w.home.codexMID, Pass: 90, Depends: []string{},
+		State: "active", Step: "work", Assignee: w.home.claudeMID, Reviewer: w.home.codexMID, Pass: 90, Depends: []string{},
 		Stats: proto.TaskStats{Started: 1_763_600_000_000}, Created: 1_763_600_000_000,
 	})
 }
 
 func (w *secScenarioWorld) createSessions(secName, ai1 string) error {
 	secKey := host.SessionKey{Group: w.home.groupID, Member: w.home.secMID}
-	if err := w.h.Sessions.Create(host.Session{SessionKey: secKey, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: "home-dev", Name: secName, Secretary: true}); err != nil {
+	if err := w.h.Sessions.Create(host.Session{SessionKey: secKey, Kind: host.GroupSession, Folder: handFolder, Agent: "claude", Home: "home-dev", Name: secName, Secretary: true}); err != nil {
 		return err
 	}
 	w.h.Sessions.SetTurn(secKey, host.Turn{Kind: host.ItemsTurn})
@@ -189,7 +189,7 @@ func (w *secScenarioWorld) createSessions(secName, ai1 string) error {
 	}
 
 	tskKey := host.SessionKey{Group: w.home.groupID, Member: w.home.claudeMID, Task: w.taskID}
-	if err := w.h.Sessions.Create(host.Session{SessionKey: tskKey, Kind: host.TaskSession, Folder: "wt/12-show-path", Agent: "claude", Home: "home-dev", Name: ai1}); err != nil {
+	if err := w.h.Sessions.Create(host.Session{SessionKey: tskKey, Kind: host.TaskSession, Folder: handFolder, Agent: "claude", Home: "home-dev", Name: ai1}); err != nil {
 		return err
 	}
 	w.h.Sessions.SetTurn(tskKey, host.Turn{Kind: host.ItemsTurn, Thread: w.taskID})

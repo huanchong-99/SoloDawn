@@ -41,7 +41,6 @@ func hostTurnInfoSteps(sc *godog.ScenarioContext, _ fixtures) {
 		return w.mentionInThread("Q", "Q-personal", text)
 	})
 	sc.Step(`^the host composes a reviewed turn for "Q-team" on task 12 from a review written by "P-AI"$`, w.composeReviewed)
-	sc.Step(`^the host composes a checks turn for "Q-team" on task 12 from a checks row written by the home$`, rewritten("AC-2", "the checks message and the item checks are removed (MODEL-1126 plan 3.1)"))
 	sc.Step(`^"Q-team" posted a decision card to "Q" on task 12 and "(P|Q)" chose option "([^"]+)"(?: as admin)?$`, w.composeTaskDecision)
 	sc.Step(`^"Q" confirms a brief posted by "Secretary" while "P" has not listed "Q"$`, func() error {
 		return w.composeSecretaryConfirmed(nil, tiQMemID)
@@ -51,7 +50,6 @@ func hostTurnInfoSteps(sc *godog.ScenarioContext, _ fixtures) {
 	})
 	sc.Step(`^the turninfo item header is:$`, w.checkItemHeader)
 	sc.Step(`^the turninfo composed text is:$`, w.checkTurnText)
-	sc.Step(`^the turninfo second line is:$`, func(doc *godog.DocString) error { return w.checkLines(doc, 2, 1) })
 	sc.Step(`^the turninfo header and second line are:$`, w.checkFirstItem)
 }
 
@@ -155,7 +153,7 @@ func (w *turnInfoWorld) composeReviewed() (err error) {
 		RowHeader: proto.RowHeader{Type: "msg", ID: turnCallID, Seq: 12},
 		Pos:       12, Group: turnGroupID, Thread: &th, By: tiPAIID, Kind: "review", Timestamp: turnTimeMS, Mentions: []string{},
 		Body: proto.ReviewBody{
-			Task: turnTaskID, Num: 12, Title: "Paths", Report: "9f2c1ab", Round: 1, Score: 86, Pass: 90, OK: false,
+			Task: turnTaskID, Num: 12, Title: "Paths", Report: turnReport, Round: 1, Score: 86, Pass: 90, OK: false,
 			Items: []proto.ReviewItem{{Text: "No event after switching back to direct", File: &file, Line: &line}},
 		},
 	})

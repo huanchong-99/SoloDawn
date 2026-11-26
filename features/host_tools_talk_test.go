@@ -67,7 +67,7 @@ func (f *talkFakeHome) threadReply(id int64, thread *string) json.RawMessage {
 	review := proto.MessageRow[proto.ReviewBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: "m2____________________A", Seq: 9},
 		Pos:       9, Group: f.groupID, Thread: thread, By: f.codexID, Kind: "review", Timestamp: 1_763_600_000_000, Mentions: []string{},
-		Body: proto.ReviewBody{Report: "9f2c1ab", Round: 1, Score: 86, Pass: 90, Items: []proto.ReviewItem{{Text: "No test"}}},
+		Body: proto.ReviewBody{Report: turnReport, Round: 1, Score: 86, Pass: 90, Items: []proto.ReviewItem{{Text: "No test"}}},
 	}
 	raw, _ := json.Marshal(row)
 	rawReview, _ := json.Marshal(review)
@@ -171,7 +171,7 @@ func (st *talkScenarioState) setup(cleanup func(func()), aiName string) error {
 	if err := h.Sessions.Create(host.Session{
 		SessionKey: sessKey,
 		Kind:       host.TaskSession,
-		Folder:     "wt/12-show-path",
+		Folder:     handFolder,
 		Agent:      "claude",
 		Home:       "home-dev",
 		Name:       aiName,
@@ -201,7 +201,7 @@ func seedTalkRows(h *host.Host, groupID, taskID, claudeID, codexID, aiName, host
 	putJSON("task", taskID, proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: taskID, Seq: 3},
 		Group:     groupID, Num: 12, Title: "Show path", Origin: "brief", Brief: "KaiCW9JC8UOG7lKNduDo8Q",
-		State: "active", Step: "local_check", Assignee: claudeID, Reviewer: codexID, Pass: 90, Depends: []string{},
+		State: "active", Step: "work", Assignee: claudeID, Reviewer: codexID, Pass: 90, Depends: []string{},
 		Stats: proto.TaskStats{Started: 1_763_600_000_000}, Created: 1_763_600_000_000,
 	})
 }

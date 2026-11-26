@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -54,7 +53,7 @@ func hostExternalSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^the home mentions "Scout" twice and the runner takes, ends, fails and abandons runs$`, func() error {
 		return runExtBubble(f.t, s.runEnds)
 	})
-	sc.Step(`^the first hand-out is run 1 of kind "group" in the clone, with the group and external instructions in its context and the items in its text$`, s.checkFirst)
+	sc.Step(`^the first hand-out is run 1 of kind "group" in the folder "Scout" was added with, with the group and external instructions in its context and the items in its text$`, s.checkFirst)
 	sc.Step(`^while run 1 was open nothing more was handed out and "Scout" was "working"$`, func() error {
 		return s.checkStates(0, "working")
 	})
@@ -292,11 +291,9 @@ func runNumbers(runs []proto.Handout) []int64 {
 
 func (s *extScenario) checkFirst() error {
 	h := s.first
-	folder := string(filepath.Separator) + filepath.Join("projects", hlGroup, "repo")
-	got := fmt.Sprintf("%d|%s|%s|%s|%t|%t|%t|%t", h.Run, h.Kind, h.Task, h.Text,
-		filepath.IsAbs(h.Folder), strings.HasSuffix(h.Folder, folder),
+	got := fmt.Sprintf("%d|%s|%s|%s|%t|%t|%t", h.Run, h.Kind, h.Task, h.Text, h.Folder == handFolder,
 		strings.HasPrefix(h.Context, "instructions of group\n# External run\n"), strings.Contains(h.Context, "Never wait or poll"))
-	if got != "1|group||items=1|true|true|true|true" {
+	if got != "1|group||items=1|true|true|true" {
 		return fmt.Errorf("first hand-out %+v", h)
 	}
 	return nil

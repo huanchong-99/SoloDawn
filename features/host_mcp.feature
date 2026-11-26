@@ -21,7 +21,7 @@ Feature: Host MCP server and stdio shim
     Given a host with an active task session at level 2 and a local MCP socket
     And MCP failure tools "mcp_conflict" and "mcp_crash"
     When an MCP client connects through the shim with the session's token
-    Then calling "mcp_conflict" returns tool error "conflict: the worktree has uncommitted changes"
+    Then calling "mcp_conflict" returns tool error "conflict: the task is not active"
     And calling "mcp_crash" returns tool error "internal: the node failed to run the tool; the cause is in its log"
 
   Scenario Outline: Tokens that do not name an active session are refused
