@@ -818,7 +818,7 @@ func (w *m3World) listSessionTools(group, member, task, agent string, kind host.
 	err := h.Sessions.Create(host.Session{
 		SessionKey: key,
 		Kind:       kind,
-		Folder:     "repo",
+		Folder:     handFolder,
 		Agent:      agent,
 		Home:       w.node().Key.ID(),
 		Name:       member,

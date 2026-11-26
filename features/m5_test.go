@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -30,14 +32,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
-)
-
-// What the steps that MODEL-1126 took away say when they fail.
-const (
-	m5NoConflict = "merges and merge conflicts are removed (MODEL-1126 plan 3.3: A5.10 goes)"
-	m5NoChecks   = "check commands and the hard checks are removed (MODEL-1126 plan 3.3: A5.3, A5.9, A5.17 go)"
-	m5NoMerge    = "a task has no worktree, branch, checks or merge: it runs in the assignee's workspace, is submitted by report and is done when its review passes (MODEL-1126 plan 1.5, 1.6)"
-	m5NoForge    = "forges, pull requests and the live forge run are removed (MODEL-1126 plan 3.3: A5.13, A9.26 go)"
 )
 
 var (
@@ -336,22 +330,23 @@ type m5World struct {
 	seq     atomic.Int64
 	scriptN atomic.Int64
 
-	mu                sync.Mutex
-	turns             int
-	composedTurns     map[host.SessionKey]m5TurnTrace
-	turnTrace         []m5TurnTrace
-	turnsAtReviewPass map[string]int
-	turnsAtMerged     map[string]int
-	sawTaskSess       map[int]host.SessionKey
-	sawTaskDir        map[int]string
-	sawRevSess        map[int]host.SessionKey
-	sawRevDir         map[int]string
-	tools             []m5ToolRecord
-	listedTools       map[host.SessionKey][]string
-	beforeHooks       map[string][]m5HookFunc
-	heldMembers       map[string]bool
-	closing           bool
-	hookErr           error
+	mu            sync.Mutex
+	turns         int
+	composedTurns map[host.SessionKey]m5TurnTrace
+	turnTrace     []m5TurnTrace
+	turnsAtReview map[string]int
+	turnsAtDone   map[string]int
+	workspaces    map[string]string
+	sawTaskSess   map[int]host.SessionKey
+	sawTaskDir    map[int]string
+	sawRevSess    map[int]host.SessionKey
+	sawRevDir     map[int]string
+	tools         []m5ToolRecord
+	listedTools   map[host.SessionKey][]string
+	beforeHooks   map[string][]m5HookFunc
+	heldMembers   map[string]bool
+	closing       bool
+	hookErr       error
 
 	confirmAns1 proto.CmdResult
 	confirmAns2 proto.CmdResult
@@ -359,25 +354,25 @@ type m5World struct {
 	failAns2    proto.CmdResult
 	refuseCode1 string
 	refuseCode2 string
-	commit1     string
-	commit2     string
-	unreviewed  string
+	report1     string
+	report2     string
 	refusedItem int64
 }
 
 func newM5World(sc *godog.ScenarioContext, f fixtures) *m5World {
 	w := &m5World{
-		f:                 f,
-		composedTurns:     map[host.SessionKey]m5TurnTrace{},
-		turnsAtReviewPass: map[string]int{},
-		turnsAtMerged:     map[string]int{},
-		sawTaskSess:       map[int]host.SessionKey{},
-		sawTaskDir:        map[int]string{},
-		sawRevSess:        map[int]host.SessionKey{},
-		sawRevDir:         map[int]string{},
-		listedTools:       map[host.SessionKey][]string{},
-		beforeHooks:       map[string][]m5HookFunc{},
-		heldMembers:       map[string]bool{},
+		f:             f,
+		composedTurns: map[host.SessionKey]m5TurnTrace{},
+		turnsAtReview: map[string]int{},
+		turnsAtDone:   map[string]int{},
+		workspaces:    map[string]string{},
+		sawTaskSess:   map[int]host.SessionKey{},
+		sawTaskDir:    map[int]string{},
+		sawRevSess:    map[int]host.SessionKey{},
+		sawRevDir:     map[int]string{},
+		listedTools:   map[host.SessionKey][]string{},
+		beforeHooks:   map[string][]m5HookFunc{},
+		heldMembers:   map[string]bool{},
 	}
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		w.settleBeforeAfterHooks()
@@ -455,11 +450,20 @@ func (w *m5World) setupCluster(level2 bool) error {
 	}
 	w.registerHostHooks()
 	tb := scenarioTB{TB: w.f.t, cleanup: w.cleanup}
-	w.cluster = nodetest.Start(tb, nodetest.Config{BinDir: w.binDir, Nodes: 1})
+	w.cluster = nodetest.Start(tb, nodetest.Config{BinDir: w.binDir, Nodes: 1, Tables: w.homeTables()})
 	if err := w.startMCPBridge(); err != nil {
 		return err
 	}
 	return w.createGroupAndJoinAIs(level2)
+}
+
+// homeTables are the home's tables with a hook that notes when it wrote
+// reviews and task_done rows.
+func (w *m5World) homeTables() home.Tables {
+	tables := home.NodeTables()
+	tables.After = maps.Clone(tables.After)
+	tables.After.Add("m5_done_order", w.recordDoneOrder)
+	return tables
 }
 
 func m5ExeExt() string {
@@ -820,6 +824,7 @@ func (w *m5World) joinAI(agent, name string, secretary bool) error {
 	if err != nil {
 		return err
 	}
+	w.workspaces[name] = workspace
 	join := map[string]any{"g": w.groupID, "home": w.cluster.Nodes[0].Key.ID(), "agent": agent, "name": name, "secretary": secretary, "workspace": workspace}
 	return w.sendHostCommand("host.join", join)
 }
@@ -1066,34 +1071,28 @@ func m5OneTaskBriefArgs() map[string]any {
 func m5Steps(sc *godog.ScenarioContext, f fixtures) {
 	w := newM5World(sc, f)
 	m5RegisterFullFlowSteps(sc, w)
-	m5RegisterCheckAndReviewSteps(sc, w)
+	m5RegisterReviewSteps(sc, w)
 	m5RegisterDepAndDirectSteps(sc, w)
-	m5RegisterConflictAndEdgeSteps(sc, w)
+	m5RegisterRepeatAndLeaveSteps(sc, w)
 	m5RegisterJumpSteps(sc, w)
 	m5RegisterFailureSteps(sc, w)
 }
 
 func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {
-	sc.Step(`^a signed-in non-GitHub forge and its scratch repository$`, rewritten("AC-1", m5NoForge))
-	sc.Step(`^both assigned branches were pushed without approval cards$`, rewritten("AC-1", m5NoForge))
-	sc.Step(`^the forge reports both distinct requests merged at their reviewed heads$`, rewritten("AC-1", m5NoForge))
-	sc.Step(`^a project group with forge "([^"]*)", a secretary and working AIs "Claude" and "Codex"$`, func(string) error {
+	sc.Step(`^a group with a secretary and working AIs "Claude" and "Codex", each in a workspace of its own$`, func() error {
 		return w.setupCluster(true)
 	})
 	sc.Step(`^the owner posts a feature request in the main line and the secretary proposes a two-task brief$`, w.stepRequestAndTwoTaskBrief)
-	sc.Step(`^before confirm no task worktree exists and no assign item is queued on the home$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the owner confirms the brief and both tasks run through checks, cross-AI review, merge and summary$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the owner confirms the brief and both tasks push their branches, pass local and hosted checks, review each other, merge and summarize$`, rewritten("AC-1", m5NoForge))
-	sc.Step(`^both tasks are merged onto base with two summary cards in the main line and no approval card$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^push_branch pushed the assigned branch to origin with no approval card$`, rewritten("AC-1", m5NoForge))
-	sc.Step(`^both tasks are merged on origin with two summary cards carrying pull-request numbers and no approval card$`, rewritten("AC-1", m5NoForge))
+	sc.Step(`^before confirm no assign item was queued on the home and no task session exists$`, w.stepVerifyBeforeConfirm)
+	sc.Step(`^the owner confirms the brief and both tasks are submitted by report, reviewed by the other's AI and summarized$`, w.stepConfirmAndRunTwoTasks)
+	sc.Step(`^both tasks are done with two summary cards in the main line and no approval card$`, w.stepVerifyTwoTasksDone)
 	sc.Step(`^the owner saw no confirm card \(A9\.40\)$`, w.verifyNoConfirmCard)
-	sc.Step(`^each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^each task ran in its own session and worktree, and after the merge those sessions and folders are gone$`, rewritten("AC-1", m5NoMerge))
+	sc.Step(`^each passing review made its task done with no AI turn in between and a task_done row in the thread$`, w.stepVerifyNoTurnBeforeDone)
+	sc.Step(`^each task ran in its own session in the workspace of its assignee, after it was done its sessions are gone, and the node's data directory holds no project folder$`, m5FinalStep(w, w.stepVerifySessionsGone))
 }
 
 func (w *m5World) stepRequestAndTwoTaskBrief() error {
-	turns := append(m5BriefTurns(m5TwoTaskBriefArgs()), m5SummaryTurns("Alpha merged.", "Beta merged.")...)
+	turns := append(m5BriefTurns(m5TwoTaskBriefArgs()), m5SummaryTurns("Alpha done.", "Beta done.")...)
 	secScript := m5ClaudeScript(turns...)
 	w.writeScriptFile("claude", secScript)
 	if err := w.ownerPostMain("Please add alpha and beta helpers.", nil); err != nil {
@@ -1124,27 +1123,220 @@ func m5WorkerCalls(summary string) []m5ToolCallSpec {
 	return []m5ToolCallSpec{{Name: "submit_task", Args: map[string]any{"summary": summary}}}
 }
 
-func m5RegisterCheckAndReviewSteps(sc *godog.ScenarioContext, w *m5World) {
-	sc.Step(`^an active brief task on forge "([^"]*)" assigned to "Claude" and reviewed by "Codex"$`, func(string) error {
-		return w.givenOneBriefTask(false)
+func (w *m5World) stepVerifyBeforeConfirm() error {
+	items, err := w.homeQueuedItems()
+	if err != nil {
+		return err
+	}
+	if i := slices.IndexFunc(items, func(it store.Item) bool { return it.Why == "assign" }); i >= 0 {
+		return fmt.Errorf("an assign item before confirm: %+v", items[i])
+	}
+	if keys := w.taskSessionKeys(); len(keys) != 0 {
+		return fmt.Errorf("task sessions before confirm: %+v", keys)
+	}
+	return nil
+}
+
+func (w *m5World) taskSessionKeys() []host.SessionKey {
+	var keys []host.SessionKey
+	for _, s := range w.cluster.Nodes[0].Host.Sessions.All() {
+		if s.Kind == host.TaskSession {
+			keys = append(keys, s.SessionKey)
+		}
+	}
+	return keys
+}
+
+// stepConfirmAndRunTwoTasks runs the brief of two tasks: Claude does task 1
+// and Codex reviews it; Codex does task 2, which depends on task 1, and
+// Claude reviews it. Codex is held from its review of task 1 until the
+// secretary has summarized task 1, so that the secretary gets one notice per
+// turn.
+func (w *m5World) stepConfirmAndRunTwoTasks() error {
+	w.writeScriptFile("claude", m5ClaudeScript(m5WorkerCalls("Alpha is in alpha.go in my folder; go test passes.")))
+	w.writeScriptFile("codex", m5CodexScript("codex-rev-1", m5PassingReview(95)))
+	w.addBeforeHook("submit_review", func(host.Caller) error {
+		w.writeScriptFile("codex", m5CodexScript("codex-task-2", m5WorkerCalls("Beta is in beta.go in my folder; go test passes.")))
+		w.writeScriptFile("claude", m5ClaudeScript(m5PassingReview(96)))
+		w.setMemberHeld(w.codexM, true)
+		return nil
 	})
-	sc.Step(`^"Claude" runs checks on a dirty worktree, submits after failing checks, submits after passing checks, and submits again after an unchecked commit$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^run_checks refused the dirty worktree, submit_task failed after failing checks, succeeded after passing checks, and failed after the extra commit$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the review passes while merge is held and a new commit advances the task branch before merge runs$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the unreviewed commit is not merged onto base and the task returns to local_check waiting on conflict$`, rewritten("AC-1", m5NoMerge))
+	if err := w.confirmTwoTaskBrief(); err != nil {
+		return w.twoTaskFailure(err)
+	}
+	if err := w.waitFor("first summary card", func() bool { return len(w.summaryCards()) >= 1 }); err != nil {
+		return w.twoTaskFailure(err)
+	}
+	w.setMemberHeld(w.codexM, false)
+	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.codexM)
+	if err := w.waitFor("two summary cards", func() bool { return len(w.summaryCards()) == 2 }); err != nil {
+		return w.twoTaskFailure(err)
+	}
+	return nil
+}
 
-	sc.Step(`^a submitted brief task on forge "([^"]*)" assigned to "Claude" and reviewed by "Codex"$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the assignee and a wrong-commit checkout attempt reviews on the submitted task$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the assignee review is refused with "forbidden" and the wrong-commit review is refused with "conflict"$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^"Codex" reviews with score 86, then with a veto at score 95, and then four more failing reviews on resubmissions$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the 86 review returned the task to local_check, the veto recorded score 0, and the sixth failed review made the task failed$`, rewritten("AC-1", m5NoMerge))
+func (w *m5World) confirmTwoTaskBrief() error {
+	// The fake secretary consumes one event per turn: confirmation, then each task_done notice.
+	w.setMemberHeld(w.claudeM, true)
+	if err := w.ownerConfirmBrief(w.pendingBriefID()); err != nil {
+		return err
+	}
+	if err := w.waitFor("secretary confirmed turn started", func() bool { return w.turnCount() >= 2 }); err != nil {
+		return err
+	}
+	w.setMemberHeld(w.claudeM, false)
+	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.claudeM)
+	return nil
+}
 
-	sc.Step(`^"Claude" commits a test secret block with a test file and calls run_checks and submit_task$`, rewritten("AC-1", m5NoChecks))
-	sc.Step(`^run_checks completes with ok false and a failing "secrets" hard-check item, and submit_task publishes nothing$`, rewritten("AC-1", m5NoChecks))
+func (w *m5World) twoTaskFailure(cause error) error {
+	var tasks, queued, deliveries string
+	var summaries int
+	n := w.cluster.Nodes[0]
+	err := n.Store.Write(func(tx *store.Tx) error {
+		return tx.QueryRow(`SELECT
+			(SELECT json_group_array(json_object('id',id,'num',data->>'num','state',data->>'state','step',data->>'step'))
+				FROM row WHERE g=? AND r='task' AND gone=0),
+			(SELECT json_group_array(json_object('id',id,'why',why,'task',task,'ai',ai,'not_before',not_before))
+				FROM inbox WHERE g=?),
+			(SELECT json_group_array(json_object('item',item,'what',what,'agent',agent,'detail',detail))
+				FROM (SELECT item,what,agent,detail FROM audit
+					WHERE g=? AND what IN ('delivered','refused') ORDER BY id DESC LIMIT 12)),
+			(SELECT count(*) FROM row WHERE g=? AND r='msg' AND gone=0 AND data->>'kind'='summary')`,
+			w.groupID, w.groupID, w.groupID, w.groupID).Scan(&tasks, &queued, &deliveries, &summaries)
+	})
+	log, logErr := os.ReadFile(w.cluster.LogPath)
+	w.mu.Lock()
+	turns := slices.Clone(w.turnTrace)
+	w.mu.Unlock()
+	return fmt.Errorf("%w; summaries browser=%d home=%d; home tasks=%s queued=%s; host item audit=%s; db=%v; hooks=%v; turns=%+v; fake CLI log err=%v:\n%s",
+		cause, len(w.summaryCards()), summaries, tasks, queued, deliveries, err, w.checkHookErr(), turns, logErr, log)
+}
 
-	sc.Step(`^a project group on forge "([^"]*)" with check "m5envcheck" and a test token variable set in the node environment$`, rewritten("AC-1", m5NoChecks))
-	sc.Step(`^an active task on that group commits a change and calls run_checks$`, rewritten("AC-1", m5NoChecks))
-	sc.Step(`^run_checks passes with "m5envcheck" seeing PATH and HOME and not seeing the test token variable$`, rewritten("AC-1", m5NoChecks))
+func (w *m5World) summaryCards() []proto.MsgRow {
+	var out []proto.MsgRow
+	for _, m := range w.browserMessages() {
+		if m.Kind == "summary" && m.Main {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func (w *m5World) verifyZeroApprovalCards() error {
+	for _, m := range w.browserMessages() {
+		if m.Kind == "approval" {
+			return fmt.Errorf("unexpected approval card %s", m.ID)
+		}
+	}
+	return nil
+}
+
+func (w *m5World) stepVerifyTwoTasksDone() error {
+	if err := w.verifyZeroApprovalCards(); err != nil {
+		return err
+	}
+	tasks := w.browserTasks()
+	if len(tasks) != 2 || tasks[0].State != "done" || tasks[1].State != "done" {
+		return fmt.Errorf("expected 2 done tasks, got %s", w.tasksBrief())
+	}
+	return w.verifySummaries()
+}
+
+func (w *m5World) verifySummaries() error {
+	cards := w.summaryCards()
+	if len(cards) != 2 {
+		return fmt.Errorf("expected 2 summary cards, got %d", len(cards))
+	}
+	for _, c := range cards {
+		var body proto.SummaryBody
+		if json.Unmarshal(c.Body, &body) != nil || c.By != w.secID {
+			return fmt.Errorf("unexpected summary card by=%q body=%s", c.By, string(c.Body))
+		}
+	}
+	return nil
+}
+
+// recordDoneOrder notes the number of AI turns begun when the home wrote each
+// task's last review and when it wrote its task_done row.
+func (w *m5World) recordDoneOrder(_ *home.State, result home.Result) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, row := range result.Rows {
+		msg, _ := row.Value().(proto.MsgRow)
+		if msg.Kind == "review" && msg.Thread != nil {
+			w.turnsAtReview[*msg.Thread] = w.turns
+		}
+		if task := m5DoneThread(msg); task != "" {
+			w.turnsAtDone[task] = w.turns
+		}
+	}
+}
+
+// m5DoneThread is the task of a task_done row, which the client shows under
+// the secretary's name (contracts/messages.md section 4).
+func m5DoneThread(m proto.MsgRow) string {
+	var body proto.TaskDoneBody
+	if m.Kind != "system" || m.Thread == nil || json.Unmarshal(m.Body, &body) != nil {
+		return ""
+	}
+	want := proto.TaskDoneBody{SystemCode: proto.SystemCode{Code: "task_done"}, Task: *m.Thread}
+	if m.By != "system" || body != want {
+		return ""
+	}
+	return body.Task
+}
+
+func (w *m5World) stepVerifyNoTurnBeforeDone() error {
+	for _, t := range w.browserTasks() {
+		w.mu.Lock()
+		atReview, ok1 := w.turnsAtReview[t.ID]
+		atDone, ok2 := w.turnsAtDone[t.ID]
+		w.mu.Unlock()
+		if !ok1 || !ok2 || atReview != atDone {
+			return w.twoTaskFailure(fmt.Errorf("task %s turns at its review=%d (ok=%v), at done=%d (ok=%v)", t.ID, atReview, ok1, atDone, ok2))
+		}
+		if !slices.ContainsFunc(w.browserMessages(), func(m proto.MsgRow) bool { return m5DoneThread(m) == t.ID }) {
+			return fmt.Errorf("task %s has no task_done row in its thread", t.ID)
+		}
+	}
+	return nil
+}
+
+func m5DistinctPair[T comparable](a, b, zero T) bool {
+	return a != zero && b != zero && a != b
+}
+
+// stepVerifySessionsGone checks where each task and review ran: task 1 by
+// Claude reviewed by Codex, task 2 by Codex reviewed by Claude.
+func (w *m5World) stepVerifySessionsGone() error {
+	w.mu.Lock()
+	keys := []host.SessionKey{w.sawTaskSess[1], w.sawTaskSess[2], w.sawRevSess[1], w.sawRevSess[2]}
+	dirs := []string{w.sawTaskDir[1], w.sawTaskDir[2], w.sawRevDir[1], w.sawRevDir[2]}
+	w.mu.Unlock()
+	if !m5DistinctPair(keys[0], keys[1], host.SessionKey{}) || !m5DistinctPair(keys[2], keys[3], host.SessionKey{}) {
+		return fmt.Errorf("tasks and reviews did not run in sessions of their own: %+v", keys)
+	}
+	want := []string{w.workspaces["Claude"], w.workspaces["Codex"], w.workspaces["Codex"], w.workspaces["Claude"]}
+	if !slices.Equal(dirs, want) {
+		return fmt.Errorf("task 1, task 2 and their reviews ran in %q, want %q", dirs, want)
+	}
+	if err := w.waitFor("task and review sessions gone after done", func() bool { return m5SessionsGone(w.cluster.Nodes[0].Host, keys) }); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(w.cluster.Nodes[0].Dir, "projects")); !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("the node's data directory has a project folder: %v", err)
+	}
+	return nil
+}
+
+func m5SessionsGone(h *host.Host, keys []host.SessionKey) bool {
+	for _, k := range keys {
+		if _, ok := h.Sessions.Get(k); ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (w *m5World) waitPendingBrief() error {
@@ -1205,91 +1397,38 @@ func m5ErrCode(err error) string {
 	return ""
 }
 
-func m5RegisterDepAndDirectSteps(sc *godog.ScenarioContext, w *m5World) {
-	sc.Step(`^a confirmed brief where task 2 depends on task 1 on forge "([^"]*)"$`, w.stepGivenConfirmedDepBrief)
-	sc.Step(`^the secretary reassigns task 2 to "Codex" and reviewer "Claude" while task 2 is queued$`, w.stepReassignQueuedTask2)
-	sc.Step(`^task 2 remains queued with no worktree and no task session$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^task 1 completes checks, passes review and merges$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^task 2 becomes active, creates its worktree, and runs its task session for "Codex"$`, rewritten("AC-1", m5NoMerge))
-
-	sc.Step(`^the owner mentions "Claude" directly for a code change and "Claude" calls start_task$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the group session listed start_task without task submission tools, created a task card, notified the secretary, and committed the change in a new task session$`, rewritten("AC-1", m5NoMerge))
-}
-
-func (w *m5World) stepGivenConfirmedDepBrief(string) error {
-	if err := w.setupCluster(true); err != nil {
-		return err
-	}
-	brief := m5BriefArgs([]map[string]any{
-		{"title": "Base unit", "assignee": "Claude", "reviewer": "Codex", "depends": []int{}},
-		{"title": "Dependent unit", "assignee": "Claude", "reviewer": "Codex", "depends": []int{0}},
-	})
-	w.writeScriptFile("claude", m5ClaudeScript(
-		[]m5ToolCallSpec{{Name: "propose_brief", Args: brief}},
-		nil,
-		[]m5ToolCallSpec{{Name: "set_task", Args: map[string]any{"task": "T-2", "assignee": "Codex", "reviewer": "Claude"}}},
-	))
-	if err := w.ownerPostMain("Build base and dependent units.", nil); err != nil {
-		return err
-	}
-	if err := w.waitPendingBrief(); err != nil {
-		return err
-	}
-	w.setMemberHeld(w.claudeM, true)
-	if err := w.ownerConfirmBrief(w.pendingBriefID()); err != nil {
-		return err
-	}
-	return w.waitFor("2 tasks created and secretary confirmed turn settled", w.depBriefConfirmedReady)
-}
-
 func (w *m5World) turnCount() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.turns
 }
 
-func (w *m5World) depBriefConfirmedReady() bool {
-	state, _ := w.cluster.Nodes[0].Host.MemberState(w.groupID, w.secID)
-	return len(w.browserTasks()) == 2 && w.turnCount() >= 2 && state == string(host.Waiting)
-}
-
-func (w *m5World) stepReassignQueuedTask2() error {
-	if err := w.ownerPostMain("Give T-2 to Codex.", nil); err != nil {
+// homeQueuedItems is the inbox of the home for the group.
+func (w *m5World) homeQueuedItems() ([]store.Item, error) {
+	var items []store.Item
+	read := func(tx *store.Tx) error {
+		var err error
+		items, err = tx.Queued(w.groupID)
 		return err
 	}
-	return w.waitFor("task 2 reassigned to Codex", func() bool {
-		t2, ok := w.taskByNum(2)
-		return ok && t2.Assignee == w.codexM && t2.Reviewer == w.claudeM
-	})
+	err := w.cluster.Nodes[0].Store.Write(read)
+	return items, err
 }
 
-func m5RegisterConflictAndEdgeSteps(sc *godog.ScenarioContext, w *m5World) {
-	sc.Step(`^a submitted brief task on forge "([^"]*)" whose base branch gained a conflicting commit$`, rewritten("AC-1", m5NoConflict))
-	sc.Step(`^"Codex" passes the review and the host attempts the merge$`, rewritten("AC-1", m5NoConflict))
-	sc.Step(`^the task returns to local_check with wait "conflict" and the secretary receives a conflict notice$`, rewritten("AC-1", m5NoConflict))
-	sc.Step(`^the secretary names "Claude" on the conflicted task and "Claude" resolves, re-checks, resubmits, passes review and merges$`, rewritten("AC-1", m5NoConflict))
-	sc.Step(`^the task reaches state "merged" and base holds the resolved content$`, rewritten("AC-1", m5NoConflict))
+// release lets the host deliver to member again and delivers what it holds.
+func (w *m5World) release(member string) {
+	w.setMemberHeld(member, false)
+	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, member)
+}
 
-	sc.Step(`^a project group with forge "([^"]*)", a secretary, working AIs and a pending one-task brief$`, w.stepGivenPendingOneTaskBrief)
+func m5RegisterRepeatAndLeaveSteps(sc *godog.ScenarioContext, w *m5World) {
+	sc.Step(`^a group with a secretary, working AIs and a pending one-task brief$`, w.stepGivenPendingOneTaskBrief)
 	sc.Step(`^the owner sends the same signed confirm twice and the host sends the same signed task fail twice$`, w.stepSendDuplicateConfirmAndFail)
 	sc.Step(`^both confirms answered ok creating one task, and both task fails answered ok counting one failure$`, m5FinalStep(w, w.stepVerifyDuplicateConfirmAndFail))
-
-	sc.Step(`^removing "Claude" or "Codex" from the group is refused with "conflict"$`, w.stepVerifyBusyAICannotLeave)
-	sc.Step(`^"Codex" passes the review while the host holds the merge item$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^reassigning the task and submitting a new commit at step merge are refused with "conflict"$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the owner cancels the task at step merge and the host releases and processes the held merge item$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the task is cancelled, base is unchanged, and the host recorded the merge item as refused$`, rewritten("AC-1", m5NoMerge))
-
-	sc.Step(`^an active brief task on forge "([^"]*)" assigned to "Claude" with reviewer "Codex" held on the host$`, func(string) error {
-		return w.givenOneBriefTask(true)
-	})
-	sc.Step(`^"Claude" submits commit 1 and then commits, checks and submits commit 2 before "Codex" is released$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the home has retired the review item for commit 1 and keeps only commit 2 queued$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the host hold on "Codex" is released and "Codex" runs its review turn$`, rewritten("AC-1", m5NoMerge))
-	sc.Step(`^the host refused the held review item for commit 1 and delivered only commit 2 to "Codex"$`, rewritten("AC-1", m5NoMerge))
+	sc.Step(`^removing "Claude" or "Codex" from the group is refused with "conflict"$`, m5FinalStep(w, w.stepVerifyBusyAICannotLeave))
 }
 
-func (w *m5World) stepGivenPendingOneTaskBrief(string) error {
+func (w *m5World) stepGivenPendingOneTaskBrief() error {
 	if err := w.setupCluster(true); err != nil {
 		return err
 	}
@@ -1374,8 +1513,8 @@ func (w *m5World) stepVerifyDuplicateConfirmAndFail() error {
 
 func (w *m5World) stepVerifyBusyAICannotLeave() error {
 	for _, memberID := range []string{w.claudeM, w.codexM} {
-		if m5ErrCode(w.ownerRemoveMember(memberID)) != "conflict" {
-			return fmt.Errorf("expected conflict removing member %s", memberID)
+		if code := m5ErrCode(w.ownerRemoveMember(memberID)); code != "conflict" {
+			return fmt.Errorf("removing member %s answered %q, want conflict", memberID, code)
 		}
 	}
 	return nil

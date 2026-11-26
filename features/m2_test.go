@@ -34,6 +34,7 @@ type m2Entry struct {
 	kind   string
 	text   string
 	status string
+	raw    json.RawMessage
 }
 
 type m2Cache struct {
@@ -205,7 +206,7 @@ func m2ApplyOne(c *m2Cache, raw json.RawMessage, moveCursor bool, track *[]strin
 	if track != nil {
 		*track = append(*track, row.Text)
 	}
-	entry := m2Entry{seq: row.Seq, pos: row.Pos, gone: row.Gone, kind: row.Kind, text: row.Text, status: status}
+	entry := m2Entry{seq: row.Seq, pos: row.Pos, gone: row.Gone, kind: row.Kind, text: row.Text, status: status, raw: raw}
 	m2StoreEntry(c, row.Type, row.ID, entry, moveCursor)
 	return nil
 }
@@ -415,9 +416,10 @@ func m2RegisterSetupSteps(sc *godog.ScenarioContext, w *m2World, cleanup func(fu
 	sc.Step(`^an M2 node where browser A and browser B have synced "([^"]*)" with worker AI "([^"]*)"$`, func(group, ai string) error {
 		return w.startWithWorker(cleanup, f, group, ai)
 	})
-	sc.Step(`^browser A creates the project group "([^"]*)" on the M2 home$`, w.createGroup)
+	sc.Step(`^browser A creates the group "([^"]*)" on the M2 home$`, w.createGroup)
 	sc.Step(`^browser B sees "([^"]*)" without reloading and syncs its state$`, w.secondSeesAndSyncs)
-	sc.Step(`^the local host adds the worker AI "([^"]*)" to "([^"]*)"$`, w.hostAddsWorker)
+	sc.Step(`^the local host joins the AI "([^"]*)" and the secretary "([^"]*)" to "([^"]*)", each in a folder of its own$`, w.hostJoinsTwoAIs)
+	sc.Step(`^browser B shows "([^"]*)" and the secretary "([^"]*)" in "([^"]*)" with their folders without reloading$`, w.secondShowsTwoAIs)
 	sc.Step(`^browser (A|B) posts "([^"]*)" in "([^"]*)"$`, w.browserPosts)
 	sc.Step(`^browser (A|B) receives "([^"]*)" in "([^"]*)" within 1 second$`, w.browserReceivesWithinOneSecond)
 }
@@ -589,6 +591,97 @@ func (w *m2World) hostAddsWorker(aiName, groupName string) error {
 	}
 	_, err = w.node().Host.Command(context.Background(), w.node().Key.ID(), string(raw))
 	return err
+}
+
+// hostJoinsTwoAIs sends host.join for two AIs of the local node, each with a
+// folder of its own, as a browser does for the AIs ticked in the create
+// dialog (A2.1).
+func (w *m2World) hostJoinsTwoAIs(worker, secretary, groupName string) error {
+	if _, err := w.node().Host.Agents(context.Background(), false); err != nil {
+		return err
+	}
+	set := proto.AgentSet{HostCommand: w.hostCmd("agent.set"), Agent: "claude", Account: "personal"}
+	if err := callHostSurface(w.node().Host, w.node().Link, w.cluster.Owner.ID(), "agent.set", set); err != nil {
+		return err
+	}
+	for _, name := range []string{worker, secretary} {
+		if err := w.hostJoin(groupName, name, name == secretary); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *m2World) hostCmd(typ string) proto.HostCommand {
+	return proto.HostCommand{Type: typ, Nonce: w.ids.next(), Timestamp: w.clock.Load(), To: w.node().Key.ID()}
+}
+
+func (w *m2World) hostJoin(groupName, name string, secretary bool) error {
+	gid := proto.ID(w.groupID(groupName))
+	folder, err := aiWorkspace(w.cluster.Root, gid, name)
+	if err != nil {
+		return err
+	}
+	join := proto.HostJoin{
+		HostCommand: w.hostCmd("host.join"),
+		Group:       gid, Home: w.node().Key.ID(), Agent: "claude", Name: name, Workspace: folder, Secretary: secretary,
+	}
+	return callHostSurface(w.node().Host, w.node().Link, w.cluster.Owner.ID(), "host.join", join)
+}
+
+// secondShowsTwoAIs reads browser B's pushes until its rows hold both AIs
+// with the folders they joined with and the group names the secretary.
+func (w *m2World) secondShowsTwoAIs(worker, secretary, groupName string) error {
+	gid := w.groupID(groupName)
+	wt := w.browserB.wait(5*time.Second, "both AIs in "+groupName)
+	defer wt.stop()
+	for {
+		err := w.twoAIsShown(gid, worker, secretary)
+		if err == nil {
+			return nil
+		}
+		raw, rerr := recvWait(wt, w.browserB.ch)
+		if rerr != nil {
+			return errors.Join(err, rerr)
+		}
+		if err := w.browserB.applyPush(raw); err != nil {
+			return err
+		}
+	}
+}
+
+func (w *m2World) twoAIsShown(gid, worker, secretary string) error {
+	ais, group := m2AIsAndGroup(w.browserB.cacheOf(gid))
+	for _, name := range []string{worker, secretary} {
+		folder, err := aiWorkspace(w.cluster.Root, proto.ID(gid), name)
+		if err != nil || ais[name].Workspace != folder {
+			return fmt.Errorf("browser B shows %s in %q, want %q (%v)", name, ais[name].Workspace, folder, err)
+		}
+	}
+	return m2CheckSecretary(ais[worker], ais[secretary], group)
+}
+
+func m2CheckSecretary(worker, secretary proto.AIMemberRow, group proto.GroupRow) error {
+	if !secretary.Secretary || worker.Secretary || group.Secretary != secretary.ID {
+		return fmt.Errorf("browser B shows the secretary %q, want %s", group.Secretary, secretary.ID)
+	}
+	return nil
+}
+
+// m2AIsAndGroup is the AI members of a cache by name, and its group row.
+func m2AIsAndGroup(c *m2Cache) (map[string]proto.AIMemberRow, proto.GroupRow) {
+	ais := map[string]proto.AIMemberRow{}
+	var group proto.GroupRow
+	for key, e := range c.entries {
+		var ai proto.AIMemberRow
+		if key[0] == "group" {
+			json.Unmarshal(e.raw, &group)
+		}
+		if key[0] == "member" && json.Unmarshal(e.raw, &ai) == nil && ai.Kind == "ai" {
+			ais[ai.Name] = ai
+		}
+	}
+	return ais, group
 }
 
 func (w *m2World) makeTextPost(group, text string, nonce proto.ID) proto.Post[proto.EmptyBody] {

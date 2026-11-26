@@ -1,19 +1,22 @@
 Feature: Milestone 2 groups, messages, and sync on the local link
-  Connected browsers of a node's owner create a project group on its home,
+  Connected browsers of a node's owner create a group on its home,
   exchange messages live within a second, catch up across disconnects by delta
   or cold reset with older pending cards and paged scroll-back, keep command
   nonces idempotent, refuse commands and reads from non-member devices, and
   resume sync without reloading or losing rows when the home restarts.
 
-  Scenario: Creating a group and posting messages reaches a second connected browser within one second
+  # On the wire the group is created first and each AI joins it after that
+  # (contracts/commands.md section 1); here its people write in it before.
+  Scenario: A group written in by its people, then joined by two AIs with their folders, one of them the secretary, reaches a second connected browser without a reload (A2.1)
     Given an M2 node with connected browser A and browser B of its owner
-    When browser A creates the project group "Website" on the M2 home
+    When browser A creates the group "Website" on the M2 home
     Then browser B sees "Website" without reloading and syncs its state
-    When the local host adds the worker AI "builder" to "Website"
-    And browser A posts "Ship the status bar" in "Website"
+    When browser A posts "Ship the status bar" in "Website"
     Then browser B receives "Ship the status bar" in "Website" within 1 second
     When browser B posts "On it now" in "Website"
     Then browser A receives "On it now" in "Website" within 1 second
+    When the local host joins the AI "builder" and the secretary "planner" to "Website", each in a folder of its own
+    Then browser B shows "builder" and the secretary "planner" in "Website" with their folders without reloading
 
   Scenario: Reconnecting after twenty missed messages receives those twenty in order without reset
     Given an M2 node where browser A and browser B have synced "Website"

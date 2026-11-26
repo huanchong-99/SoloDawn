@@ -174,11 +174,11 @@ func m4Steps(sc *godog.ScenarioContext, f fixtures) {
 }
 
 func registerM4SetupSteps(sc *godog.ScenarioContext, w *m4World) {
-	sc.Step(`^an M4 project group with a second browser and configured AIs "([^"]+)" and "([^"]+)"$`, func(ai1, ai2 string) error {
+	sc.Step(`^an M4 group with a second browser and configured AIs "([^"]+)" and "([^"]+)"$`, func(ai1, ai2 string) error {
 		return w.givenTwoAIGroup(0, ai1, ai2)
 	})
-	sc.Step(`^an M4 project group with a (\d+)-second approval wait, a second browser and configured AI "([^"]+)"$`, w.givenSingleAIWaitGroup)
-	sc.Step(`^an M4 project group with a (\d+)-second approval wait, a second browser and configured AIs "([^"]+)" and "([^"]+)"$`, w.givenTwoAIGroup)
+	sc.Step(`^an M4 group with a (\d+)-second approval wait, a second browser and configured AI "([^"]+)"$`, w.givenSingleAIWaitGroup)
+	sc.Step(`^an M4 group with a (\d+)-second approval wait, a second browser and configured AIs "([^"]+)" and "([^"]+)"$`, w.givenTwoAIGroup)
 }
 
 func registerM4ApprovalSteps(sc *godog.ScenarioContext, w *m4World) {
@@ -199,7 +199,7 @@ func registerM4DecisionSteps(sc *godog.ScenarioContext, w *m4World) {
 	sc.Step(`^"([^"]+)" posts "([^"]+)" in the M4 group$`, w.thenAIPostsAndSettles)
 	sc.Step(`^the M4 owner mentions "([^"]+)" in the main line and it asks two four-option requestUserInput prompts$`, w.whenCodexMainLineQuestions)
 	sc.Step(`^the M4 browsers answer "([^"]+)"'s main-line decision cards with option "([^"]+)" and with free text "([^"]+)"$`, w.thenAnswerCodexQuestions)
-	sc.Step(`^a second M4 task for "([^"]+)" raises a four-option request_decision card and ends its turn$`, w.whenTaskRaisesRequestDecision)
+	sc.Step(`^the M4 owner cancels that task and a second M4 task for "([^"]+)" raises a four-option request_decision card and ends its turn$`, w.whenTaskRaisesRequestDecision)
 	sc.Step(`^the M4 second browser chooses option "([^"]+)" with note "([^"]+)" and wakes "([^"]+)" to post "([^"]+)"$`, w.thenChooseAndWakeRequestDecision)
 }
 
@@ -940,7 +940,12 @@ func (w *m4World) thenAnswerCodexQuestions(aiName, optID, customText string) err
 	return w.actOnCard(w.b1, card2.ID, "choose", "", customText, "")
 }
 
+// whenTaskRaisesRequestDecision cancels the AI's task, which holds its
+// folder, and starts a second one that asks with request_decision.
 func (w *m4World) whenTaskRaisesRequestDecision(aiName string) error {
+	if err := w.cancelTask(w.currentTaskID); err != nil {
+		return err
+	}
 	reqArgs := map[string]any{
 		"question": "Where should the status badge sit?", "context": "Placement", "recommended": 1,
 		"options": []map[string]string{
@@ -1219,14 +1224,18 @@ func (w *m4World) collectTaskTwoPendingCards(aiName string) error {
 }
 
 func (w *m4World) whenOwnerCancelsSecondTask() error {
+	return w.cancelTask(w.secondTaskID)
+}
+
+func (w *m4World) cancelTask(taskID string) error {
 	cancel := proto.TaskCommand{
 		HomeCommand: proto.HomeCommand{Type: "task", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID},
-		Op:          "cancel", ID: proto.ID(w.secondTaskID),
+		Op:          "cancel", ID: proto.ID(taskID),
 	}
 	if err := w.sendOK(w.b1, cancel); err != nil {
 		return err
 	}
-	return w.awaitTaskSessionRemoved(w.secondTaskID)
+	return w.awaitTaskSessionRemoved(taskID)
 }
 
 func (w *m4World) awaitTaskSessionRemoved(taskID string) error {

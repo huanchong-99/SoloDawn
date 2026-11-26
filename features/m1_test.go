@@ -208,7 +208,7 @@ func (w *m1World) createGroupFromFirstBrowser(name string) error {
 	b, bc := w.browsers[0], w.conns[0]
 	gid := exampleID("m1-group-" + name)
 	w.createdGrp = gid
-	payload := fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":%q,"kind":"project","repo":"/tmp/website","base":"main","forge":"none","checks":[],"member_name":"Owner"}`,
+	payload := fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":%q,"member_name":"Owner"}`,
 		gid, w.clock().UnixMilli(), gid, name)
 	env := b.key.Sign(payload)
 	raw, err := bc.request(w.ctx, func(id int64) any {

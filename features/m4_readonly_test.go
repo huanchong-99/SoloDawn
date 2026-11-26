@@ -26,6 +26,7 @@ type editWorld struct {
 	m      *m3World
 	m4     *m4World
 	agent  string
+	task   string // the task that tried last
 	folder string // of the task session that tried last
 }
 
@@ -38,7 +39,7 @@ func m4ReadOnlySteps(sc *godog.ScenarioContext, f fixtures) {
 		}
 		return ctx, nil
 	})
-	sc.Step(`^an M4 project with a "([^"]+)" AI whose CLI edits a file on every turn$`, func(agent string) error {
+	sc.Step(`^an M4 group with a "([^"]+)" AI whose CLI edits a file on every turn$`, func(agent string) error {
 		m := &m3World{f: f, cleanup: cleanup, tb: scenarioTB{TB: f.t, cleanup: cleanup}, groups: map[string]string{}, homeView: newHomeView()}
 		if err := m.givenSingleAINode("Website", "Worker", agent); err != nil {
 			return err
@@ -51,8 +52,8 @@ func m4ReadOnlySteps(sc *godog.ScenarioContext, f fixtures) {
 	})
 	sc.Step(`^a task of that AI runs at level 1$`, w.tryReadOnly)
 	sc.Step(`^a task of that AI runs at level 1 and its CLI asks the host to edit the file$`, w.askReadOnly)
-	sc.Step(`^the CLI refused its own edit, the file and the worktree are unchanged and there is no card$`, w.unchanged)
-	sc.Step(`^a task of that AI runs at level 3$`, w.tryLevel3)
+	sc.Step(`^the CLI refused its own edit, the file and the workspace are unchanged and there is no card$`, w.unchanged)
+	sc.Step(`^that task is cancelled and a task of that AI runs at level 3$`, w.tryLevel3)
 	sc.Step(`^the same CLI edited the file and there is no card$`, w.changed)
 }
 
@@ -106,7 +107,12 @@ func (w *editWorld) askReadOnly() error {
 	return w.try("1", "Refused.", w.askSteps())
 }
 
+// tryLevel3 cancels the task of the level-1 run, which holds the AI's
+// folder, and runs a new task at level 3.
 func (w *editWorld) tryLevel3() error {
+	if err := w.m4.cancelTask(w.task); err != nil {
+		return err
+	}
 	return w.try("3", "Edited.", nil)
 }
 
@@ -122,6 +128,7 @@ func (w *editWorld) try(level, text string, body []map[string]any) error {
 	if err != nil {
 		return err
 	}
+	w.task = task
 	if err := w.m.thenAIPosts("Worker", text, "Website"); err != nil {
 		return err
 	}
