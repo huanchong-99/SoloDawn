@@ -18,10 +18,9 @@ Ids of members, tasks and messages are random ids unless stated.
 ## 1. `group`
 
 ```json
-{"r":"group","id":"Qm1…","seq":812,"name":"Website","kind":"project",
- "repo":"https://git.example/team/website.git","base":"main","forge":"github",
+{"r":"group","id":"Qm1…","seq":812,"name":"Website",
  "home":"<device id>","secretary":"<member id>",
- "checks":["go vet ./...","go test ./..."],"pass":90,"pass_foundation":70,
+ "pass":90,"pass_foundation":70,
  "limits":{"rounds":10,"wakes_per_hour":20,"turn_minutes":60,"failures":3,
            "review_rounds":5,"ask_depth":4,"ask_wait_s":45,"approval_wait_s":600,
            "idle_notice_minutes":30},
@@ -30,13 +29,13 @@ Ids of members, tasks and messages are random ids unless stated.
 
 | Field | Values |
 | --- | --- |
-| `kind` | `project`; `team` from step 2 (no repository, no tasks) |
-| `forge` | `github` (through the `gh` CLI) or `none` (single machine, no remote) |
-| `checks` | the project's own check commands, run in the task worktree (R-103) |
 | `paused` | `{"by":"<member id>","at":<time>}` after an emergency stop, or `null` |
 
-Optional: `secretary` (absent while the group has none); `repo` (absent only
-for a group without a repository, step 2).
+Optional: `secretary` (absent while the group has none).
+
+There is one kind of group (R-10): the row names no kind, no repository, no
+branch, no forge and no check command. A group with people and no AI is an
+ordinary group.
 
 ## 2. `member`
 
@@ -52,6 +51,7 @@ AI:
 ```json
 {"r":"member","id":"m7…","seq":790,"g":"Qm1…","kind":"ai","user":"<owner's user id>",
  "name":"Claude Code","cli":"claude","host":"<device id>","host_name":"workstation",
+ "workspace":"/home/dev/website",
  "secretary":false,"account":"personal","allow":[],"approvers":["<user id>"],
  "state":"working","task":"<task id>","since":1763599000000,"path":"direct",
  "usage":{"window_pct":62,"window_resets":1763611200000,"day_cap_pct":80,
@@ -63,6 +63,7 @@ AI:
 | --- | --- |
 | `role` | `owner`, `admin`, `member` (people) |
 | `cli` | `claude`, `codex`; more in step 3, among them `external`: an agent the node does not start, whose row may also have `tool` (`contracts/step-3/external.md` section 1) |
+| `workspace` | the folder on `host` that every session of this AI in this group runs in (R-11): an absolute path, as the host resolved it when the AI was added, symbolic links resolved. Set by `member add_ai` and never changed afterwards: to move an AI to another folder its owner removes it and adds it again. Every member of the group reads it. One AI member has one workspace; two members may have the same one (`contracts/local.md` section 7) |
 | `account` | `personal`, `team`, `api_key` (R-50) |
 | `allow` | user ids that may direct this AI without confirmation (step 2, R-53) |
 | `approvers` | user ids that may decide its approvals: the owner, plus delegates |
@@ -107,38 +108,32 @@ does not.
 ```json
 {"r":"task","id":"t12…","seq":805,"g":"Qm1…","num":12,
  "title":"Node: report connection path changes",
- "slug":"node-report-connection-path-changes",
  "origin":"brief","brief":"<msg id>",
- "state":"active","step":"review","commit":"9f2c1ab",
+ "state":"active","step":"review","report":"<msg id>",
  "assignee":"<member id>","reviewer":"<member id>",
  "foundation":false,"pass":90,"depends":[],
- "branch":"task/12-node-report-connection-path-changes","pr":31,"pr_url":"https://…/pull/31",
- "checks":{"local":{"ok":true,"at":1763598000000,"commit":"9f2c1ab"},
-           "cloud":{"ok":true,"at":1763598300000,"commit":"9f2c1ab"}},
- "review":{"round":1,"failed":1,"score":86,"ok":false,"by":"<member id>","commit":"9f2c1ab","at":1763598900000},
+ "review":{"round":1,"failed":1,"score":86,"ok":false,"by":"<member id>","report":"<msg id>","at":1763598900000},
  "wait":null,"failures":0,
  "thread":{"count":7,"rounds":3,
            "last":{"by":"<member id>","kind":"progress","text":"Adding the event after switch-back","ts":1763599000000}},
- "stats":{"added":212,"removed":18,"started":1763595000000,"ended":null},
+ "stats":{"started":1763595000000,"ended":null},
  "created":1763595000000}
 ```
 
 | Field | Values |
 | --- | --- |
 | `num` | per-group counter, shown as `T-12` |
-| `slug` | the task's name in its branch `task/<num>-<slug>` and its worktree: 1 to 40 characters of `a` to `z`, `0` to `9` and `-`, made from `title` by the rule of `contracts/local.md` section 7. The home writes it once, when it creates the task, and never changes it; hosts read it from here. A reader refuses a task row whose `slug` is any other text, a copy of the row beside an inbox item included, so that none reaches a path or a branch name. In code: `proto.MakeSlug` and the type `proto.Slug`, and `Slug` in `web/src/lib/proto.ts` |
-| `origin` | `brief` (from a confirmed brief), `direct` (R-71), `takeover` (R-83) |
-| `state` | `queued`, `active`, `paused`, `failed`, `merged`, `cancelled` |
-| `step` | `branch`, `local_check`, `cloud_check`, `review`, `merge`. The card draws six positions; "pull request" is done when `pr` is set (`contracts/task-machine.md` section 1) |
-| `depends` | list of **task ids**: the tasks that must be merged before this one starts. (In a brief the same relation is written as indexes; the home turns them into ids when it creates the tasks.) |
-| `checks` | always an object; `{}` before the first check |
+| `origin` | `brief` (from a confirmed brief), `direct` (R-71) |
+| `state` | `queued`, `active`, `paused`, `failed`, `done`, `cancelled`. The last two are final |
+| `step` | `work`, `review`. The card draws three positions: work, review, done (`contracts/task-machine.md` section 1) |
+| `depends` | list of **task ids**: the tasks that must be done before this one starts. (In a brief the same relation is written as indexes; the home turns them into ids when it creates the tasks.) |
 | `wait` | `{"kind":…,"msg":"<msg id>","who":["<user id>"],"since":<time>}`, the latest reason the task is not moving, or `null` |
-| `wait.kind` | while `queued`: `depends`; while `active`: `approval`, `decision`, `reviewer`, `conflict`; while `paused`: `manual`, `rounds`, `preempted` |
+| `wait.kind` | while `queued`: `depends`, `busy` (the assignee's folder is in use by another task); while `active`: `approval`, `decision`, `reviewer`; while `paused`: `manual`, `rounds`, `preempted` |
 | `failures` | consecutive failures (R-63) |
 | `review.failed` | failed reviews since the task was created or a person last resumed or reassigned it from `failed`; the stop of R-63 counts it (`contracts/task-machine.md` row 7) |
 | `thread.rounds` | AI-to-AI exchanges since the last human message in the thread (R-60) |
 | `thread.last.text` | a preview: at most the first 200 characters of that message's text. A long message is cut here, never refused because of it |
-| `stats.started` | the time the task became active: when it was created, or, for a task created `queued`, when the merge of its last dependency released it (`contracts/task-machine.md` row 8) |
+| `stats.started` | the time the task became active: when it was created, or, for a task created `queued`, when it was started (`contracts/task-machine.md` section 2, "Starting a queued task") |
 | `stats.ended` | the time the task finished, or `null` |
 
 Optional:
@@ -146,33 +141,30 @@ Optional:
 | Field | Present |
 | --- | --- |
 | `brief` | when `origin` is `brief` |
-| `plan` | when `origin` is `direct` or `takeover` and the `plan` of `task start` is not empty: that plan |
-| `commit` | from the first submission: what hosted checks, the review and the merge are about |
+| `plan` | when `origin` is `direct` and the `plan` of `task start` is not empty: that plan |
+| `report` | from the first submission: the id of the `report` message that is under review (`contracts/task-machine.md` row 5) |
 | `reviewer` | once one is named |
 | `asked` | while it names any: those of the assignee and the reviewer whose role in this task needs their owner's `confirm` card (`contracts/step-2/confirm.md` section 6) |
-| `branch` | once the branch exists |
-| `pr`, `pr_url` | after a submission, when the group has a remote |
-| `review` | after the first review; `review.failed` counts from 0 before it |
-| `checks.local`, `checks.cloud` | after that check has run |
+| `review` | after the first review; `review.failed` counts from 0 before it. `review.report` is the report that review was about |
 | `thread.last` | when the thread has a message |
 | `wait.msg`, `wait.who` | when the wait is about a card, and about people |
-| `wait.kept` | on a wait of a paused task (`manual`, `rounds`, `preempted`) that replaced a `reviewer` or `conflict` wait: that `kind`, restored when the pause ends (`contracts/task-machine.md` section 2) |
+| `wait.kept` | on a wait of a paused task (`manual`, `rounds`, `preempted`) that replaced a `reviewer` wait: that `kind`, restored when the pause ends (`contracts/task-machine.md` section 2) |
+| `wait.by` | exactly on a wait of kind `manual`: the member id of whoever paused the task, the secretary or a person, written by the home from the sender of `task pause` (`contracts/task-machine.md` row 12). A wait that replaces it takes it away. The waits `rounds` and `preempted` have none: nobody chose them |
 
 What the mock-up badges map to. A task shows one badge: the first row,
 from the top, whose condition holds.
 
 | Badge | Condition |
 | --- | --- |
-| merged | `state = merged` |
+| done | `state = done` |
 | cancelled | `state = cancelled` |
 | stopped after failures | `state = failed` |
 | owner is operating directly | the assignee's member row has `state = takeover` and `task` = this task |
-| paused | `state = paused` |
-| queued | `state = queued` |
+| paused | `state = paused`; for `wait.kind = manual` the card says who paused it: `<name> paused the task` (in Chinese `<name> 暂停了任务`), the name being that of the member `wait.by`, kept after that member has left |
+| queued | `state = queued`; `wait.kind` says for what: another task (`depends`), or the folder (`busy`) |
 | waiting for your approval / for someone's approval | `wait.kind = approval`, viewer in `wait.who` or not |
 | waiting for your decision / for someone's decision | `wait.kind = decision`, viewer in `wait.who` or not |
 | waiting for a reviewer | `wait.kind = reviewer` |
-| merge conflict | `wait.kind = conflict` |
 | sent back by review | `state = active`, `review.ok = false` |
 | in progress | `state = active` |
 
@@ -181,7 +173,7 @@ from the top, whose condition holds.
 ```json
 {"r":"msg","id":"Zk3…","seq":814,"pos":790,"g":"Qm1…","thread":"t12…","main":false,
  "by":"<member id>","kind":"progress","ts":1763599000000,
- "text":"Branch created. Plan: add the event, emit on switch-back, write tests.",
+ "text":"Plan: add the event, emit on switch-back, write tests.",
  "mentions":[],"re":null,"body":{},"state":null,
  "env":{"p":"…","k":"…","s":"…"}}
 ```

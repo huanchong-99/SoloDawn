@@ -1,7 +1,8 @@
 # Contract, step 2: people
 
-How a second person comes into a group, what the three roles may do, and
-how a person leaves or is removed. It settles design point D-7 of
+How a second person comes into a group, by a link or added by an admin,
+what the three roles may do, and how a person leaves or is removed. It
+settles design point D-7 of
 `steps/parallel-plan-step-2-3.md` and refines the row "People" of
 `steps/step-2-3.md`. Rules: R-134, R-136, R-138, R-140.
 
@@ -15,7 +16,7 @@ A person's `member` row has `role` (`contracts/rows.md` section 2).
 | Role | Who | May, beyond what the role above it in this table may |
 | --- | --- | --- |
 | `member` | every person who joined | read the group; `post`, `note`, `jump`; `act` on a card that names them; add and remove their own AIs (`host.join`, `host.leave`); remove themself |
-| `admin` | named by the owner | everything `contracts/commands.md` gives "an admin"; `invite`; remove a person whose role is `member` |
+| `admin` | named by the owner | everything `contracts/commands.md` gives "an admin"; `invite`; `member add_person`; remove a person whose role is `member` |
 | `owner` | the owner of the home node; the person of `group create` | set roles; remove an admin |
 
 - A group has exactly one owner, the owner of the home, and the role never
@@ -141,8 +142,46 @@ new signalling from those devices fails `unknown_device`.
   connection and does not learn of a removal it missed.
 
 A removed person may be invited again and gets a new member id. Stated
-limit: removal ends access and takes nothing back. The person keeps the
-clone on their machines and whatever their clients had read.
+limit: removal ends access and takes nothing back. The person keeps
+whatever their clients had read, and the folders their AIs worked in are
+their own.
+
+### 2.5 `member add_person`
+
+`{"t":"member","n":"…","ts":…,"g":"…","op":"add_person","user":"<user id>",
+"name":"Mina"}`. By an admin. It adds, without an invitation, a person the
+home already knows (R-140; the owner's decision of 2026-11-26: a group is
+created by choosing people). `name` is the name the person gets in this
+group; the admin's client proposes the one the person has in another group.
+
+The home accepts it when both hold:
+
+1. It holds the device log of `user`, which it does exactly while that
+   person is a member of another group homed on this node (2.4, point 3):
+   else `not_found`. A person who is in no group here is invited by link.
+2. The person is not a member of `g`, and `name` is unused in it: else
+   `conflict`.
+
+It writes, in one transaction, what an accepted `join` writes (2.2),
+without an invitation:
+
+- a `member` row: `id` = `n`, `kind: human`, `user`, `name`, role `member`;
+- one `device` row per entry of the person's log;
+- a `system` message `member_joined` in the main line, with `by` = the
+  admin (section 6).
+
+Then the home pushes `groups` to that person's connected devices, as it
+does whenever the list of groups a peer may read changes; a device that
+connects later gets the group in `welcome.groups`
+(`contracts/datachannel.md` section 3). Those devices are admitted on this
+node already, as devices of a member of another group here (section 5).
+Their browser then sends `home.add` to the person's own nodes, as for any
+group homed on another person's computer (section 7, point 2), so that an
+AI of theirs can join.
+
+There is no consent step: the person leaves with `member remove` on their
+own row (2.4), and no AI of theirs is in the group until they add it
+(`risks.md` K-36).
 
 ## 3. The invitation is not a device pairing
 
@@ -201,6 +240,10 @@ Two rows of `contracts/datachannel.md` section 8 in step 2:
 
 - A joining connection whose person is no member when the invitation's
   time is reached is closed.
+- **A person added with `member add_person`** (2.5) has no joining
+  connection. Their devices are those of the second row already, through
+  another group homed here: the group they were added to is one more that
+  the home serves them, from the `groups` push on.
 - **Device logs with several people.** After `welcome` a home sends a
   peer the logs of the people in the groups that peer may read, and no
   other. It applies a `devlog` frame only for a person whose log it
@@ -220,7 +263,7 @@ the home:
 
 | `code` | Always present | Optional |
 | --- | --- | --- |
-| `member_joined` | `member` (the new row), `by` (the admin who invited) | — |
+| `member_joined` | `member` (the new row), `by` (the admin who invited, or who added the person with `member add_person`) | — |
 | `member_removed` | `user`, `name` (of the removed row, which is gone) | `by`, the member who removed them; absent when the person left |
 
 A role change writes no message: the row shows it.
@@ -236,16 +279,15 @@ A role change writes no message: the row shows it.
    (`contracts/datachannel.md` section 7), the groups whose home this node
    knows, each entry with `home`; it keeps such entries across restarts in
    the `setting` key `homes`, and `addrs` as addresses of `home`. The node
-   connects to each home in `host.info.homes`, reads the group with
-   `state_only` to learn its kind, and keeps the connection. It clones
-   nothing. B sends `home.add` for a team group, or a group homed on another
-   person's node, that a node of P does not list, when it connects to that
-   node and when the group appears, once per connection. When the node has
-   an AI in that group, `home.add` replaces the home it connects to for it
-   (`contracts/step-2/export.md` section 4). P-4a froze `home.add` and T2-1b
-   built it. T2-7 added the connections as specified in
-   [watch-team.md section 10 ("Which home")](watch-team.md#10-a-secretarys-notice-r-14),
-   decided 2026-11-22.
+   connects to each home in `host.info.homes`, as a device of a member
+   (`contracts/datachannel.md` section 8, third row), reads the group with
+   `state_only`, and keeps the connection. B sends `home.add` for a group
+   homed on another person's node that a node of P does not list, when it
+   connects to that node and when the group appears, once per connection.
+   When the node has an AI in that group, `home.add` replaces the home it
+   connects to for it (`contracts/step-2/export.md` section 4). P-4a froze
+   `home.add` and T2-1b built it; T2-7 added the connections (decided
+   2026-11-22).
 3. **One web client origin.** A stated limit: a browser is a device per
    origin, and the link opens the web client of the home's rendezvous. A
    person on another origin first adds a browser there
@@ -260,7 +302,7 @@ A role change writes no message: the row shows it.
 
 | Part | Folded into |
 | --- | --- |
-| sections 1 and 2; section 7, point 2 | `contracts/commands.md` 1.2, a section for `invite` and `join`, and section 2 (`home.add`); the link of `invite` among the results that live only in memory ("Once only"; `contracts/storage.md` section 2, `receipt`); `contracts/storage.md` section 2, `setting` key `homes` |
+| sections 1 and 2; section 7, point 2 | `contracts/commands.md` 1.2 (`add_person` is in its table), a section for `invite` and `join`, and section 2 (`home.add`); the link of `invite` among the results that live only in memory ("Once only"; `contracts/storage.md` section 2, `receipt`); `contracts/storage.md` section 2, `setting` key `homes` |
 | section 3 | `contracts/envelope.md` section 3 (check 2: a joining peer) and section 6 |
 | section 4 | a new `flows/joining.md` |
 | section 5; section 7, point 2 | `contracts/datachannel.md` sections 3.1, 7 (`homes`: the groups whose home the node knows, each entry with `home`) and 8 |
@@ -268,7 +310,8 @@ A role change writes no message: the row shows it.
 
 Unit P-4a freezes the wire shapes: the payloads of `invite` (with its
 result) and `join`, `member set` with `role`, the two `system` bodies,
-`home.add` and `home` in `host.info.homes` (section 7).
+`home.add` and `home` in `host.info.homes` (section 7). Unit P-8 freezes
+`member add_person` (`contracts/conventions.md` section 5).
 
 `[unverified]` Nothing here was run. That one rendezvous connection holds
 several rooms was read in the code of the service, not tested.

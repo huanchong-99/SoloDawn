@@ -80,7 +80,7 @@ today; the builder may move a line to the nearest place that has the fields.
 | `ice.pair` | `peer`: the selected pair changes | `dev`, `conn`, `local`, `remote` (candidate types), `proto`, `path` (`direct`, `relay`) |
 | `turn.stray` (`warn`) | `peer`: the socket of a TURN client over UDP drops a datagram that is not from its TURN server (`issues.md` FLAKY-33) | `from` |
 | `ctl.open`, `conn.close` | `peer`: `ctl` is ready; the connection is done | `dev`, `conn`; at the close `why` (`ice_failed`; `ctl_closed` when the remote side closed; `closed` when this side did), `ms` open |
-| `bg.start`, `bg.stop` | `host`, `home`, `node`: each goroutine a wait group starts (a delivery, a group sync, a poll of hosted checks, a status flush, a connection's pump), and in `host` the goroutines of a watched terminal; not the read loops of a CLI process or a terminal, the first of which `proc.*` covers | `name`; `g` and `task` when the work has them |
+| `bg.start`, `bg.stop` | `host`, `home`, `node`: each goroutine a wait group starts (a delivery, a group sync, a status flush, a connection's pump), and in `host` the goroutines of a watched terminal; not the read loops of a CLI process or a terminal, the first of which `proc.*` covers | `name`; `g` and `task` when the work has them |
 
 A change of path is two `ice.pair` lines of one `conn` with different
 `path`. A turn that ran out is `turn.interrupt` with `why=timeout`. A pause
@@ -90,9 +90,6 @@ What each of the failures of 2026-11-23 would have shown (`issues.md`):
 
 | Failure | Lines |
 | --- | --- |
-| A9.24, the retry commit not submitted | `cmd.reply t=task/checked` logged before the `rows.send` that carries its rows; then `tool name=submit_task` with its refusal |
-| A9.24, hosted checks run again | a second `bg.start name=cloud_poll` for the task after the `bg.stop` of the first |
-| A9.23, the bulletin before the attach | `tool name=post code=home_unreachable` between `home.dial` and `host.attach` of that home |
 | A10.3, the pause read (FLAKY-27) | `inbox.take` with the newer item in `took` and the older in `left` |
 | Host teardown | any line of that node, a `bg.stop` too, after `settle.end` |
 | A7.9 on Windows | `ice.pair` and `ice.state` of the takeover connection on the next failing run |

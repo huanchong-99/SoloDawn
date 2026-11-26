@@ -38,8 +38,8 @@ messages it accepts from a peer depends on who the peer is (section 8).
 The client's first message, `hello`, and the node's answer, `welcome`:
 
 ```json
-{"t":"hello","id":1,"v":2,"kind":"browser","name":"phone browser","addrs":[]}
-{"t":"welcome","re":1,"ok":true,"v":2,"device":"<node device id>",
+{"t":"hello","id":1,"v":3,"kind":"browser","name":"phone browser","addrs":[]}
+{"t":"welcome","re":1,"ok":true,"v":3,"device":"<node device id>",
  "name":"workstation","version":"v0.3.1","time":1763600000000,
  "addrs":["ws://192.0.2.10:47800/rv","wss://rv.example/rv"],
  "groups":[{"g":"Qm1…","name":"Website","seq":812}],"owner":true}
@@ -47,7 +47,7 @@ The client's first message, `hello`, and the node's answer, `welcome`:
 
 | Field | Meaning |
 | --- | --- |
-| `v` | protocol version. A node that cannot speak it answers `version` and keeps the connection open, so that the client can send `hello` again with a lower `v`. Steps 2 and 3 share `v` 2; a client sends 2 and, answered `version`, again 1 (`contracts/step-3/knowledge.md` section 8) |
+| `v` | protocol version: 3, the one version there is. A node answers `version` to a `hello` with any other `v`; 1 and 2 are what `v3.0.0-rc.1` spoke, whose rows this version would misread. A client, a browser or a node that connects to a home, sends 3 and nothing else: answered `version`, it stops and says that the node and the client must be updated together. It never sends `hello` again with a lower `v`, and it takes no `welcome` whose `v` is not 3 |
 | `kind` | `browser` or `host` |
 | `addrs` | where the sender can be signalled. In `hello`, URLs at which this node may be reachable, `[]` from a browser. In `welcome`, what reaches the node without the rendezvous: its own `ws://<address>:<port>/rv` URLs, then its rendezvous URLs (`contracts/rendezvous.md` section 4) |
 | `time` | the node's clock, in Unix milliseconds, when it sends `welcome` |
@@ -184,8 +184,8 @@ no `g` and no `to`.
 
 ```json
 {"t":"inbox","g":"Qm1…","items":[
-  {"item":{"item":4411,"ai":"<member id>","why":"review","task":"t12…","commit":"9f2c1ab"},
-   "task":{"r":"task", …}}
+  {"item":{"item":4411,"ai":"<member id>","why":"review","task":"t12…","msg":"Zk3…"},
+   "task":{"r":"task", …},"msg":{"r":"msg","kind":"report", …}}
 ]}
 ```
 
@@ -195,7 +195,7 @@ whatever the task has become; only a `jump` (R-72) still adds `jump: true`
 to a stored item, under its number. It always has `item`, `ai` and `why`, and the
 fields the table gives its `why`, each there exactly when the table says.
 `ack.item` is `items[].item.item`. In `item`, `task` and `msg` are the ids
-of those rows, and the optional fields are `task`, `msg`, `commit`, `pr`,
+of those rows, and the optional fields are `task`, `msg`,
 `jump`, `code` and `detail`. Beside `item`, `msg` and `task` are optional
 copies of the rows `item` names, taken when the item is sent, to build the
 turn from (`msg.env` is the author's own envelope); `items` is `[]` when a
@@ -205,9 +205,9 @@ frame has none.
 | --- | --- | --- | --- |
 | `mention` | when the message is in a thread | the message | `jump`: `true` after the author's `jump` (R-72), else absent |
 | `reply` | when the reply is in a thread | the reply | — |
-| `assign` | always | the `task` message (task-machine rows 1, 8); `re` of `task start` (row 2); the latest `checks` or `review` message (row 11); absent when there is none | — |
-| `review`, `merge` | always | — | `commit`; for `merge`, `pr` when the group has a remote |
-| `reviewed`, `checks` | always | the `review`, or the `checks`, message | — |
+| `assign` | always | the `task` message, for a task that starts (task-machine row 1, and a queued task that starts later); `re` of `task start` (row 2, a task that starts at once); the latest `review` message (row 11); absent when there is none | — |
+| `review` | always | the `report` message under review | — |
+| `reviewed` | always | the `review` message | — |
 | `resume` | always | — | — |
 | `decided` | when the card names a task | the card | — |
 | `confirmed` | — | the brief | — |
@@ -219,9 +219,9 @@ frame has none.
   `to` check).
 - **Still current.** Whether it is still true is checked when the host
   **uses** it, after it has read the group's state on this connection. For
-  a work item (`assign`, `checks`, `reviewed`, `review`, `resume`, `merge`):
-  the task is active, the AI still has that role, and for `review` and
-  `merge` the task is at that step with the item's commit. If not, the host
+  a work item (`assign`, `reviewed`, `review`, `resume`):
+  the task is active, the AI still has that role, and for `review` the
+  task is at step `review` and its `report` is the item's `msg`. If not, the host
   refuses it (audit `refused`, then `ack`). A `notice` is delivered
   whatever the task has become. The home pushes a row change before the
   items it produces, and deletes items that a later change made pointless.
@@ -232,8 +232,9 @@ frame has none.
   that jumps as soon as it does. A host acknowledges an item it has
   delivered before, and an item that jumps replaces the one it holds under
   that number.
-- A `merge` item is for the host itself, not for a session. What the host
-  does with an item is in `flows/agent-turn.md`.
+- What the host does with an item is in `flows/agent-turn.md`. When it
+  delivers a `review` item it keeps the id of that report with the review
+  session, and `submit_review` names it (`contracts/storage.md` section 3).
 
 ## 7. Host surface
 
@@ -256,7 +257,7 @@ and without `re` and `ok` (`contracts/conventions.md` section 3):
    "login_ok":true,"caps":{"day":{"unit":"turns","max":200}},
    "driver":{"accounts":["personal","team","api_key"],"takeover":"resume"},
    "models":[{"model":"…","name":"…","efforts":["low","high"],"tier":"…"}],
-   "groups":[{"g":"Qm1…","member":"<member id>","level":3,
+   "groups":[{"g":"Qm1…","member":"<member id>","workspace":"/home/dev/website","level":3,
               "state":"working","task":"<task id>","queued":0,"watchers":[]}]}],
  "settings":{"retention_days":90,"idle_minutes":15,"default_level":3,"all_level3":false,"approvers":[]}}
 ```
@@ -283,7 +284,33 @@ and without `re` and `ok` (`contracts/conventions.md` section 3):
   (`contracts/step-2/watch-team.md` section 5).
 - In `groups`: `state` and `task` are the AI's derived state
   (`contracts/rows.md` section 2; `task` is optional), `level` is the level
-  of its task sessions, and `queued` counts held items.
+  of its task sessions, and `queued` counts held items. `workspace` is the
+  folder of that member's sessions, as the node keeps it
+  (`contracts/local.md` section 7), always present. The Computers page
+  shows it, and the folder list of a dialog marks with it the folders that
+  are in use: one that an AI of the same group has says which AI and can be
+  chosen; one that an AI of another group has says which group and cannot.
+
+### `host.workspaces` (request)
+
+Asked when a dialog needs it, never pushed:
+
+```json
+{"t":"host.workspaces","id":9,"agent":"claude"}
+{"re":9,"ok":true,"workspaces":[{"path":"/home/dev/website","used":1763600000000}]}
+```
+
+- `agent` is one of the agents of `contracts/step-3/drivers.md`, or
+  `external`; anything else is `bad_request`.
+- `workspaces` lists the folders that CLI was used in on this computer,
+  newest use first; `[]` when there is none, and always for `external`.
+  `path` is absolute, resolved as `host.join` resolves a folder; `used` is
+  the time of the newest session there. Both are always present.
+- Where the folders come from, what is left out and where the list is cut
+  is in `contracts/local.md` section 7. A source that cannot be read gives
+  `[]`, not an error.
+- A folder that is not in the list is typed by the person; `host.join`
+  judges every folder alike (`contracts/commands.md` section 2).
 
 ### `audit` (request)
 

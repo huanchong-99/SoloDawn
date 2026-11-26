@@ -10,8 +10,7 @@ This file adds to the step 1 contracts. Presence follows
 `contracts/conventions.md` section 2.
 
 Not here, all in `contracts/step-2/`: when a home asks an owner, and the
-labels (`confirm.md`, `labels.md`); watching (`watch-team.md`); forge
-templates (`checks-forge.md`).
+labels (`confirm.md`, `labels.md`); watching (`watch-team.md`).
 
 ## 1. The home decides
 

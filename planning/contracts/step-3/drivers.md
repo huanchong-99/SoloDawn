@@ -82,6 +82,16 @@ step 1 drivers:
 - a fake CLI scripted from captures of the real one, as the two of step 1
   (`internal/host/fakecli/`).
 
+**Listing folders is not a driver operation.** The folders a CLI was used
+in, which the owner chooses a workspace from, are found by the package
+`internal/host/workspaces`, one finder per CLI, from the CLI's own session
+files; it starts no CLI and uses no driver. The one exception is OpenCode,
+whose finder is handed a function that fetches from the server its driver
+already starts to list models (section 10.1). The sources, per CLI, and
+what the node does not open are in `contracts/local.md` section 7. A CLI
+whose history cannot be read lists nothing, and its owner types the folder:
+no capability of section 4 depends on it.
+
 ## 4. The capability table
 
 Each driver declares one value, fixed in its code. A field may differ by
@@ -91,9 +101,9 @@ node was built for. The table holds only what a switch of section 5 reads.
 | Field | Value | The capability | Without it |
 | --- | --- | --- | --- |
 | `accounts` | list of `personal`, `team`, `api_key`; at least one | the terms allow that account type (section 2) | a type not listed cannot be declared for this CLI |
-| `levels` | list of `1`, `2`, `3`; always holds `1` | `2`: a sandbox of the CLI's own that lets it write inside the session's folder and stops writes outside it. `3`: a mode in which the CLI asks nothing | a level not listed is not offered. Without `2` and `3` the AI can be a secretary, a reviewer and answer questions, and cannot produce a submission (`contracts/drivers.md` section 2) |
+| `levels` | list of `1`, `2`, `3`; always holds `1` | `2`: a sandbox of the CLI's own that lets it write inside the session's folder and stops writes outside it. `3`: a mode in which the CLI asks nothing | a level not listed is not offered. Without `2` and `3` the AI can be a secretary, a reviewer and answer questions, and can change no file for a task (`contracts/drivers.md` section 1) |
 | `approvals` | `tool` or `conn` | how the required approval channel (section 3, R-43) reaches the node. `tool`: the CLI calls the node's MCP tool `approve`. `conn`: requests arrive on the driver's own connection | never missing: a CLI without a channel is not built |
-| `takeover` | `new`, `resume` or `none` | an interactive command that resumes the same session in a terminal, with the level, the repository setting and the node's MCP server holding there as in structured mode. `new`: it can also start a session there with an id the node chose | `none`: no "open terminal" for this AI, and nothing to watch (step 2). `resume`: a working AI without an unfinished task gets its `assign` turn in structured mode first (`flows/takeover.md` A) |
+| `takeover` | `new`, `resume` or `none` | an interactive command that resumes the same session in a terminal, with the level, the repository setting and the node's MCP server holding there as in structured mode. `new`: it can also start a session there with an id the node chose | `none`: no "open terminal" for this AI, and nothing to watch (step 2). `resume`: a session that has never run gets one structured turn first (`flows/takeover.md` A) |
 | `usage` | list of `tokens`, `usd`, `window_pct`; may be empty | the CLI reports that figure in structured mode | a cap in a unit not listed cannot be set. `turns` always can: the node counts them |
 
 Rules for a declaration:
@@ -123,7 +133,7 @@ would be refused. The home knows nothing of it, and no row changes.
 | `agent.set` | an `account` not in `accounts` is refused with `bad_request` |
 | the tool list of a session | `approve` is listed only to a structured session of a driver with `approvals` `tool` (`contracts/mcp-tools.md` section 3) |
 | `takeover.start` | refused with `conflict` when `takeover` is `none`, before the checks that answer `relay`, `busy` or `cli` |
-| `takeover.start` for a working AI without an unfinished task | `new`: the session starts in the terminal. `resume`: the structured `assign` turn comes first |
+| `takeover.start` for a session that has never run, which is the group session of a working AI without an unfinished task | `new`: the session starts in the terminal. `resume`: one structured turn comes first (`flows/takeover.md` A) |
 
 - Each refusal names the field of the declaration in `msg`.
 - No switch reads `levels` or `usage` in 1.0: `perm.set` and the caps of
@@ -180,7 +190,7 @@ the test of the switch takes their place:
 | no level 2 | A4.1, A4.2, A4.3, A4.6, A4.10, and the last sentence of A4.7: without level 2 no approval card can arise (`contracts/drivers.md` section 2) |
 | no level 3 | A4.5 |
 | `takeover` `none` | A7.1 to A7.9 |
-| `takeover` `resume` | A7.7 runs with the structured `assign` turn first |
+| `takeover` `resume` | A7.7 runs with one structured turn first |
 
 - Containment at level 2 is tested on every driver that declares it,
   through refusals: A4.2 and A4.10, where a refused request leaves no

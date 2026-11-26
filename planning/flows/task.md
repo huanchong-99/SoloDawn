@@ -1,16 +1,20 @@
-# Flow: a task from request to merge
+# Flow: a task from request to done
 
 Contracts: `contracts/task-machine.md` (every transition),
 `contracts/commands.md`, `contracts/rows.md`, `contracts/messages.md`,
-`contracts/mcp-tools.md`, `contracts/local.md` section 7 (Git commands).
-Rules: R-12, R-20 to R-24, R-41, R-90 to R-92, R-100 to R-103, R-63.
+`contracts/mcp-tools.md`, `contracts/local.md` section 7 (workspaces),
+`contracts/drivers.md` sections 3 and 4 (what a turn and the instructions
+say). Rules: R-11, R-12, R-20 to R-24, R-41, R-90, R-100 to R-103, R-63.
 
 Actors: P, the person asking; SEC, the secretary AI; H, the home; A, the
 assignee AI on host NA; R, the reviewer AI on host NR.
 
-The home moves a task only on facts reported by hosts. No AI can set a step,
-and no AI performs the merge. Hosted checks, the review and the merge are
-always about one commit: the one that was submitted.
+A task is work, a scored review, and done. The home moves it on two posts:
+the assignee's report and the reviewer's review. No AI can set a step or a
+state. The platform creates no branch, runs no check and merges nothing
+(the owner's decision of 2026-11-26): the AI works directly in its folder,
+tests the way the project does, and the review is about one report, the
+one that was submitted.
 
 ## A. Brief
 
@@ -28,127 +32,110 @@ always about one commit: the one that was submitted.
    (`contracts/commands.md` 1.3, 1.4): members and roles may have changed
    since. If one fails, the whole brief is answered `conflict` and nothing
    is created. Otherwise H creates the tasks exactly as listed, writes one
-   `task` message per task, and queues `assign` for each task with no unmet
-   dependency.
+   `task` message per task, and queues `assign` for each task that starts:
+   one with no unmet dependency whose assignee's folder is free. The others
+   wait as `queued` (section E, "One task at a time per folder").
 
 ## B. Work
 
-6. NA takes the `assign` item and creates A's **task session**: fetch (with
-   a remote), create the worktree and branch for the task from the base
-   branch, record the session with that worktree as its folder. NA reports
-   `task branch`. The step becomes `local_check`.
-7. NA delivers the first turn: the brief, the criteria, the folder, the
-   branch, and the group's notes.
-8. A works in the worktree and reports with `post` (kind `progress`). To
-   push while working it calls `push_branch`: NA pushes the task's own
-   branch, never forced. No approval is involved (R-41). A `git push` that A
-   runs by itself is like any other command that needs the network: at
-   level 2 the CLI's sandbox blocks it. That a card appears when the AI
-   then asks through its CLI is `[unverified]` on Claude Code
-   (`contracts/drivers.md` 1.1; `risks.md` Q-25).
-9. A calls `run_checks`. NA refuses if the worktree has uncommitted changes:
-   checks are about a commit. Otherwise NA runs, in the worktree, every
-   command in `group.checks` and then the universal hard checks, and reports
-   `task checked` with the result and the head commit; H writes a `checks`
-   message. The tool returns pass, or the tail of the failing output. A
-   fixes, commits and repeats.
-10. A calls `submit_task` with a summary. NA refuses unless the worktree is
-    clean and the last `run_checks` passed on the head commit. With a
-    remote, NA then pushes the branch and opens the pull request if the
-    branch has none (title: the task title; body: the summary). NA sends
-    `post` (kind `report`) and `task submitted` with that commit and the
-    pull-request number. That commit is now the task's `commit`.
+6. NA takes the `assign` item and creates A's **task session**: a session
+   row whose folder is A's workspace, the folder A was added with. NA
+   prepares nothing there: no clone, no branch, no worktree. Before the
+   first turn it closes the task sessions of this group whose task is final
+   or has another assignee, and checks that the folder exists
+   (`flows/agent-turn.md` step 4).
+7. NA delivers the first turn: the brief, the criteria, the folder, and the
+   group's notes.
+8. A works in that folder, with its own CLI. As its instructions say
+   (`contracts/drivers.md` section 4), it brings the folder up to date the
+   way the project does, leaves alone what it did not change, tests the way
+   the project does, and publishes its work by the project's own rules, or
+   without such rules to a branch of its own and never, before the review
+   has passed, to a branch others use. It reports with `post` (kind
+   `progress`). The node runs none of this and checks none of it (R-90).
 
-Submitting again later, after more work, replaces the commit and sends the
-task through hosted checks and review again.
+## C. Submission
 
-## C. Hosted checks
+9. A calls `submit_task` with a summary: what it changed, what it ran and
+   how it ended, and where the work is (the branch and commit, or this
+   folder only). That is one command, the `post` of kind `report` in the
+   task's thread, signed by NA for A. NA adds nothing to it and reads
+   nothing in the folder. H sets the task's `report` to that message, the
+   step to `review` and `failures` to 0. A ends its turn.
 
-11. With `forge: github`, the step is `cloud_check`. Every 30 seconds NA
-    reads, in one request, the pull request's head commit and the state of
-    its checks. It reports `task cloud` only from an answer whose head is
-    the submitted commit and whose checks have all finished. A repository
-    without hosted checks passes after two empty reads, and checks that
-    have not finished after 60 minutes count as failed
-    (`contracts/local.md` section 7). A failure returns the task to
-    `local_check`, counts as one failure, and A gets the detail.
-12. With `forge: custom` the group's `checks` template takes the place of
-    that read. With `forge: none` this step and the pull request are
-    skipped. With `forge: custom` the `push`, `open` and `merge` templates
-    likewise take the place of the forge commands in steps 10 and 18
-    (`contracts/step-2/checks-forge.md` section 3).
+Submitting again later, after more work, replaces the report and sends the
+task through review again.
 
 ## D. Review
 
-13. The step is `review`. H queues `review` for R, naming the commit. If the
-    task has no reviewer, H sets wait `reviewer` and gives SEC a `notice`;
-    when SEC names one, the `review` item goes to that reviewer.
-14. NR creates R's **review session** for the task, or reuses it in a later
-    round: a read-only checkout of exactly that commit, with the diff
-    against the base branch written to a file in that folder. NR delivers
-    the turn: brief, criteria, pass score, the name of the diff file.
-15. R calls `submit_review` with a score from 0 to 100 and a list of
+10. H queues `review` for R, carrying the report. If the task has no
+    reviewer, H sets wait `reviewer` and gives SEC a `notice`; when SEC
+    names one, the `review` item goes to that reviewer.
+11. NR creates R's **review session** for the task, or reuses it in a later
+    round, in R's own workspace. Nothing is checked out and no file is
+    moved. NR keeps the id of the report with the session and delivers the
+    turn: brief, criteria, pass score, the report as A wrote it, and where
+    the work is: A's name, computer and folder, with one of three remarks.
+
+    | A's folder is | The turn says |
+    | --- | --- |
+    | this session's own folder | the work is in this folder |
+    | another folder on this computer | read it there; change nothing in it |
+    | on another computer | get the work the way the report says it is shared (with Git and a remote: fetch the branch the report names), and read it without changing what this folder holds |
+
+12. R reads the work. Across computers it travels the way the project
+    shares work; SoloDawn carries text only (R-111). When R cannot get the
+    work, it says so in the thread and asks A, and does not score what it
+    has not read.
+13. R calls `submit_review` with a score from 0 to 100 and a list of
     remarks, each optionally tied to a file and line, each optionally a
-    veto. NR adds the commit it checked out. H refuses a review of any
-    other commit and computes the outcome.
-16. Not passed: the step returns to `local_check` and A gets `reviewed` with
-    the review, in its task session. Continue at 8. The sixth failed review
-    of a task makes it `failed` instead (R-63).
-17. Passed: the step is `merge`, and H queues a `merge` item for NA, naming
-    the commit and the pull request. From here until NA reports, nothing
-    else changes the task: no pause, no reassignment, no new submission
-    (`contracts/task-machine.md` section 4).
+    veto. NR adds the id of the report it delivered to that session, which
+    it still has after a restart. H refuses a review of any other report
+    and computes the outcome.
+14. Not passed: the step returns to `work` and A gets `reviewed` with the
+    review, in its task session. Continue at 8. The sixth failed review of
+    a task makes it `failed` instead (R-63).
 
-## E. Merge and summary
+## E. Done and summary
 
-18. NA takes the item only if the task, as NA sees it now, is still at
-    `merge` for that commit. It merges exactly that commit: with a remote,
-    through the forge (squash, delete the branch), told to refuse if the
-    pull request's head is not that commit; without, only if the task
-    branch's head is that commit, by a squash merge into the base branch of
-    the local clone. NA reports `task merged`. There is no retry and no
-    rollback.
-19. H marks the task `merged`, writes `system` `task_merged` in the thread
-    (the web client shows it under the secretary's name, R-24), activates
-    tasks that depended on it, and gives SEC a `notice`.
-20. NA and NR end the sessions of this task and remove the worktree and the
-    review checkout.
-21. SEC posts the summary (`post`, kind `summary`, one or two sentences). H
-    adds score, rounds, duration, lines changed and the pull-request number,
-    and the summary card appears in the main line.
+15. Passed: the task is `done`, in the transaction of the review. H expires
+    its pending cards, writes `system` `task_done` in the thread (the web
+    client shows it under the secretary's name, R-24), starts the queued
+    tasks that waited for it or for its folder, and gives SEC a `notice`.
+    No host acts and nothing is merged.
+16. NA and NR end the sessions of this task. Nothing is removed from a
+    folder.
+17. SEC posts the summary (`post`, kind `summary`, one or two sentences). H
+    adds score, rounds and duration, and the summary card appears in the
+    main line. SEC then arranges the closing step the project needs, such
+    as the merge of the task's branch or request: it asks the assignee in
+    the thread, or brings it to a person when the project wants a person to
+    do it.
 
-### Conflict
+What the platform no longer guarantees: that what was reviewed is what ends
+up anywhere. The review names a report, and the report is the assignee's
+statement (`risks.md` K-30).
 
-22. If the merge does not apply, or the branch has moved past the reviewed
-    commit, NA reports `task conflict` with the detail. H writes a `checks`
-    message (stage `merge`, failed), sets step `local_check` and wait
-    `conflict`, and gives SEC a `notice`.
-23. SEC says which AI resolves it (`set_task`): the same assignee or another
-    one. H clears the wait and queues `assign`, carrying that `checks`
-    message. The AI brings the branch up to date with the base branch,
-    resolves, and the flow continues at 9.
+### One task at a time per folder
+
+A task whose assignee's folder is in use by another task that has started
+waits as `queued` with wait `busy`, and starts by itself when that task is
+done or cancelled, or when either task gets an assignee in another folder
+(`contracts/task-machine.md` section 2). Two AIs that were added with one
+folder on one computer share the rule. A second task for an AI in another
+folder starts at once.
 
 ### Reassignment
 
 When a task's assignee changes, the previous assignee's node ends its task
-session, pushes the task branch when there is a remote, and then removes its
-worktree with `--force` (`contracts/local.md` section 7). When the new
-assignee is on the same node, all of it comes before the new worktree is
-created; two nodes do not wait for each other. The new assignee's
-node creates its worktree from the published branch, or from the base
-branch if nothing was ever published; without a remote both AIs are on the
-same node and use the same local branch. Only commits carry over;
-uncommitted changes are discarded. The new node reports `task branch` only
-if the task is still at step `branch`; a task that is further along keeps
-its step. The reviewer's session and checkout stay.
+session; nothing is moved, pushed or removed, and what that AI changed
+stays in its folder. The new assignee starts in its own folder and finds
+out from the thread, or by asking the previous one, where the work is.
 
 When only the reviewer changes, the previous reviewer's node ends its
-review session and removes `review/<num>`; the new reviewer's node creates
-its own at the next `review` item.
-
-A task cannot be reassigned, paused or resubmitted while it is at step
-`merge`, and an AI cannot leave the group while it is assignee or reviewer
-of an unfinished task.
+review session; the new reviewer's node creates its own at the next
+`review` item. An AI cannot leave the group while it is assignee or
+reviewer of an unfinished task.
 
 ## F. Failures
 
@@ -156,10 +143,8 @@ Every outcome is a row of `contracts/task-machine.md`; this is only the map.
 
 | What happens | Row |
 | --- | --- |
-| `run_checks` fails | none: returned to A in the same turn, not counted |
-| hosted checks fail | 6 |
 | a turn crashes or times out in the task session | 10 |
-| the merge does not apply, or the branch has moved | 9 |
+| the folder of the task session is gone when its CLI is to start | 10, with `turn_interrupted` naming the folder (`contracts/local.md` section 7) |
 | three consecutive failures; a sixth failed review | 14: only a person resumes or reassigns the task (R-63) |
 | approval not answered | 17: the task waits; SEC may reassign (row 11, R-42) |
 
@@ -172,9 +157,14 @@ Every outcome is a row of `contracts/task-machine.md`; this is only the map.
 - If the request needs a code change, the AI calls `start_task` with a
   title and a short plan. NA sends `task start`; H creates the task card,
   gives SEC a `notice`, and queues `assign` carrying the owner's message.
-  NA creates the task session as in step 6; its first turn holds the
-  owner's message and the plan. The flow continues at 8. The task has no
-  reviewer yet: SEC names one, at the latest when H asks at step 13.
+  NA creates the task session as in step 6, in the same folder; its first
+  turn holds the owner's message and the plan. The flow continues at 8.
+  The task has no reviewer yet: SEC names one, at the latest when H asks at
+  step 10.
+- When the AI's folder is in use by another task, its own included, the new
+  task is created `queued` with wait `busy`, and `start_task` says so. Its
+  `assign` is queued when it starts, carrying the `task` message: the first
+  turn then holds the title and the plan.
 
 ## H. Follow-up by the secretary (R-22)
 

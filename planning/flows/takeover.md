@@ -9,19 +9,20 @@ is taken over; H, the home.
 
 ## A. Which session
 
-Code changed during takeover must be on a task branch (R-83). Task sessions
-already live in a task's worktree, so the rule is:
+Every session of an AI in a group runs in the member's workspace, so a
+takeover is always in that folder (R-83). Which session's history the
+terminal continues:
 
 | The AI is | S is |
 | --- | --- |
 | a working AI, and `takeover.start` names a task it is assigned | that task session |
 | a working AI, and `takeover.start` names a task it reviews | that review session, still at level 1. The hand-back turn leaves out the sentence about the task, and no task command is sent |
 | a working AI, no task named, with an unfinished task that is not queued | the task session it used last |
-| a working AI with no such task | a new task session: N first sends `task start` with `origin: takeover`, the title "Owner takeover" and an empty plan, and creates the session as in `flows/task.md` step 6. A CLI that can start a new session in the terminal is started there with the new session id. For one that cannot (`contracts/drivers.md` 1.3 says which) N first delivers the task's `assign` turn in structured mode (for a task of origin `takeover` it says only that the owner is about to work with the AI in the terminal) and takes over when it has ended |
-| the secretary | its group session, in the project clone, still read only: the secretary changes no file, in the terminal either (R-21) |
+| a working AI with no such task | its group session. No task is created (the owner's decision of 2026-11-26): the node reads no facts from the folder, so it could not tell afterwards whether anything changed and whether a task was needed. A group session that has never run is started in the terminal by a CLI that can start a new session there, with the new session id. For one that cannot (`contracts/drivers.md` 1.3 says which) N first delivers one turn in structured mode, which says only that the owner is about to work with the AI in the terminal, and takes over when it has ended |
+| the secretary | its group session, still read only: the secretary changes no file, in the terminal either (R-21) |
 
-A queued task is left untouched: a takeover gives it no worktree and no
-session, and a `takeover.start` that names one is answered `conflict`.
+A queued task is left untouched: a takeover gives it no session and does
+not start it, and a `takeover.start` that names one is answered `conflict`.
 
 ## B. Taking over
 
@@ -29,14 +30,14 @@ session, and a `takeover.start` that names one is answered `conflict`.
    disabled unless B's path to N is `direct` (`flows/connect.md` step 8).
 2. B sends the signed host command `takeover.start` to N.
 3. N checks the signer is its owner and picks S (section A). It answers
-   `busy` while another takeover of this AI is open, N is giving the AI a
-   turn that has not begun, or a merge of one of its tasks is running. If
-   the AI is running a turn in this group, N interrupts it and waits for its
-   end.
+   `busy` while another takeover of this AI is open, or N is giving the AI a
+   turn that has not begun. If the AI is running a turn in this group, N
+   interrupts it and waits for its end.
 4. N closes the structured CLI process of S, if one is open, and waits for
    it to exit (C-6).
-5. N notes, for the hand-back summary, the current commit and the list of
-   uncommitted files in S's folder.
+5. N checks that S's folder exists (`contracts/local.md` section 7); a
+   folder that is gone is the first row of section E. N notes nothing about
+   the folder: it reads no Git facts, before or after.
 6. N starts the vendor's interactive CLI in a pseudo-terminal, in S's
    folder, with S's session id and with the same level, the same setting
    sources and the same MCP configuration as the structured session
@@ -55,7 +56,8 @@ session, and a `takeover.start` that names one is answered `conflict`.
 9. Inbox items for this AI in this group are held. The terminal page and
    the AI's card say that messages to the AI wait until hand-back, without a
    count: the node pushes no `host.info` for it (`issues.md`).
-10. Whatever O and the AI do stays in the task's worktree and branch.
+10. Whatever O and the AI do is done in the member's workspace, like any
+    work of that AI.
 11. N does not read, store or interpret terminal bytes (R-85).
 
 ## D. Handing back
@@ -66,33 +68,27 @@ session, and a `takeover.start` that names one is answered `conflict`.
     otherwise when N's own stack reports the connection lost.
 13. N ends the interactive CLI by closing its pseudo-terminal and waits for
     it to exit, at most 10 s (`flows/agent-turn.md` G).
-14. N computes the facts: commits made since step 5, files changed, lines
-    added and removed (`contracts/local.md` section 7, hand-back facts).
-15. If the task was created by this takeover and nothing changed (no new
-    commit, no modified file), N sends `task cancel`, the session ends, and
-    nothing is posted. The flow stops here.
-16. N starts the structured CLI again with the same session id and delivers
+14. N starts the structured CLI again with the same session id and delivers
     one `handback` turn: "Your owner worked with you directly in the
     terminal. Post a short account of what was asked and what was done
     (`post`, kind `handback`). Then continue the task: if the work is
-    complete, run the checks and submit; otherwise post what remains."
-17. The AI posts it. N adds the facts from step 14 to `body` before
-    signing. H stores the message in the thread and notifies the secretary.
-    If the AI has not posted it by the end of the hand-back turn, N posts
-    the facts itself: `post` kind `handback`, signed for the AI, with an
-    empty `text`.
-18. State `waiting`. Held items are delivered next.
+    complete, submit; otherwise post what remains."
+15. The AI posts it: the account is the AI's own, and its body is `{}`
+    (`contracts/messages.md` 2.10). H stores the message in the thread and
+    notifies the secretary. If the AI has not posted it by the end of the
+    hand-back turn, N posts the message itself: `post` kind `handback`,
+    signed for the AI, with an empty `text`.
+16. State `waiting`. Held items are delivered next.
 
-For the secretary and for a review session, steps 16 to 18 apply without
-the sentence about the task; the secretary's summary goes to the main line.
-Both sessions are read only in the terminal as well, so there are no
-changed files to report.
+For a group session, the secretary's or a working AI's, and for a review
+session, steps 14 to 16 apply without the sentence about the task. The
+account of a group session goes to the main line, and no item follows it.
 
 ## E. Failure cases
 
 | Event | Result |
 | --- | --- |
-| the interactive CLI cannot start or resume the session | N answers `takeover.start` with `cli` and the CLI's error text; S becomes `dormant`, and a task this takeover created is cancelled (`task cancel` by the host) |
+| the interactive CLI cannot start or resume the session, or S's folder is gone | N answers `takeover.start` with `cli` and the CLI's error text, for a missing folder a text that names it; S becomes `dormant` |
 | the pseudo-terminal process exits by itself (O typed the CLI's exit command) | same as step 12 |
 | the path of B or of N becomes `relay` during takeover | that end closes the `pty` channel (`flows/connect.md` step 9): same as step 12 |
 | N restarts during takeover | on start, a session recorded as `takeover` is treated as handed back from step 14 |
@@ -104,8 +100,6 @@ changed files to report.
   ways, with the level holding in the terminal and the MCP token naming
   the right session in each phase. The commands, and what each CLI does
   and cannot do in the terminal, are in `contracts/drivers.md` 1.3.
-- `[unverified]` Whether trusting a parent folder covers Claude Code's
-  worktrees below it.
 - `[unverified]` Pseudo-terminal behaviour on Windows (ConPTY) with both
   CLIs. Spike S-5 measured ConPTY with another program; go-pty is measured
   in HS-19 (`risks.md` T-4).

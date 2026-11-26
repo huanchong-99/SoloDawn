@@ -14,13 +14,17 @@ H addresses items to an AI. N chooses the session.
 
 | Item | Session |
 | --- | --- |
-| `assign`, `checks`, `reviewed`, `resume` | the AI's task session for `task`; N creates it on the first `assign` |
+| `assign`, `reviewed`, `resume` | the AI's task session for `task`; N creates it on the first `assign` |
 | `review` | the AI's review session for `task`; N creates it on the first `review` |
 | `decided` about a task | the AI's task session for `task` if it has one; else its review session for `task` if one is open; else its group session |
 | `mention` or `reply` whose message is in the thread of a task for which the AI has a task or review session | that session |
 | any other `mention`, `reply` or `decided` | the AI's group session |
 | everything addressed to the secretary | the secretary's group session |
-| `merge` | no session: N runs the merge itself (`flows/task.md` E). Held only while the group is paused or N is offline by the owner's command |
+
+Every session of the AI in this group runs in one folder, the member's
+workspace (`sessions.md` section 1). No item is for the host itself except
+`watch` (`contracts/step-2/watch-team.md` section 2): nothing is merged, so
+there is no `merge` item.
 
 **An answer that a tool call is waiting for is not a turn.** A `reply` to a
 call whose `ask` is still open, and a `decided` for an approval the CLI is
@@ -47,24 +51,31 @@ that is waiting for them.
    `mention` items for a paused or failed task too; N holds every item of
    such a task and delivers them when the task is `active` again. N starts
    no turn in the session of a `failed` task.
-4. If the target session does not exist yet, N creates it: prepares the
-   folder (worktree for a task session, read-only checkout for a review
-   session, `flows/task.md`), and records a new session row. The CLI's
-   session id is stored at its first start (`contracts/drivers.md`
-   section 1).
+4. If the target session does not exist yet, N creates it: it records a new
+   session row, whose folder is the member's workspace, copied from the row
+   of the AI's group session (`contracts/local.md` section 7). N prepares
+   nothing in the folder. For a task session it first closes the group's
+   obsolete task sessions on this node: those whose task is final or has
+   another assignee. It waits for their processes to exit (section G), so
+   that the first turn of the new task never runs beside the last turn of
+   an earlier one in the same folder (`contracts/task-machine.md` section
+   4). For a review session it writes the report of the `review` item into
+   the row when it records the delivery (step 7). The CLI's session id is
+   stored at its first start (`contracts/drivers.md` section 1).
 5. If S is `dormant`, N wakes it:
    1. if the number of open sessions on this node, those in `takeover`
       included, equals `max_open`, N closes the open session that has been
       `waiting` longest. If every open session is `working` or in
       `takeover`, the item waits until one is free;
-   2. N starts the CLI in the session's folder with the session id, when
-      it has one, and the level of the session kind
-      (`contracts/drivers.md`);
+   2. N checks that the session's folder exists, and starts the CLI in it
+      with the session id, when it has one, and the level of the session
+      kind (`contracts/drivers.md`). A folder that is gone is the first row
+      of section E, with the path in `detail`;
    3. state becomes `working`; N reports `member status`.
 6. N takes **all** held items for S, in order. Each item that asks for work
    on a task is checked now against the task as N holds it after reading
    the group's state: still active, the AI still in that role, and for
-   `review` and `merge` the same step and commit; one that no longer fits
+   `review` the same step and the same report; one that no longer fits
    is refused (`contracts/datachannel.md` section 6). A `notice` is always
    delivered. From the rest N composes one turn
    (`contracts/drivers.md` section 3). Each item is labelled with who wrote
@@ -96,8 +107,8 @@ that is waiting for them.
       item simply goes first, and the task is not paused. Step 14 applies as
       after any jump.
     - It is for another session, and the interrupted one is a task session:
-      N reports `task preempted`. If the home refuses it (a task at step
-      `merge`), nothing more is reported for that task.
+      N reports `task preempted`. If the home refuses it (a task that is
+      no longer `active`), nothing more is reported for that task.
     - N has delivered the item under that number before: it interrupts
       nothing and only acknowledges the item.
 13. N delivers the jump item as in steps 4 to 9.
@@ -114,12 +125,13 @@ that is waiting for them.
     needs a slot (step 5.1).
 16. N closes the CLI's stdin and waits for the process to exit. Only the
     session id remains. State `dormant`.
-17. A task session ends when its task is merged or cancelled, or another AI
-    becomes its assignee; a review session when its task is merged or
+17. A task session ends when its task is done or cancelled, or another AI
+    becomes its assignee; a review session when its task is done or
     cancelled, or another AI becomes its reviewer. N closes the process if
-    open, removes the session row and the folder of that role
-    (`contracts/local.md` section 7). A group session ends when the AI
-    leaves the group.
+    open and removes the session row. There is no folder to remove: the
+    workspace stays as the AI left it (`contracts/local.md` section 7). A
+    group session ends when the AI leaves the group, and with it the
+    folder is free for another group.
 
 ## E. When things go wrong
 
@@ -129,7 +141,7 @@ an `event` in `member status`, which H turns into a `system` row
 
 | Event | What N does |
 | --- | --- |
-| the CLI exits or closes its output during a turn | reports `turn_interrupted` (`crash`); in a task session also sends `task fail`; state `dormant`; the next item starts the CLI again with the same session id |
+| the CLI exits or closes its output during a turn, or cannot start because the session's folder is gone | reports `turn_interrupted` (`crash`), for a missing folder with its path in `detail`; in a task session also sends `task fail`; state `dormant`; the next item starts the CLI again with the same session id |
 | a turn lasts longer than `limits.turn_minutes`, or a Codex turn is silent (`contracts/drivers.md` 1.2 step 6) | interrupts it; reports `turn_interrupted` (`timeout`); in a task session also sends `task fail` |
 | the CLI cannot resume the session id | starts a fresh session in the same folder; its first turn carries what the first turn of that session kind carries, plus the last 20 messages of the thread (R-123); reports `session_replaced` |
 | the CLI reports a vendor rate limit | state `limited`; reports `rate_limited` with the reset time; items are held until then |

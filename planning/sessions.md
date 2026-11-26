@@ -4,7 +4,7 @@ Which CLI sessions exist, where each one works, what it may do, and the
 states it goes through. Rules: R-12, R-70 to R-72, R-120 to R-124; settled
 by the coordinator in `risks.md` Q-8 and Q-15. Delivery of items to sessions
 is in `flows/agent-turn.md`; CLI flags are in `contracts/drivers.md`,
-folders in `contracts/local.md`.
+the folder in `contracts/local.md` section 7.
 
 ## 1. Kinds
 
@@ -12,10 +12,26 @@ An AI in a group has several sessions over time:
 
 | Session | Exists | Working folder | Level | Receives |
 | --- | --- | --- | --- | --- |
-| group session | one per AI per group, long-lived. For the secretary this is its only session. | the project clone | the level the owner set for this AI in this project (default 3; owner's decision of 2026-11-21) | main-line mentions, direct questions (R-70), calls from threads where the AI has no role; for the secretary, everything addressed to it |
-| task session | one per task the AI is assigned, from first delivery until the task is merged or cancelled, or another AI becomes its assignee (`flows/agent-turn.md` step 17) | the task's worktree | the level the owner set for this AI in this project (default 3; owner's decision of 2026-11-21) | everything about that task |
-| review session | one per task the AI reviews, until that task is merged or cancelled, or another AI becomes its reviewer (`flows/agent-turn.md` step 17) | a detached checkout of the submitted commit | the level the owner set for this AI in this project (default 3; owner's decision of 2026-11-21) | review requests for that task |
+| group session | one per AI per group, long-lived. For the secretary this is its only session. | the member's workspace | the level the owner set for this AI in this project (default 3; owner's decision of 2026-11-21) | main-line mentions, direct questions (R-70), calls from threads where the AI has no role; for the secretary, everything addressed to it |
+| task session | one per task the AI is assigned, from first delivery until the task is done or cancelled, or another AI becomes its assignee (`flows/agent-turn.md` step 17) | the member's workspace | the level the owner set for this AI in this project (default 3; owner's decision of 2026-11-21) | everything about that task |
+| review session | one per task the AI reviews, until that task is done or cancelled, or another AI becomes its reviewer (`flows/agent-turn.md` step 17) | the member's workspace | the level the owner set for this AI in this project (default 3; owner's decision of 2026-11-21) | review requests for that task |
 
+- **One folder.** Every session of an AI in a group runs in the member's
+  workspace, the folder its owner gave it when it was added (R-11;
+  `contracts/local.md` section 7). The three kinds stay because their
+  tools, their instructions and their context differ, and R-12 keeps one
+  CLI session per task; only the folder is the same. Nothing is cloned or
+  prepared for a session and nothing is removed when it ends. A review
+  session reads the assignee's work where its turn says it is
+  (`contracts/drivers.md` section 3).
+- **One task at a time per folder.** A task whose assignee's folder is in
+  use by another started task waits as `queued` with wait `busy`; the home
+  enforces it, where it holds a task for a dependency
+  (`contracts/task-machine.md` section 2). A review and a question are
+  reading, and are not held by it.
+- **One group per folder.** A folder is the workspace of AIs of one group
+  only; the host refuses another at `host.join`
+  (`contracts/local.md` section 7).
 - A working AI does not change code in its group session: its instructions
   tell it not to, and at level 1 the CLI enforces read-only access (by the
   owner's decision of 2026-11-21 every session defaults to level 3 so that
@@ -45,7 +61,7 @@ Each session has one state, kept by the host: `dormant`, `working`,
 | `waiting` | `dormant` | `idle_minutes` passed, `max_open` needs the slot, or the owner took all AIs offline | `flows/agent-turn.md` steps 5.1, 15; E |
 | `working` | `dormant` | the CLI exits during a turn or is killed; the owner took all AIs offline | `flows/agent-turn.md` E, G |
 | `dormant`, `waiting`, `working` | `takeover` | `takeover.start` is accepted | `flows/takeover.md` steps 3 to 6 |
-| `takeover` | `working` | hand-back: the structured CLI starts with the hand-back turn | `flows/takeover.md` step 16 |
+| `takeover` | `working` | hand-back: the structured CLI starts with the hand-back turn | `flows/takeover.md` step 14 |
 | `takeover` | `dormant` | the interactive CLI cannot start | `flows/takeover.md` E |
 | `working`, `waiting` (saved) | `dormant` | the node starts | `flows/agent-turn.md` E |
 | `takeover` (saved) | `working` | the node starts: hand-back from step 14 | `flows/takeover.md` E |

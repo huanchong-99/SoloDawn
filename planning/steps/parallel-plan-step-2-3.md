@@ -21,19 +21,19 @@ sessions, never in group sessions.
 | --- | --- | --- |
 | D-1 | Who caused a task, for the level cap of R-44 | Not in 1.0 (decided 2026-11-22): R-44 is not applied; every session runs at the highest level (`contracts/step-2/authority.md` section 5) |
 | D-2 | What a host requires before it acts for a home that is not its owner's | Cut: the host takes its home's items as in step 1 |
-| D-3 | Check commands on other people's machines | Cut: no acceptance and no gate. The client shows a group's commands before an AI joins it (`contracts/step-2/checks-forge.md` section 1) |
+| D-3 | Check commands on other people's machines | Cut: no acceptance and no gate. The client showed a group's commands before an AI joined it, until the decision of 2026-11-26 left a group without commands |
 | D-4 | Stolen-device race in the device log | Cut: the step 1 rule stays, `risks.md` K-4 a stated limit |
 | D-5 | What a browser trusts | Cut: a browser shows what the home pushes, as in step 1 |
 | D-6 | A secretary on a personal subscription | No mechanism. The interface warns; the documentation recommends a team plan or key (`contracts/step-2/browser-trust.md` section 1) |
 | D-7 | Invitation | The link carries group id, home device id and a one-time secret; joining reuses the pairing room and `mac` unchanged, and the home treats the peer as joining. Roles: `owner` (one, the home's owner), `admin`, `member` (`contracts/step-2/people.md`) |
 | D-8 | The `confirm` card | One card kind for three requests: directing someone's personal-subscription AI, calling it with `ask`, and watching its terminal. `act confirm` names the card; the home queues the item (`contracts/step-2/confirm.md`) |
 | D-9 | Messages from others after a task started (R-52) | Delivered with the label `information`, read from the rows the home sent (`contracts/step-2/labels.md`) |
-| D-10 | Other forges | Per group: four templates (push, open request, read checks, merge) as argument lists with named places, never a shell string; the home checks them (`contracts/step-2/checks-forge.md`) |
+| D-10 | Other forges | Per group: four templates (push, open request, read checks, merge) as argument lists with named places, never a shell string; the home checks them. Ended by the decision of 2026-11-26 (last section): no forge is configured, and the contract `checks-forge.md` is removed |
 | D-11 | Moving a group; a copy for safekeeping | One export on the old node and one import on the new; a copy is an export, scheduled by the owner; clients follow the error `moved` (decided 2026-11-22; `contracts/step-2/export.md`) |
 | D-12 | Checks in a sandbox | Cut: none in 1.0; `risks.md` K-8 stays a stated limit |
 | D-13 | Approver delegates (R-42) | The `approvers` of the member row, set by the owner with `member set` of step 1; the home checks the row when a decision comes (`contracts/step-2/authority.md` section 3) |
 | D-14 | Watching a terminal (R-81) | A receive-only channel `watch:*` served by the AI's host on a `direct` path, opened after a `confirm` card with `what: watch`; the home's `watch` item gives the grant (`contracts/step-2/watch-team.md`) |
-| D-15 | Team-wide group | Group kind `team`: tasks, briefs and AIs refused; a secretary posts a `bulletin` there to a team group its node knows (`contracts/step-2/watch-team.md`) |
+| D-15 | Team-wide group | Group kind `team`: tasks, briefs and AIs refused; a secretary posts a `bulletin` there to a team group its node knows. Ended by the decision of 2026-11-26 (last section): one kind of group, no bulletin |
 | D-16 | Which CLIs first (step 3.1) | OpenCode and Qwen Code, API keys only; Amp deferred (`contracts/step-3/drivers.md` section 8) |
 | D-17 | Style presets (step 3.2) | A note of type `preset` per group; a brief names one; its text is put into the `assign` turn |
 | D-18 | Knowledge base (step 3.3) | Notes of type `kb` with a full-text index on the home; tools `kb_put` and `kb_search`; exempt from retention |
@@ -460,4 +460,50 @@ are those of the files before the cut.
 
 Changed, not cut: `settings.teams` became "the team groups a node knows"
 (homed there, or added with `home.add`), because `settings.set` is postponed
-after 1.0 (`contracts/step-2/watch-team.md` section 10).
+after 1.0. The team group itself ended on 2026-11-26 (next section);
+`home.add` stays (`contracts/step-2/people.md` section 7, point 2).
+
+## The model change of 2026-11-26
+
+The owner changed the model of groups on 2026-11-26: one kind of group,
+made of people and connected AIs; each AI works in a folder of its owner;
+no Git, no checks and no merge by the platform. The decision, its reasons
+and what the coordinator decided under it are in the
+[decision record](../../docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md).
+The contracts and flows are already written for it (unit C-1).
+
+**What ends of this plan.** Design points D-3, D-10 and D-15 (the team
+kind and its bulletin; watching, D-14, stays). The code of units T2-7 and
+T2-8, the forge and template half of U2-4, the team screens of U2-3, and
+everything of step 1 that cloned, made worktrees, ran checks, pushed,
+opened pull requests or merged. Acceptance tests A5.3, A5.9, A5.10, A5.13,
+A5.17 and A9.23 to A9.26, and the clauses of others that named those
+(`steps/step-1-acceptance.md`, `steps/step-2-3-acceptance.md`,
+`steps/step-3-acceptance.md`).
+
+**The units.** They are built on one branch that reaches `rebuild` as one
+pull request, because the wire change breaks every package that reads it
+until that package has followed. Each code unit updates the README of its
+package.
+
+| Unit | Does | Files | After |
+| --- | --- | --- | --- |
+| C-1 | rules, contracts, flows, the decision record | `planning/**`, `docs/decisions/**` | — |
+| P-8 | the wire: Go types, golden files, `wire.json`, `tools.json`, the web schema and its file map (`contracts/conventions.md` section 5, last row) | `internal/proto/**`, `web/src/lib/proto.ts`, `web/src/lib/mock.ts` | C-1 |
+| ST-2 | migration 4; the version of an export file (`contracts/storage.md` section 7; `contracts/step-2/export.md` section 5) | `internal/store/**` | C-1 |
+| HS-W | the four folder finders (`contracts/local.md` section 7) | `internal/host/workspaces/**` | C-1 |
+| HM-A | the home: group and member commands, the task machine, done at review, the busy rule; the sender in a manual pause and in `reassigned` cards; `trace-local` written again | `internal/home/**` except `cmd_people.go` | P-8, ST-2 |
+| PE-1 | `member add_person` in the home (`contracts/step-2/people.md` section 2.5) | `internal/home/cmd_people.go` | HM-A |
+| HS-A | the host core: every session in the workspace; clone, worktree, checks, forge, merge and bulletin out; `host.join` with the one-group check; `submit_task` and `submit_review` by report; delivery | `internal/host/*.go` except those of HS-B | P-8, ST-2 |
+| HS-B | takeover, turn text, instructions; the request `host.workspaces`; the node's route, `workspace` in `host.info`, `v` 3 without a fallback | `internal/host/takeover.go`, `turn*.go`, `instructions/*`, `internal/node/**` | HS-A, HS-W, HM-A |
+| WB-A | the web data layer; `v` 3 without a fallback; the fake home and the demo simulation | `web/src/lib/**` except `proto.ts` | P-8 |
+| WB-B | the create dialog with people and AIs, the add-AI dialog, the folder list, the person picker, the task card, group info, the Computers page, the two actor texts | `web/src/components/**`, `web/src/routes/**`, `web/src/messages/**` | WB-A |
+| DS-1 | design check of the new surfaces | no file | WB-B |
+| WB-C | the web scenarios | `features/web_*.feature`, `web/features/*.spec.ts` | DS-1 |
+| AC-0 | the acceptance fixtures: a workspace folder per AI, no bare repository; `features/` compiles when it ends | `features/helpers_test.go` and a compile pass over `features/*_test.go` | HM-A, PE-1, HS-B |
+| AC-1 | M3 to M8 | `features/m*` | AC-0 |
+| AC-2 | host and node scenarios | `features/host_*`, `features/node_*` | AC-0 |
+| AC-3 | home, step 2 and step 3 scenarios | `features/home_*`, `features/s2_*`, `features/s3_*`, `features/a10_*` | AC-0 |
+| AC-4 | browser end to end | `web/e2e/**` | AC-1 to AC-3, WB-C |
+| DOC-1 | `install.md`, the real-machine checklist, `web/README.md`, `issues.md` | those files | AC-4 |
+| REL-1 | the release notes and the next release candidate | no file of the repository | the batch on `rebuild` |

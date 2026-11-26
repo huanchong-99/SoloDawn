@@ -12,7 +12,7 @@ Several people in one group, each with their own computers and AIs.
 
 | Area | Addition | Rules |
 | --- | --- | --- |
-| People | Invitation link carrying the group id, the home's device id and a one-time secret. The joiner's browser presents its device log and becomes a member. Roles `owner`, `admin`, `member`; removing a member. | R-140 |
+| People | Invitation link carrying the group id, the home's device id and a one-time secret. The joiner's browser presents its device log and becomes a member. Roles `owner`, `admin`, `member`; removing a member. Since 2026-11-26 an admin also adds, without a link, a person who is already in another group on the same home (`member add_person`). | R-140 |
 | Other people's hosts | A member's node joins its AI to a group homed on someone else's node. Nothing new on the wire: it is the `host.join` and `member add_ai` of step 1. | R-134 |
 | Whose instructions | A new card kind `confirm`: when someone mentions another person's personal-subscription AI, the home asks that owner, and queues the item once the owner confirms. No auto-accept switch. | R-51 |
 | After a task started | Messages from others in the thread are delivered labelled `information`. A change of direction needs a new confirmation. | R-52 |
@@ -21,8 +21,8 @@ Several people in one group, each with their own computers and AIs.
 | Calls across owners | `ask` to someone else's AI follows the same confirmation or allow list. | R-115 |
 | Approver delegates | The owner names people who may decide approvals for their AIs. | R-42 |
 | Watching | A member asks to watch a terminal; the owner confirms; a receive-only terminal channel. | R-81 |
-| Team-wide group | Group kind `team`: no repository, no tasks. Secretaries post cross-project notices there. | R-14 |
-| Other forges | The forge commands of `contracts/local.md` section 7 become per-group templates (`risks.md` Q-9). The client shows a group's check commands and templates before an AI joins it. | R-92 |
+| Team-wide group | Ended by the decision of 2026-11-26: there is one kind of group, and a group without AIs is what the team group was. No bulletins. | R-10 |
+| Other forges | Ended by the decision of 2026-11-26: no forge is configured, and a group names no command. | R-90 |
 | Home changes | Moving a group to another home; a copy of the group for safekeeping (`risks.md` Q-12): one export on the old node and one import on the new (`contracts/step-2/export.md`). | R-134, R-135 |
 | Checks in a sandbox | Cut on 2026-11-22: no sandbox for checks in 1.0; `risks.md` K-8 stays a stated limit. | R-40 |
 
@@ -54,8 +54,7 @@ Several people in one group, each with their own computers and AIs.
 
 - `contracts/commands.md`: `invite`, `join`, `member set role`,
   `member remove` for people; card kind `confirm` with `act confirm`.
-- `contracts/messages.md`: kind `confirm`. `contracts/rows.md`: group kind
-  `team`.
+- `contracts/messages.md`: kind `confirm`.
 - `contracts/datachannel.md`: section 8 row "a device of another member"
   becomes active; receive-only terminal channel.
 - Nothing in the step 1 shapes changes meaning.

@@ -21,10 +21,9 @@ these shapes.
 | `decision` | main, or thread + main | an AI | 2.4 | 3.3 |
 | `summary` | thread + main | the secretary | 2.5 | `null` |
 | `call` | thread, or main when the caller has no task | an AI | 2.6 | 3.4 |
-| `report` | thread | an AI | 2.7 | `null` |
-| `checks` | thread | nobody: the home writes it | 2.8 | `null` |
+| `report` | thread | an AI, the assignee | 2.7 | `null` |
 | `review` | thread | an AI, the reviewer | 2.9 | `null` |
-| `handback` | thread (main for the secretary) | an AI | 2.10 | `null` |
+| `handback` | thread, or main for a session without a task | an AI | 2.10 | `null` |
 | `system` | main, thread | nobody: the home writes it | 2.11 | `null` |
 
 A signed message reaches the home as a `post` command
@@ -149,10 +148,10 @@ Signed: every field. Added by the home: nothing.
 
 ### 2.5 `summary`
 
-`{"task":"<task id>","score":94,"rounds":2,"minutes":72,"added":318,"removed":42,"pr":28}`.
-`pr` is optional (absent without a remote).
+`{"task":"<task id>","score":94,"rounds":2,"minutes":72}`.
 
-Signed: `{}`. Added by the home: every field, from the task row.
+Signed: `{}`. Added by the home: every field, from the task row. The card
+holds no line counts and no pull request: the home knows neither.
 
 ### 2.6 `call`
 
@@ -163,57 +162,52 @@ by the home: nothing.
 
 ### 2.7 `report`
 
-`{"commit":"9f2c1ab","files":4,"added":212,"removed":18,"pr":31}`. `pr` is
-optional.
+`{}`. The report is its `text`: the `summary` the assignee gave
+`submit_task`, as it wrote it. It says what was changed, what was run and
+how it ended, and where the work is: the branch and commit that hold it, or
+that it is in the folder only (`contracts/drivers.md` section 4). The host
+adds nothing: it reads no folder and runs no Git.
 
-Signed: every field; the host fills them at `submit_task`. `commit` is the
-head of the task branch at that moment, the commit the `task submitted`
-that follows names. It is in the body because a task is submitted again
-after every failed review: each report says which commit it describes.
-Added by the home: nothing.
+A `report` is the submission of its task (`contracts/task-machine.md` row
+5), and the message's id is what the task row, the `review` item and the
+review name. A task is submitted again after every failed review; each
+report is a message of its own.
 
-### 2.8 `checks`
+Signed: `{}`. Added by the home: nothing.
 
-```json
-{"stage":"local","ok":true,"commit":"9f2c1ab",
- "items":[{"name":"go test ./...","ok":true,"detail":"42 tests"}]}
-```
+### 2.8 Not used
 
-`stage` is `local`, `cloud` or `merge`. `items[].detail` is optional. For
-`merge` there is one item, named `merge`, whose `detail` is the output of
-the failed merge.
-
-Written by the home from the host's `task checked` (`local`), `task cloud`
-(`cloud`) or `task conflict` (`merge`); `commit` is the one that command
-names. It is in the body because a task is checked again after every
-change, and what passes review and is merged is one commit
-(`contracts/task-machine.md` section 4): each result says which commit it
-is about.
+The kind `checks` ended with the decision of 2026-11-26: the node runs no
+check. The number is kept so that the sections after it keep theirs.
 
 ### 2.9 `review`
 
 ```json
 {"task":"<task id>","num":12,"title":"Node: report connection path changes",
- "commit":"9f2c1ab","round":1,"score":86,"pass":90,"ok":false,
+ "report":"<msg id>","round":1,"score":86,"pass":90,"ok":false,
  "items":[{"text":"No event after switching back to direct","veto":false,
            "file":"conn/switch.go","line":88}]}
 ```
 
 `items[].file` and `items[].line` are optional.
 
-Signed: `task`, `commit`, `score` and `items`. The reviewer gives `score`
-and `items`; its host adds `task` and the commit of the review checkout
-before it signs. Added by the home: `num`, `title`, `round`, `pass` and
+Signed: `task`, `report`, `score` and `items`. The reviewer gives `score`
+and `items`; its host adds `task` and `report`, the id of the report that
+the review session was given, before it signs (`contracts/storage.md`
+section 3, `session.report`). Added by the home: `num`, `title`, `round`, `pass` and
 `ok`, so that a ledger entry still reads well after its task row has been
 removed by retention. The home also writes `score` as 0 when an item has
 `veto` (R-101).
 
 ### 2.10 `handback`
 
-`{"files":["a.go"],"commits":[{"sha":"9f2c1ab","subject":"…"}],"added":40,"removed":3}`.
+`{}`. The account is the message's `text`, written by the AI: what its
+owner asked in the terminal and what was done. The node reads no facts from
+the folder (R-84). When the AI posts none by the end of the hand-back turn,
+its host posts the message for it with an empty `text`
+(`flows/takeover.md` D).
 
-Signed: every field; the host fills them from Git. Added by the home:
-nothing.
+Signed: `{}`. Added by the home: nothing.
 
 ### 2.11 `system`
 
@@ -233,7 +227,7 @@ row lists below, except `ai`, which the home adds.
 | `rate_limited` | host | `ai`, `resets` | — |
 | `login_invalid` | host | `ai` (R-56) | `detail` |
 | `task_failed` | home | `task`, `reason` (`failures`, `review_rounds`) | — |
-| `task_merged` | home | `task`, `commit`, `merge_commit`; shown under the secretary's name (R-24) | — |
+| `task_done` | home | `task`; shown under the secretary's name (R-24) | — |
 | `no_secretary` | home | — | — |
 | `session_replaced` | host | `ai` (a new session took over from notes, R-123) | `task` |
 
@@ -264,7 +258,14 @@ therefore adds less than 4 KiB to a card's row.
 | --- | --- |
 | `pending` | none |
 | `approved`, `denied` | `by`, `at`, `act` |
-| `expired`, `reassigned` | `at` |
+| `expired` | `at` |
+| `reassigned` | `at`, and `by`: the member id of whoever gave the task to another AI, the secretary or a person, written by the home from the sender of that `task assign` (`contracts/task-machine.md` row 11) |
+
+A card that ended as `reassigned` reads `<name> gave the task to <AI>` (in
+Chinese `<name> 把任务改派给了 <AI>`). The
+name is that of the member `by`, kept after that member has left the group;
+`<AI>` is the assignee the task row has now, so a card of a task that was
+reassigned twice names the latest one. The state holds no `to`.
 
 ### 3.3 `decision`
 
@@ -272,7 +273,7 @@ therefore adds less than 4 KiB to a card's row.
 | --- | --- |
 | `pending` | none |
 | `decided` | `by`, `at`, `act`; `choice` (an option id) and `text`, at least one of the two |
-| `expired` | `at`: the task it names was merged or cancelled while it was pending |
+| `expired` | `at`: the task it names was done or cancelled while it was pending |
 
 ### 3.4 `call`
 
