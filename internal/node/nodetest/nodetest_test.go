@@ -202,7 +202,7 @@ func checkCustomStart(t *testing.T, binDir string) {
 }
 
 func singleGroupCreate(s *home.State, cmd home.Command) (home.Result, *home.Refusal) {
-	grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "One", Checks: []string{}, Created: cmd.Now}
+	grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "One", Created: cmd.Now}
 	mem := proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m1"}, Group: s.ID, Kind: "human", Name: "Owner", User: s.Owner},
 		Role:      "admin",

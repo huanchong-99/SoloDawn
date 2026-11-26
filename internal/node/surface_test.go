@@ -56,7 +56,7 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	}
 
 	fc := serveConn(t, s, ownerKey.ID(), false)
-	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b", Addrs: []string{}})
+	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 3, Kind: "browser", Name: "b", Addrs: []string{}})
 	fc.next(t) // welcome
 	fc.next(t) // devlog
 
@@ -79,7 +79,7 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 
 	// Creating a group on home.Loop pushes proto.Groups to the welcomed browser; host.info.homes reads setting('homes') only.
 	gID := sesID("grp-1")
-	createEnv := ownerKey.Sign(fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":"Website","kind":"project","repo":"https://git.example/w.git","base":"main","forge":"none","checks":[],"member_name":"Owner"}`, gID, now.UnixMilli(), gID))
+	createEnv := ownerKey.Sign(fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":"Website","member_name":"Owner"}`, gID, now.UnixMilli(), gID))
 	fc.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 3}, Env: createEnv})
 	var groupsPush proto.Groups
 	var sawCmdOK, sawGroups bool
@@ -113,6 +113,13 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	if watchErr.Re != 40 || watchErr.Err.Code != "forbidden" {
 		t.Fatalf("watch.start = %+v", watchErr)
 	}
+	// host.workspaces is the host's answer; an external AI has no list.
+	fc.push(proto.HostWorkspacesRequest{Request: proto.Request{Type: "host.workspaces", ID: 41}, Agent: "external"})
+	if got := string(fc.next(t)); got != `{"ok":true,"re":41,"workspaces":[]}` {
+		t.Fatalf("host.workspaces = %s", got)
+	}
+	fc.push(proto.HostWorkspacesRequest{Request: proto.Request{Type: "host.workspaces", ID: 42}, Agent: "nano"})
+	expectErr(t, fc.next(t), 42, "bad_request")
 	fc.push(proto.PTYResize{Type: "pty.resize", Group: gID, AI: aiID, Cols: 120, Rows: 36})
 	fc.push(proto.Request{Type: "host.info", ID: 4})
 	fc.next(t)
@@ -127,7 +134,7 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 
 func mustSurfaceSession(t *testing.T, h *host.Host, home string, key host.SessionKey, kind host.Kind, agent string) {
 	t.Helper()
-	if err := h.Sessions.Create(host.Session{SessionKey: key, Kind: kind, Folder: "repo", Agent: agent, Home: home, Name: "AI"}); err != nil {
+	if err := h.Sessions.Create(host.Session{SessionKey: key, Kind: kind, Folder: "/work/" + string(kind), Agent: agent, Home: home, Name: "AI"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -224,10 +231,11 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	}
 	assertSurfaceHeader(t, st, savedHomes)
 	assertSurfaceAgentGroups(t, st.Agents, map[proto.ID]proto.AgentGroup{
-		proto.ID(g1): {Group: proto.ID(g1), Member: proto.ID(m1), Level: 3, State: "takeover", Task: proto.ID(tTake), Queued: 0, Watchers: []string{}},
+		// The workspace is the folder of the group session, which every AI has once it has joined.
+		proto.ID(g1): {Group: proto.ID(g1), Member: proto.ID(m1), Workspace: "/work/group", Level: 3, State: "takeover", Task: proto.ID(tTake), Queued: 0, Watchers: []string{}},
 		proto.ID(g2): {Group: proto.ID(g2), Member: proto.ID(m2), Level: 3, State: "working", Task: proto.ID(tWork), Queued: 0, Watchers: []string{}},
 		proto.ID(g3): {Group: proto.ID(g3), Member: proto.ID(m3), Level: 3, State: "waiting", Task: proto.ID(tWait), Queued: 0, Watchers: []string{}},
-		proto.ID(g4): {Group: proto.ID(g4), Member: proto.ID(m4), Level: 3, State: "dormant", Queued: 0, Watchers: []string{}},
+		proto.ID(g4): {Group: proto.ID(g4), Member: proto.ID(m4), Workspace: "/work/group", Level: 3, State: "dormant", Queued: 0, Watchers: []string{}},
 	})
 
 	hookErr = errors.New("probe failed")

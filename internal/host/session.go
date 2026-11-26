@@ -72,6 +72,7 @@ const (
 	ReplacedTurn TurnKind = "replaced" // the first turn of a session that replaces one the CLI could not resume (flows/agent-turn.md E)
 	ContinueTurn TurnKind = "continue" // the turn of its own a session gets after a jump interrupted it (flows/agent-turn.md step 14)
 	HandbackTurn TurnKind = "handback" // the turn that follows a takeover (flows/takeover.md step 16)
+	TakeoverTurn TurnKind = "takeover" // the structured first turn of a session that a CLI of takeover resume cannot start in a terminal (flows/takeover.md A)
 )
 
 // A Turn is what the host notes about a turn beside its text. The tools

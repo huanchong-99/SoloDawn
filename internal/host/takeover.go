@@ -47,7 +47,7 @@ type takeover struct {
 	key    SessionKey
 	from   Owner
 	nonce  string
-	assign bool // the CLI cannot start a new session in a terminal
+	assign bool // the CLI cannot start a new session in a terminal: a session that has never run gets a structured turn first
 	pty    *PTY
 	closed bool // the terminal has closed
 	posted bool // the AI posted its hand-back
@@ -166,11 +166,32 @@ func openTerminal(ctx context.Context, h *Host, p *takeovers, slot aiSlot, ai ai
 
 func openSession(ctx context.Context, h *Host, p *takeovers, ai aiInfo, target routedTarget, home string, t *takeover) error {
 	s, err := prepareTargetSession(h, ai, target, home)
-	if gone := missingFolder(s); err == nil && gone != "" {
-		err = &Error{"cli", gone}
+	if err == nil {
+		err = readyForTerminal(ctx, h, s, t.assign)
 	}
 	if err == nil {
 		err = startTerminal(ctx, h, p, s.SessionKey, t)
+	}
+	return err
+}
+
+// readyForTerminal refuses a session whose folder is gone, and gives a
+// session that has never run its first turn in structured mode when the CLI
+// cannot start a session in a terminal (flows/takeover.md A). The terminal
+// opens once that turn has ended.
+func readyForTerminal(ctx context.Context, h *Host, s Session, resumeOnly bool) error {
+	if gone := missingFolder(s); gone != "" {
+		return &Error{"cli", gone}
+	}
+	if !resumeOnly || s.CLISession != "" {
+		return nil
+	}
+	text, turn, err := Compose(h, s, TakeoverTurn, nil)
+	if err == nil {
+		err = Runner.Turn(ctx, h, s.SessionKey, text, turn)
+	}
+	if err == nil {
+		err = waitTurnOver(ctx, h, s.SessionKey)
 	}
 	return err
 }

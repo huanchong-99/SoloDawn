@@ -60,7 +60,7 @@ func (nilClient) Done() <-chan struct{} { return nil }
 func (nilClient) Send(any) error        { return nil }
 
 func testTransferGroup(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-	group := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Moved group", Checks: []string{}, Created: c.Now, Home: s.Home}
+	group := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Moved group", Created: c.Now, Home: s.Home}
 	owner := proto.HumanMemberRow{MemberRow: proto.MemberRow{
 		RowHeader: proto.RowHeader{Type: "member", ID: string(sesID("transfer-owner"))}, Group: s.ID, Kind: "human", User: s.Owner,
 	}, Role: "owner"}

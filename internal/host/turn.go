@@ -101,7 +101,7 @@ func composeTurn(h *Host, s Session, kind TurnKind, items []json.RawMessage) (st
 		return "", Turn{}, err
 	}
 	switch kind {
-	case ContinueTurn, HandbackTurn, ReplacedTurn:
+	case ContinueTurn, HandbackTurn, ReplacedTurn, TakeoverTurn:
 		return c.composeNoItemsTurn(items)
 	case ItemsTurn:
 		return c.composeItemsTurn(items)
@@ -146,6 +146,9 @@ func (c *turnCtx) composeNoItemsTurn(items []json.RawMessage) (string, Turn, err
 }
 
 func (c *turnCtx) ownTurnBody() string {
+	if c.kind == TakeoverTurn {
+		return "Your owner is about to work with you directly in the terminal."
+	}
 	if c.kind == ContinueTurn {
 		if c.s.Kind == TaskSession {
 			return "You were interrupted by a direct request from your owner. Continue the task."
@@ -154,7 +157,7 @@ func (c *turnCtx) ownTurnBody() string {
 	}
 	const base = "Your owner worked with you directly in the terminal. Post a short account of what was asked and what was done (`post`, kind `handback`)."
 	if c.s.Kind == TaskSession {
-		return base + " Then continue the task: if the work is complete, run the checks and submit; otherwise post what remains."
+		return base + " Then continue the task: if the work is complete, submit; otherwise post what remains."
 	}
 	return base
 }

@@ -8,10 +8,10 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-const (
-	legacyVersion = 1
-	wireVersion   = 2
-)
+// wireVersion is the one protocol version there is: 1 and 2 are what
+// v3.0.0-rc.1 spoke, whose rows this version would misread
+// (contracts/datachannel.md section 3).
+const wireVersion = 3
 
 func sesDecodeHello(data json.RawMessage) (proto.Hello, *host.Error) {
 	var ver struct {
@@ -21,9 +21,7 @@ func sesDecodeHello(data json.RawMessage) (proto.Hello, *host.Error) {
 	if proto.Decode(data, &ver) != nil {
 		return proto.Hello{}, &host.Error{Code: "bad_request", Message: "invalid hello frame"}
 	}
-	switch ver.V {
-	case wireVersion, legacyVersion:
-	default:
+	if ver.V != wireVersion {
 		return proto.Hello{}, &host.Error{Code: "version", Message: "unsupported protocol version"}
 	}
 	var h proto.Hello
@@ -33,11 +31,11 @@ func sesDecodeHello(data json.RawMessage) (proto.Hello, *host.Error) {
 	return h, nil
 }
 
-func (s *Sessions) cliHello(ctx context.Context, raw clientCtl, version int) (json.RawMessage, error) {
+func (s *Sessions) cliHello(ctx context.Context, raw clientCtl) (json.RawMessage, error) {
 	return raw.Request(ctx, func(id int64) any {
 		return proto.Hello{
 			Request: proto.Request{Type: "hello", ID: id},
-			V:       version,
+			V:       wireVersion,
 			Kind:    "host",
 			Name:    s.cfg.Name(),
 			Addrs:   s.cfg.Addrs(),

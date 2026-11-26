@@ -68,7 +68,7 @@ func TestInvitationJoinAndMemberSurface(t *testing.T) {
 	owner.next(t)
 	sendInviteCmd(owner, admin, 2, proto.GroupCreate{
 		GroupCommand: proto.GroupCommand{HomeCommand: inviteCommand(ph, "group", group, "create"), Op: "create"},
-		Name:         "Shared", Checks: []string{},
+		Name:         "Shared",
 	})
 	var create proto.CmdResult
 	mustNoErr(t, proto.Decode(owner.next(t), &create))
@@ -141,11 +141,11 @@ func sendInviteCmd(c *fakeCtl, key identity.Key, re int64, payload any) {
 
 func checkInviteHello(t *testing.T, ctl *fakeCtl, id int64, owner bool, groups int) {
 	t.Helper()
-	ctl.push(proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 2, Kind: "browser", Name: "browser", Addrs: []string{}})
+	ctl.push(proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 3, Kind: "browser", Name: "browser", Addrs: []string{}})
 	var w proto.Welcome
 	mustNoErr(t, proto.Decode(ctl.next(t), &w))
-	if w.V != 2 || w.Re != id || w.Owner != owner || len(w.Groups) != groups {
-		t.Fatalf("welcome = %+v, want v2 re=%d owner=%t groups=%d", w, id, owner, groups)
+	if w.V != 3 || w.Re != id || w.Owner != owner || len(w.Groups) != groups {
+		t.Fatalf("welcome = %+v, want v3 re=%d owner=%t groups=%d", w, id, owner, groups)
 	}
 }
 
@@ -256,7 +256,7 @@ func joinWithLog(t *testing.T, ph *pairHarness, owner *fakeCtl, admin, key ident
 	group := sesID(name + "-group")
 	sendInviteCmd(owner, admin, 11, proto.GroupCreate{
 		GroupCommand: proto.GroupCommand{HomeCommand: inviteCommand(ph, "group", group, name+"-create"), Op: "create"},
-		Name:         name, Checks: []string{},
+		Name:         name,
 	})
 	mustEqual(t, bool(inviteJoinResult(t, owner).OK), true)
 	sendInviteCmd(owner, admin, 12, inviteCommand(ph, "invite", group, name+"-invitation"))
@@ -478,7 +478,7 @@ func joinAsGuest(t *testing.T, ph *pairHarness, owner *fakeCtl, admin, guest ide
 	t.Helper()
 	create := proto.GroupCreate{
 		GroupCommand: proto.GroupCommand{HomeCommand: inviteCommand(ph, "group", group, ""), Op: "create"},
-		Name:         "Group", MemberName: "Admin", Kind: "project", Repo: "repo", Base: "main", Forge: "none", Checks: []string{},
+		Name:         "Group", MemberName: "Admin",
 	}
 	create.Nonce = group
 	sendInviteCmd(owner, admin, 7, create)

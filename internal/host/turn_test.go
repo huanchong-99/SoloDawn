@@ -255,10 +255,10 @@ func TestSessionInstructionsCoverEveryRole(t *testing.T) {
 		s     Session
 		wants []string
 	}{
-		{Session{Kind: GroupSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", "start_task"}},
-		{Session{Kind: TaskSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "push_branch", "run_checks", "submit_task", "sandbox"}},
-		{Session{Kind: ReviewSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", ".solodawn-review.diff", "submit_review", "veto"}},
-		{Session{Kind: GroupSession, Secretary: true}, []string{"post", "ask", "reply", "propose_brief", "set_task", "request_decision", "summary", "note_put"}},
+		{Session{Kind: GroupSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", "start_task", "queued behind another one"}},
+		{Session{Kind: TaskSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "Work only in this folder", "look at the folder's state", "`git status`", "someone else's", "`git pull --ff-only`", "stop and say so in the thread", "never stash, reset, clean", "`git add -A`", "`git add .`", "switch branches", "force push", "by path", "Test the way the project does", "Publish by the project's own rules", "push to a branch of your own", "Call `submit_task` last", "After it, end your turn", "sandbox"}},
+		{Session{Kind: ReviewSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", "where the turn says it is", "Change nothing in the assignee's folder", "submit_review", "veto"}},
+		{Session{Kind: GroupSession, Secretary: true}, []string{"post", "ask", "reply", "propose_brief", "set_task", "request_decision", "summary", "note_put", "its own folder on its own computer", "`depends`", "on the assignee's computer", "closing step", "what state it leaves in its folder"}},
 		{Session{Kind: TaskSession, Secretary: true}, []string{"propose_brief", "note_put"}},
 	}
 	for _, tc := range cases {
@@ -281,10 +281,10 @@ func checkInstructionCase(t *testing.T, s Session, wants []string) {
 }
 
 const secretaryTurnHeader = "[SoloDawn] group \"Website\" · you are \"Secretary\" · secretary session\n" +
-	"AI members (CLI on computer · tier · state · skills):\n" +
-	"- \"Claude Code\" · claude on workstation · standard · waiting\n" +
-	"- \"Codex\" · codex on workstation · standard · waiting\n" +
-	"- \"Secretary\" · claude on workstation · standard · waiting\n"
+	"AI members (CLI on computer · folder · tier · state · skills):\n" +
+	"- \"Claude Code\" · claude on workstation · " + tFolder + " · standard · waiting\n" +
+	"- \"Codex\" · codex on workstation · " + tFolder + " · standard · waiting\n" +
+	"- \"Secretary\" · claude on workstation · " + tFolder + " · standard · waiting\n"
 
 func TestOwnTurnsContinueAndHandback(t *testing.T) {
 	r := newTurnRig(t)
@@ -311,8 +311,13 @@ func TestOwnTurnsContinueAndHandback(t *testing.T) {
 		},
 		{
 			r.session(TaskSession, false, "c1"), HandbackTurn,
-			"[SoloDawn] group \"Website\" · you are \"Claude Code\" · task session T-12\n== 1 of 1 · handback · instruction\nYour owner worked with you directly in the terminal. Post a short account of what was asked and what was done (`post`, kind `handback`). Then continue the task: if the work is complete, run the checks and submit; otherwise post what remains.",
+			"[SoloDawn] group \"Website\" · you are \"Claude Code\" · task session T-12\n== 1 of 1 · handback · instruction\nYour owner worked with you directly in the terminal. Post a short account of what was asked and what was done (`post`, kind `handback`). Then continue the task: if the work is complete, submit; otherwise post what remains.",
 			tTaskID,
+		},
+		{
+			r.session(GroupSession, false, ""), TakeoverTurn,
+			"[SoloDawn] group \"Website\" · you are \"Claude Code\" · group session\n== 1 of 1 · takeover · instruction\nYour owner is about to work with you directly in the terminal.",
+			"",
 		},
 		{
 			r.session(GroupSession, true, "c1"), HandbackTurn,
@@ -329,7 +334,7 @@ func TestOwnTurnsContinueAndHandback(t *testing.T) {
 		assertComposed(t, r.h, tc.s, tc.kind, nil, tc.wantText, Turn{Kind: tc.kind, Thread: tc.wantThread})
 	}
 	extra := []json.RawMessage{json.RawMessage(`{}`)}
-	for _, kind := range []TurnKind{ContinueTurn, HandbackTurn, ReplacedTurn} {
+	for _, kind := range []TurnKind{ContinueTurn, HandbackTurn, ReplacedTurn, TakeoverTurn} {
 		_, _, err := Compose(r.h, r.session(TaskSession, false, "c1"), kind, extra)
 		seamCode(t, err, "bad_request")
 	}

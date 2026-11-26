@@ -270,8 +270,8 @@ func (r *teamLabelRig) sess(ai, name string, kind Kind, sec bool) Session {
 }
 
 func TestStep2InstructionsCarryTwoLabelRules(t *testing.T) {
-	if !strings.Contains(Instructions(Session{Kind: TaskSession}), "When a review did not pass or checks failed") {
-		t.Fatal("task instructions missing failed review/checks sentence")
+	if !strings.Contains(Instructions(Session{Kind: TaskSession}), "When a review did not pass, the work is yours again") {
+		t.Fatal("task instructions missing the failed review sentence")
 	}
 }
 

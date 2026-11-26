@@ -425,6 +425,97 @@ func TestTakeoverFallbackPostsAndFailedHandBackTurns(t *testing.T) {
 	}
 }
 
+// A CLI whose takeover is resume cannot start a session in a terminal: a
+// group session that has never run gets one structured turn first, which says
+// only that the owner is about to work with the AI, and the terminal resumes
+// the session that turn made (flows/takeover.md A). A session that has run
+// gets none.
+func TestTakeoverStartsANeverRunSessionOfAResumeCLIInStructuredMode(t *testing.T) {
+	r := newTkRig(t)
+	var kinds []TurnKind
+	Compose = func(_ *Host, s Session, kind TurnKind, _ []json.RawMessage) (string, Turn, error) {
+		kinds = append(kinds, kind)
+		return "first", Turn{Kind: kind, Thread: s.Task}, nil
+	}
+	if err := r.start(runAI2, ""); err != nil {
+		t.Fatal(err)
+	}
+	key := SessionKey{Group: runGroup1, Member: runAI2}
+	if l := r.lastOpened(); !slices.Equal(kinds, []TurnKind{TakeoverTurn}) || l.Session != "thread-1" || r.drv.count() != 1 || r.session(key).State != Takeover {
+		t.Fatalf("turns %v, terminal %+v, session %+v", kinds, l, r.session(key))
+	}
+	r.end(runAI2)
+	r.waitReleased(runAI2)
+	kinds = nil
+	if err := r.start(runAI2, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(kinds, nil) || r.drv.count() != 2 || r.lastOpened().Session != "thread-1" {
+		t.Fatalf("a session that has run got turns %v, %d starts", kinds, r.drv.count())
+	}
+	r.end(runAI2)
+	r.waitReleased(runAI2)
+
+	// A first turn that cannot be composed opens no terminal.
+	r.h.Sessions.Update(key, func(s *Session) { s.CLISession = "" })
+	Compose = func(*Host, Session, TurnKind, []json.RawMessage) (string, Turn, error) {
+		return "", Turn{}, errors.New("no compose")
+	}
+	opened := len(r.opened)
+	if err := r.start(runAI2, ""); err == nil || len(r.opened) != opened || r.held(runAI2) {
+		t.Fatalf("start = %v, terminals %d", err, len(r.opened)-opened)
+	}
+}
+
+// The terminal opens only once that first turn has ended.
+func TestTakeoverWaitsForTheFirstTurn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newTkRig(t)
+		r.drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
+			p := newFakeProc(ctx, l)
+			p.autoReadyID = "thread-1"
+			return p, nil
+		}
+		opened := make(chan Launch, 1)
+		Drivers["codex"] = tkDriver{r.drv, func(l Launch) ([]string, string, error) {
+			opened <- l
+			return nil, "", errors.New("no terminal")
+		}}
+		done := make(chan error, 1)
+		go func() { done <- r.start(runAI2, "") }()
+		synctest.Wait()
+		if len(opened) != 0 || len(done) != 0 {
+			t.Fatal("the terminal opened during the first turn")
+		}
+		r.drv.lastProc().emit(Event{Kind: TurnEnded, Status: "completed"})
+		tkCode(t, <-done, "cli")
+		if l := <-opened; l.Session != "thread-1" {
+			t.Fatalf("terminal after the first turn = %+v", l)
+		}
+	})
+}
+
+// A folder that is gone when the terminal closes fails the hand-back as a
+// crash: the task fails and the session is dormant (contracts/local.md
+// section 7).
+func TestTakeoverHandBackInAFolderThatIsGoneFailsTheTask(t *testing.T) {
+	r := newTkRig(t)
+	r.putTask(tkTask, "active", runAI1, "", 1)
+	if err := r.start(runAI1, tkTask); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(r.folder); err != nil {
+		t.Fatal(err)
+	}
+	r.end(runAI1)
+	r.waitReleased(runAI1)
+	key := SessionKey{Group: runGroup1, Member: runAI1, Task: tkTask}
+	fails := r.sent("task", "fail")
+	if s := r.session(key); s.State != Dormant || r.drv.count() != 0 || len(fails) != 1 || fails[0]["reason"] != "crash" || !strings.Contains(fmt.Sprint(fails[0]["detail"]), r.folder) {
+		t.Fatalf("after the hand-back: %+v, %d starts, task commands %v", s, r.drv.count(), r.sent("task", ""))
+	}
+}
+
 func TestTakeoverStartFailures(t *testing.T) {
 	r := newTkRig(t)
 	r.putTask(tkTask, "active", runAI1, runAI2, 1)

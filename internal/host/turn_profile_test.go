@@ -25,7 +25,7 @@ func TestSecretaryProfileRosterOnReplacement(t *testing.T) {
 		ai.Usage = proto.Usage{WindowPct: new(40.0), WindowResets: new(int64(seamStart + 9_000_000))}
 	})
 	setTurnProfile(t, r, tPeerID, func(ai *proto.AIMemberRow) {
-		ai.Tier, ai.State, ai.CLI, ai.Tool = "light", "limited", externalAgent, "ZCode"
+		ai.Tier, ai.State, ai.CLI, ai.Tool, ai.HostName, ai.Workspace = "light", "limited", externalAgent, "ZCode", "laptop", "/srv/work/website"
 		ai.Usage = proto.Usage{WindowPct: new(62.5)}
 	})
 	setTurnProfile(t, r, tSecID, func(ai *proto.AIMemberRow) {
@@ -33,10 +33,10 @@ func TestSecretaryProfileRosterOnReplacement(t *testing.T) {
 		ai.Usage = proto.Usage{WindowPct: new(100.0), WindowResets: new(int64(seamStart - 7_200_000))}
 	})
 	want := `[SoloDawn] group "Website" · you are "Secretary" · secretary session
-AI members (CLI on computer · tier · state · skills):
-- "Claude Code" · claude on workstation · strong · working on T-12 · window 40% used, resets in 3 h · Go backend
-- "Codex" · external (ZCode) on workstation · light · limited · window 62.5% used
-- "Secretary" · claude on workstation · standard · offline · window 100% used, resets in 0 h
+AI members (CLI on computer · folder · tier · state · skills):
+- "Claude Code" · claude on workstation · /home/dev/website · strong · working on T-12 · window 40% used, resets in 3 h · Go backend
+- "Codex" · external (ZCode) on laptop · /srv/work/website · light · limited · window 62.5% used
+- "Secretary" · claude on workstation · /home/dev/website · standard · offline · window 100% used, resets in 0 h
 == context · instruction`
 	assertComposed(t, r.h, r.session(GroupSession, true, ""), ReplacedTurn, nil, want, Turn{Kind: ReplacedTurn})
 }
