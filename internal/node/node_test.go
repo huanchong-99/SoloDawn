@@ -230,7 +230,7 @@ func checkNetworkAndStartupErrors(t *testing.T) {
 	socks, err := listenNodePeer(0, 0, "test")
 	mustNoErr(t, err)
 	socks.Close()
-	ln, err := listenNodeHTTP(":0")
+	ln, err := listenNodeHTTP("0")
 	mustNoErr(t, err)
 	ln.Close()
 
@@ -273,6 +273,26 @@ func seedNodeDB(t *testing.T, fn func(*store.Tx) error) string {
 	mustNoErr(t, db.Write(fn))
 	mustNoErr(t, db.Close())
 	return dir
+}
+
+// Another process holding the web port on 127.0.0.1 only makes the node fall
+// back to a free port instead of dialing that process as its own rendezvous.
+func TestNodeWebPortShadowedOnLoopback(t *testing.T) {
+	stranger := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(stranger.Close)
+	port := strconv.Itoa(stranger.Listener.Addr().(*net.TCPAddr).Port)
+	saved := tcpListen
+	t.Cleanup(func() { tcpListen = saved })
+	tcpListen = func(network, addr string) (net.Listener, error) {
+		return saved(network, strings.Replace(addr, strconv.Itoa(defaultWebPort), port, 1))
+	}
+	n, err := openNode(t.Context(), socketRoot(t))
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	if strconv.Itoa(n.httpPort) == port {
+		t.Fatalf("the node serves on the stranger's port %s", port)
+	}
+	checkLocalWebServer(t, n.httpPort)
 }
 
 func TestMultiNodePortFallbackWebAndLocalCommands(t *testing.T) {
