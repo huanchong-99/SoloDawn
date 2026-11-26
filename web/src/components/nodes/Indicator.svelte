@@ -73,7 +73,8 @@
       background: var(--surface-2);
     }
   }
-  .conn[data-st='limited'] {
+  .conn[data-st='limited'],
+  .conn[data-st='some'] {
     border-color: color-mix(in srgb, var(--dawn) 50%, var(--line));
     background: var(--dawn-soft);
   }

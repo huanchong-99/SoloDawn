@@ -2,6 +2,7 @@
   import { subject, type Group } from '../../lib/groups.svelte';
   import { card as cardOf } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
+  import { taskTitle } from '../../lib/task';
   import type { MsgRow } from '../../lib/proto';
   import { clock } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
@@ -51,7 +52,7 @@
     {:else if msg.kind === 'task'}
       {@const task = group.task(msg.body.task)}
       {#if task}
-        <span class="cut"><span class="mono">T-{task.num}</span> {task.title}</span>
+        <span class="cut"><span class="mono">T-{task.num}</span> {taskTitle(task)}</span>
       {/if}
     {/if}
     <time datetime={new Date(msg.ts).toISOString()}>{time}</time>
@@ -67,7 +68,7 @@
         cli={author?.kind === 'ai' ? author.cli : undefined}
       />
       <p class="msg-head">
-        <b class="cut">{author?.name ?? t('chat.gone')}</b>
+        <b class="cut">{group.nameOf(msg.by)}</b>
         {#if author?.kind === 'ai' && author.secretary}
           <span class="badge">{t('chat.secretary')}</span>
         {/if}

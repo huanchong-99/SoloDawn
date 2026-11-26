@@ -71,6 +71,7 @@ describe('step 2 in the browser', () => {
     await update(p, 'member', 'q', { role: 'admin' });
     await row.getByRole('button', { name: 'Make member' }).waitFor();
     await row.getByRole('button', { name: 'Remove' }).click();
+    await row.getByRole('button', { name: 'Confirm removal' }).click();
     await expect.poll(() => sent(p), { timeout: 5000 }).toHaveLength(3);
     await p.evaluate(() => window.s2.remove('member', 'q'));
     await texts(p, '.people li').toEqual(['A\nAlex · You · Owner']);

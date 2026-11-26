@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { find, Group, Home, homes, lost, newId, recent, subject } from './groups.svelte';
+import {
+  creating,
+  find,
+  Group,
+  Home,
+  homes,
+  lost,
+  newId,
+  recent,
+  subject,
+  takeCreate,
+} from './groups.svelte';
 import { goldens } from './mock';
 import * as p from './proto';
 
@@ -590,6 +601,29 @@ describe('the lists of a group', () => {
     expect(group.member('system')).toBeUndefined();
   });
 
+  it('name a person who left twice under two names by the name they left with last', () => {
+    const { group } = joined();
+    group.apply([row('row-member-human', { id: 'first', user: 'mina', name: 'Mina', seq: 3 })]);
+    group.apply([gone('member', 'first', 4)]);
+    group.apply([row('row-member-human', { id: 'again', user: 'mina', name: 'Mina Li', seq: 5 })]);
+    group.apply([gone('member', 'again', 6)]);
+    expect(group.personName('mina')).toBe('Mina Li');
+    expect(group.nameOf('first')).toBe('Mina');
+  });
+
+  it('name a member that left by the last row held of it, and one never held as a former member', () => {
+    const { group } = joined();
+    const person = row('row-member-human', { id: 'mina', name: 'Mina', seq: 3 });
+    group.apply([person, row('row-member-human', { id: 'mina', name: 'Mina Li', seq: 4 })]);
+    expect(group.nameOf('mina')).toBe('Mina Li');
+    group.apply([gone('member', 'mina', 900), gone('member', 'never-held', 901)]);
+    group.reset();
+    expect(group.member('mina')).toBeUndefined();
+    expect(group.nameOf('mina')).toBe('Mina Li');
+    expect(group.nameOf('never-held')).toBe('Former member');
+    expect(group.nameOf(undefined)).toBe('Former member');
+  });
+
   it('know the person at this browser among the members, and find a person name or task by id', () => {
     const { group } = joined();
     expect(group.me).toBeUndefined();
@@ -613,7 +647,7 @@ describe('the lists of a group', () => {
     expect(group.task('missing')).toBeUndefined();
 
     group.apply([gone('member', owner.id, 900), gone('task', taskRow.id, 901)]);
-    expect(group.personName(user)).toBeUndefined();
+    expect(group.personName(user)).toBe('Zoe');
     expect(group.task(taskRow.id)).toBeUndefined();
   });
 
@@ -1524,5 +1558,14 @@ describe('ids and lost answers', () => {
     // Nothing is live before the first synced.
     group.apply([text('a', 7)]);
     expect(group.cursor).toBe(0);
+  });
+});
+
+describe('the request to open the create-group dialog', () => {
+  it('is taken once', () => {
+    expect(takeCreate()).toBe(false);
+    creating.open = true;
+    expect(takeCreate()).toBe(true);
+    expect(takeCreate()).toBe(false);
   });
 });

@@ -140,6 +140,10 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
     When('I remove the person', () => {
       command.mockResolvedValueOnce(refusal('conflict'));
       button('Remove', person('Member')).click();
+      flushSync();
+      expect(command).not.toHaveBeenCalledWith(expect.objectContaining({ op: 'remove' }));
+      expect(actions('Member')).toEqual(['Make member', 'Confirm removal']);
+      button('Confirm removal', person('Member')).click();
     });
     Then('a task conflict is shown without removing their row', async () => {
       await vi.waitFor(() =>
@@ -152,8 +156,12 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
     When('the home accepts the removal', async () => {
       command.mockResolvedValueOnce(refusal('forbidden')).mockResolvedValueOnce(success);
       button('Remove', person('Member')).click();
+      flushSync();
+      button('Confirm removal', person('Member')).click();
       await vi.waitFor(() => expect(person('Member').querySelector('.fail')).toBeTruthy());
       button('Remove', person('Member')).click();
+      flushSync();
+      button('Confirm removal', person('Member')).click();
       expect(command.mock.lastCall).toEqual([{ t: 'member', g, op: 'remove', id: 'Member' }]);
       home.remove(g, 'member', 'Member');
     });

@@ -448,7 +448,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `paging(thread)` says whether more may exist, whether a page is on its way, and whether one
     can be asked for (`ready`).
   - The lists and lookups: `main` and `thread(task)` in `pos` order, `members` by name,
-    `member(id)`, `personName(user)`, `task(id)`, `me`, `waiting` (the
+    `member(id)`, `nameOf(id)` (the name to show: of a member that left, the name of the last row
+    this page held of it, else "Former member"), `personName(user)` (also of a person who left
+    while this page held their row, by the name they left with last), `task(id)`, `me`, `waiting` (the
     pending brief the person asked for, the pending approvals, decisions and confirmations put to
     them), `info`
     (the group row), `latest`. `recent()` is every group, the newest main line first.
@@ -588,7 +590,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   label: `offline` (`Inactive`) while `net.otherTab` is true; for an open `#/groups/<g>` chat,
   the path to that group's home; elsewhere, the summary across `net.homes` (`undefined` before
   any home is known, `down` when no target home is
-  connected, `linking` while any connected target has no selected pair yet, `limited` when any
+  connected, `some` (`Some computers unreachable`) when only some are, `linking` while any connected target has no selected pair yet, `limited` when any
   uses a relay, and `ok` with the first measured `rtt` when all are direct). `routes/Nodes.svelte`
   calls `nodes.sync(net.homes)` to read `host.info` once per online owner connection, lists owned
   computers with their link path, hosted groups and registered AIs, sends `agent.set` followed by

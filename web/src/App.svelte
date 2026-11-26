@@ -16,6 +16,7 @@
     toggleTheme,
   } from './lib/prefs.svelte';
   import { href, route, routes, tabs, type Tab } from './lib/route.svelte';
+  import { watches } from './lib/terminal.svelte';
 
   type View = Component<{ params: Record<string, string | undefined>; net: Net }>;
 
@@ -41,7 +42,11 @@
   const file = $derived(`./routes/${at.view}.svelte`);
   const View: View | undefined = $derived(views[file] ?? loaded[file]);
   const tab = $derived('tab' in at ? at.tab : undefined);
-  const pageTitle = $derived(t(`page.${route.page}`));
+  // Another person's AI's terminal is watched, not taken over.
+  const watching = $derived(
+    route.page === 'terminal' && watches(route.params.g, route.params.member),
+  );
+  const pageTitle = $derived(t(watching ? 'page.watch' : `page.${route.page}`));
   let main: HTMLElement;
   let previous = untrack(() => View);
 

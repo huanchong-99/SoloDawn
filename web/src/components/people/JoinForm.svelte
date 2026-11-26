@@ -5,6 +5,12 @@
   import { t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
 
+  // The refusals a person can act on, in words (contracts/step-2/people.md 2.2); any other keeps
+  // its code.
+  const worded = ['forbidden', 'conflict', 'stale', 'version', 'timeout', 'lost'] as const;
+  const isWorded = (code: string): code is (typeof worded)[number] =>
+    (worded as readonly string[]).includes(code);
+
   let { invitation, net }: { invitation: Invitation | undefined; net: Net } = $props();
   let pending = $state.raw<AbortController>();
   let error = $state.raw<JoinError>();
@@ -51,6 +57,8 @@
       <div class="row">
         <a class="btn" href={href('onboarding')}>{t('page.onboarding')}</a>
       </div>
+    {:else if error && isWorded(error.code)}
+      <p role="alert">{t(`people.join.fail.${error.code}`)}</p>
     {:else if error}
       <p role="alert">
         {t('people.join.failure').replace('{step}', error.step).replace('{code}', error.code)}

@@ -27,7 +27,7 @@
 
   const taskRow = $derived(group.task(msg.body.task));
 
-  const memberName = (id: string) => group.member(id)?.name ?? t('chat.gone');
+  const memberName = (id: string) => group.nameOf(id);
   const waitingOn = $derived(
     msg.body.to.map((uid) => group.personName(uid) ?? uid).join(t('decision.sep')),
   );

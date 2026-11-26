@@ -13,6 +13,7 @@ import {
   readPairingCode,
   startDirectSurface,
   type DirectSurface,
+  finishOnboarding,
 } from './direct';
 import { startNet, type Node } from './nodes';
 
@@ -128,7 +129,7 @@ test('external setup, usage and removal (A10.17, A10.20, A10.25, A10.27)', async
     await pair(page, surface, node);
     await page.locator('input[name="acct-claude"][value="personal"]').check();
     await page.locator('input[name="acct-codex"][value="api_key"]').check();
-    await page.locator('a.done-btn').click();
+    await finishOnboarding(page);
     await page.goto(`${surface.url}#/onboarding`);
     await pair(page, surface, second);
     await page.goto(`${surface.url}#/groups`);

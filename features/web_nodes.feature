@@ -39,6 +39,7 @@ Feature: Connection indicator and my computers and AIs
     And the page lists "windows-box" as "Online" with link "Relay · 210 ms · 26 min", relay notice "Using a relay — speed and data are limited." and "Limited" AI state
     When "windows-box" stops
     Then "windows-box" is marked "Offline" and its AIs say "Offline · wakes when the computer returns"
+    And the indicator in the top bar has state "some" and reads "Some computers unreachable"
 
   Scenario: An account type is corrected, with its members in the groups
     Given an owned computer "workstation" on "macOS 15.2" running "v0.3.1" with direct path 4 ms and group "Website"

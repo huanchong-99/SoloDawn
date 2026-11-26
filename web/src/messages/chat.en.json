@@ -18,6 +18,7 @@
   "chat.latest.new": "New messages",
   "chat.compose": "Message",
   "chat.compose.hint": "Send a request to the secretary, or @ one of your AIs",
+  "chat.compose.hint.solo": "@ an AI to give it work",
   "chat.send": "Send",
   "chat.mention": "Mention a person or an AI",
   "chat.mention.list": "People and AIs to mention",

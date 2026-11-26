@@ -4,7 +4,7 @@
   import GroupList from '../components/groups/GroupList.svelte';
   import Waiting from '../components/groups/Waiting.svelte';
   import Icon from '../components/Icon.svelte';
-  import { find } from '../lib/groups.svelte';
+  import { find, takeCreate } from '../lib/groups.svelte';
   import type { Net } from '../lib/net.svelte';
   import { t } from '../lib/prefs.svelte';
   import { href } from '../lib/route.svelte';
@@ -13,7 +13,7 @@
   let { params, net }: { params: { g?: string }; net: Net } = $props();
 
   const open = $derived(find(params.g));
-  let creating = $state(false);
+  let creating = $state(takeCreate());
   // The address names a chat: the page is laid out for it, whether or not the group has been read.
 </script>
 

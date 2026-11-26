@@ -122,6 +122,13 @@ describe('the files of the client', () => {
     expect(messages['zh-CN']['chat.send']).toBe('发送');
   });
 
+  it('set a name or number apart from the Chinese around it by a space', () => {
+    const tight = Object.entries(messages['zh-CN']).filter(([, text]) =>
+      /\p{Script=Han}\{|\}\p{Script=Han}/u.test(text),
+    );
+    expect(tight).toEqual([]);
+  });
+
   // Each area declares its keys for the type checker in <area>.d.ts.
   const declarations = import.meta.glob<string>('./*.d.ts', {
     query: '?raw',

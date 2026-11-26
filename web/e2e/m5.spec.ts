@@ -18,6 +18,7 @@ import {
   sendChatMessage,
   startDirectSurface,
   type DirectSurface,
+  finishOnboarding,
 } from './direct';
 import { startNet, type Net, type Node } from './nodes';
 
@@ -38,9 +39,7 @@ async function pairNode(page: Page, surface: DirectSurface, node: Node, name: st
   await page.locator('input[name="acct-claude"][value="personal"]').check();
   await poll(() => page.locator('fieldset.acct').first().isDisabled()).toBe(false);
   await page.locator('input[name="acct-codex"][value="api_key"]').check();
-  await poll(() => page.locator('a.done-btn').count()).toBe(1);
-  await page.locator('a.done-btn').click();
-  await poll(() => page.url()).toContain('#/groups');
+  await finishOnboarding(page);
   await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 }
 
@@ -922,9 +921,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       const item = (name: string) => card.locator('.menu .item', { hasText: name });
       await more.click();
       await item('Pause').click();
-      await poll(() => card.locator('.hold').textContent()).toContain(
-        'The secretary or an admin paused it.',
-      );
+      await poll(() => card.locator('.hold').textContent()).toContain('Paused by hand.');
       await poll(() => card.locator('.card-head').textContent()).toContain('Paused');
 
       await more.click();

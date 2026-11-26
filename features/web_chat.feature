@@ -25,6 +25,11 @@ Feature: Chat main line of the web client
     Then the post names the member "Codex" in its mentions
     And the message shows "@Codex" as a mention
 
+  Scenario: The composer suggests a request to the secretary only while the group has one
+    Then the composer suggests "Send a request to the secretary, or @ one of your AIs"
+    When the group no longer has a secretary
+    Then the composer suggests "@ an AI to give it work"
+
   Scenario: The composer tells the writer before a message is too long
     When the person writes a message of 5830 letters
     Then the composer says nothing about its length

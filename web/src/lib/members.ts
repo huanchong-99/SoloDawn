@@ -4,6 +4,7 @@ import { lost, newId, type Group, type Home } from './groups.svelte';
 import type { Net } from './net.svelte';
 import { cliName } from './onboard.svelte';
 import { t, type Key } from './prefs.svelte';
+import { taskTitle } from './task';
 import type { AIMemberRow, HostInfoPush, HostJoin, HumanMemberRow, MsgRow, TaskRow } from './proto';
 import { hostHomeOf } from './terminal.svelte';
 import { clock, dayOf, now } from './when';
@@ -128,7 +129,7 @@ export function waitingOnOther(group: Group, ai: AIMemberRow, task: TaskRow | un
   }
   if (who) return t('member.state.waiting.who').replace('{who}', who);
   return task
-    ? `${t('member.state.waiting')} · T-${task.num} ${task.title}`
+    ? `${t('member.state.waiting')} · T-${task.num} ${taskTitle(task)}`
     : t('member.state.waiting');
 }
 
@@ -160,7 +161,7 @@ export function statusOf(group: Group, ai: AIMemberRow): { st: string; text: str
   }
   if (ai.state === 'working') {
     const base = t('member.state.working');
-    return { st: 'working', text: task ? `${base} · T-${task.num} ${task.title}` : base };
+    return { st: 'working', text: task ? `${base} · T-${task.num} ${taskTitle(task)}` : base };
   }
   const idle = idleStates[ai.state];
   return idle

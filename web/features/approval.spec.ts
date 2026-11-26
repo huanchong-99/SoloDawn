@@ -659,6 +659,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             '等你审批',
             `已改派 · ${clock(1763600000000, 'zh-CN')}`,
           ]);
+          // The home writes no actor for a reassignment (contracts/messages.md 3.2): no one is named.
+          expect(texts('section[aria-labelledby="states-approval"] p.hint')).toContain(
+            '任务已改派给别的 AI，这条申请作废。',
+          );
         },
       );
     },

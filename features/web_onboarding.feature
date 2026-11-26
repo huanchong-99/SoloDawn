@@ -21,7 +21,7 @@ Feature: Onboarding and pairing in the web client
     And the page lists "Claude Code" and "Codex" for account declaration
     When the person declares "Personal subscription" for "Claude Code" and "API key" for "Codex"
     Then the node received signed "agent.set" commands for "claude" and "codex"
-    And "Create your first group" leads to "#/groups"
+    And "Create your first group" leads to "#/groups" and opens the create-group dialog
 
   Scenario: The pairing secret expires after 10 minutes and can be replaced
     Given a fresh browser and a fresh node on a rendezvous

@@ -13,7 +13,7 @@ Feature: Confirmation cards and access to an AI (U2-2)
     Given the examples of all four confirmation states
     Then the cards show the three kinds, four states and no actions for the observer
     When the person asked is no longer in the group
-    Then the decisions still show their outcomes and times
+    Then the decisions still show their outcomes, times and the person's name
     When the referenced call has not been loaded
     Then the card identifies the requester as unknown
 

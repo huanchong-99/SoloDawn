@@ -9,6 +9,7 @@ import {
   readPairingCode,
   startDirectSurface,
   type DirectSurface,
+  finishOnboarding,
 } from './direct';
 import { startNet, type Net, type Node } from './nodes';
 
@@ -101,10 +102,10 @@ describe('E-M1: onboarding, pairing, account declaration, and two computers', ()
         'Pairing code used and discarded.',
       );
 
-      const doneLink = page.locator('a.done-btn');
-      await poll(() => doneLink.textContent()).toContain('Create your first group');
-      await doneLink.click();
-      await poll(() => page.url()).toContain('#/groups');
+      await poll(() => page.locator('a.done-btn').textContent()).toContain(
+        'Create your first group',
+      );
+      await finishOnboarding(page);
 
       const indicator = page.locator('.bar a.conn');
       await poll(() => indicator.getAttribute('data-st')).toBe('ok');

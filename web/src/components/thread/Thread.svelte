@@ -129,7 +129,7 @@
           />
           <div>
             <p class="ti-head">
-              <b>{author?.name ?? t('chat.gone')}</b>
+              <b>{group.nameOf(msg.by)}</b>
               {#if badge}<span class="badge" data-tone={badge.tone}>{badge.label}</span>{/if}
               <time datetime={iso}>{time}</time>
             </p>

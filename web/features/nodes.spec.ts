@@ -296,6 +296,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           );
         },
       );
+      And(
+        'the indicator in the top bar has state "some" and reads "Some computers unreachable"',
+        () => {
+          const el = one<HTMLAnchorElement>('.bar .conn');
+          expect(el.dataset.st).toBe('some');
+          expect(texts('.bar .conn')).toEqual(['Some computers unreachable']);
+          expect(el.getAttribute('aria-label')).toBe(
+            'Connection status: some computers unreachable',
+          );
+        },
+      );
     },
   );
 

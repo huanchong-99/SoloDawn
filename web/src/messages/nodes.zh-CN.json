@@ -5,6 +5,7 @@
   "nodes.empty.title": "还没有接入电脑",
   "nodes.empty.body": "先接入一台电脑。每台电脑运行一个节点，承载你放在上面的项目群和 AI。",
   "nodes.conn.ok": "直连",
+  "nodes.conn.some": "部分电脑连不上",
   "nodes.conn.limited": "中继 · 受限",
   "nodes.conn.linking": "重连中",
   "nodes.conn.down": "连不上群的家",

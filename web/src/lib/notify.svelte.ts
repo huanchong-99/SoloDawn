@@ -4,10 +4,10 @@ import { tick } from 'svelte';
 import { isWatch, type Confirm } from './confirm';
 import { subject, type Group, type Home } from './groups.svelte';
 import { jumpToMessage } from './jump';
-import { t } from './prefs.svelte';
 import type { MsgRow, Row } from './proto';
 import { href, route } from './route.svelte';
 import { systemText } from './system';
+import { taskTitle } from './task';
 
 export type NotifyKind =
   'approval' | 'decision' | 'brief' | 'confirm' | 'done' | 'mention' | 'alert';
@@ -72,14 +72,14 @@ function aboutOf(group: Group, msg: MsgRow) {
 /** Display name of the member a notification is about; of a bulletin, the AI that it names. */
 export function whoOf(group: Group, msg: MsgRow): string {
   if (msg.kind === 'bulletin') return msg.body.ai;
-  return group.member(aboutOf(group, msg))?.name ?? t('chat.gone');
+  return group.nameOf(aboutOf(group, msg));
 }
 
 /** Single-line summary shown beside the notification's kind label. */
 export function titleOf(group: Group, msg: MsgRow): string {
-  if (msg.kind === 'summary') {
+  if (msg.kind === 'summary' || msg.kind === 'task') {
     const task = group.task(msg.body.task);
-    return task ? `T-${task.num} ${task.title}` : firstLine(msg.text);
+    return task ? `T-${task.num} ${taskTitle(task)}` : firstLine(msg.text);
   }
   return firstLine(msg.kind === 'system' ? systemText(group, msg) : subject(group, msg));
 }

@@ -213,6 +213,39 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     },
   );
 
+  Scenario('The list shows a task and a notice as the chat words them', ({ Given, When, Then }) => {
+    Given(
+      'the last message of "Website" is the task T-12 "Show connection path", and the home also holds "Docs", whose last message says that "Mina" joined',
+      () => {
+        home.write(website, example('row-task'));
+        home.write(website, example('row-msg-task', { ts: Date.now() }));
+        home.add(docs, 'Docs');
+        home.write(docs, example('row-member-human', { id: mina, user: mina, name: 'Mina' }));
+        home.write(
+          docs,
+          example('row-msg-system', {
+            thread: null,
+            ts: Date.now(),
+            body: { code: 'member_joined', member: mina, by: owner },
+          }),
+        );
+      },
+    );
+    When('the browser has read both groups', async () => {
+      first.drop();
+      await read();
+      openPage();
+    });
+    Then(
+      'the list reads "System: T-12 Show connection path" under "Website" and "System: Mina joined, invited by Alex." under "Docs"',
+      () => {
+        const preview = (name: string) => texts('.glist .gprev')[texts('.glist a b').indexOf(name)];
+        expect(preview('Website')).toBe('System: T-12 Show connection path');
+        expect(preview('Docs')).toBe('System: Mina joined, invited by Alex.');
+      },
+    );
+  });
+
   Scenario(
     'The last message of a team group names the AI of a bulletin',
     ({ Given, When, Then }) => {

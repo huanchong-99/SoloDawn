@@ -98,6 +98,7 @@ describe('systemText', () => {
     ],
     [{ code: 'member_removed', user: 'u', name: "$& $'" }, "$& $' left the group."],
     [{ code: 'no_secretary' }, 'This group has no secretary AI.'],
+    [{ code: 'task_merged', task, commit: 'a1', merge_commit: 'b2' }, 'Secretary AI merged T-12'],
     [{ code: 'cap_reached', ai: codex, cap: 'day' }, 'cap_reached'],
   ])('words %j', (body, text) => expect(said(body)).toBe(text));
 

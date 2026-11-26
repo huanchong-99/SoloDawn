@@ -5,6 +5,7 @@
   "nodes.empty.title": "No computers connected yet",
   "nodes.empty.body": "Connect a computer first. Each computer runs one node and keeps the groups and AIs you put on it.",
   "nodes.conn.ok": "Direct",
+  "nodes.conn.some": "Some computers unreachable",
   "nodes.conn.limited": "Relayed · limited",
   "nodes.conn.linking": "Reconnecting",
   "nodes.conn.down": "Cannot reach group home",

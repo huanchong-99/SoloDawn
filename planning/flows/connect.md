@@ -170,6 +170,7 @@ and leaves alone the connection N itself offered
 | path `relay` | warm colour, "relayed, limited" | terminal button disabled with the reason; "ask the AI to diagnose the network" |
 | reconnecting | blue, breathing | — |
 | home unreachable | red hollow ring | the group is read-only until the home returns |
+| some homes unreachable (outside a group) | warm hollow ring, "some computers unreachable" | the groups homed on those are read-only until they return |
 
 "Ask the AI to diagnose" posts an ordinary message that mentions an AI on
 that computer; the AI uses the `net_status` tool (`contracts/mcp-tools.md`)

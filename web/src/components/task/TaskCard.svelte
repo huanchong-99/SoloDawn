@@ -3,7 +3,14 @@
   import { jumpToMessage } from '../../lib/jump';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { t } from '../../lib/prefs.svelte';
-  import { reviewLine, taskBadge, taskSteps, threadPreview, waitBadge } from '../../lib/task';
+  import {
+    reviewLine,
+    taskBadge,
+    taskSteps,
+    taskTitle,
+    threadPreview,
+    waitBadge,
+  } from '../../lib/task';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import Thread from '../thread/Thread.svelte';
@@ -51,7 +58,7 @@
   >
     <header class="card-head">
       <span class="mono" id={`task-num-${msg.id}`}>T-{task.num}</span>
-      <h3 id={`task-title-${msg.id}`}>{task.title}</h3>
+      <h3 id={`task-title-${msg.id}`}>{taskTitle(task)}</h3>
       <span class="badge" class:solid={badge.solid} data-tone={badge.tone}>
         {#if badge.dot}<span class="st" data-st={badge.dot}><i></i></span>{/if}{badge.text}
       </span>
@@ -77,7 +84,7 @@
             cli={assignee?.kind === 'ai' ? assignee.cli : undefined}
             size="sm"
           />
-          <span>{assignee?.name ?? t('chat.gone')}</span>
+          <span>{group.nameOf(task.assignee)}</span>
           {#if assignee?.kind === 'ai' && assignee.host_name}
             <span class="muted">· {assignee.host_name}</span>
           {/if}

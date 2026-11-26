@@ -15,6 +15,21 @@
   const next = $derived(person.role === 'admin' ? 'member' : 'admin');
   let busy = $state(false);
   let failure = $state('');
+  // Removal, or leaving, takes two presses, as for an AI (RemoveAI.svelte).
+  let asked = $state(false);
+  const removal = $derived(self ? 'people.leave' : 'people.remove');
+
+  function press(event: MouseEvent & { currentTarget: HTMLButtonElement }) {
+    event.currentTarget.focus();
+    asked = !asked;
+    if (!asked) void send('remove');
+  }
+
+  function escape(event: KeyboardEvent) {
+    if (!asked || event.key !== 'Escape') return;
+    event.preventDefault();
+    asked = false;
+  }
 
   async function send(op: 'set' | 'remove') {
     busy = true;
@@ -45,11 +60,12 @@
     {/if}
     <button
       type="button"
-      class="btn btn-sm btn-ghost"
+      class="btn btn-sm {asked ? 'btn-danger' : 'btn-ghost'}"
       disabled={busy || !group.home.ctl}
-      onclick={() => send('remove')}
+      onclick={press}
+      onkeydown={escape}
     >
-      {t(self ? 'people.leave' : 'people.remove')}
+      {t(asked ? (`${removal}.confirm` as const) : removal)}
     </button>
     {#if failure === 'conflict'}
       <p class="hint" role="alert">{t('people.conflict')}</p>

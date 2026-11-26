@@ -17,6 +17,7 @@ import {
   sendChatMessage,
   startDirectSurface,
   type DirectSurface,
+  finishOnboarding,
 } from './direct';
 import { startNet, type Net, type Node } from './nodes';
 
@@ -50,12 +51,9 @@ async function pairAndCreateGroup(page: Page, surface: DirectSurface, node: Node
   await page.locator('input[name="acct-claude"][value="personal"]').check();
   await poll(() => page.locator('fieldset.acct').first().isDisabled()).toBe(false);
   await page.locator('input[name="acct-codex"][value="api_key"]').check();
-  await poll(() => page.locator('a.done-btn').count()).toBe(1);
-  await page.locator('a.done-btn').click();
-  await poll(() => page.url()).toContain('#/groups');
+  await finishOnboarding(page, true);
   await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 
-  await page.locator('button', { hasText: 'New group' }).first().click();
   const dlg = page.locator('dialog.dlg[open]');
   const inputs = dlg.locator('input.input');
   await inputs.nth(0).fill('Website');

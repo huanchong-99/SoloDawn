@@ -18,6 +18,7 @@
   "chat.latest.new": "有新消息",
   "chat.compose": "发消息",
   "chat.compose.hint": "发需求给 @秘书，或者直接 @ 你自己的 AI",
+  "chat.compose.hint.solo": "@ 一个 AI，把活交给它",
   "chat.send": "发送",
   "chat.mention": "@ 一位成员或 AI",
   "chat.mention.list": "可以 @ 的成员和 AI",

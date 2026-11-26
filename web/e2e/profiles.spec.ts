@@ -14,6 +14,7 @@ import {
   readPairingCode,
   startDirectSurface,
   type DirectSurface,
+  finishOnboarding,
 } from './direct';
 import { leader, startNet, stop, type Net, type Node, type Proc } from './nodes';
 
@@ -36,11 +37,8 @@ async function createGroup(page: Page, surface: DirectSurface, node: Node, repo:
   await page.locator('input[name="acct-codex"][value="api_key"]').check();
   await page.locator('input[name="acct-opencode"][value="api_key"]').check();
   await page.locator('input[name="acct-qwen"][value="api_key"]').check();
-  await poll(() => page.locator('a.done-btn').count()).toBe(1);
-  await page.locator('a.done-btn').click();
-  await poll(() => page.url()).toContain('#/groups');
+  await finishOnboarding(page, true);
   await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
-  await page.getByRole('button', { name: 'New group', exact: true }).first().click();
   const dialog = page.locator('dialog.dlg[open]');
   const inputs = dialog.locator('input.input');
   await inputs.nth(0).fill('Profiles');
@@ -151,7 +149,7 @@ describe('AI profiles with fake CLIs', () => {
         .allTextContents(),
     ).toEqual(["The CLI's default", 'low', 'high']);
     await poll(() => dialog.locator('.fast').count()).toBe(0);
-    await dialog.locator('.choice', { hasText: 'Qwen · studio' }).locator('input').check();
+    await dialog.locator('.choice', { hasText: 'Qwen Code · studio' }).locator('input').check();
     await poll(() => dialog.getByRole('textbox', { name: 'Model', exact: true }).count()).toBe(1);
     await poll(() => dialog.getByRole('textbox', { name: 'Level', exact: true }).count()).toBe(1);
     await dialog.locator('.choice', { hasText: 'Claude Code · studio' }).locator('input').check();

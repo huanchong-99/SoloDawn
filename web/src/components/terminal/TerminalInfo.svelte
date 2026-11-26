@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import { t } from '../../lib/prefs.svelte';
   import type { AIMemberRow, TaskRow } from '../../lib/proto';
+  import { taskTitle } from '../../lib/task';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
 
@@ -43,7 +44,7 @@
       </dd>
       {#if !ai?.secretary}
         <dt>{t('terminal.kv.task')}</dt>
-        <dd>{task ? `T-${task.num} ${task.title}` : t('terminal.kv.task.none')}</dd>
+        <dd>{task ? `T-${task.num} ${taskTitle(task)}` : t('terminal.kv.task.none')}</dd>
         {#if task?.branch}
           <dt>{t('terminal.kv.branch')}</dt>
           <dd><code>{task.branch}</code></dd>

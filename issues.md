@@ -20,8 +20,14 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
   9. The composer of a group without a secretary still suggests "发需求给 @秘书".
   10. The connection indicator stays "直连" while one of two computers is down (`indicator` summarises online homes only, `web/src/lib/nodes.svelte.ts`).
   11. A team bulletin reads "来自Alex的电脑" without a space.
-- Cause: not looked into one by one; each is wording or a small interaction of the client, none a fault of the demo.
-- Status: open; the items wait for a fix.
+- Cause (lines as of `ea96a5ce7`): `cliLabels` knew two CLIs (`web/src/lib/onboard.svelte.ts:37`); `JoinForm.svelte:56` showed `people.join.failure` for every code; display names came from `group.member(id)` (`web/src/lib/groups.svelte.ts:131`), which forgets a removed row, and `PersonActions.svelte:50` removed at the first press; the texts `approval.hint.reassigned` (`approval.zh-CN.json:18`) and `task.hold.manual` (`task.en.json:63`, `task.zh-CN.json:63`); the title is the host's (`internal/host/takeover.go:261`, `planning/flows/takeover.md` A); `App.svelte:44` titled every terminal page `page.terminal`; `GroupList.svelte:29` used `subject`, the text of the row, empty for a task or a notice; `StatusPanel.svelte:179` only linked to `#/groups`; the composer hint ignored `group.secretary` (`Composer.svelte:50`); `indicator` summarised the connected homes only (`web/src/lib/nodes.svelte.ts:50`); `team.computer` had no spaces (`team.zh-CN.json:7`).
+- Status: resolved on `fix/demo-findings`; the actor of a pause or reassignment is the separate open entry "No row says who paused or reassigned a task, and a removed member's name lasts only while the page is open".
+
+### 2026-11-26 · limitation · No row says who paused or reassigned a task, and a removed member's name lasts only while the page is open
+
+- Symptom: a task paused by hand says only that it was paused by hand, and an approval made void by a reassignment only that the task was reassigned, even when the reader did it; before 2026-11-26 the Chinese texts named the secretary. A member removed before this page was opened is shown as "Former member" on what they wrote.
+- Cause: the wait `manual` of a task row and the approval state `reassigned` carry no actor (`planning/contracts/rows.md` section 4, `planning/contracts/messages.md` 3.2; `waitFor`, `internal/home/machine.go:362`, and `tskCardRows`, `internal/home/cmd_task.go:349`), and a member's `gone` marker carries no name (`rows.md`, `gone`). The web client keeps the last row it held of each member that left (`Group.nameOf`, `web/src/lib/groups.svelte.ts:142`), and a browser cache lives in memory (`planning/flows/sync.md` G).
+- Status: open. Naming the actor needs a `by` in those rows, a contract change for the coordinator to decide.
 
 ### 2026-11-26 · bug · A9.27 fails in its set-up and connections when six copies run at once on a Mac
 

@@ -1,6 +1,6 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { expect } from 'vitest';
-import { show, closePage, openPage } from './page';
+import { show, closePage, openPage, texts } from './page';
 import { Group, Home, homes } from '../src/lib/groups.svelte';
 import { goldens } from '../src/lib/mock';
 import * as p from '../src/lib/proto';
@@ -56,6 +56,21 @@ describeFeature(feature, ({ AfterEachScenario, Scenario }) => {
       });
     },
   );
+  Scenario("The terminal of another person's AI is titled as watched", ({ Given, When, Then }) => {
+    let ai: p.AIMemberRow;
+    Given('the AI "Codex" of another person in the group', () => {
+      setup();
+      ai = { ...p.decode(p.AIMemberRow, goldens['row-member-ai']), user: 'someone-else' };
+      group.apply([ai]);
+    });
+    When('its terminal is opened', () => {
+      openPage(`#/terminal/${group.g}/${ai.id}`);
+    });
+    Then('the page is titled "Watching a terminal"', () => {
+      expect(texts('#page-title')).toEqual(['Watching a terminal']);
+      expect(document.title).toBe('Watching a terminal · SoloDawn');
+    });
+  });
   Scenario('A watch request names its AI and requester', ({ Given, Then }) => {
     Given('a watch confirmation addressed to the owner', () => {
       const person = setup();
