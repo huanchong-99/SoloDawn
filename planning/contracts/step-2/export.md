@@ -19,7 +19,7 @@ them is at the owner's machine, so they need no role check of their own.
 | Command | Does |
 | --- | --- |
 | `solodawn group export <group id> <file> [--to <device id>]` | on the home of the group: writes the group to `<file>` (section 2). With `--to`, a move (section 3): from then on this node is no longer the home. Without it, a copy: this node stays the home. Fails when this node is not the group's home |
-| `solodawn group import <file>` | installs the group of `<file>` and makes this node its home. Fails when this node's owner is not the group's owner, or when the node already holds rows of that group |
+| `solodawn group import <file>` | installs the group of `<file>` and makes this node its home. Fails when this node's owner is not the group's owner, when the node already holds rows of that group, or when the file was written by another version (section 5, limit 5) |
 
 Both print one line and exit non-zero on failure, as the other commands do.
 A group moves only between nodes of its owner, so the role `owner` never
@@ -32,7 +32,10 @@ section 1) and `device_log`, holding only that group: its `row` rows,
 `gone` markers included; its `grp` counters; its unacknowledged `inbox`
 items; the device logs and `push_sub` rows of its people. The node writes it
 in one read transaction, so the file is one consistent state of the group.
-Receipts are not in the file (section 5, limit 2).
+Receipts are not in the file (section 5, limit 2). The file's
+`user_version` is the schema version of the node that wrote it
+(`contracts/storage.md` section 7). An AI's workspace is a path on its own
+host: it is in the member row and does not move with the home.
 
 ## 3. Moving
 
@@ -76,6 +79,7 @@ If the import fails, the file can be imported on P1 again.
 | 2 | Receipts stay on P1 | a command sent to P1, unanswered, and sent again to P2 is applied again |
 | 3 | A restore holds the rows of the last copy | rows written after it are lost; a task whose row went back reports to the secretary as its host acts on it, and a person settles it |
 | 4 | `moved` carries no signalling URLs | clients reach P2 through the signalling URLs they had for P1, which is the same rendezvous for one owner's nodes; otherwise they need the link of section 4 |
+| 5 | A file of another version is refused | `group import` reads the file's `user_version` and, when it is not the node's own schema version, fails in one line that says so. A file written by `v3.0.0-rc.1` has 0 there: its rows are of the model before the decision of 2026-11-26 and cannot be imported |
 
 ## 6. Where it goes
 

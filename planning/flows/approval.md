@@ -133,18 +133,20 @@ back `reassigned` or `expired` and are deleted on fetch in step 3.
 
 ## F. Reassigned or cancelled
 
-16. The secretary may give the task to another AI while the card is pending
-    (R-42). H sets the card's `state.status = reassigned`; the first AI's
-    task session ends (`flows/task.md`, "Reassignment").
-17. If the task is cancelled or merged while the card is pending, H sets
-    the card to `expired` (`contracts/task-machine.md` rows 8 and 15).
+16. The secretary or an admin may give the task to another AI while the
+    card is pending (R-42). H sets the card's `state.status = reassigned`
+    and writes who did it into `state.by`, so that the card can say
+    `<name> gave the task to <AI>` (`contracts/messages.md` 3.2); the first
+    AI's task session ends (`flows/task.md`, "Reassignment").
+17. If the task is cancelled or done while the card is pending, H sets
+    the card to `expired` (`contracts/task-machine.md` rows 7 and 15).
 
 ## G. Levels at a glance
 
 | Level | The CLI is started with | Requests |
 | --- | --- | --- |
 | 1 read only | settings that allow no change | permission requests denied by N without a card |
-| 2 workspace | the CLI's sandbox and permission rules for the task's worktree | card, owner decides |
+| 2 workspace | the CLI's sandbox and permission rules for the member's workspace | card, owner decides |
 | 3 unrestricted (default) | the CLI's highest-autonomy mode (2026-11-21 owner override 2) | any permission request or multiple-choice question the CLI still raises becomes a card |
 
 What each of these settings was measured to confine on each CLI, and what
@@ -154,14 +156,9 @@ place for it.
 - The same settings apply when the session is taken over in the interactive
   CLI, where the CLI asks the owner in the terminal instead of through a
   card (`flows/takeover.md`).
-- Exact flags per CLI, and what the node itself does for a session at each
-  level (checks, push, pull request, merge), are in `contracts/drivers.md`
-  sections 1 and 2.
-- The project's check commands are run by the node, outside the CLI's
-  sandbox, on code the AI wrote, with a minimal environment. Level 2
-  confines what the AI does; it does not confine what the project's own
-  checks execute, and the web client says so next to the level control
-  (decided, `risks.md` Q-19).
+- Exact flags per CLI are in `contracts/drivers.md` section 1. The node
+  itself does nothing for a session by level but answer its requests
+  (section 2 there): it runs no command of a project.
 - Work that someone other than the owner triggered never runs above level 2
   (R-44, step 2).
 

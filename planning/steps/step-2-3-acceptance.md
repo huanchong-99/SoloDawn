@@ -18,8 +18,6 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   `P1`, a working AI of P on `P2`, and two working AIs of Q on `Q1`:
   **Q-personal** (`account: personal`) and **Q-team** (`account: team`). All
   are fake CLIs that log each start and each turn's text.
-- **Another forge** is a test program, first on PATH, that records its
-  argument list and answers from files.
 - A sentence that starts "In the browser" is checked end to end in the web
   client; everything else by integration.
 
@@ -43,11 +41,17 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   Q and of Q's AIs are `gone` markers. While an AI of Q is assignee or
   reviewer of an unfinished task the removal is answered `conflict`. The owner
   cannot be removed. In the browser: roles, invitation, removal.
+- **A9.46** When a group is created, a person who is already in another
+  group on the same home computer is ticked: the group appears in their
+  connected browser without a link and without a reload, and a browser of
+  theirs that connects later lists it. A person who is in no group on that
+  computer is not offered, `add_person` for them is answered `not_found`,
+  and they get a link.
 
 ### Other people's hosts (`contracts/step-2/people.md`)
 
 - **A9.5** `Q1` joins Q-team to the group with `host.join`: the member row has
-  `host` = `Q1` and `user` = Q, and `Q1` holds a clone. `member add_ai` from a
+  `host` = `Q1`, `user` = Q and the folder Q chose as `workspace`. `member add_ai` from a
   node whose owner is not a member is refused, and so is `secretary: true`
   from Q while the group has a secretary.
 - **A9.6** What a node accepts (`contracts/datachannel.md` section 8). To a
@@ -73,8 +77,8 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   items of its home and checks no owner's signature on them (D-2).
 - **A9.11** P confirms a brief that makes Q-personal assignee of one task and
   reviewer of another. Both wait for Q, the second from step `review`; until Q
-  confirms, no `assign` or `review` item reaches `Q1` and no worktree exists
-  there. In the browser: the card, its actions for Q only, each end state.
+  confirms, no `assign` or `review` item reaches `Q1` and no session of
+  those tasks exists there. In the browser: the card, its actions for Q only, each end state.
 
 ### After a task started (D-9; `contracts/step-2/labels.md`)
 
@@ -152,30 +156,17 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   to a relayed pair, as in A7.9, the channel closes and `ctl` keeps answering.
   In the browser: P's terminal takes no input, and Q sees that P is watching.
 
-### Team-wide group (D-15; `contracts/step-2/watch-team.md`)
+### A group of people (R-10)
 
-- **A9.22** `group create` with kind `team` makes a group without `repo`. In
-  it `task start`, `post` of kind `brief`, `host.join`, `member add_ai` and
-  `group set` with `checks` are refused, and no node holds a clone for it.
-- **A9.23** The secretary of a project group posts a notice with the `post`
-  tool and the team group's id; it appears in that group's main line under the
-  secretary's name. The same call by a working AI is refused. A person's
-  message there that names an AI produces no item. In the browser: the team
-  group has no task list, no brief and no AI cards.
+- **A9.22** A group with people and no AI has a main line, notes and a
+  member list; a person who joins it later reads its history.
+- **A9.23** Removed on 2026-11-26: there is no team kind of group and no
+  bulletin.
 
-### Other forges (D-10; `contracts/step-2/checks-forge.md`)
+### Other forges (ended)
 
-- **A9.24** A group whose four templates (push, open request, read checks,
-  merge) name the test forge program passes A5.1, the last sentence of A5.3,
-  A5.10 and A5.13. The argument lists the program recorded are the templates
-  with their named places filled, and `gh` was never started. In the browser:
-  the dialog that joins an AI to the group shows the check commands and each
-  template.
-- **A9.25** A task title with a space, a quote, `;` and `$(touch marker)`
-  arrives in its place as one unchanged argument, and no marker exists: no
-  shell reads a template. `{title}` in `push` is refused; `{tag}` is literal.
-- **A9.26** The M5 run against one real forge other than GitHub, with its own
-  signed-in command-line program. (`live`)
+- **A9.24** to **A9.26** Removed on 2026-11-26: no forge is configured,
+  and the node runs no forge program.
 
 ### Home changes (D-11; `contracts/step-2/export.md`)
 
@@ -201,9 +192,8 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 - **A9.33**, **A9.34** Removed on 2026-11-22: no sandbox for checks in 1.0
   (D-12, T2-12); `risks.md` K-8 stays a stated limit.
 - **A9.35**, **A9.36** Removed on 2026-11-22: no per-machine acceptance of
-  the check list (D-3, T2-9). The client shows the commands instead
-  (`contracts/step-2/checks-forge.md` section 1), tested as part of A9.24 in
-  the browser.
+  the check list (D-3, T2-9). Since 2026-11-26 a group has no commands to
+  show.
 
 ### What a browser shows (D-6; `contracts/step-2/browser-trust.md`)
 
@@ -233,5 +223,4 @@ The answers are silent on these; the contract of each group decides.
 | A9.4 | a person whose AI holds an unfinished task cannot be removed | `contracts/commands.md` 1.2, `member remove` |
 | A9.14 | decided on 2026-11-20: for an AI on a team plan and a person not on its list, the owner is asked with the same card | D-8 names personal subscriptions only |
 | A9.20 | there is a terminal to watch only during a takeover | D-14, "the bridge of step 1" |
-| A9.23 | a secretary's node may post in a team group although no AI is a member of it | D-15 refuses `host.join` there |
 | A9.27, A9.28 | decided: the new home is another node of the group's owner | D-7: the owner is the home's owner |

@@ -22,6 +22,13 @@ to start". The coordinator has settled Q-1 to Q-28 (`risks.md`). Next:
    the contract itself. The first batches, from the reviews of backend
    tasks B-01 and B-02, are in `contracts/conventions.md`,
    `contracts/messages.md` and `contracts/envelope.md`.
+6. On 2026-11-26 the owner changed the model of groups: one kind of group,
+   made of people and connected AIs; each AI works directly in a folder of
+   its owner, its workspace; the platform runs no Git and no checks and
+   merges nothing. The rules, contracts and flows here are written for
+   that model. Why, what was given up and what the coordinator decided
+   under it is the
+   [decision record](../docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md).
 
 SoloDawn is being rebuilt from an empty tree. This directory holds the plan
 that the implementation will follow. It is written for two readers: the
@@ -35,8 +42,8 @@ listed in the contracts).
 
 A small program, the **node**, runs on each of the owner's computers. It keeps
 official AI coding CLIs alive as long-lived sessions, lets them talk to each
-other and to people in **groups** (one group per project), and enforces what
-each AI may do. People use a **web client**. Nodes and browsers connect
+other and to people in **groups**, each AI working in a folder its owner
+gave it, and enforces what each AI may do. People use a **web client**. Nodes and browsers connect
 peer-to-peer over WebRTC data channels. A tiny **rendezvous** service helps
 peers find each other and relays ciphertext only when no direct path exists.
 All data lives on the users' own machines.
@@ -122,14 +129,14 @@ Change: <files and sections edited, or the reason for rejecting>
 | `README.md` | this file |
 | `product-rules.md` | product behaviour already decided, numbered `R-n` |
 | `architecture.md` | fixed constraints, components, responsibilities, diagram, trust model, repository layout and import rules |
-| `sessions.md` | kinds of CLI session, their folders, levels and states |
+| `sessions.md` | kinds of CLI session, their folder, levels and states |
 | `flows/pairing.md` | first run: browser and node pair, device list |
 | `flows/connect.md` | finding a peer, racing paths, relay fallback |
 | `flows/sync.md` | how a client catches up with a group home |
 | `flows/agent-turn.md` | delivering a message to an AI and getting its reply |
 | `flows/approval.md` | an AI asks for permission, the owner decides |
-| `flows/task.md` | brief, confirm, work, checks, review, merge |
-| `flows/trace-task.md` | one confirmed task on the wire: who signs what, which commit |
+| `flows/task.md` | brief, confirm, work, submission, review, done |
+| `flows/trace-task.md` | one confirmed task on the wire: who signs what, which report |
 | `flows/ask.md` | one AI calls another, same machine or not |
 | `flows/takeover.md` | the owner takes the terminal and hands it back |
 | `contracts/envelope.md` | identities, signed envelope, device log |
@@ -144,16 +151,15 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/mcp-tools.md` | tools the node offers to AI sessions |
 | `contracts/storage.md` | SQLite schema draft |
 | `contracts/task-machine.md` | the one table of task transitions |
-| `contracts/drivers.md` | how each CLI is started, levels, turn format, instructions |
-| `contracts/local.md` | local interfaces: command line, MCP shim socket, Git commands, outbound secret check, self-update |
+| `contracts/drivers.md` | how each CLI is started, levels, turn format, instructions: what every session is told about its folder, testing and publishing |
+| `contracts/local.md` | local interfaces: command line, MCP shim socket, workspaces (the folder of a session, the folders a CLI was used in), outbound secret check, self-update |
 | `contracts/diagnostics.md` | what a node logs and what a failing test leaves behind, so that one occurrence of a failure names its cause |
 | `contracts/step-2/authority.md` | step 2: the home decides on someone else's home; allow list, delegates, the secretary, the level cap (D-1, D-13) |
 | `contracts/step-2/labels.md` | step 2: the two labels of a turn, split from `confirm.md` (D-9) |
-| `contracts/step-2/people.md` | step 2: a second person in a group, the three roles, leaving and removal (D-7) |
+| `contracts/step-2/people.md` | step 2: a second person in a group, by a link or added by an admin, the three roles, leaving and removal (D-7) |
 | `contracts/step-2/browser-trust.md` | step 2: what a browser shows about a home of another, the secretary warning (D-6) |
 | `contracts/step-2/confirm.md` | step 2: the owner's `confirm` card before an AI works for someone else, and the `information` label (D-8, D-9) |
-| `contracts/step-2/checks-forge.md` | step 2: forges other than GitHub, and where a group's commands are shown (D-10) |
-| `contracts/step-2/watch-team.md` | step 2: watching a takeover terminal, and the group kind `team` (D-14, D-15) |
+| `contracts/step-2/watch-team.md` | step 2: watching a takeover terminal (D-14) |
 | `contracts/step-2/export.md` | step 2: exporting and importing a group, to move it or keep a copy (D-11) |
 | `contracts/step-3/drivers.md` | step 3: what a driver for a further CLI must have, its capability table (refines `steps/step-2-3.md` 3.1) |
 | `contracts/step-3/knowledge.md` | step 3: style presets and the knowledge base (D-17, D-18) |

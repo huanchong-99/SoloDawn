@@ -24,7 +24,7 @@ by its type:
 | Type of the field | "Nothing" is written as | Never |
 | --- | --- | --- |
 | a list | `[]` | `null`, left out |
-| an object whose keys are themselves optional (`usage`, `checks`, a `body` without content) | `{}` | `null`, left out |
+| an object whose keys are themselves optional (`usage`, a `body` without content) | `{}` | `null`, left out |
 | a single value that can be "none", which its contract marks "or `null`" | `null` | left out |
 | a number, a boolean, a string | its value; `0`, `false` and `""` are values, not absence | `null` |
 
@@ -147,7 +147,7 @@ A client tells a success from an error by the presence of `err`, never by
   the rest in another frame (`rows`, `devlog`) or as another page
   (`fetched`).
 - A node that writes free text into a command of its own (the `detail` of
-  a check, of a failure, of a host event) shortens it so that the row
+  a failure, of a host event) shortens it so that the row
   fits, and keeps the end of an output.
 - A `device` row holds its log entry, which is why the `p` of an entry is
   at most 2 KiB (`contracts/envelope.md` section 4).
@@ -173,8 +173,7 @@ reads each golden file: `shapes` in `internal/proto/shapes_test.go`, and
 holds what the two readers must agree on, and both test suites judge
 every golden file by it: which of its members may be left out, which may be
 `null`, which numbers may be a fraction, which texts are random ids; and
-cases with one value replaced, such as a slug that the home's rule cannot
-make. The Go tests write that file from the tags of the Go types, so a
+cases with one value replaced. The Go tests write that file from the tags of the Go types, so a
 changed tag is a changed line there, and the web client's tests then hold
 its schema to the same line. Two things are outside it: a member that the
 Go type of a frame keeps as JSON (a row in `rows`, the `msg` of an inbox
@@ -193,12 +192,13 @@ hold them as text and only the schemas name them.
 | the payloads of `group`, `member`, `post` (every kind), `act`, `jump`, `task`, `note`, `forget`, `push`; the review outcome and the host events (`contracts/commands.md` 1.8, 1.9); `inbox` with the signed `item` payload, `ack`; the payloads of `host.join`, `host.leave`; `fetch` of one row (`r`, `row`). Changes to shapes frozen earlier, in the same pull request: the task row's `slug`, `plan`, `review.failed` and `wait.kept`, with `row-task.json`'s branch made by the slug rule; the decision state `expired` (`row-msg-decision-expired.json`); `mentions` of an approval card holding its approvers; `act` payloads in the examples without empty `arg` or `text`; `welcome.addrs`. The approval body's `full` is frozen already (pull request 117) | P-1 |
 | `groups`; `host.info`, with `homes` entries of `g`, `home` and `name`; `pty.resize`; the local-network `beacon` payload; the payloads of `settings.set`, `pair.browser`, `agent.set`, `perm.set`, `host.offline`, `host.online`, `takeover.start`, `takeover.end`; the MCP tool list (`tools.json`, `contracts/mcp-tools.md` section 5) | P-2, after P-1 and B-07 |
 | `inbox` and `item-*` re-frozen with a plain unsigned `item` object (`item`, `ai`, `why` and the optional fields of `contracts/datachannel.md` section 6), with no `env` wrapper and no `cause`, `g` or `to` (owner's decision of 2026-11-21: no attack-and-defence code) | P-1b |
-| one confirmed task end to end, with and without a remote | B-01 slice (c) |
+| one confirmed task end to end (`flows/trace-task.md`); until the last row of this table also with a remote | B-01 slice (c) |
 | the people and confirm shapes of `contracts/step-2/people.md` section 8 and `contracts/step-2/confirm.md` section 3 to 6, and `hello` with `v` 2 | P-4a |
-| the watch, team, forge and export shapes of `contracts/step-2/watch-team.md`, `checks-forge.md` and `export.md` | P-4b |
+| the watch and export shapes of `contracts/step-2/watch-team.md` and `export.md`; with them the team and forge shapes, which the last row of this table removes | P-4b |
 | the note types `preset` and `kb`, the brief's `preset`, `kb_put`, `kb_search`, and the `driver` object of `host.info` | P-5 |
 | the additions of `contracts/step-3/profiles.md` section 6: the four fields of an AI member, `member` in `host.leave`, `refresh` and `models` in `host.info`, `stuck` on the task row | P-6 |
 | the additions of `contracts/step-3/external.md` section 12: `tool` on an AI member, `host.join` for `external`, `exe` and the `external` agent in `host.info`, the tool list `external`, the hand-out | P-7 |
+| re-frozen for the decision of 2026-11-26 ([record](../../docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)). Changed: the `group` row without `kind`, `repo`, `base`, `forge`, `checks` and `templates`, and `group create` and `set` without them; `workspace` on an AI member, in `member add_ai`, in `host.join` and in `agents[].groups[]` of `host.info`; the `task` row (`contracts/rows.md` section 4) with `report`, `review.report`, the state `done`, the steps `work` and `review`, the wait `busy` and `wait.by`; `by` in the approval state `reassigned`; the bodies of `report`, `review`, `summary` and `handback`, and `system` `task_done`; the item `review` with `msg`; `hello` and `welcome` with `v` 3; `tools.json` with the member `task`. New: `member add_person`; `host.workspaces`, request and answer. Removed, with their golden files: the slug, the kinds `checks` and `bulletin`, the task commands `branch`, `checked`, `submitted`, `cloud`, `merged` and `conflict`, the items `checks` and `merge`, and the transcript `trace-remote`. `trace-local` is written again by the home's trace test once the home follows | P-8 |
 
 **Feature files of the parallel plan** (`steps/parallel-plan.md` section 2).
 The module's seam unit owns `features/<module>.feature`. A Go slice puts

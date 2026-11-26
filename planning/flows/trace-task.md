@@ -1,24 +1,26 @@
 # Trace: one confirmed task on the wire
 
-One task from request to merge, message by message, with who signs what and
-which commit each step is about. It follows `contracts/task-machine.md`
-rows 1, 3 to 8.
+One task from request to done, message by message, with who signs what and
+which report each step is about. It follows `contracts/task-machine.md`
+rows 1, 5 and 7.
 
 This file is documentation: payloads are abridged. The complete signed golden
-transcripts are `internal/proto/testdata/trace-remote.json` (with a GitHub
-remote) and `internal/proto/testdata/trace-local.json` (`forge: none`, no
-remote). `internal/home/trace_test.go` produces them by sending their signed
-commands through the home and fails when they differ from its output;
-`web/src/lib/trace.test.ts` verifies them on their own. Each pins the device
+transcript is `internal/proto/testdata/trace-local.json`.
+`internal/home/trace_test.go` produces it by sending its signed commands
+through the home and fails when it differs from its output;
+`web/src/lib/trace.test.ts` verifies it on its own. It pins the device
 keys, owner device log, initial group and member rows, sequence and task
 counters, every command envelope and `re`-paired response, the resulting
-`rows` pushes, and all six inbox items with their host `ack`s.
+`rows` pushes, and all five inbox items with their host `ack`s. The second
+transcript, `trace-remote.json`, went with the forge: there is one flow,
+with or without a remote, because the platform runs no Git (the owner's
+decision of 2026-11-26).
 
 Cast: the owner's browser, device `OB`. Node A, device `HA`: home of group
-`G`; hosts the secretary `mS` and the AI `mX`. Node B, device `HB`: hosts
-the AI `mY`. All three devices are in the owner's log. The group has a
-GitHub remote and base branch `main`. Payloads below are shown without `n`
-and `ts`, and envelopes as `signed by`.
+`G`; hosts the secretary `mS` and the AIs `mX` and `mY`, each added with a
+folder on that computer (`workspace` on its member row). Both devices are
+in the owner's log. Payloads below are shown without `n` and `ts`, and
+envelopes as `signed by`.
 
 ## The steps
 
@@ -26,15 +28,15 @@ and `ts`, and envelopes as `signed by`.
 | --- | --- | --- | --- | --- |
 | 1 | browser → home, `cmd` | `OB` | `{"t":"post","g":"G","kind":"text","text":"Show the connection path…"}` (id `M1`) | stores `M1`; item 1 for `mS` |
 | 2 | secretary → home, `cmd` | `HA`, `as: mS` | `{"t":"post","kind":"brief","body":{"title":"…","criteria":[…],"tasks":[{"title":"Node: report path changes","assignee":"mX","reviewer":"mY"}],"pass":90,"requester":"<owner>"}}` (id `M2`) | stores the card, pending |
-| 3 | browser → home, `cmd` | `OB` | `{"t":"act","g":"G","msg":"M2","action":"confirm"}` (nonce `C1`) | card confirmed (`state.act` keeps step 3's envelope); task `t1` (T-12) `active`/`branch`; the `task` message, whose id is `t1`; receipt for (`OB`, `C1`); item 2 for `mX`; item 3 for `mS` |
-| 4 | host A → home, `cmd` | `HA` | `{"t":"task","op":"branch","id":"t1","branch":"task/12-node-report-path-changes"}` | step `local_check` |
-| 5 | AI `mX` → home, `cmd` | `HA`, `as: mX` | `{"t":"post","kind":"progress","thread":"t1","text":"Branch created…"}` | stores it |
-| 6 | host A → home, `cmd` | `HA` | `{"t":"task","op":"checked","id":"t1","ok":true,"commit":"c1","items":[…]}` | `checks.local`; a `checks` message |
-| 7 | AI `mX`, then host A → home | `HA` | `{"t":"post","kind":"report","thread":"t1",…}` (`as: mX`), then `{"t":"task","op":"submitted","id":"t1","commit":"c1","pr":31,"pr_url":"…","stats":{…}}` | `commit` = `c1`; step `cloud_check` |
-| 8 | host A → home, `cmd` | `HA` | `{"t":"task","op":"cloud","id":"t1","commit":"c1","ok":true,"items":[…]}` | `checks.cloud`; a `checks` message; step `review`; `failures` = 0; item 4 for `mY` |
-| 9 | AI `mY` → home, `cmd` | `HB`, `as: mY` | `{"t":"post","kind":"review","thread":"t1","body":{"task":"t1","commit":"c1","score":93,"items":[…]}}`; answered `{"ok":true,"passed":true,"round":1}` | step `merge`; item 5 for host A |
-| 10 | host A → home, `cmd` | `HA` | `{"t":"task","op":"merged","id":"t1","commit":"c1","merge_commit":"m1","stats":{…}}` | task `merged`; `system` `task_merged`; item 6 for `mS` |
-| 11 | secretary → home, `cmd` | `HA`, `as: mS` | `{"t":"post","kind":"summary","thread":"t1","text":"Path changes are reported…"}` | fills the figures; summary card |
+| 3 | browser → home, `cmd` | `OB` | `{"t":"act","g":"G","msg":"M2","action":"confirm"}` (nonce `C1`) | card confirmed (`state.act` keeps step 3's envelope); task `t1` (T-12) `active`/`work`, its folder being free; the `task` message, whose id is `t1`; receipt for (`OB`, `C1`); item 2 for `mX`; item 3 for `mS` |
+| 4 | AI `mX` → home, `cmd` | `HA`, `as: mX` | `{"t":"post","kind":"progress","thread":"t1","text":"Plan: add the event…"}` | stores it |
+| 5 | AI `mX` → home, `cmd` | `HA`, `as: mX` | `{"t":"post","kind":"report","thread":"t1","text":"Path events are sent on every switch. Ran the tests: 42 passed. Commit 9f2c1ab on branch t12-path-events.","body":{}}` (id `M3`) | `report` = `M3`; step `review`; `failures` = 0; item 4 for `mY` |
+| 6 | AI `mY` → home, `cmd` | `HA`, `as: mY` | `{"t":"post","kind":"review","thread":"t1","body":{"task":"t1","report":"M3","score":93,"items":[…]}}`; answered `{"ok":true,"passed":true,"round":1}` | task `done`; `system` `task_done`; item 5 for `mS` |
+| 7 | secretary → home, `cmd` | `HA`, `as: mS` | `{"t":"post","kind":"summary","thread":"t1","text":"Path changes are reported…"}` | fills the figures; summary card |
+
+No host command moves the task: there is no branch, no check and no merge
+to report. What `mX` did in its folder between steps 3 and 5 is its own
+CLI's work and is on no wire.
 
 ## The items
 
@@ -50,45 +52,45 @@ with no `env` wrapper and no `cause`, `g` or `to`, alongside copies of the
   signed confirmation lives on the confirmed brief row (`M2.state.act`).
 - Item 3 (`confirmed` for `mS`, to `HA`): names `M2`, with a copy of the
   confirmed brief row.
-- Item 4 (`review` for `mY`, to `HB`): names `t1` and `commit` `c1`, with a
-  copy of `t1`.
-- Item 5 (`merge` for `mX`'s host `HA`): names `t1`, `commit` `c1` and `pr`
-  `31`, with a copy of `t1`.
-- Item 6 (`notice` for `mS`, to `HA`): names `t1`, `code` `task_merged` and
-  the `task_merged` `system` message, with copies of that message and `t1`.
+- Item 4 (`review` for `mY`, to `HA`): names `t1` and the report `M3`, with
+  copies of both rows.
+- Item 5 (`notice` for `mS`, to `HA`): names `t1`, `code` `task_done` and
+  the `task_done` `system` message, with copies of that message and `t1`.
 
-Exact wire JSON for all six items and their `ack` frames is in
-`internal/proto/testdata/trace-remote.json` and
+Exact wire JSON for all five items and their `ack` frames is in
 `internal/proto/testdata/trace-local.json`.
 
 ## What each host checks before acting
 
 | Item | The host checks | Then |
 | --- | --- | --- |
-| 2 | the frame comes from `HA`, the home of `G`; `mX` runs here; when taken, `t1` is active for `mX` | creates the worktree and the task session; step 4 |
-| 4 | the frame comes from `HA`; `mY` runs here; when taken, `t1` is active at `review` for `mY` and `c1` | checks out exactly `c1` for the review session |
-| 5 | the frame comes from `HA`; `mX` runs here; when taken, `t1` is active at `merge` for `mX` and `c1` | runs `gh pr merge 31 --squash --delete-branch --match-head-commit c1`, with the pull request number from the item |
+| 2 | the frame comes from `HA`, the home of `G`; `mX` runs here; when taken, `t1` is active for `mX` | closes the task sessions of `G` whose task is final or has another assignee; checks that `mX`'s folder exists; creates the task session there |
+| 4 | the frame comes from `HA`; `mY` runs here; when taken, `t1` is active at `review` for `mY` and its `report` is `M3` | creates the review session in `mY`'s folder and keeps `M3` with it (`contracts/storage.md` section 3) |
 
-The `task` and `msg` rows inside an item are what the turn is written from.
+The `task` and `msg` rows inside an item are what the turn is written from:
+for item 4, the brief, the report `M3` as `mX` wrote it, and where the work
+is, read from `mX`'s member row (`contracts/drivers.md` section 3).
 
-## Where one commit is enforced
+## Where one report is enforced
 
 | Step | Check | By |
 | --- | --- | --- |
-| 6 | the worktree is clean; the commit is its head | host A |
-| 7 | the head is still the checked commit `c1` | host A, then the home (`checks.local.commit` = `commit`) |
-| 8 | head and checks are read in one answer, and the head is `c1` | host A; the home refuses a result for another commit |
-| 9 | the review checkout is `c1`; `body.commit` = the task's `commit` | host B, then the home |
-| 10 | the forge merges only if the head is `c1`; nothing else may change the task between steps 9 and 10 | the forge, asked by host A; the home |
+| 5 | `thread` is `t1`, and `as` is its assignee | the home |
+| 6 | the review names the report the session was given when item 4 was delivered | host A, which adds `body.report` from the session's row |
+| 6 | `body.report` = the task's `report` | the home |
 
-If the assignee submits again before the merge, steps 7 to 10 repeat with
-the new commit, and anything still about `c1` is refused.
+If the assignee submits again before the review, step 5 repeats with a new
+report: the home retires item 4, queues a `review` item for the new report,
+and refuses a review that still names `M3`.
 
-## The same without a remote
+The home checks nothing about a folder, a branch or a commit: it cannot.
+What the report says about them is the assignee's statement
+(`risks.md` K-30).
 
-Steps 7 and 8 collapse (`internal/proto/testdata/trace-local.json`):
-`submitted` carries no `pr` or `pr_url`, there is no `cloud` step, and the
-home goes straight to `review`. Reviewer `mY` is a distinct AI on host A,
-the review checkout is taken from the local clone, item 5 carries no `pr`,
-step 10 is a squash merge of `c1` into `main` in that clone done only if the
-task branch's head is still `c1`, and the summary card carries no `pr`.
+## Across two computers
+
+With `mY` on a node B, device `HB`, the same commands travel, step 6 signed
+by `HB`. Item 4 goes to `HB`, and its turn says that the work is on another
+computer: the reviewer gets it the way the report says it is shared, for a
+project with Git and a remote by fetching the branch the report names. The
+platform moves no file between the two (R-111).

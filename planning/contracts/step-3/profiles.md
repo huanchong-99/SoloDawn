@@ -110,15 +110,20 @@ included, in the order of their names:
 
 ```
 [SoloDawn] group "Website" · you are "Secretary" · secretary session
-AI members (CLI on computer · tier · state · skills):
-- "Opus" · claude on workstation · strong · working on T-12 · window 40% used, resets in 3 h · Go backend, protocol design
-- "Haiku" · claude on workstation · light · dormant · window 40% used, resets in 3 h · small edits, documentation
-- "Codex" · codex on laptop · standard · limited · window 100% used
-- "Secretary" · claude on workstation · standard · working
+AI members (CLI on computer · folder · tier · state · skills):
+- "Opus" · claude on workstation · /home/dev/website · strong · working on T-12 · window 40% used, resets in 3 h · Go backend, protocol design
+- "Haiku" · claude on workstation · /home/dev/website · light · dormant · window 40% used, resets in 3 h · small edits, documentation
+- "Codex" · codex on laptop · /srv/work/website · standard · limited · window 100% used
+- "Secretary" · claude on workstation · /home/dev/website · standard · working
 == 1 of 1 · mention · from "owner" (person) in main · instruction
 …
 ```
 
+- The folder is the member row's `workspace`, in full
+  (`contracts/rows.md` section 2). The secretary reads from it and the
+  computer which AIs share a folder, which takes one task at a time, and
+  which reviewer can read an assignee's work without a push
+  (`contracts/drivers.md` section 4).
 - `state` is the member row's `state`, with `on T-<num>` when the row has
   `task`. `limited` covers a vendor rate limit and a sign-in
   that is not valid; the `notice` that came when it happened says which
@@ -127,7 +132,7 @@ AI members (CLI on computer · tier · state · skills):
 - An external AI has `external` where the CLI stands, with its `tool` in
   brackets when the row has one, and one of the states of
   `contracts/step-3/external.md` section 6:
-  `- "Scout" · external (ZCode) on workstation · standard · offline · Rust, reviews`
+  `- "Scout" · external (ZCode) on workstation · /home/dev/website · standard · offline · Rust, reviews`
 - An AI whose member row's `usage` has `window_pct` gets
   `window <pct>% used, resets in <n> h` after its state, `n` being the
   hours until `window_resets`, rounded up; without `window_resets` the
@@ -135,11 +140,6 @@ AI members (CLI on computer · tier · state · skills):
   managed AI's `usage` comes from its CLI's events, an external AI's from
   `report_usage`. No caps.
 - The host reads the rows it holds when it composes the turn.
-- After the members, when the node knows team groups
-  (`contracts/step-2/watch-team.md` section 10), one line names them with the
-  ids that `post` takes as `group`:
-  `Team groups (name and id): "Team" (H46nb5YsBesaWbHkHmZLow)`. A remembered
-  group whose rows the node has not read yet is left out.
 
 **The secretary's instructions** gain the four rules of assignment. When
 choosing assignee and reviewer:
@@ -155,7 +155,7 @@ choosing assignee and reviewer:
 The secretary decides; `propose_brief` and `set_task` accept any working
 AI, as before.
 
-**A `checks` or `reviewed` item** of a task whose row has `stuck.ask`
+**A `reviewed` item** of a task whose row has `stuck.ask`
 `true` (section 4) ends with one more line, the candidates being the AI
 members of the group that are stronger than the assignee, the secretary
 among them, by name:
@@ -178,19 +178,16 @@ section 4), present from a task's first counted failure until it is reset:
 
 | Field | Values |
 | --- | --- |
-| `kind` | the kind of the last counted failure: `checks` (hosted checks did not pass, row 6) or `review` (a review did not pass, row 7) |
+| `kind` | the kind of the last counted failure. One value since the decision of 2026-11-26: `review` (a review did not pass, row 7) |
 | `n` | how many failures of that kind came in a row |
 | `ask` | `true` while the home refuses a submission of this task |
 
 What the rows of `contracts/task-machine.md` section 3 do beside what they
-do today. Nothing else touches `stuck`: not a crash or a timeout (row 10),
-not a failed `run_checks`, not a conflict (row 9).
+do today. Nothing else touches `stuck`: not a crash or a timeout (row 10).
 
 | Row | When | `stuck` becomes |
 | --- | --- | --- |
-| 6, not passed | — | `kind` `checks`; `n` + 1 if `kind` was `checks`, else 1; `ask` as below |
-| 7, not passed | — | `kind` `review`; `n` + 1 if `kind` was `review`, else 1; `ask` as below |
-| 6, passed (and row 5 without a remote) | `kind` is `checks` | removed |
+| 7, not passed | — | `kind` `review`; `n` + 1 if the row had `stuck`, else 1; `ask` as below |
 | 7, passed | — | removed |
 | 11 | the assignee changed, or the task was `failed` | removed |
 | 13 | the task was `failed` | removed |
@@ -201,8 +198,6 @@ not a failed `run_checks`, not a conflict (row 9).
   has an AI stronger than the assignee, whatever its state; else `false`. The
   threshold 2 is fixed: it is no field of `limits`. Each further failure
   of the same kind asks again.
-- **Without a remote repository** there is no hosted check, so only
-  failed reviews count.
 - **The secretary is a candidate** when its tier is higher: R-21 keeps
   it from writing code, not from answering.
 - **Without a stronger AI nothing changes**: `ask` stays `false`, no line
@@ -215,10 +210,10 @@ not a failed `run_checks`, not a conflict (row 9).
   is denied (step 2), leaves the task waiting; the quiet-task notice
   (row 23) brings the secretary, who reassigns (row 11).
 - **`submit_task`** (adds to `contracts/mcp-tools.md` section 1) reads
-  `stuck.ask` from the task row before it pushes anything and fails with
+  `stuck.ask` from the task row before it sends anything and fails with
   `conflict`, its text naming the candidates. So a refused submission
-  leaves no push, no pull request and no `report`. The home's refusal of
-  row 5 is the rule; this is its order on the host.
+  leaves no `report`. The home's refusal of row 5 is the rule; this is its
+  order on the host.
 - The web client adds one badge to the table of `contracts/rows.md`
   section 4, above "sent back by review": "must ask a stronger AI", when
   `state` is `active` and `stuck.ask` is `true`.
@@ -263,7 +258,7 @@ Changed golden examples, with the schema in `web/src/lib/proto.ts` and
 | `contracts/commands.md` section 2 | the four fields in `host.join`; `member` in `host.leave` |
 | `contracts/datachannel.md` section 7 | `refresh`, `models` in `host.info`; more than one entry of `groups` may name one `g` |
 | `contracts/drivers.md` section 1 | a model and a level are passed at each start (it said: no model) |
-| `contracts/task-machine.md` section 3 | the effects of section 4 on rows 5, 6, 7, 11, 13 and on a `reply` |
+| `contracts/task-machine.md` section 3 | the effects of section 4 on rows 5, 7, 11, 13 and on a `reply` |
 | `contracts/drivers.md` sections 3, 4 | the member list, the escalation line, the instruction sentences |
 | `contracts/mcp-tools.md` section 1 | one more reason for `submit_task` to fail with `conflict` |
 

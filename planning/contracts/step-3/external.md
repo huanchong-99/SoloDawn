@@ -32,6 +32,7 @@ An AI member row like any other, with these differences:
 | `cli` | `external` |
 | `tool` | new, optional: the owner's label for the program that runs it, such as `Cursor` or `ZCode`; 1 to 32 code points, no control characters. No managed AI has it |
 | `host` | the node that added it, as for every AI. The agent runs on that computer |
+| `workspace` | as for every AI: the folder it was added with, where every run works (section 4) |
 | `account` | declared for this member when it is added (R-50), not for a CLI |
 | `secretary` | always `false` |
 | `model`, `effort` | text for people to read, within the bounds of `contracts/step-3/profiles.md` section 1. Nothing passes them to the agent |
@@ -42,7 +43,8 @@ An AI member row like any other, with these differences:
 ```json
 {"r":"member","id":"1PC8WineBrUQ-apCjx7tug","seq":812,"g":"Qm1…","kind":"ai",
  "user":"<owner's user id>","name":"Scout","cli":"external","tool":"ZCode",
- "host":"<device id>","host_name":"workstation","secretary":false,
+ "host":"<device id>","host_name":"workstation","workspace":"/home/dev/website",
+ "secretary":false,
  "account":"api_key","allow":[],"approvers":["<user id>"],
  "state":"waiting","since":1763599000000,"path":"local",
  "usage":{"window_pct":40,"window_resets":1763611200000},
@@ -62,7 +64,7 @@ two groups is two members, each with its own id and its own runner.
 
 | Command | For an external AI |
 | --- | --- |
-| `host.join` | `agent` `external`; also `account`, required, one of the three types, and `tool`, optional. `secretary` `true` is `bad_request`. No `agent.set` comes first. The node clones the project as for any AI (R-11), sends `member add_ai` with `cli` `external`, then reports the state `offline`. The four profile fields as in `contracts/step-3/profiles.md` section 2 |
+| `host.join` | `agent` `external`; also `account`, required, one of the three types, and `tool`, optional. `secretary` `true` is `bad_request`. No `agent.set` comes first. `workspace` is required and judged as for any AI (R-11; `contracts/commands.md` section 2): `host.workspaces` lists nothing for `external`, so the owner types the folder. The node sends `member add_ai` with `cli` `external`, then reports the state `offline`. The four profile fields as in `contracts/step-3/profiles.md` section 2 |
 | `member add_ai` | optional `tool`; outside its bound, `bad_request` |
 | `member set` | `tool` in its "any of", by the AI's owner only; `""` removes it |
 | `agent.set` | `agent` `external` is `bad_request`: the account belongs to a member |
@@ -119,7 +121,7 @@ answer without one is exit 3.
 
 ```json
 {"run":4412,"kind":"task","task":"T-12",
- "folder":"<data directory>/projects/Qm1…/wt/12-node-report-connection-path-changes",
+ "folder":"/home/dev/website",
  "context":"…","text":"…"}
 ```
 
@@ -128,22 +130,21 @@ answer without one is exit 3.
 | `run` | always | the number that ends this run: the id of its first inbox item |
 | `kind` | always | `group`, `task` or `review`: the kind of session a managed AI would get these items in (`flows/agent-turn.md` A) |
 | `task` | optional | `T-<num>`, for `task` and `review` |
-| `folder` | always | the absolute path to work in (section 4) |
+| `folder` | always | the absolute path to work in: the member's workspace, whatever the `kind` (section 4) |
 | `context` | always | what a session that knows nothing needs: the instructions of that kind of session, the lines of section 9, then what a replaced session is told (`contracts/drivers.md` sections 4 and 3) |
 | `text` | always | the turn text for these items, as a managed AI gets it (`contracts/drivers.md` section 3) |
 
 - **What is handed out** is what `flows/agent-turn.md` steps 4 and 6 give
   a managed AI in one turn: the held items of the session of the oldest
-  one, checked as there, with the folder prepared as there.
+  one, checked as there, the folder check included.
 - **Acknowledged when handed out**, as its step 7: the audit row
   `delivered`, then `ack`, then the hand-out is written. An item is handed
   out once and never again.
 - Nothing is handed out while a run of this member is open, the group is
   paused, the item's task is `paused` or `failed`, or the owner took all
   AIs offline. A `jump` item goes first and interrupts nothing.
-- A `merge` item is the node's own work, as today. A `reply` to an `ask`
-  that is still open, and a `decided` for an `approve` that is still
-  open, go to that call, as today.
+- A `reply` to an `ask` that is still open, and a `decided` for an
+  `approve` that is still open, go to that call, as today.
 
 ### 3.3 A run
 
@@ -168,29 +169,22 @@ the first of these:
 
 ## 4. Where it works
 
-Decided: **the node tells the agent the folder, on the same computer.** The
-project's remote is not the exchange point.
+Decided: **the node tells the agent the folder, on the same computer.** It
+is the member's workspace, the folder the owner gave when adding it, for a
+run of every `kind`: a group run reads and answers and changes nothing
+there, a task run works there, a review run reads the work where its turn
+says it is (`contracts/drivers.md` section 3).
 
-| `kind` | `folder` |
-| --- | --- |
-| `group` | the clone, `projects/<group>/repo`: read and answer, change nothing |
-| `task` | the task's worktree, on its branch |
-| `review` | the review checkout, with `.solodawn-review.diff` |
-
-- The node makes, reuses and removes these folders exactly as for a
-  managed AI (`contracts/local.md` section 7). The runner starts the agent
-  in `folder`.
+- The node makes and removes no folder, as for a managed AI
+  (`contracts/local.md` section 7). The runner starts the agent in
+  `folder`.
 - An external AI has session rows as a managed AI (`session` table,
   `agent` `external`, no `cli_session`): a hand-out sets the row of its
-  session `working`, the end of the run sets it `waiting`; so the folders,
+  session `working`, the end of the run sets it `waiting`; so the folder,
   `flows/agent-turn.md` step 17 and the restart row apply unchanged.
-- So `run_checks`, `push_branch`, `submit_task`, `submit_review`, the hard
-  checks and the merge are the step 1 code, unchanged, and a group without
-  a remote works too.
-- Why not the remote: the agent already runs on the node's computer, since
-  the local socket is its only way in; an exchange through the remote
-  would need a second submission path, checks on a fetched commit, and a
-  remote in every group.
+- So `submit_task` and `submit_review` are the code of the managed AIs,
+  unchanged, and the busy rule holds for an external AI's folder as for any
+  (`contracts/task-machine.md` section 2).
 - The node sets no level and no sandbox, and cannot keep the repository's
   own AI configuration out of a group run (R-45): the agent's own settings
   apply.
@@ -214,7 +208,7 @@ group session. A tool that kind of session is not listed fails with
 
 | Tool | Needs |
 | --- | --- |
-| `push_branch`, `run_checks`, `submit_task` | a task run |
+| `submit_task` | a task run |
 | `submit_review` | a review run |
 | `start_task` | a group run, or no run |
 | `post` with kind `handback` or `summary`, `propose_brief`, `set_task` | not listed: takeover and the secretary |
@@ -411,7 +405,8 @@ never call it in a loop.
 
 - **Adding.** Under each of the owner's nodes, the dialog that adds an AI
   offers the agent `external` beside the CLIs found there: name, account
-  type, tool label, tier, skills, and model and level as text. It sends
+  type, tool label, the folder (typed), tier, skills, and model and level as
+  text. It sends
   `host.join`, then the setup check (section 8).
 - **Setup panel**, for the owner of that node, after adding and from the
   member panel at any time: which computer to paste into; the prompt with
@@ -458,7 +453,8 @@ In `internal/proto`, with golden files, `wire.json` and the web schema
 - new `row-member-ai-external.json`: the row of section 1.
   `row-member-ai.json` stays, without `tool`.
 - new `member-add_ai-external.json` and `member-set-tool.json`.
-- new `host-join-external.json`, with `account` and `tool`.
+- new `host-join-external.json`, with `account`, `tool` and, since unit
+  P-8, `workspace`.
 - `host-info-answer.json` and `host-info-push.json`: `exe`, and the
   `external` entry of `agents`.
 - `tools.json`: the member `external`, with `next_item`, `done` and

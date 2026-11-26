@@ -58,8 +58,8 @@ around `solodawn wait` and `solodawn done`. The test shortens the 180
 seconds of presence and the turn limit.
 
 - **A10.17** Adding. `host.join` with `agent` `external`, a name, an
-  account type and a tool label gives a member row with `cli` `external`,
-  that `tool`, `secretary` `false`, the default profile and, once the
+  account type, a folder and a tool label gives a member row with `cli`
+  `external`, that `tool`, that folder as `workspace`, `secretary` `false`, the default profile and, once the
   node has reported, `state` `offline`. No `agent.set` came first. Without
   `account`, with `secretary` `true`, or with a `tool` of 33 code points
   it is `bad_request`; so is `agent.set` for `external`. `member set` with
@@ -74,14 +74,16 @@ seconds of presence and the turn limit.
 - **A10.18** Looking once. With nothing waiting, `solodawn wait --member X
   --timeout 0` exits 3 at once and prints nothing. After the owner
   mentions X, it exits 0 with one line of JSON: `run`, `kind` `group`,
-  `folder` the clone, a `context` that holds the group instructions and
+  `folder` the folder X was added with, a `context` that holds the group
+  instructions and
   the lines of section 9, and a `text` that holds the message; the home
   holds no item for X any more, and X is `working`. While that run is
   open the command exits 3, also with a second mention queued. `solodawn
   done` with that `run` exits 0 and X is `waiting`; the next look hands
   out the second mention, once. A `done` for the first run then changes
   nothing and exits 0. An id that names no external AI of this node exits
-  1 with one line.
+  1 with one line. Every hand-out of an external AI names the folder it
+  was added with, whatever the run's kind.
 - **A10.19** Waiting. `solodawn wait --member X` blocks, and X is
   `waiting`; a mention makes it print the hand-out and exit 0. With
   `--timeout 2` and nothing waiting it exits 3 after two seconds. A wait
@@ -103,21 +105,19 @@ seconds of presence and the turn limit.
   exactly the tools of `external` in `tools.json`, and `approve`. With no
   run open, `post`, `ask` to M with its answer, `read_thread`,
   `list_members`, `list_tasks`, `note_put`, `kb_put` and `kb_search` act
-  as X; `run_checks` and `submit_review` fail with `conflict`; a `post`
+  as X; `submit_task` and `submit_review` fail with `conflict`; a `post`
   whose text holds a test secret fails with `secret`. `next_item` answers
   `{"none":true}` at once when nothing waits, and the hand-out when
   something does; `done` with its `run` ends that run. A connection whose
   id names no external AI of this node is closed at once.
 - **A10.22** A task. A brief names X assignee and M reviewer. X's hand-out
-  has `kind` `task`, `task`, a `folder` that is the task's worktree on its
-  branch, and the brief with its criteria in `context`. X commits there;
-  `run_checks` and `submit_task` succeed with no `task` argument; M
-  reviews; the node merges; the worktree is gone. With the roles
-  swapped, X's hand-out has `kind` `review`, the review checkout as
-  `folder` with `.solodawn-review.diff`, and `submit_review` succeeds.
-  A5.1 holds with X as one of its two AIs, with and without a remote.
-  `start_task` in a group run gives the task number, and the `assign`
-  item is handed out after that run ended.
+  has `kind` `task`, `task`, the `folder` X was added with, and the brief
+  with its criteria in `context`. X works there; `submit_task` succeeds
+  with no `task` argument; M reviews; the task is done. With the roles
+  swapped, X's hand-out has `kind` `review`, the same `folder`, and a
+  `text` that says where the work is; `submit_review` succeeds. A5.1 holds
+  with X as one of its two AIs. `start_task` in a group run gives the task
+  number, and the `assign` item is handed out after that run ended.
 - **A10.23** A run that died. `solodawn done` with `--failed` in a task
   run: a `system` row `turn_interrupted` with `crash` and that text, the
   task's `failures` is 1, and the secretary has its `notice`. A run that
@@ -160,7 +160,7 @@ seconds of presence and the turn limit.
 
 Cast: working AIs S (`strong`), M (`standard`) and L (`light`) of one
 owner, and the secretary C (`standard` unless a test says otherwise); the
-fake CLIs fail checks and reviews on script.
+fake CLIs fail reviews on script.
 
 - **A10.8** A new AI's row has `tier` `standard` and `skills` `""`. `member
   set` by its owner with `tier` and `skills` changes the row; by its host,
@@ -182,26 +182,22 @@ fake CLIs fail checks and reviews on script.
   from step 1. After the second in a row: the task row has `stuck` with
   `kind` `review`, `n` 2, `ask` `true`; M's `reviewed` item ends with the
   line that names S and neither L nor C; `submit_task` fails with
-  `conflict`, and there is no push, no pull request and no `report`. None
+  `conflict`, and there is no `report`. None
   of these clears it: L's reply to M's call; S's reply to L's call in
   this thread; S's reply to M's call in another task's thread. S's host
   goes offline: still refused. S returns and replies to M's call in this
   thread: `ask` is `false` and the next `submit_task` succeeds. A third
   failed review then gives `n` 3, `ask` `true`, the line again and the
-  refusal again. The same with two failed hosted checks and `kind`
-  `checks`. In the browser: the badge "must ask a stronger AI" while `ask`
-  is `true`.
+  refusal again. In the browser: the badge "must ask a stronger AI" while
+  `ask` is `true`.
 - **A10.11** S is the assignee, or every AI keeps the default tier: after
   two failed reviews in a row `stuck.ask` is `false`, the item has no added
   line and `submit_task` succeeds. With C `strong` and S `standard` as the
   assignee: the line names C, and C's reply clears `ask`. A1 to A8 pass with
   default profiles.
-- **A10.12** M fails hosted checks once, then a review once: `n` is 1 and
-  nothing is asked. M fails a review, passes hosted checks on the next
-  commit and fails the review again: `n` is 2 and `ask` is `true`, since a
-  passed hosted check clears only `kind` `checks`. M fails a review, then
-  passes one: `stuck` is gone, and a later single failure asks nothing.
-  `task assign` to another AI removes `stuck`.
+- **A10.12** M fails a review once: `n` is 1 and nothing is asked. `task
+  assign` to another AI removes `stuck`. (The sentences on hosted checks
+  were removed on 2026-11-26.)
 - **A10.13** Discovery. With each fake CLI scripted to list two models,
   `host.info` carries them under that agent as `models`, with id, name,
   levels and, where the script says so, `fast`; an id with a word of the

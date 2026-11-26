@@ -127,8 +127,8 @@ The body of a `brief` gains one optional field:
 | `preset` | optional: the `name` of a preset of the group. Absent when the brief names none |
 
 - Signed with the brief and fixed with its body: a brief names the same
-  preset from proposal to merge. One preset per brief, for all its tasks;
-  a task of `origin` `direct` or `takeover` has none.
+  preset from proposal to done. One preset per brief, for all its tasks;
+  a task of `origin` `direct` has none.
 - **Check** on `post` kind `brief` (`contracts/commands.md` 1.3): the
   group has a preset of that name, else `not_found`, and the message
   lists the names of the group's presets.
@@ -265,10 +265,11 @@ enters first turns: wrong, and silent. It answers `bad_request` to `fetch`
 with `kind: preset` or `kb`, and stores a brief with `preset` unchecked. So
 a client offers presets and the knowledge base, and a host lists `kb_put`,
 `kb_search` and the new arguments, only for a group whose home knows
-step 3: a home that answers `welcome` with `v` 2. Decided: one protocol
-step, `v` 2, covers every addition of steps 2 and 3. A client sends `hello`
-with `v` 2 and, answered `version`, again with `v` 1, as a host does; it
-then offers nothing of steps 2 and 3. P-4a freezes it; T2-1 builds it.
+step 3. Decided on 2026-11-20: one protocol step, `v` 2, covered every
+addition of steps 2 and 3, and a client fell back to `v` 1. Since the
+decision of 2026-11-26 the one version is `v` 3 and nothing falls back
+(`contracts/datachannel.md` section 3): every home a client can talk to
+knows steps 2 and 3, so nothing is hidden for an older one.
 
 ## 9. Verified, not verified, decided
 
@@ -295,4 +296,5 @@ v1.46.2, not kept in the repository:
 Decided by the coordinator on 2026-11-20: the read of one row by id
 (section 4.1, built by HM-3); the preset's name in the review turn;
 changes of preset through `revise` only, so U3-1 is "preset shown in the
-brief card; editor"; protocol step `v` 2 (section 8).
+brief card; editor"; protocol step `v` 2 (section 8), which `v` 3 replaced
+on 2026-11-26.

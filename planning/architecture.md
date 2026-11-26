@@ -29,10 +29,9 @@ does what and why. Step-by-step sequences are in `flows/`.
 - **C-10** The node never inspects shell commands to decide whether they are
   safe (R-41). Permission questions come from the CLI; the node's only
   content check is the outbound secret check of R-137.
-- **C-11** For Git and the forge the node runs only `git`, `gh` and, from
-  step 2, the forge program a group's templates name, each signed
-  in by the owner on that machine (R-137, widened 2026-11-20). It never
-  reads, stores or passes on a token or credential, nor calls a forge API.
+- **C-11** Removed on 2026-11-26: the node runs no `git`, no `gh` and no
+  forge program (R-137). An AI works in a folder of its owner and uses the
+  project's own tools through its CLI.
 
 ## 2. Components
 
@@ -78,8 +77,9 @@ for the groups it is home to.
   that AI's inbox.
 - Runs the task state machine and the group-level limits (rounds, wake-ups,
   failure counts, review rounds, pause).
-- When checks and review have passed, tells the assignee's host to merge. No
-  AI decides that (R-24).
+- When a review passes, marks the task done and starts the tasks that
+  waited for it or for its folder. No AI decides that, and nothing is
+  merged (R-24).
 - Single writer. There is no merge logic and no conflict resolution: clients
   propose, the home orders.
 
@@ -99,9 +99,10 @@ for the groups it is home to.
   owner's devices (R-136), whatever the home says.
 - Refuses to send to the group anything from an AI that looks like a secret
   (R-137).
-- Prepares workspaces and runs the fixed Git steps: clone, worktree and
-  branch per task, the project's check commands, pushing the task's own
-  branch, opening the pull request, the merge.
+- Runs every session of an AI in the folder its owner gave it for that
+  group, its workspace; lists the folders a CLI was used in; and keeps a
+  folder to one group (`contracts/local.md` section 7). It prepares nothing
+  in a folder and runs no command of a project.
 - Bridges the pseudo-terminal during takeover.
 - Keeps the local audit record and runs retention.
 
@@ -195,7 +196,7 @@ AI calling an AI on another machine is two ordinary messages through the home
 | CLI session transcript | the vendor CLI's own files | nobody |
 | audit record | the node that acted | nobody in version 1 (R-139) |
 | pending inbox of an AI | group home | the AI's host |
-| source code | Git | the remote |
+| source code | the workspace of each AI, a folder of its owner on that AI's computer | nowhere by the platform: the project shares it its own way (R-111) |
 
 Clients keep caches, not replicas. A browser holds recent rows in memory; a
 host holds only cursors. Losing a client loses nothing. Losing a home loses
@@ -203,7 +204,7 @@ that group's history (see `risks.md`).
 
 ## 6. Sessions
 
-In `sessions.md`: the kinds of session, their folders and levels, and the
+In `sessions.md`: the kinds of session, their folder and levels, and the
 states. In short: the secretary has one session per group; a working AI has
 one session per task and one read-only group session; one process owns a
 session at any time (C-6); an AI runs one turn at a time per group.
@@ -217,9 +218,9 @@ session at any time (C-6); an AI runs one turn at a time per group.
 | Cards are messages with a mutable `state` | a table per card type | four card types share one row shape and one command |
 | The home fills AI inboxes; hosts deliver | hosts derive wake-ups from the row stream | limits are group-wide and must be decided in one place |
 | One CLI process per open session, for both CLIs | one shared Codex app-server for many threads | the MCP shim then knows its caller; hibernate is "kill"; costs memory, bounded by the concurrency cap |
-| A working AI has one session per task, in the task's worktree | one session per AI per group in the project folder | the sandbox scope is exactly the task; context is clean; "push my own branch" is well defined; decided by the coordinator (Q-8) |
-| The home triggers the merge when review passes | the secretary calls a merge tool | deterministic, no turn spent; decided by the coordinator (Q-7) |
-| The node pushes the task branch and opens the pull request through tools | the AI runs `git push` and `gh` itself | no approval card for the task's own branch and no command inspection (Q-10) |
+| A working AI has one session per task | one session per AI per group | context is clean; decided by the coordinator (Q-8). Until 2026-11-26 each task also had a worktree of its own; now every session runs in the member's workspace, and a folder takes one task at a time |
+| The AI works in a folder of its owner, and the platform runs no Git | a clone and a worktree per task, checks, push, pull request and merge run by the node | the owner's decision of 2026-11-26: a group is people and AIs, not a repository ([record](../docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)) |
+| A task is done when its review passes | a merge step after the review | nothing can be merged by a platform that runs no Git; the secretary arranges the closing step (R-24) |
 | stdio MCP shim per session | HTTP MCP server in the node | stdio has the longest idle timeout in Claude Code `[documented]`; caller identity comes from the shim's arguments |
 | Signed signalling, ephemeral DTLS certificates | long-lived certificates as identity | one key per device; browsers cannot sign with a certificate key |
 | Non-relay probe connection, then move (cut 2026-11-21) | ICE restart on the live connection | make-before-break; a failed probe costs nothing |
@@ -238,7 +239,8 @@ cmd/solodawn/           argument parsing only; subcommands as in contracts/local
 internal/node/          assembly: starts and wires everything below; pairing, local socket,
                         device-log forwarding, retention schedule, self-update, start at login;
                         embeds the built web client from webdist/ (ignored by Git)
-internal/host/          sessions, CLI drivers, MCP tools, workspaces, pty, audit
+internal/host/          sessions, CLI drivers, MCP tools, pty, audit
+  workspaces/           the folders each CLI was used in; imports nothing from host
   fakecli/claude/, fakecli/codex/   the two fake CLIs for tests (main packages)
   instructions/         instruction texts per session kind
 internal/home/          command handling, task state machine, limits, inbox
@@ -279,6 +281,9 @@ and of those only the ones in this table:
 | `host` | `proto`, `identity`, `store` |
 | `node` | every package above |
 | `cmd` | `node` |
+
+A subpackage belongs to the layer of its parent: `internal/host/workspaces`
+is in the layer of `host` and imports no internal package.
 
 So these are forbidden although the order alone would allow them:
 `host → home`, `host → rendezvous`, `host → peer`, `home → rendezvous`,

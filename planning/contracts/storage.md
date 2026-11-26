@@ -2,7 +2,7 @@
 
 One database file per node, `node.db`, through `modernc.org/sqlite`. WAL
 mode. One writer goroutine. Schema version in `PRAGMA user_version`;
-migrations are an ordered list of SQL strings applied at start.
+migrations are an ordered list of SQL strings applied at start (section 7).
 
 The node has two roles, so the file has two groups of tables. A node that is
 home to no group simply has empty home tables.
@@ -28,7 +28,7 @@ CREATE TABLE row (
   thread  TEXT,               -- msg: task id, NULL for main line
   in_main INTEGER NOT NULL DEFAULT 0,  -- msg: 1 if shown in the main line
   pending INTEGER NOT NULL DEFAULT 0,  -- msg: 1 while its card state is pending
-  final   INTEGER NOT NULL DEFAULT 0,  -- task: 1 if merged or cancelled
+  final   INTEGER NOT NULL DEFAULT 0,  -- task: 1 if done or cancelled
   keep    INTEGER NOT NULL DEFAULT 0,  -- 1 for notes and review messages: exempt from retention
   gone    INTEGER NOT NULL DEFAULT 0,  -- 1 for the marker of a row removed on purpose
   data    TEXT    NOT NULL,   -- the row as JSON, exactly as pushed
@@ -81,7 +81,7 @@ CREATE TABLE inbox (
   why        TEXT    NOT NULL,
   msg        TEXT,               -- message id
   task       TEXT,               -- task id
-  commit_id  TEXT,               -- review, merge: the commit the item is about
+  commit_id  TEXT,               -- unused since migration 4; kept so that the column order stays
   env        TEXT    NOT NULL,   -- JSON: the plain unsigned item object
   not_before INTEGER NOT NULL DEFAULT 0,  -- wake-up cap, round limit hold
   created    INTEGER NOT NULL
@@ -93,7 +93,11 @@ The plain unsigned item JSON (owner's decision of 2026-11-21: no
 attack-and-defence code, so items are not signed and carry no `cause`) is
 built in the transaction that queues the item, so it says what was decided
 then. A row is deleted when its host acknowledges it, or when a later change
-of the task makes it pointless (`contracts/task-machine.md` section 2).
+of the task makes it pointless (`contracts/task-machine.md` section 2). A
+`review` item has the report it is about in `msg`. `commit_id` is written
+by nothing; it stays because the export file is built from the first
+migration's text and filled by column position
+(`contracts/step-2/export.md` section 2).
 
 ### `push_sub`: reminders for browsers
 
@@ -177,7 +181,7 @@ CREATE TABLE session (            -- one per session (sessions.md)
   member      TEXT    NOT NULL,   -- member id of the AI in that group
   task        TEXT    NOT NULL DEFAULT '',  -- '' for the group session
   kind        TEXT    NOT NULL,   -- group | task | review
-  folder      TEXT    NOT NULL,   -- working folder, relative to projects/<group>/
+  folder      TEXT    NOT NULL,   -- the member's workspace: an absolute path, symbolic links resolved
   agent       TEXT    NOT NULL,
   home        TEXT    NOT NULL,   -- device id of the group home
   name        TEXT    NOT NULL,
@@ -185,7 +189,7 @@ CREATE TABLE session (            -- one per session (sessions.md)
   cli_session TEXT,               -- the CLI's session or thread id
   state       TEXT    NOT NULL,   -- dormant | working | waiting | takeover
   last_active INTEGER NOT NULL DEFAULT 0,
-  takeover_at TEXT,               -- commit noted at takeover start
+  report      TEXT,               -- review session: id of the report its review is about
   PRIMARY KEY (g, member, task)
 ) STRICT;
 
@@ -204,10 +208,10 @@ CREATE TABLE audit (              -- R-139
   ts     INTEGER NOT NULL,
   g      TEXT,
   agent  TEXT,
-  what   TEXT NOT NULL,           -- delivered | refused | merge | setting | killed
+  what   TEXT NOT NULL,           -- delivered | refused | setting | killed
   item   INTEGER,                 -- delivered, refused: the inbox item id
   home   TEXT,                    -- delivered, refused: device id of the home
-  detail TEXT NOT NULL,           -- merge: the task and the commit (contracts/local.md section 7)
+  detail TEXT NOT NULL,
   by     TEXT,                    -- device id that caused it
   result TEXT
 ) STRICT;
@@ -236,6 +240,14 @@ CREATE TABLE peer (               -- remembered signalling addresses (R-133)
 - **Approvals.** A row is written when the request is posted and removed
   when the request is denied, when the grant is used, and when the task is
   reassigned or ends.
+- **The folder of a session.** The row of an AI's group session is written
+  at `host.join` with the folder the node resolved, under the lock of the
+  one-group check (`contracts/local.md` section 7). The rows of its task
+  and review sessions in that group copy `folder` from it.
+- **The report of a review.** `session.report` is written in the
+  transaction that records a `review` item as `delivered`: the `msg` of
+  that item. `submit_review` reads it there, so a review session that is
+  resumed after the node restarted still names the report it was given.
 
 Not stored: session tokens, relay credentials, the pairing secret, the
 hourly wake-up counts, and anything from a terminal.
@@ -297,6 +309,29 @@ DELETE FROM receipt WHERE ts < :now - 86400000;
 
 ## 6. Sizes to expect
 
-A message row is about 0.5 to 2 KiB, at most 16 KiB. A busy project
+A message row is about 0.5 to 2 KiB, at most 16 KiB. A busy
 group may write a few thousand rows a day; ninety days stay well under a
 gigabyte. No sharding, no archive tables, no compaction beyond SQLite's own.
+
+## 7. Migrations
+
+The schema above is the state after the last migration. Migrations 1 to 3
+are the tables as they were built. **Migration 4** belongs to the decision
+of 2026-11-26: the rows of a group made before it have fields this version
+no longer reads (a repository, branches, commits, checks) and lack what it
+needs (a workspace), so they are not converted. At the first start of this
+version on an older data directory it:
+
+| | |
+| --- | --- |
+| deletes | every row of `row`, `grp`, `inbox`, `kb`, `perm`, `session` and `approval`; the settings `homes` and `moved`; the device logs and `push_sub` rows of everyone but the node's owner, which is what `member remove` does for a person who is in no other group here |
+| changes | `session`: drops `takeover_at`, adds `report` |
+| keeps | the owner's identity, the owner's own device log and push subscriptions, pairing, `peer`, `agent` with the account types, `receipt` (replay protection by signer and nonce, pruned after 24 hours), `audit`, `usage`, and every other setting |
+| does not touch | `inbox.commit_id`; anything outside the database: a folder `projects/` in the data directory stays as it was, with whatever task branches and worktrees it holds |
+
+So a node that starts on the data directory of `v3.0.0-rc.1` keeps its
+pairing, its devices, its account types and its peers, and lists no group.
+People who were in its groups are invited again by link: the node has
+forgotten their devices. An export file carries the schema version of the
+node that wrote it, and a file of another version is refused
+(`contracts/step-2/export.md` section 5).

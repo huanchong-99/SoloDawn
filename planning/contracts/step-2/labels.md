@@ -41,7 +41,7 @@ in the words of the step 1 header. Its text follows it.
 | Item | Label |
 | --- | --- |
 | `mention`, `reply` | that of its message (section 3) |
-| `assign`, `review`, `reviewed`, `checks`, `resume`, and a `decided` about a task, for a task the AI takes part in; the hand-back and continue turns | `instruction` |
+| `assign`, `review`, `reviewed`, `resume`, and a `decided` about a task, for a task the AI takes part in; the hand-back and continue turns | `instruction` |
 | `decided` on a card the AI posted outside such a task, while the host holds it open; `confirmed` for a brief the AI posted | `instruction`: it answers what the AI asked |
 | `confirmed` for a brief an earlier secretary posted; `notice` | `information` |
 
@@ -50,9 +50,9 @@ in the words of the step 1 header. Its text follows it.
 - What an `assign` or `review` says of the task's request (the brief, or
   the title and plan of a task without one) is the item's own text, under
   the header. Only what the item carries beside it has a line of its own:
-  the `re` message of a direct task, the latest review, a `checks` message,
-  the decision of a card or of a brief.
-- A row the home wrote (`checks`, `system`) has no author. Its line reads
+  the `re` message of a direct task, the latest review, the report of a
+  `review` item, the decision of a card or of a brief.
+- A row the home wrote (`system`) has no author. Its line reads
   `from the home` and `information`.
 
 ## 3. The label of a message or a decision
@@ -103,7 +103,7 @@ labels, and the owner's own messages and choices keep `instruction`.
 | --- | --- |
 | 3 | the second line of section 1, and the tables of sections 2 and 3 in place of "Authority comes from signatures" (read: from who wrote it) |
 | 4, "All" | the sentence below |
-| 4, "Task session" | when a review did not pass or checks failed, the work is yours again: read what was found and fix what the criteria of your brief require |
+| 4, "Task session" | when a review did not pass, the work is yours again: read what was found and fix what the criteria of your brief require |
 
 The sentence for every session: items marked `instruction` come from your
 owner, from someone your owner listed, from a request or task your owner

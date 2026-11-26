@@ -1,9 +1,9 @@
 # Contract: driving the CLIs
 
-How a node starts each vendor CLI, what the node does itself for a session
-at each permission level, what a turn looks like, and what every session is
-told. Session kinds are in `sessions.md`; folders and Git commands in
-`contracts/local.md`.
+How a node starts each vendor CLI, how it answers a session's requests at
+each permission level, what a turn looks like, and what every session is
+told. Session kinds are in `sessions.md`; the folder of a session in
+`contracts/local.md` section 7.
 
 Markers: `[verified]` observed in the driver experiments and in spikes S-2,
 S-3 and S-4 (Claude Code 2.1.311, Codex CLI 0.164.0, macOS);
@@ -16,9 +16,14 @@ One process per open session. Folder and level come from the session kind:
 
 | Session kind | Folder | Level |
 | --- | --- | --- |
-| group session (the secretary's, or a working AI's) | `repo/` | 3 by default; what `perm.set` or `default_level` sets (`contracts/commands.md` section 2) |
-| task session | `wt/<num>-<slug>/` | 3 by default; what `perm.set` or `default_level` sets (R-40) |
-| review session | `review/<num>/` | 3 by default; what `perm.set` or `default_level` sets (`contracts/commands.md` section 2) |
+| group session (the secretary's, or a working AI's) | the member's workspace | 3 by default; what `perm.set` or `default_level` sets (`contracts/commands.md` section 2) |
+| task session | the member's workspace | 3 by default; what `perm.set` or `default_level` sets (R-40) |
+| review session | the member's workspace | 3 by default; what `perm.set` or `default_level` sets (`contracts/commands.md` section 2) |
+
+Every session of an AI in a group starts in one folder, the member's
+workspace (R-11; `contracts/local.md` section 7). The three kinds differ in
+tools, instructions and context, not in folder: nothing is cloned, checked
+out or prepared for a session, and nothing is removed when it ends.
 
 By the owner's decisions of 2026-11-21, every AI defaults to level 3 across
 group, review and task sessions so the secretary and reviewers keep the CLI's
@@ -240,8 +245,10 @@ codex resume <thread id> --no-alt-screen --no-daemon -C <folder>
   the permission prompt tool there, and Claude Code would show it to the
   model as an ordinary tool.
 - Trust. Claude Code asks whether the folder is trusted on its first
-  interactive start in each folder, so on the first takeover of every
-  worktree, with `--setting-sources user` as well. The owner answers in
+  interactive start in each folder, with `--setting-sources user` as well.
+  The workspace is a folder its owner chose and, when it came from the list
+  of `host.workspaces`, already uses with that CLI, so the question comes
+  at most once for a workspace, not once per task. The owner answers in
   the terminal. Codex does not ask.
 - A session that does not exist yet: Claude Code starts one in the
   terminal with `--session-id <uuid>`, passing `--append-system-prompt`
@@ -261,25 +268,19 @@ codex resume <thread id> --no-alt-screen --no-daemon -C <folder>
 
 ## 2. What the node does itself, by level
 
-Besides what the CLI may do under its own settings, the node performs a few
-fixed operations for a task session. They do not go through the CLI's
-permission interface, so the level decides whether they are offered at all.
+One thing: it answers what the CLI asks. The node performs no operation of
+its own for a session at any level. It runs no check, pushes no branch,
+opens no pull request and merges nothing (`contracts/local.md` section 7),
+so a task session has one tool list whatever its level
+(`contracts/mcp-tools.md` section 5).
 
 | Operation | Level 1 | Level 2 | Level 3 |
 | --- | --- | --- | --- |
 | answer the CLI's permission requests and multiple-choice questions | deny permission requests; `AskUserQuestion` and `requestUserInput` questions become `decision` cards | card to the owner (`approval` or `decision`) | card to the owner (`approval` or `decision`) for any request or question the CLI raises (owner's decision, 2026-11-21) |
-| run the project's check commands (`run_checks`) | not offered | yes | yes |
-| push the task's own branch; open the pull request (`push_branch`, `submit_task`) | not offered | yes | yes |
-| merge a reviewed commit when the home asks | not applicable | yes | yes |
 
-- At level 1 the tools `push_branch`, `run_checks` and `submit_task` are not
-  listed. A level-1 task session can read and report; it cannot produce a
-  submission.
-- The check commands run as the owner, outside the CLI's sandbox, on the
-  task's tree, with a minimal environment (`contracts/local.md` section 7).
-  Level 2 limits what the AI itself does, not what the project's checks
-  execute. Decided for step 1 (`risks.md` Q-19); step 2 runs checks in an
-  operating-system sandbox.
+1.0 runs every session at level 3. When levels return, level 2 means "write
+inside the workspace", and its closed network stops a pull or a push that
+the AI runs until the owner approves a card.
 
 ## 3. Turn format
 
@@ -290,7 +291,7 @@ task session:
 [SoloDawn] group "Website" · you are "Claude Code" · task session T-12
 == 1 of 1 · assign · instruction
 Task T-12 "Node: report connection path changes"
-Branch: task/12-node-report-connection-path-changes (this folder is its worktree)
+Folder: /home/dev/website (your workspace in this group)
 Goal: …
 Acceptance criteria:
 1. …
@@ -309,6 +310,40 @@ A later turn:
 Which fields do you need in the path event?
 ```
 
+A review turn, as the reviewer's session gets it:
+
+```
+[SoloDawn] group "Website" · you are "Codex" · review session T-12
+== 1 of 1 · review · instruction
+Task T-12 "Node: report connection path changes"
+Goal: …
+Acceptance criteria:
+1. …
+Pass score: 90
+Work: by "Claude Code" on workstation, in /home/dev/website
+The work is in another folder on this computer. Read it there; change nothing in it.
+-- from "Claude Code" (AI) in T-12 · information
+Path events are sent on every switch. Ran go test ./...: 42 passed. Commit 9f2c1ab on branch t12-path-events.
+```
+
+- **The `Folder:` line** of a task session's first turn names the session's
+  folder, in place of a branch: the platform makes none.
+- **The `Work:` line** of a review turn says where the work is: the name,
+  the computer (`host_name`) and the folder (`workspace`) of the member who
+  wrote the report under review, read from that member's row. The line
+  after it is one of three, by where that folder lies for the reviewer's
+  own session:
+
+  | The work's folder is | The line |
+  | --- | --- |
+  | this session's own folder (the same `host` and `workspace`) | `The work is in this folder.` |
+  | another folder on this computer (the same `host`) | `The work is in another folder on this computer. Read it there; change nothing in it.` |
+  | on another computer | `The work is on another computer. Get it the way the report says it is shared (with Git and a remote: fetch the branch the report names), and read it without changing what this folder holds.` |
+
+  Then comes the report as its author wrote it, under a line of its own
+  (`contracts/step-2/labels.md` section 1). The node prepares nothing for a
+  review and moves no file: across computers the work travels the way the
+  project shares it, and SoloDawn carries text only (R-111).
 - Header per item, in the order of the examples: position, `why`, author,
   place, authority, and the call id when the message is a `call`.
 - Session header labels: `task session T-<num>`, `review session T-<num>`,
@@ -321,7 +356,7 @@ Which fields do you need in the path event?
   names a human `member` row whose `user` matches the node's `owner` (a
   message from an AI, `system`, or another person is never one), and for the
   workflow items of a task (`assign`, `review`, `reviewed`, `decided`,
-  `checks`, `resume`, and the hand-back and continue turns; a main-line
+  `resume`, and the hand-back and continue turns; a main-line
   `decided` without a task gets its authority from `msg.state.by`). It is
   `information` for everything else (R-52).
 - A `decided` or `confirmed` item reads its outcome and actor from
@@ -340,7 +375,7 @@ Which fields do you need in the path event?
   above, `Tasks:` and the numbered titles. A `decision` that is not decided:
   `Decision (id <id>): <question>` and one line `- <id> (<label>): <effect>` per
   option.
-- A task without a brief (`direct` or `takeover` origin) shows `Plan: <plan>`
+- A task without a brief (`direct` origin) shows `Plan: <plan>`
   when `plan` is not empty, and `Reviewer: none` while no reviewer is named.
 - Text from other members is included verbatim below the header and never
   above it. A label is context for the model; it enforces nothing.
@@ -357,7 +392,11 @@ Which fields do you need in the path event?
 
 Passed at session start, under 60 lines, in English, one text per session
 kind. The full texts live in `internal/host/instructions/*.md` and are
-reviewed like code. Contents:
+reviewed like code. Since the decision of 2026-11-26 they carry what the
+platform no longer does for an AI: keeping its folder up to date, testing,
+publishing its work, and leaving alone what is not its own. These are
+duties stated to the model; no code enforces them (`risks.md` K-26).
+Contents:
 
 - **All**: you are a member of a group; speak only with `post`, `ask` and
   `reply`; your printed text is not seen by anyone; to have a person choose,
@@ -371,25 +410,69 @@ reviewed like code. Contents:
 - **Group session of a working AI**: do not edit files here (the session runs
   at the level set for `(agent, group)`, default 3 by the owner's decision of
   2026-11-21, so its instructions forbid writes rather than level 1). Answer
-  questions here. If the request needs a code change, call `start_task` with
-  a title and a plan and end your turn.
-- **Task session**: work only in this folder, on this branch. Commit your
-  work. Report progress briefly. `push_branch` pushes your branch. When
-  done: `run_checks`, then `submit_task`. Do not open or merge pull requests
-  yourself. When the sandbox blocks something the task needs (the network,
-  a path outside this folder), ask for it with your CLI's own permission
-  request; do not work around it. Follow a style preset in the turn for
-  interface work, and when a turn says to ask a stronger AI, do it with `ask`
-  before `submit_task` (`contracts/step-3/profiles.md` section 4).
-- **Review session**: the diff is in `.solodawn-review.diff`, the code in
-  this folder. Score against the criteria with `submit_review`. A fake test
-  or a missing test is a veto.
+  questions here. If the request needs a change to a file, call `start_task`
+  with a title and a plan and end your turn. `start_task` may answer that
+  the task is queued behind another one in this folder: it starts by
+  itself.
+- **Task session**:
+  - Work only in this folder; it is your workspace in this group. Other
+    members work in their own folders, some of them on other computers.
+  - Before you start, bring the folder up to date the way the project does
+    (with Git and a remote: pull). If the thread shows that another AI
+    worked on this task before you, find out first where its work is: read
+    the thread, ask it.
+  - The folder may hold changes you did not make: its owner's, or another
+    task's. Leave them. With Git that means: stage and commit only the
+    files you changed, never `git add -A` or `git commit -a`; while the
+    folder holds changes you did not make, never stash, reset, clean, check
+    out over files, rebase or switch branches, and say in the thread what
+    is in your way and ask; never force a push and never rewrite history
+    that was published.
+  - Test the way the project does: its own test, build and lint commands,
+    as its README, its contributor notes, its scripts and its CI describe
+    them. SoloDawn runs no checks for you.
+  - Publishing. Follow the project's own rules for publishing work when it
+    has them. When it has none: commit your work; never push to a branch
+    that others use (such as `main`) before the review has passed; when
+    your reviewer works on another computer, push to a branch of your own.
+    SoloDawn creates no branch and merges nothing. After the review has
+    passed, closing steps such as a merge are arranged by the secretary.
+  - Report progress briefly. Call `submit_task` last, and say in it what
+    you changed, what you ran and how it ended, and which branch and commit
+    hold the work, or that it is in this folder only. After it, end your
+    turn.
+  - When a review did not pass, the work is yours again: read what was
+    found and fix what the criteria of your brief require.
+  - When the sandbox blocks something the task needs (the network, a path
+    outside this folder), ask for it with your CLI's own permission
+    request; do not work around it. Follow a style preset in the turn for
+    interface work, and when a turn says to ask a stronger AI, do it with
+    `ask` before `submit_task` (`contracts/step-3/profiles.md` section 4).
+- **Review session**: read the work where the turn says it is
+  (section 3). Change nothing in the assignee's folder, and do not change
+  what your own folder holds for a review: with Git, fetch, then read with
+  `git diff` and `git show`; or make a temporary copy outside this folder
+  and remove it afterwards. If you cannot get the work, say so in the
+  thread and ask the assignee; do not score what you have not read. Score
+  against the criteria with `submit_review`. A fake test or a missing test
+  is a veto.
 - **Secretary**: the workflow of R-22; never write code; `propose_brief`,
   `set_task`, `request_decision`, and `post` with kind `summary` after a
-  merge. When told a task is quiet, has failed or conflicts, decide: ask in
-  its thread, reassign, or bring it to a person. After every review and
-  every merge, write what future tasks should know as notes (`note_put`):
-  notes are what each new task session is given. Choose assignee and
-  reviewer by tier, skills, subscriptions and window, and never a `limited`
-  or `offline` AI (`contracts/step-3/profiles.md` section 3); name a style
-  preset in the brief when the group has one that fits.
+  task is done. Each AI works in its own folder on its own computer; the
+  member list in your turn names both
+  (`contracts/step-3/profiles.md` section 3). One folder takes one task at
+  a time: parts that must come together are ordered with `depends`. A
+  reviewer on another computer can read only work that was pushed: choose a
+  reviewer on the assignee's computer when the project has no shared
+  remote. Nothing is merged by the platform: when a task is done, arrange
+  the closing step the project needs (the merge of the task's branch or
+  request): ask the assignee, or bring it to a person when the project
+  wants a person to do it. Before you cancel or reassign a task that has
+  started, ask its assignee to say what state it leaves in its folder. When
+  told a task is quiet or has failed, decide: ask in its thread, reassign,
+  or bring it to a person. After every review and every finished task,
+  write what future tasks should know as notes (`note_put`): notes are what
+  each new task session is given. Choose assignee and reviewer by tier,
+  skills, subscriptions and window, and never a `limited` or `offline` AI
+  (`contracts/step-3/profiles.md` section 3); name a style preset in the
+  brief when the group has one that fits.

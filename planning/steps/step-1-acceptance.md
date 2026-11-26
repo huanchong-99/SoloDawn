@@ -80,9 +80,12 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
 
 ## M2. Groups, messages, sync
 
-- **A2.1** A group is created from a browser. A second browser of the same
-  person that was already connected shows it without a reload; a message
-  posted in one appears in the other within 1 second on a direct path.
+- **A2.1** A group is created from a browser with a name, the person's
+  name and two of the person's connected AIs, each with a folder, one of
+  them the secretary. A second browser of the same person that was already
+  connected shows the group and both AIs without a reload; a message
+  posted in one appears in the other within 1 second on a direct path. A
+  group created with no AI can be written in by its people.
 - **A2.2** A browser disconnects; 20 messages are posted; on reconnect it
   receives exactly those 20 in order. With 1500 missed rows it is told to
   reset first, shows the newest 50, and scrolling back fetches older pages
@@ -101,6 +104,16 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   missing at `synced` nor applied twice. A deleted row does not come back
   when an older `fetch` page arrives after the deletion. (The sentence on a
   move from a relayed to a direct path was removed with A1.3 and A1.13.)
+- **A2.8** An AI is added with a folder that does not exist on its
+  computer: the dialog says so, and the group has no such member.
+- **A2.9** `host.join` with a folder that is the workspace of an AI of
+  another group on that computer is answered `conflict` and names that
+  group, whichever home that group has. Two such joins sent at once for
+  one folder and two groups: one succeeds. After that AI has left its
+  group, the join succeeds.
+- **A2.10** In the folder list of the add dialog, a folder that an AI of
+  this group already has says which AI. A folder that an AI of another
+  group has cannot be chosen and says which group.
 
 ## M3. AI sessions
 
@@ -108,7 +121,8 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   `post`. A second mention shows it remembers the first. One CLI process
   existed throughout.
 - **A3.2** The same with Codex.
-- **A3.3** The same with the AI on a node other than the home.
+- **A3.3** The same with the AI on a node other than the home; the AI's
+  process runs in the folder it was added with.
 - **A3.4** After the idle period (set to 1 minute) the process is gone and
   the card says dormant. A mention resumes it with its memory.
 - **A3.5** With `max_open` 1 and two AIs, the first `waiting`: mentioning
@@ -122,6 +136,17 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   with `secret`; no row for it exists on the home.
 - **A3.10** An inbox item sent twice by the home produces one turn, also
   across a restart of the host.
+- **A3.11** For a Claude Code and a Codex that were used in two folders
+  each, the add dialog lists those folders, newest first, and neither a
+  folder that has been deleted nor one under the node's data directory.
+  (`live` for OpenCode and Qwen Code.)
+- **A3.12** A folder typed by hand is accepted when it exists. The node
+  builds its lists from session files alone: with `~/.claude.json`,
+  `~/.codex/auth.json` and `~/.codex/config.toml` unreadable, the same
+  folders are listed.
+- **A3.13** With the folder of an AI removed after it joined, the next
+  mention produces a `turn_interrupted` row that names the folder; with
+  the folder back, the next mention works.
 
 ## M4. Permissions and approvals
 
@@ -154,7 +179,7 @@ These tests need a task session, so they follow the first slice of M5
 - **A4.9** With `turn_minutes` 1 a long turn is interrupted with reason
   `timeout`.
 - **A4.10** On each CLI at level 2, an AI asked to write a marker file
-  outside its worktree produces a card, and no file exists before approval.
+  outside its workspace produces a card, and no file exists before approval.
   (`live`)
 - **A4.11** On the real Codex CLI with
   `-c features.default_mode_request_user_input=true`, an AI in Default mode
@@ -165,49 +190,46 @@ These tests need a task session, so they follow the first slice of M5
 
 ## M5. Tasks
 
-Run once with a scratch GitHub repository and once with `forge: none`.
+The tests of this milestone follow the owner's decision of 2026-11-26: a
+task is work in the assignee's folder, a scored review, and done. The
+sentences that tested checks, pushes and the merge are removed with that
+behaviour; a number is not used again.
 
 - **A5.1** Request, brief, confirm, two tasks reviewed by each other's AI,
-  both merged, two summary cards. The only human action is the confirm, at
-  level 2, and no approval card appears. Each task ran in its own session
-  in its own worktree; after the merge those sessions and folders are gone.
-- **A5.2** Before the confirm no worktree exists and no `assign` item was
-  created.
-- **A5.3** `run_checks` refuses a worktree with uncommitted changes.
-  `submit_task` is refused after failing checks, accepted after passing
-  ones, and refused again if a commit was added since. A commit pushed to
-  the branch after the review passed is not merged: the task reports a
-  conflict.
-- **A5.4** A review of 86 against 90 returns the task to `local_check`. A
-  veto gives 0. The sixth failed review makes the task `failed`. A review
-  by the task's own assignee, or of a commit other than the submitted one,
+  both done, two summary cards. The only human action is the confirm, and
+  no approval card appears. Each task ran in its own session, in the
+  folder of its assignee; after each task is done its sessions are gone,
+  and the node's data directory holds no project folder.
+- **A5.2** Before the confirm no `assign` item was created and no task
+  session exists.
+- **A5.3** Removed on 2026-11-26: the node runs no checks and merges
+  nothing.
+- **A5.4** A review of 86 against 90 returns the task to `work`. A veto
+  gives 0. The sixth failed review makes the task `failed`. A review by
+  the task's own assignee, or of a report other than the one under review,
   is refused.
-- **A5.5** Three consecutive failures (crashed turns, failed hosted checks)
-  with no passing hosted check in between make the task `failed` and
-  mention the owner. The secretary cannot resume or reassign it; a person
-  can.
-- **A5.6** A task that depends on another starts only after that one merged;
-  reassigning it while it is queued creates no worktree.
-- **A5.7** An owner's direct request that needs a code change: the AI's
-  group session cannot modify a file; after `start_task` a task card exists,
-  the secretary is notified, and the change is made in a new task session.
+- **A5.5** Three consecutive crashed turns with no submission in between
+  make the task `failed` and mention the owner. The secretary cannot
+  resume or reassign it; a person can.
+- **A5.6** A task that depends on another starts only after that one is
+  done; reassigning it while it is queued starts nothing.
+- **A5.7** An owner's direct request that needs a change: the AI's group
+  session lists `start_task` and no tool that submits; after `start_task`
+  a task card exists, the secretary is notified, and the change is made in
+  a task session in the same folder.
 - **A5.8** Two AIs made to answer each other are paused at 10 rounds; a
   person's message in the thread resumes them, and so does `task resume`,
   and either way the held mentions go out.
-- **A5.9** A diff containing a test secret pattern fails the hard check.
-- **A5.10** A merge conflict returns the task to `local_check` with wait
-  `conflict` and notifies the secretary. After the secretary names an AI,
-  the task goes through checks and review again and merges.
+- **A5.9**, **A5.10** Removed on 2026-11-26: no hard check reads a diff,
+  and nothing is merged, so there is no conflict.
 - **A5.11** "Jump the queue" on a direct request interrupts the running
   turn; the task shows as pre-empted meanwhile and continues afterwards by
   itself. A jump aimed at the session that is running interrupts it and
   goes first without pausing the task; the session then continues by itself
   with one turn of its own.
-- **A5.12** When a review passes, the merge follows with no AI turn in
-  between, and the thread shows it under the secretary's name.
-- **A5.13** At level 2, `push_branch` pushes the task's branch and no card
-  appears. A `git push` of another branch that the AI runs itself produces
-  a card. (With a remote.)
+- **A5.12** When a review passes, the task is done with no AI turn in
+  between, and the thread shows `task_done` under the secretary's name.
+- **A5.13** Removed on 2026-11-26: the node pushes nothing.
 - **A5.14** With retention set to 7 days and the clock advanced, notes and
   review messages remain. `forget` removes one, and a connected browser
   drops it within 1 second.
@@ -215,15 +237,36 @@ Run once with a scratch GitHub repository and once with `forge: none`.
   once and is answered `ok` twice; `task fail` sent twice counts once.
 - **A5.16** With `idle_notice_minutes` 1, an active task with no thread
   message produces one `notice` for the secretary.
-- **A5.17** A check command sees `PATH` and `HOME`, and does not see a test
-  token variable that is set in the node's own environment.
-- **A5.18** Between a passed review and the host's report, a pause, a
-  reassignment and a new submission are refused. A person's cancel is
-  accepted, and a host that then takes the merge item drops it. An AI that
-  is assignee or reviewer of an unfinished task cannot be removed.
-- **A5.19** A review item queued for one commit is not delivered after the
-  task was resubmitted with another: the home has removed it, and a host
-  that still holds it refuses it.
+- **A5.17** Removed on 2026-11-26: the node runs no check command.
+- **A5.18** An AI that is assignee or reviewer of an unfinished task cannot
+  be removed. (The sentences on the step `merge` were removed on
+  2026-11-26.)
+- **A5.19** A review item queued for one report is not delivered after the
+  task was submitted again: the home has removed it, and a host that still
+  holds it refuses it. A review session that is resumed after its node
+  restarted still submits its review for the report it was given.
+- **A5.20** Two tasks of one brief for the same AI: the second is `queued`
+  with wait `busy` until the first is done, and then starts by itself.
+  With three, the release starts one and leaves the other queued. The same
+  with two AIs that were added with one folder on one computer. A second
+  task for an AI in another folder starts at once. Giving a started task to
+  an AI whose folder is busy with another task is refused with `conflict`.
+  Giving it to an AI in another folder starts the task that was queued
+  behind it. `start_task` while the AI's folder is busy answers `queued`,
+  and the task's first turn, when it starts, holds its title and plan.
+- **A5.21** The reviewer's turn names the assignee's computer and folder
+  and says which of the three cases holds: the same folder, another folder
+  on this computer, another computer.
+- **A5.22** `submit_task` whose summary holds a test secret pattern fails
+  with `secret`; the task is not submitted.
+- **A5.23** A task that the secretary or an admin paused shows who paused
+  it, in the reader's language. An approval card that ended because its
+  task was given to another AI shows who gave it and to which AI. Both
+  still show the name after that member has left the group.
+- **A5.24** Two AIs share a folder. The first task's assignee is still
+  running the turn in which it submitted when the review passes. The
+  second task's first turn starts only after that assignee's process has
+  exited.
 
 ## M6. AI calls AI
 
@@ -238,8 +281,8 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 ## M7. Terminal takeover
 
 - **A7.1** "Open terminal" on a Claude Code member that has a task shows
-  its native interface in that task's worktree; a typed prompt is answered;
-  hand-back produces the summary with files and commits; a later mention in
+  its native interface in its workspace; a typed prompt is answered;
+  hand-back produces the AI's own account in the thread; a later mention in
   the task's thread shows the AI remembers the terminal exchange. (`live`)
 - **A7.2** The same with Codex. (`live`)
 - **A7.3** Mentions during takeover are held and delivered in order after
@@ -252,9 +295,9 @@ Run once with a scratch GitHub repository and once with `forge: none`.
   the browser signals) hands back within 2 seconds. A connection that is
   simply lost hands back when the node's stack reports it. `takeover.start`
   sent again after the hand-back is answered `conflict`.
-- **A7.7** Opening the terminal of a working AI that has no task creates a
-  task card. Handing back with nothing changed cancels it. Handing back
-  after a commit keeps it, and the summary lists the commit.
+- **A7.7** Opening the terminal of a working AI that has no task opens its
+  group session and creates no task card; hand-back posts the AI's account
+  in the main line.
 - **A7.8** In the secretary's terminal, a request to edit a file changes
   nothing on disk. (`live`)
 - **A7.9** With `pty` open on a direct path, keep TURN reachable and make the
@@ -283,3 +326,11 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 - **A8.6** Recorded, with the machine, the CLI versions and the workload
   named: node binary size, node idle memory, peak memory per open session
   of each CLI, rendezvous memory with 100 idle connections.
+- **A8.7** A node that starts on the data directory of `v3.0.0-rc.1` keeps
+  its pairing, its owner's devices, its account types and its peers,
+  forgets the devices of everyone else who was in its groups, lists no
+  group, and leaves the folder `projects/` as it was. `group import` of a
+  file that rc.1 wrote is refused in one line that says why. A node of
+  rc.1 that connects to it is answered `version`, and a node or browser of
+  this version that reaches a home of rc.1 stops at `version` instead of
+  retrying with an older one.

@@ -6,15 +6,16 @@ Acceptance tests: `steps/step-1-acceptance.md`.
 ## Scope
 
 In: every rule tagged `[S1]` in `product-rules.md`. One person; any number of
-their computers and browsers; Claude Code and Codex; project groups with a
-secretary; tasks from brief to merge with GitHub or with no remote;
+their computers and browsers; Claude Code and Codex; groups with a
+secretary; tasks from brief to done, in the folder each AI was given (since
+the decision of 2026-11-26: no Git, checks or merge by the platform);
 approvals; AI calling AI; terminal takeover; direct, relayed and
 server-less connectivity; the seven pages of the design; Chinese and
 English; dark and light.
 
 Out (later steps): more than one person in a group, invitations, confirming
-other people's requests, watching a terminal, the team-wide group, forges
-other than GitHub, CLIs other than Claude Code and Codex, phone app.
+other people's requests, watching a terminal, CLIs other than Claude Code
+and Codex, phone app.
 
 Step 1 is done when every acceptance test of `steps/step-1-acceptance.md`
 passes on these pairs, at the browser baseline that spike S-7 fixed

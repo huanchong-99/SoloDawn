@@ -46,7 +46,7 @@ enough for that AI, the home does this instead:
 | queue `mention` for a `call` | writes an `ask` card; no item. The call stays `waiting` until the card is decided (section 5), and the caller's `ask` returns its receipt as in `flows/ask.md` B |
 | do either in the thread of a task the AI takes part in | no card. The item is queued as in step 1 and is labelled `information` (`contracts/step-2/labels.md`, R-52) |
 | give the AI a role in a task (`contracts/task-machine.md` rows 1 and 11) | writes a `direct` card unless the AI already has one for that request; section 7 |
-| queue `reply`, `decided`, `reviewed`, `checks`, `resume`, `confirmed`, `notice` or `merge` | nothing new: these follow from what the AI asked itself or already takes part in |
+| queue `reply`, `decided`, `reviewed`, `resume`, `confirmed` or `notice` | nothing new: these follow from what the AI asked itself or already takes part in |
 
 - The card is written in the transaction of the command that made the
   request. One card per AI and request: two such AIs, two cards.

@@ -25,48 +25,61 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 
 ## Groups and workspaces
 
-- **R-10** `[S1]` One project, one group. Registering a project records its
-  Git repository address.
-- **R-11** `[S1]` When an AI joins a project group, its node clones the
-  project into a fixed folder on that machine.
-- **R-12** `[S1]` An AI may be in several project groups. Contexts never mix
-  across groups. Session granularity (settled by the coordinator, Q-8): the
+By the owner's decision of 2026-11-26
+([record](../docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)):
+
+- **R-10** `[S1]` There is one kind of group: people and AIs. A group is
+  created by choosing people and connected AIs, and people and AIs can be
+  added later. A group needs no AI: one without is a group of people. No
+  repository, branch, forge or check command is registered with a group.
+- **R-11** `[S1]` Only a connected AI can be added: a CLI that a paired
+  computer of its owner found and whose account type the owner declared
+  (R-50), or an external agent (R-166). It joins with a **workspace**: a
+  folder on its computer, which its owner chooses when adding it, from the
+  folders that CLI was used in on that computer or by typing one. The AI
+  works directly in that folder, and every member of the group sees its
+  path. Nothing is cloned, and the folder need not be a Git repository. Two
+  AIs of one group may have the same folder; a folder is the workspace of
+  AIs of one group only.
+- **R-12** `[S1]` An AI may be in several groups. Contexts never mix across
+  groups. Session granularity (settled by the coordinator, Q-8): the
   secretary has one long session per group; a working AI has one session per
-  task, whose working folder is that task's worktree and which ends when the
-  task ends. What carries over between tasks is the ledger and the notes
+  task, whose working folder is the member's workspace and which ends when
+  the task ends. What carries over between tasks is the ledger and the notes
   (R-102), not a session. A working AI also has one read-only group
-  session per group, in the project clone, for what belongs to no task:
+  session per group, in the member's workspace, for what belongs to no task:
   questions, main-line mentions, calls from other tasks. To change code it
-  starts a task, which gets its own session (Q-15).
-- **R-13** `[S1]` Every task gets its own branch and its own worktree.
-- **R-14** `[S2]` A team may also have one team-wide group for notices and
-  cross-project talk. No work happens there. AIs speak only in their own
-  project group; a secretary relays cross-project matters to the team group.
+  starts a task, which gets its own session (Q-15). One folder takes one
+  task at a time: a task whose assignee's folder is in use by another task
+  waits its turn.
+- **R-13** Removed on 2026-11-26: a task has no branch and no worktree of
+  its own (R-11, R-90).
+- **R-14** Removed on 2026-11-26: there is no team-wide kind of group and
+  no relaying to one (R-10).
 
 ## The secretary
 
-- **R-20** `[S1]` Each project group has exactly one secretary; the team group
-  of step 2 has none (R-14; 2026-11-20). It is an AI member kept alive by some
-  node, with the secretary instructions loaded. Secretary contexts of
-  different groups never mix.
+- **R-20** `[S1]` Each group has at most one secretary. It is an AI member
+  kept alive by some node, with the secretary instructions loaded. Secretary
+  contexts of different groups never mix.
 - **R-21** `[S1]` The secretary coordinates and never writes code, in its
   terminal either: to change code the owner takes over a working AI (Q-20).
 - **R-22** `[S1]` Workflow: take the request; ask only if unclear; post a
   task brief and wait for the requester to confirm; split and assign; AIs
   work and report; follow up on silence and reassign on failure; bring
   questions of direction, trade-off, money, permission or safety to a person;
-  accept through checks plus scored review; post a summary.
+  accept through scored review of work the AI tested itself; post a summary.
 - **R-23** `[S1]` Nothing starts before the brief is confirmed.
-- **R-24** `[S1]` When checks and review both pass, the merge happens without
-  a human click. The platform performs it deterministically and shows it
-  under the secretary's name (Q-7). On a conflict the secretary assigns an AI
-  to resolve it.
+- **R-24** `[S1]` When the review passes, the task is done, without a human
+  click and without an AI turn; the platform shows it under the secretary's
+  name. The platform merges nothing: the secretary arranges the closing step
+  the project needs, such as a merge.
 
 ## Main line and threads
 
 - **R-30** `[S1]` The main line carries only: requests, task briefs, task
-  cards, decision requests, approval cards, summaries; and confirm cards and
-  bulletins `[S2]` (2026-11-20, for step 2: R-51, the team group).
+  cards, decision requests, approval cards, summaries; and confirm cards
+  `[S2]` (2026-11-20, for step 2: R-51).
 - **R-31** `[S1]` Progress, AI-to-AI discussion and review remarks go in the
   thread of the task they belong to.
 - **R-32** `[S1]` Message kinds in a thread: progress, question, call,
@@ -80,8 +93,7 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-40** `[S1]` Three levels, set per project and per AI by the owner of the
   machine: (1) read only; (2) work inside the workspace, the default; (3)
   unrestricted. The owner may set level 3 for all projects at once. Level 2
-  limits what the AI itself does. The project's own check commands run outside
-  the sandbox; the product says so where levels are chosen (Q-19).
+  limits what the AI itself does.
 - **R-41** `[S1]` At level 2 the AI changes files in the workspace without
   asking. What reaches further (a change outside the workspace, or the
   network: installing software, pushing code) is meant to happen only
@@ -89,12 +101,10 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   card. Level 2 does not promise to limit reading, and Codex reads
   anywhere at level 1 too. What each CLI was measured to confine, and what
   is not shown yet, is in `contracts/drivers.md` section 1 (Q-25). As settled:
-  - pushing the task's own branch needs no approval, and the node itself
-    does it and opens the pull request (Q-10, Q-16); pushing any other
-    branch, or force-pushing, needs approval;
   - the platform never inspects commands. Bulk deletion inside the
-    workspace is covered by Git and by the CLI's sandbox, not by a card
-    (Q-11). A card shows the kind of request and the CLI's own one-line
+    workspace is left to the CLI's sandbox and to the project's own version
+    control, not to a card (Q-11). A card shows the kind of request and the
+    CLI's own one-line
     description, never a label derived from reading the command (Q-18);
   - secrets are guarded where they would leave the machine (R-137).
 - **R-42** `[S1]` Approval flow: the AI stops and asks; an approval card
@@ -166,23 +176,28 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   owner's consent `[S2]`.
 - **R-82** `[S1]` During takeover the card says so, and incoming messages
   queue until hand-back.
-- **R-83** `[S1]` Code changed during takeover stays on the task branch and
-  goes through the same checks, review and merge. If no task existed, one is
-  registered.
-- **R-84** `[S1]` On hand-back the platform posts a summary in the thread:
-  what was asked, which files changed, what was committed.
+- **R-83** `[S1]` A takeover runs in the folder of the session that is taken
+  over, the member's workspace. What is changed for a task there goes through
+  the same review. A takeover of a working AI that has no unfinished task
+  opens its group session and creates no task.
+- **R-84** `[S1]` On hand-back the AI posts its own account of what was
+  asked and what was done: in the thread of the task, or in the main line
+  for a session without one. The node reads no facts from the folder.
 - **R-85** `[S1]` The platform never reads terminal content and never bases a
   decision on it.
 
 ## Code flow
 
-- **R-90** `[S1]` Branch at start; push while working; local checks; open a
-  pull request; hosted checks; scored review by a different AI; merge.
-- **R-91** `[S1]` Same flow on a single machine without a remote: no push, no
-  pull request.
-- **R-92** `[S1]` Hosting defaults to GitHub; other hosts can be configured.
-  Several machines or several people require a hosted remote. Step 1
-  supports GitHub and "no remote"; other hosts come in step 2 (Q-9).
+- **R-90** `[S1]` The AI brings its folder up to date, tests and publishes
+  its work the way the project does; then a different AI reviews and scores
+  it. A project without rules of its own for publishing gets these: the AI
+  commits its work, pushes nothing to a branch that others use before the
+  review has passed, and pushes to a branch of its own when its reviewer
+  works on another computer. The platform creates no branch, runs no check,
+  opens no pull request and merges nothing; its instructions tell each AI
+  these duties, and no code enforces them (`contracts/drivers.md` section 4).
+- **R-91**, **R-92** Removed on 2026-11-26 with the flow they varied: no
+  forge is configured and none is needed.
 
 ## Quality
 
@@ -193,15 +208,16 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   the group's long-term memory. They are exempt from the retention period of
   R-135 and stay until a person deletes them (Q-13), which is done in the
   group's own panel under "Project memory" (Q-17).
-- **R-103** `[S1]` Quality gates are each project's own check commands
-  (build, test, lint), plus universal hard checks: leaked secrets, fake
-  tests, missing tests. No built-in rule engine.
+- **R-103** `[S1]` A group has no check commands, and the node runs no hard
+  check on a diff: the AI tests the way the project does (R-90). A fake test
+  or a missing test is a veto in review. No built-in rule engine.
 
 ## AI calling AI
 
 - **R-110** `[S1]` A tool lets an AI ask another AI mid-task and continue with
   the answer. Same interface on one machine or across machines.
-- **R-111** `[S1]` Only text travels in messages. Code travels through Git.
+- **R-111** `[S1]` Only text travels in messages. Code travels the way the
+  project shares it.
 - **R-112** `[S1]` Small requests wait for the answer; large ones return a
   receipt and notify on completion.
 - **R-113** `[S1]` Every call is a visible thread message: the caller
@@ -220,8 +236,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   profile and state and chooses assignee and reviewer by them: hard work
   to strong AIs, simple work to light ones, independent tasks spread over
   different AIs, none to an AI that is limited or offline. An assignee
-  whose task fails twice in a row in the same way (hosted checks, or
-  review) must ask a stronger AI and get an answer before it submits
+  whose task fails twice in a row in the same way (review) must ask a
+  stronger AI and get an answer before it submits
   again; with no stronger AI in the group nothing changes. Contracts:
   `contracts/step-3/profiles.md`, `contracts/step-3/drivers.md` section
   10.
@@ -290,11 +306,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-137** `[S1]` Secrets never leave the machine. The node reads no AI
   credential, and project secret files are never posted to a group. An
   outbound check refuses what an AI sends to the group when it matches
-  common secret formats or looks like an environment file (Q-11). For Git
-  and the forge the node runs only `git`, `gh` and, from step 2, a forge
-  program a group's templates name, shown to the owner before their AI joins
-  the group (widened 2026-11-20 for D-10; no acceptance step since 2026-11-22),
-  each signed in by the owner; it never reads a token or credential (Q-16).
+  common secret formats or looks like an environment file (Q-11). The node
+  runs no `git`, no `gh` and no command of a project or a forge.
 - **R-138** `[S1]` Every computer and every browser has its own identity key.
   A lost device can be revoked from another device.
 - **R-139** `[S1]` Each node keeps a local audit record of who made its AIs
@@ -303,7 +316,9 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-140** `[S2]` An invitation is a one-time link, valid 10 minutes, that
   admits one person to one group. (2026-11-22: no fingerprint and no check
   against a rendezvous that stands in for a home; the [deployment guide](../docs/cookbook/self-hosting.md) says
-  to send the link privately and to use a trusted rendezvous.)
+  to send the link privately and to use a trusted rendezvous.) A person who
+  is already in another group on the same home is added by an admin without
+  a link and without a step of their own (2026-11-26).
 
 ## Distribution
 
