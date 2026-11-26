@@ -5,39 +5,23 @@
   "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
   "num": 12,
   "title": "Show connection path",
-  "slug": "show-connection-path",
   "origin": "brief",
   "brief": "KaiCW9JC8UOG7lKNduDo8Q",
   "state": "active",
   "step": "review",
-  "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
+  "report": "hF6RgxMZ6JxNZWvbgMJ4rA",
   "assignee": "1PC8WineBrUQ-apCjx7tug",
   "reviewer": "LXCZmuGAXkvO-bSrOkuCfw",
   "foundation": false,
   "pass": 90,
   "depends": [],
-  "branch": "task/12-show-connection-path",
-  "pr": 31,
-  "pr_url": "https://git.example/team/website/pull/31",
-  "checks": {
-    "local": {
-      "ok": true,
-      "at": 1763599997000,
-      "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-    },
-    "cloud": {
-      "ok": true,
-      "at": 1763599998000,
-      "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-    }
-  },
   "review": {
     "round": 1,
     "failed": 1,
     "score": 86,
     "ok": false,
     "by": "LXCZmuGAXkvO-bSrOkuCfw",
-    "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
+    "report": "9Ci2WsMvUDU0MuAwSdrfQQ",
     "at": 1763599999000
   },
   "wait": null,
@@ -58,8 +42,6 @@
     }
   },
   "stats": {
-    "added": 212,
-    "removed": 18,
     "started": 1763599996000,
     "ended": null
   },

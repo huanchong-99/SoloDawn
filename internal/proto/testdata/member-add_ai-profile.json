@@ -7,6 +7,7 @@
   "id": "1PC8WineBrUQ-apCjx7tug",
   "cli": "codex",
   "name": "Codex",
+  "workspace": "/home/dev/website",
   "account": "personal",
   "secretary": false,
   "approvers": [

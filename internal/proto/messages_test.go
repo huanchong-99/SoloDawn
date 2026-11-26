@@ -48,12 +48,8 @@ func exampleRow[B, S any](t *testing.T, m messageExample, body B, state S, seq i
 		if m.signedBody == nil {
 			m.signedBody = body
 		}
-		as := ID(r.By)
-		if m.kind == "bulletin" {
-			as = ""
-		}
 		post := wireJSON(t, Post[any]{
-			HomeCommand{"post", ID(r.ID), r.Timestamp, ID(group), as},
+			HomeCommand{"post", ID(r.ID), r.Timestamp, ID(group), ID(r.By)},
 			r.Kind, (*ID)(r.Thread), r.Main, r.Text, ids(r.Mentions), (*ID)(r.Re), m.signedBody,
 		})
 		goldenJSON(t, "post-"+m.kind, post)
@@ -91,7 +87,7 @@ func TestDecisionGoldens(t *testing.T) {
 	m, body := decisionExample()
 	golden(t, "row-msg-decision-pending", exampleRow(t, m, body, StatusOnly{"pending"}, 790))
 	golden(t, "row-msg-decision-decided", decidedExample(t))
-	// The task it names was merged or cancelled while it was pending (contracts/messages.md 3.3).
+	// The task it names was done or cancelled while it was pending (contracts/messages.md 3.3).
 	golden(t, "row-msg-decision-expired", exampleRow(t, m, body, TimedState{"expired", ts}, 814))
 }
 
@@ -136,9 +132,9 @@ func TestApprovalGoldens(t *testing.T) {
 		state := ActedState{a.status, person, ts, actExample(t, "approval", a.action, "", "")}
 		golden(t, "row-msg-approval-"+a.status, exampleRow(t, m, body, state, 814))
 	}
-	for _, status := range []string{"expired", "reassigned"} {
-		golden(t, "row-msg-approval-"+status, exampleRow(t, m, body, TimedState{status, ts}, 814))
-	}
+	golden(t, "row-msg-approval-expired", exampleRow(t, m, body, TimedState{"expired", ts}, 814))
+	// The secretary gave the task to another AI (contracts/messages.md 3.2).
+	golden(t, "row-msg-approval-reassigned", exampleRow(t, m, body, ReassignedState{"reassigned", secretary, ts}, 814))
 }
 
 func TestCallGoldens(t *testing.T) {
@@ -220,22 +216,29 @@ func TestCardStateRetainsPresentZeroValues(t *testing.T) {
 	}
 }
 
+// reportRow is the submission of the example task: its text is the account the
+// assignee gave submit_task, and its body is empty (contracts/messages.md 2.7).
+func reportRow(t *testing.T) MessageRow[EmptyBody, NoCard] {
+	t.Helper()
+	return exampleRow[EmptyBody, NoCard](t, messageExample{kind: "report", author: agent, thread: &taskID,
+		text: "Added the path indicator and its test; go test ./... passed. The work is on branch path-indicator at 9f2c1ab, pushed."},
+		EmptyBody{}, nil, 790)
+}
+
 func TestNonCardGoldens(t *testing.T) {
-	nonCard(t, messageExample{kind: "bulletin", author: person, text: "The website is ready.", signedBody: BulletinSigned{ID(group), "Website", "Claude Code"}}, BulletinBody{group, "Website", "Claude Code"})
 	nonCard(t, messageExample{kind: "text", author: agent, text: "The path is direct."}, EmptyBody{})
 	nonCard(t, messageExample{kind: "progress", author: agent, thread: &taskID, text: "Added the path indicator."}, EmptyBody{})
 	nonCard(t, messageExample{kind: "question", author: agent, text: "Should the path include latency?"}, EmptyBody{})
 	nonCard(t, messageExample{kind: "reply", author: reviewer, thread: &taskID, replyTo: new(id("call")), text: "Use the path change event."}, EmptyBody{})
 	nonCard(t, messageExample{kind: "task", author: "system"}, TaskBody{taskID})
 	nonCard(t, messageExample{kind: "summary", author: secretary, thread: &taskID, main: true, signedBody: EmptyBody{}},
-		SummaryBody{taskID, 94, 2, 72, 318, 42, new(28)})
-	nonCard(t, messageExample{kind: "report", author: agent, thread: &taskID}, ReportBody{"9f2c1ab", 4, 212, 18, new(31)})
-	nonCard(t, messageExample{kind: "checks", author: "system", thread: &taskID}, ChecksBody{"local", true, "9f2c1ab", []CheckItem{{"go test ./...", true, new("42 tests")}}})
+		SummaryBody{taskID, 94, 2, 72})
+	golden(t, "row-msg-report", reportRow(t))
 	items := []ReviewItem{{"Missing relay path", false, new("path.go"), new(88)}}
-	review := ReviewBody{taskID, 12, "Show connection paths", "9f2c1ab", 1, 86, 90, false, items}
-	nonCard(t, messageExample{kind: "review", author: reviewer, thread: &taskID, signedBody: map[string]any{
-		"task": review.Task, "commit": review.Commit, "score": review.Score, "items": review.Items}}, review)
-	nonCard(t, messageExample{kind: "handback", author: agent, thread: &taskID}, HandbackBody{[]string{"path.go"}, []CommitSubject{{"9f2c1ab", "Emit path changes"}}, 40, 3})
+	review := ReviewBody{taskID, 12, "Show connection paths", report, 1, 86, 90, false, items}
+	nonCard(t, messageExample{kind: "review", author: reviewer, thread: &taskID, signedBody: ReviewSigned{
+		ID(review.Task), ID(review.Report), review.Score, review.Items}}, review)
+	nonCard(t, messageExample{kind: "handback", author: agent, thread: &taskID, text: "Renamed the indicator in the terminal, as its owner asked."}, EmptyBody{})
 	nonCard(t, messageExample{kind: "system", author: "system", thread: &taskID}, TurnInterruptedBody{SystemCode{"turn_interrupted"}, agent, "timeout", &taskID, new("Turn deadline reached.")})
 }
 

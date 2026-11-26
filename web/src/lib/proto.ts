@@ -32,11 +32,6 @@ export type Envelope = v.InferOutput<typeof Envelope>;
  *  holds an id takes no other text. */
 export const Id = v.pipe(str, v.regex(/^[A-Za-z0-9_-]{21}[AQgw]$/));
 
-/** A task's name in its branch and its worktree, as the home makes it from the title: at most 40
- *  characters, groups of a to z and 0 to 9 with one hyphen between two (contracts/local.md section
- *  7). A field that holds a slug takes no other text, as internal/proto's Slug takes none. */
-export const Slug = v.pipe(str, v.maxLength(40), v.regex(/^[a-z0-9]+(-[a-z0-9]+)*$/));
-
 const PayloadHeader = { n: Id, ts: int, g: v.optional(Id), to: v.optional(str) };
 const SignalHeader = { ...PayloadHeader, conn: Id };
 
@@ -201,20 +196,14 @@ const Limits = v.object({
   idle_notice_minutes: int,
 });
 
-const ForgeTemplates = v.object({ push: strs, open: strs, checks: strs, merge: strs });
-
+/** The one kind of group: people and AIs, with no repository, forge or check command
+ *  (contracts/rows.md section 1). */
 export const GroupRow = v.object({
   r: v.literal('group'),
   ...RowHeader,
   name: str,
-  kind: str,
-  repo: v.optional(str),
-  base: str,
-  forge: str,
-  templates: v.optional(ForgeTemplates),
   home: str,
   secretary: v.optional(str),
-  checks: strs,
   pass: int,
   pass_foundation: int,
   limits: Limits,
@@ -261,6 +250,8 @@ export const AIMemberRow = v.object({
   tool: v.optional(str),
   host: str,
   host_name: str,
+  /** The absolute path of its folder on `host`, set when it was added and never changed. */
+  workspace: str,
   secretary: bool,
   account: str,
   allow: strs,
@@ -286,33 +277,27 @@ export const DeviceRow = v.object({
 });
 export type DeviceRow = v.InferOutput<typeof DeviceRow>;
 
-const Check = v.object({ ok: bool, at: int, commit: str });
-
 export const TaskRow = v.object({
   r: v.literal('task'),
   ...RowHeader,
   g: str,
   num: int,
   title: str,
-  slug: Slug,
   origin: str,
   brief: v.optional(str),
   plan: v.optional(str),
   state: str,
   step: str,
-  commit: v.optional(str),
+  /** The report message under review, from the first submission. */
+  report: v.optional(str),
   assignee: str,
   reviewer: v.optional(str),
   asked: v.optional(strs),
   foundation: bool,
   pass: int,
   depends: strs,
-  branch: v.optional(str),
-  pr: v.optional(int),
-  pr_url: v.optional(str),
-  checks: record({ local: v.optional(Check), cloud: v.optional(Check) }),
   review: v.optional(
-    v.object({ round: int, failed: int, score: int, ok: bool, by: str, commit: str, at: int }),
+    v.object({ round: int, failed: int, score: int, ok: bool, by: str, report: str, at: int }),
   ),
   wait: v.nullable(
     v.object({
@@ -321,6 +306,8 @@ export const TaskRow = v.object({
       who: v.optional(strs),
       since: int,
       kept: v.optional(str),
+      /** On a wait of kind `manual`: the member who paused the task. */
+      by: v.optional(str),
     }),
   ),
   failures: int,
@@ -331,7 +318,7 @@ export const TaskRow = v.object({
     rounds: int,
     last: v.optional(v.object({ by: str, kind: str, text: str, ts: int })),
   }),
-  stats: v.object({ added: int, removed: int, started: int, ended: v.nullable(int) }),
+  stats: v.object({ started: int, ended: v.nullable(int) }),
   created: int,
 });
 export type TaskRow = v.InferOutput<typeof TaskRow>;
@@ -382,23 +369,7 @@ const DecisionBody = v.object({
 
 const CallBody = v.object({ to: str, depth: int, wait: bool });
 const ConfirmBody = v.object({ what: str, ai: str, to: strs });
-const BulletinBody = v.object({ from: str, group: str, ai: str });
-const BulletinSigned = v.object({ from: Id, group: str, ai: str });
-const ReportBody = v.object({
-  commit: str,
-  files: int,
-  added: int,
-  removed: int,
-  pr: optionalInt,
-});
-const CheckItem = v.object({ name: str, ok: bool, detail: optionalText });
 const ReviewItem = v.object({ text: str, veto: bool, file: optionalText, line: optionalInt });
-const HandbackBody = v.object({
-  files: strs,
-  commits: v.array(v.object({ sha: str, subject: str })),
-  added: int,
-  removed: int,
-});
 
 const SystemBody = v.variant('code', [
   v.object({ code: v.literal('rounds_limit'), task: str, n: int }),
@@ -420,7 +391,7 @@ const SystemBody = v.variant('code', [
   v.object({ code: v.literal('rate_limited'), ai: str, resets: int }),
   v.object({ code: v.literal('login_invalid'), ai: str, detail: optionalText }),
   v.object({ code: v.literal('task_failed'), task: str, reason: str }),
-  v.object({ code: v.literal('task_merged'), task: str, commit: str, merge_commit: str }),
+  v.object({ code: v.literal('task_done'), task: str }),
   v.object({ code: v.literal('no_secretary') }),
   v.object({ code: v.literal('session_replaced'), ai: str, task: optionalText }),
   v.object({ code: v.literal('member_joined'), member: str, by: str }),
@@ -439,7 +410,9 @@ const BriefState = v.variant('status', [
 const ApprovalState = v.variant('status', [
   Pending,
   v.object({ status: v.picklist(['approved', 'denied']), ...acted }),
-  v.object({ status: v.picklist(['expired', 'reassigned']), at: int }),
+  v.object({ status: v.literal('expired'), at: int }),
+  /** `by` gave the task to another AI. */
+  v.object({ status: v.literal('reassigned'), by: str, at: int }),
 ]);
 const DecisionState = v.variant('status', [
   Pending,
@@ -486,21 +459,8 @@ export const MsgRow = v.variant('kind', [
   message('task', v.object({ task: str }), noCard),
   message('approval', ApprovalBody, ApprovalState),
   message('confirm', ConfirmBody, ConfirmState),
-  message('bulletin', BulletinBody, noCard),
   message('decision', DecisionBody, DecisionState),
-  message(
-    'summary',
-    v.object({
-      task: str,
-      score: int,
-      rounds: int,
-      minutes: int,
-      added: int,
-      removed: int,
-      pr: optionalInt,
-    }),
-    noCard,
-  ),
+  message('summary', v.object({ task: str, score: int, rounds: int, minutes: int }), noCard),
   message(
     'call',
     CallBody,
@@ -510,24 +470,15 @@ export const MsgRow = v.variant('kind', [
       v.object({ status: v.literal('denied'), at: int }),
     ]),
   ),
-  message('report', ReportBody, noCard),
-  message(
-    'checks',
-    v.object({
-      stage: str,
-      ok: bool,
-      commit: str,
-      items: v.array(CheckItem),
-    }),
-    noCard,
-  ),
+  // The text of a report and of a hand-back is the account; the body is empty (messages.md 2.7, 2.10).
+  message('report', EmptyBody, noCard),
   message(
     'review',
     v.object({
       task: str,
       num: int,
       title: str,
-      commit: str,
+      report: str,
       round: int,
       score: int,
       pass: int,
@@ -536,7 +487,7 @@ export const MsgRow = v.variant('kind', [
     }),
     noCard,
   ),
-  message('handback', HandbackBody, noCard),
+  message('handback', EmptyBody, noCard),
   message('system', SystemBody, noCard),
 ]);
 export type MsgRow = v.InferOutput<typeof MsgRow>;
@@ -640,18 +591,13 @@ export type ErrorResponse = v.InferOutput<typeof ErrorResponse>;
 const HomeCommand = { n: Id, ts: int, g: Id, as: v.optional(Id) };
 const group = { t: v.literal('group'), ...HomeCommand };
 
-/** The receiving node becomes the home of a new group, whose id is both `g` and `n`. */
+/** The receiving node becomes the home of a new group, whose id is both `g` and `n`. People and
+ *  AIs are added by later commands (commands.md 1.1). */
 export const GroupCreate = v.object({
   ...group,
   op: v.literal('create'),
   name: str,
-  kind: str,
-  repo: optionalText,
-  base: str,
-  forge: str,
-  checks: strs,
   member_name: str,
-  templates: v.optional(ForgeTemplates),
 });
 export type GroupCreate = v.InferOutput<typeof GroupCreate>;
 
@@ -660,12 +606,10 @@ export const GroupSet = v.object({
   ...group,
   op: v.literal('set'),
   name: optionalText,
-  checks: v.optional(strs),
   pass: optionalInt,
   pass_foundation: optionalInt,
   limits: v.optional(Limits),
   secretary: v.optional(Id),
-  templates: v.optional(ForgeTemplates),
 });
 export type GroupSet = v.InferOutput<typeof GroupSet>;
 
@@ -688,6 +632,8 @@ export const MemberAddAI = v.object({
   cli: str,
   tool: optionalText,
   name: str,
+  /** The folder on the signing host, as that host resolved it. */
+  workspace: str,
   account: str,
   secretary: bool,
   approvers: strs,
@@ -738,6 +684,17 @@ export type MemberSet = v.InferOutput<typeof MemberSet>;
 export const MemberCommand = v.object({ ...member, op: v.literal('remove') });
 export type MemberCommand = v.InferOutput<typeof MemberCommand>;
 
+/** Adds a person whose device log the home holds, without an invitation; the new member's id is
+ *  `n` (contracts/step-2/people.md section 2.5). */
+export const MemberAddPerson = v.object({
+  t: v.literal('member'),
+  ...HomeCommand,
+  op: v.literal('add_person'),
+  user: str,
+  name: str,
+});
+export type MemberAddPerson = v.InferOutput<typeof MemberAddPerson>;
+
 /** Asks the home for an invitation link for its group; answered with `link` and `expires` in
  *  `CmdResult` (contracts/step-2/people.md section 2.1). */
 export const Invite = v.object({ t: v.literal('invite'), ...HomeCommand });
@@ -747,9 +704,9 @@ export type Invite = v.InferOutput<typeof Invite>;
 export const Join = v.object({ t: v.literal('join'), ...HomeCommand, name: str });
 export type Join = v.InferOutput<typeof Join>;
 
-/** What the reviewer signs of a review body; the home adds the rest and answers `passed` and
- *  `round` (commands.md 1.8). */
-const ReviewSigned = v.object({ task: Id, commit: str, score: int, items: v.array(ReviewItem) });
+/** What the reviewer signs of a review body, `report` being the report under review; the home adds
+ *  the rest and answers `passed` and `round` (commands.md 1.8). */
+const ReviewSigned = v.object({ task: Id, report: Id, score: int, items: v.array(ReviewItem) });
 
 /** What a person signs to ask to watch an AI's terminal; the home adds `to`
  *  (contracts/step-2/confirm.md section 3). */
@@ -780,12 +737,11 @@ export const Post = v.variant('kind', [
   post('summary', EmptyBody),
   post('approval', ApprovalBody),
   post('confirm', ConfirmSigned),
-  post('bulletin', BulletinSigned),
   post('decision', DecisionBody),
   post('call', CallBody),
-  post('report', ReportBody),
+  post('report', EmptyBody),
   post('review', ReviewSigned),
-  post('handback', HandbackBody),
+  post('handback', EmptyBody),
 ]);
 export type Post = v.InferOutput<typeof Post>;
 
@@ -814,48 +770,6 @@ export const TaskStart = v.object({
   origin: str,
 });
 export type TaskStart = v.InferOutput<typeof TaskStart>;
-
-export const TaskBranch = v.object({ ...task, op: v.literal('branch'), branch: str });
-export type TaskBranch = v.InferOutput<typeof TaskBranch>;
-
-/** The result of the local checks (`checked`) and of the hosted ones (`cloud`). */
-export const TaskChecked = v.object({
-  ...task,
-  op: v.picklist(['checked', 'cloud']),
-  ok: bool,
-  items: v.array(CheckItem),
-  commit: str,
-});
-export type TaskChecked = v.InferOutput<typeof TaskChecked>;
-
-const DiffStats = v.object({ added: int, removed: int });
-
-export const TaskSubmitted = v.object({
-  ...task,
-  op: v.literal('submitted'),
-  commit: str,
-  pr: optionalInt,
-  pr_url: optionalText,
-  stats: DiffStats,
-});
-export type TaskSubmitted = v.InferOutput<typeof TaskSubmitted>;
-
-export const TaskMerged = v.object({
-  ...task,
-  op: v.literal('merged'),
-  commit: str,
-  merge_commit: str,
-  stats: DiffStats,
-});
-export type TaskMerged = v.InferOutput<typeof TaskMerged>;
-
-export const TaskConflict = v.object({
-  ...task,
-  op: v.literal('conflict'),
-  commit: str,
-  detail: str,
-});
-export type TaskConflict = v.InferOutput<typeof TaskConflict>;
 
 export const TaskFail = v.object({ ...task, op: v.literal('fail'), reason: str, detail: str });
 export type TaskFail = v.InferOutput<typeof TaskFail>;
@@ -929,6 +843,8 @@ export const HostJoin = v.object({
   agent: str,
   name: str,
   secretary: bool,
+  /** A path on the receiving node, which it checks and resolves (commands.md section 2). */
+  workspace: str,
   account: optionalText,
   tool: optionalText,
   ...ProfileSet,
@@ -1076,6 +992,8 @@ const HostState = {
         v.object({
           g: Id,
           member: Id,
+          /** The folder of that member's sessions. */
+          workspace: str,
           level: int,
           state: str,
           task: v.optional(Id),
@@ -1101,6 +1019,21 @@ export type HostInfo = v.InferOutput<typeof HostInfo>;
 /** `host.info` again after one of its fields changed: a push, the whole object, without `re`. */
 export const HostInfoPush = v.object({ t: v.literal('host.info'), ...HostState });
 export type HostInfoPush = v.InferOutput<typeof HostInfoPush>;
+
+/** Which folders the CLI `agent` was used in on the node (datachannel.md section 7). */
+export const HostWorkspacesRequest = v.object({
+  t: v.literal('host.workspaces'),
+  id: int,
+  agent: str,
+});
+export type HostWorkspacesRequest = v.InferOutput<typeof HostWorkspacesRequest>;
+
+/** The answer to `host.workspaces`, newest use first; it has no `t`. */
+export const HostWorkspaces = v.object({
+  ...Success,
+  workspaces: v.array(v.object({ path: str, used: int })),
+});
+export type HostWorkspaces = v.InferOutput<typeof HostWorkspaces>;
 
 /** The size of a takeover's terminal, pushed by the browser; `ai` is the member taken over. */
 export const PTYResize = v.object({
@@ -1129,8 +1062,6 @@ export const Item = v.object({
   why: str,
   task: v.optional(Id),
   msg: v.optional(Id),
-  commit: optionalText,
-  pr: optionalInt,
   jump: v.optional(v.literal(true)),
   code: optionalText,
   detail: optionalText,
@@ -1172,7 +1103,7 @@ const TraceStep = v.object({
 });
 
 /** A complete signed transcript of one confirmed task from request to summary
- *  (flows/trace-task.md): `trace-remote.json` and `trace-local.json`. */
+ *  (flows/trace-task.md): `trace-local.json`. */
 export const TaskTrace = v.object({
   keys: v.array(TraceKey),
   devlog: Devlog,
@@ -1247,8 +1178,7 @@ export const ToolLists = v.strictObject({
   secretary: ToolList,
   group: ToolList,
   review: ToolList,
-  task_level_1: ToolList,
-  task_level_2_3: ToolList,
+  task: ToolList,
   external: ToolList,
 });
 export type ToolLists = v.InferOutput<typeof ToolLists>;
@@ -1272,6 +1202,7 @@ export const AnswerOf = {
   fetch: Fetched,
   cmd: CmdResult,
   'host.info': HostInfo,
+  'host.workspaces': HostWorkspaces,
   'watch.start': CmdResult,
 } as const;
 export type RequestType = keyof typeof AnswerOf;
@@ -1322,6 +1253,7 @@ export interface Ctl {
   ): Promise<AnswerTo<'fetch'> | ErrorResponse>;
   request(req: Ask<Cmd>): Promise<AnswerTo<'cmd'> | ErrorResponse>;
   request(req: Ask<HostInfoRequest>): Promise<AnswerTo<'host.info'> | ErrorResponse>;
+  request(req: Ask<HostWorkspacesRequest>): Promise<AnswerTo<'host.workspaces'> | ErrorResponse>;
   request(req: Ask<WatchStart>): Promise<AnswerTo<'watch.start'> | ErrorResponse>;
   send?(frame: Devlog | PTYResize): void;
   channel?(label: string): PtyChannel | undefined;

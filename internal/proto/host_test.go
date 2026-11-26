@@ -15,14 +15,14 @@ func hostState() HostState {
 		Agents: []HostAgent{
 			{"claude", "2.1.311", new("personal"), true, Caps{Day: &Cap{"turns", 200}, Task: &Cap{"usd", 12.5}},
 				Driver{[]string{"personal", "team", "api_key"}, "new"},
-				[]AgentGroup{{ID(group), ID(agent), 2, "working", ID(taskID), 1, []string{user}}},
+				[]AgentGroup{{ID(group), ID(agent), workspace, 2, "working", ID(taskID), 1, []string{user}}},
 				[]Model{{"opus", "Opus", []string{"low", "medium", "high", "xhigh", "max"}, true, "strong"}, {"haiku", "Haiku", []string{}, false, "light"}}},
 			{"codex", "0.164.0", nil, false, Caps{},
 				Driver{[]string{"personal", "team", "api_key"}, "resume"},
 				[]AgentGroup{}, []Model{}},
 			{"external", "", nil, true, Caps{},
 				Driver{[]string{"personal", "team", "api_key"}, "none"},
-				[]AgentGroup{{ID(group), ID(id("scout")), 3, "waiting", "", 0, []string{}}},
+				[]AgentGroup{{ID(group), ID(id("scout")), workspace, 3, "waiting", "", 0, []string{}}},
 				[]Model{}},
 		},
 		Settings: HostSettings{90, 15, 2, false, []string{}},
@@ -45,6 +45,10 @@ func TestHostSurfaceGoldens(t *testing.T) {
 	state.Settings.Approvers = []string{user}
 	state.Agents[0].Groups[0].Watchers = []string{}
 	golden(t, "host-info-push", HostInfoPush{"host.info", state})
+
+	golden(t, "host-workspaces-request", HostWorkspacesRequest{Request{"host.workspaces", 11}, "claude"})
+	// Newest use first (contracts/datachannel.md section 7).
+	golden(t, "host-workspaces-answer", HostWorkspaces{Success{11, true}, []Workspace{{workspace, ts - 60000}, {"/home/dev/notes", ts - 86400000}}})
 
 	golden(t, "pty-resize", PTYResize{"pty.resize", ID(group), ID(agent), 120, 32})
 	golden(t, "beacon", Beacon{"beacon", ID(id("beacon")), ts, 47800})

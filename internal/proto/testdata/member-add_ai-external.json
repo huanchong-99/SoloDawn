@@ -8,6 +8,7 @@
   "cli": "external",
   "tool": "ZCode",
   "name": "Scout",
+  "workspace": "/home/dev/website",
   "account": "api_key",
   "secretary": false,
   "approvers": [

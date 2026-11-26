@@ -16,7 +16,7 @@
     "task": "DrtCn6htSBwmMPrFPbHJHA",
     "num": 12,
     "title": "Show connection paths",
-    "commit": "9f2c1ab",
+    "report": "hF6RgxMZ6JxNZWvbgMJ4rA",
     "round": 1,
     "score": 86,
     "pass": 90,
@@ -32,8 +32,8 @@
   },
   "state": null,
   "env": {
-    "p": "{\"t\":\"post\",\"n\":\"yXrOTI_vLO6PoPPJ9SqrGA\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"LXCZmuGAXkvO-bSrOkuCfw\",\"kind\":\"review\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":false,\"text\":\"\",\"mentions\":[],\"re\":null,\"body\":{\"commit\":\"9f2c1ab\",\"items\":[{\"text\":\"Missing relay path\",\"veto\":false,\"file\":\"path.go\",\"line\":88}],\"score\":86,\"task\":\"DrtCn6htSBwmMPrFPbHJHA\"}}",
+    "p": "{\"t\":\"post\",\"n\":\"yXrOTI_vLO6PoPPJ9SqrGA\",\"ts\":1763599999500,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"as\":\"LXCZmuGAXkvO-bSrOkuCfw\",\"kind\":\"review\",\"thread\":\"DrtCn6htSBwmMPrFPbHJHA\",\"main\":false,\"text\":\"\",\"mentions\":[],\"re\":null,\"body\":{\"task\":\"DrtCn6htSBwmMPrFPbHJHA\",\"report\":\"hF6RgxMZ6JxNZWvbgMJ4rA\",\"score\":86,\"items\":[{\"text\":\"Missing relay path\",\"veto\":false,\"file\":\"path.go\",\"line\":88}]}}",
     "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
-    "s": "8aolLd9RH0sBOgtzYFHJ5rsQjk1oj-B_fqNEZIgsr7D7xY2NCJYf2Syj_QLs6dgOaN0A2T3BZjKU8-8UHIoRBg"
+    "s": "JXlSLuluNfrqpespGb09oYIMnPIj-vPwsDfJ7uhCRum6KHi4dqcm6FVHkS9t4R2-leJx3pJcyI7RyGEarP--CQ"
   }
 }

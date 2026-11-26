@@ -30,8 +30,6 @@ type Item struct {
 	Why    string `json:"why"`
 	Task   ID     `json:"task,omitempty"`
 	Msg    ID     `json:"msg,omitempty"`
-	Commit string `json:"commit,omitempty"`
-	PR     int    `json:"pr,omitempty"`
 	Jump   True   `json:"jump,omitempty"`
 	Code   string `json:"code,omitempty"`
 	Detail string `json:"detail,omitempty"`

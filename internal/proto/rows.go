@@ -13,30 +13,18 @@ type GoneRow struct {
 	Gone bool `json:"gone"`
 }
 
+// GroupRow is the one kind of group there is: people and AIs, with no
+// repository, branch, forge or check command (contracts/rows.md section 1).
 type GroupRow struct {
 	RowHeader
-	Name           string          `json:"name"`
-	Kind           string          `json:"kind"`
-	Repo           string          `json:"repo,omitempty"`
-	Base           string          `json:"base"`
-	Forge          string          `json:"forge"`
-	Templates      *ForgeTemplates `json:"templates,omitempty"`
-	Home           string          `json:"home"`
-	Secretary      string          `json:"secretary,omitempty"`
-	Checks         []string        `json:"checks"`
-	Pass           int             `json:"pass"`
-	PassFoundation int             `json:"pass_foundation"`
-	Limits         Limits          `json:"limits"`
-	Paused         *GroupPause     `json:"paused"`
-	Created        int64           `json:"created"`
-}
-
-// ForgeTemplates holds the argument lists for custom forge commands.
-type ForgeTemplates struct {
-	Push   []string `json:"push"`
-	Open   []string `json:"open"`
-	Checks []string `json:"checks"`
-	Merge  []string `json:"merge"`
+	Name           string      `json:"name"`
+	Home           string      `json:"home"`
+	Secretary      string      `json:"secretary,omitempty"`
+	Pass           int         `json:"pass"`
+	PassFoundation int         `json:"pass_foundation"`
+	Limits         Limits      `json:"limits"`
+	Paused         *GroupPause `json:"paused"`
+	Created        int64       `json:"created"`
 }
 
 type Limits struct {
@@ -71,12 +59,16 @@ type HumanMemberRow struct {
 	Online bool   `json:"online"`
 }
 
+// AIMemberRow is an AI member. Workspace is the absolute path of the folder
+// on Host that every session of this AI in this group runs in, set when it
+// was added and never changed.
 type AIMemberRow struct {
 	MemberRow
 	CLI       string   `json:"cli"`
 	Tool      string   `json:"tool,omitempty"`
 	Host      string   `json:"host"`
 	HostName  string   `json:"host_name"`
+	Workspace string   `json:"workspace"`
 	Secretary bool     `json:"secretary"`
 	Account   string   `json:"account"`
 	Allow     []string `json:"allow"`

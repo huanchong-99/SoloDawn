@@ -5,10 +5,6 @@
   "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
   "op": "set",
   "name": "Website",
-  "checks": [
-    "go vet ./...",
-    "go test ./..."
-  ],
   "pass": 90,
   "pass_foundation": 70,
   "limits": {

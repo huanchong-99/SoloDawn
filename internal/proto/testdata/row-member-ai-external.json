@@ -11,6 +11,7 @@
   "tool": "ZCode",
   "host": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
   "host_name": "workstation",
+  "workspace": "/home/dev/website",
   "secretary": false,
   "account": "api_key",
   "allow": [],

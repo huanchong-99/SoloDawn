@@ -5,17 +5,15 @@
   "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
   "num": 15,
   "title": "Node: report connection path changes",
-  "slug": "node-report-connection-path-changes",
   "origin": "brief",
   "brief": "KaiCW9JC8UOG7lKNduDo8Q",
   "state": "active",
-  "step": "branch",
+  "step": "work",
   "assignee": "1PC8WineBrUQ-apCjx7tug",
   "reviewer": "LXCZmuGAXkvO-bSrOkuCfw",
   "foundation": false,
   "pass": 90,
   "depends": [],
-  "checks": {},
   "wait": {
     "kind": "confirm",
     "msg": "PyZ8KrQi5QK62OYP-eVWZg",
@@ -30,8 +28,6 @@
     "rounds": 0
   },
   "stats": {
-    "added": 0,
-    "removed": 0,
     "started": 1763600000000,
     "ended": null
   },

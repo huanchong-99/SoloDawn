@@ -5,29 +5,25 @@ import (
 	"testing"
 )
 
-const commit = "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
+// report is the id of the example report message: the submission under review.
+var report = id("report")
 
-// taskExample is task 12 at its review. Its slug and its branch follow from its title.
+// taskExample is task 12 at its review, sent back once and submitted again.
 func taskExample() TaskRow {
-	title := "Show connection path"
 	return TaskRow{
-		RowHeader: RowHeader{"task", taskID, 805}, Group: group, Num: 12, Title: title, Slug: MakeSlug(title),
-		Origin: "brief", Brief: id("brief"), State: "active", Step: "review", Commit: commit,
+		RowHeader: RowHeader{"task", taskID, 805}, Group: group, Num: 12, Title: "Show connection path",
+		Origin: "brief", Brief: id("brief"), State: "active", Step: "review", Report: report,
 		Assignee: agent, Reviewer: reviewer, Pass: 90, Depends: []string{},
-		Branch: "task/12-" + string(MakeSlug(title)), PR: 31, PRURL: "https://git.example/team/website/pull/31",
-		Checks: TaskChecks{&Check{true, ts - 3000, commit}, &Check{true, ts - 2000, commit}},
-		Review: &Review{1, 1, 86, false, reviewer, commit, ts - 1000},
+		Review: &Review{1, 1, 86, false, reviewer, id("earlier report"), ts - 1000},
 		Thread: ThreadSummary{7, 3, &ThreadMessage{agent, "progress", "Added the path indicator.", ts - 500}},
-		Stats:  TaskStats{212, 18, ts - 4000, nil}, Created: ts - 4000,
+		Stats:  TaskStats{ts - 4000, nil}, Created: ts - 4000,
 	}
 }
 
 func TestGroupGoldens(t *testing.T) {
 	ai, human, task := id("agent"), id("member"), id("task")
 	project := GroupRow{
-		RowHeader: RowHeader{"group", group, 1}, Name: "Website", Kind: "project",
-		Repo: "https://git.example/team/website.git", Base: "main", Forge: "github",
-		Home: host, Secretary: id("secretary"), Checks: []string{"go vet ./...", "go test ./..."},
+		RowHeader: RowHeader{"group", group, 1}, Name: "Website", Home: host, Secretary: id("secretary"),
 		Pass: 90, PassFoundation: 70, Limits: Limits{10, 20, 60, 3, 5, 4, 45, 600, 30}, Created: ts - 5000,
 	}
 	golden(t, "row-group", project)
@@ -40,7 +36,7 @@ func TestGroupGoldens(t *testing.T) {
 	})
 	golden(t, "row-member-ai", AIMemberRow{
 		MemberRow: MemberRow{RowHeader{"member", ai, 789}, group, "ai", user, "Codex", ts},
-		CLI:       "codex", Host: host, HostName: "workstation", Account: "personal", Allow: []string{},
+		CLI:       "codex", Host: host, HostName: "workstation", Workspace: workspace, Account: "personal", Allow: []string{},
 		Approvers: []string{user}, State: "working", Task: task, Since: ts - 2000, Path: "local",
 		Usage: Usage{WindowPct: new(62.5), WindowResets: new(ts + 10000), DayCapPct: new(80.0),
 			SpendToday: new(0.0), SpendCap: new(10.5), TurnsToday: new(14)},
@@ -48,7 +44,7 @@ func TestGroupGoldens(t *testing.T) {
 	})
 	golden(t, "row-member-ai-external", AIMemberRow{
 		MemberRow: MemberRow{RowHeader{"member", id("scout"), 812}, group, "ai", user, "Scout", ts},
-		CLI:       "external", Tool: "ZCode", Host: host, HostName: "workstation", Account: "api_key",
+		CLI:       "external", Tool: "ZCode", Host: host, HostName: "workstation", Workspace: workspace, Account: "api_key",
 		Allow: []string{}, Approvers: []string{user}, State: "waiting", Since: ts - 1000000, Path: "local",
 		Usage:   Usage{WindowPct: new(40.0), WindowResets: new(ts + 11200000)},
 		Profile: Profile{Tier: "standard", Skills: "Rust, reviews"},
@@ -63,27 +59,27 @@ func TestGroupGoldens(t *testing.T) {
 	golden(t, "row-task-stuck", stuck)
 	waiting := TaskRow{
 		RowHeader: RowHeader{"task", id("local task"), 817}, Group: group, Num: 13, Title: "Choose a label",
-		Slug: MakeSlug("Choose a label"), Origin: "direct", Plan: "Ask the owner which label the path gets.",
-		State: "active", Step: "branch", Assignee: ai, Foundation: true, Pass: 70,
+		Origin: "direct", Plan: "Ask the owner which label the path gets.",
+		State: "active", Step: "work", Assignee: ai, Foundation: true, Pass: 70,
 		Depends: []string{}, Wait: &TaskWait{Kind: "decision", Msg: id("local decision"), Who: []string{user}, Since: ts},
 		Stats: TaskStats{Started: ts}, Created: ts,
 	}
 	golden(t, "row-task-waiting", waiting)
-	// Paused by hand while it waited for a reviewer: the pause keeps that wait (contracts/task-machine.md section 2).
+	// Paused by the secretary while it waited for a reviewer: the pause keeps that wait
+	// and names who paused (contracts/task-machine.md section 2, row 12).
 	paused := TaskRow{
 		RowHeader: RowHeader{"task", id("paused task"), 818}, Group: group, Num: 14, Title: "Fix: the relay notice!",
-		Slug: MakeSlug("Fix: the relay notice!"), Origin: "takeover", State: "paused", Step: "review", Commit: commit,
-		Assignee: ai, Pass: 90, Depends: []string{}, Branch: "task/14-" + string(MakeSlug("Fix: the relay notice!")),
-		Checks: TaskChecks{Local: &Check{true, ts - 3000, commit}},
-		Wait:   &TaskWait{Kind: "manual", Since: ts, Kept: "reviewer"},
-		Thread: ThreadSummary{Count: 2}, Stats: TaskStats{9, 2, ts - 4000, nil}, Created: ts - 4000,
+		Origin: "direct", State: "paused", Step: "review", Report: id("paused report"),
+		Assignee: ai, Pass: 90, Depends: []string{},
+		Wait:   &TaskWait{Kind: "manual", Since: ts, Kept: "reviewer", By: secretary},
+		Thread: ThreadSummary{Count: 2}, Stats: TaskStats{ts - 4000, nil}, Created: ts - 4000,
 	}
 	golden(t, "row-task-paused", paused)
 	confirmTitle := "Node: report connection path changes"
 	confirmWait := TaskRow{
 		RowHeader: RowHeader{"task", id("confirm task"), 819}, Group: group, Num: 15, Title: confirmTitle,
-		Slug: MakeSlug(confirmTitle), Origin: "brief", Brief: id("brief"),
-		State: "active", Step: "branch", Assignee: ai, Reviewer: reviewer, Pass: 90,
+		Origin: "brief", Brief: id("brief"),
+		State: "active", Step: "work", Assignee: ai, Reviewer: reviewer, Pass: 90,
 		Depends: []string{}, Wait: &TaskWait{Kind: "confirm", Msg: id("confirm"), Who: []string{user}, Since: ts},
 		Stats: TaskStats{Started: ts}, Created: ts,
 	}
@@ -145,21 +141,4 @@ func TestGroupGoldens(t *testing.T) {
 	})
 	golden(t, "cmd-error", ErrorResponse{8, WireError{Code: "conflict", Message: "This card has already been decided."}})
 	golden(t, "cmd-moved", ErrorResponse{8, WireError{Code: "moved", Message: "The group has moved.", Home: host}})
-}
-
-func templateExample() *ForgeTemplates {
-	return &ForgeTemplates{
-		Push:   []string{"git", "push", "origin", "{branch}"},
-		Open:   []string{"forge", "open", "--title={title}", "--body={summary}", "{base}", "{commit}"},
-		Checks: []string{"forge", "checks", "{request}", "{commit}"},
-		Merge:  []string{"forge", "merge", "{request}", "{commit}"},
-	}
-}
-
-func TestStepTwoGroupGoldens(t *testing.T) {
-	row := GroupRow{RowHeader: RowHeader{"group", group, 1}, Name: "Team", Kind: "team", Forge: "none", Home: host, Checks: []string{}, Pass: 90, PassFoundation: 70, Limits: limits, Created: ts}
-	golden(t, "row-group-team", row)
-	row.Name, row.Kind, row.Repo, row.Base, row.Forge, row.Secretary = "Website", "project", "https://git.example/team/website.git", "main", "custom", secretary
-	row.Templates = templateExample()
-	golden(t, "row-group-custom", row)
 }

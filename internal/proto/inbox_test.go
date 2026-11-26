@@ -23,11 +23,10 @@ func TestItemGoldens(t *testing.T) {
 	golden(t, "item-mention", jumped)
 	golden(t, "item-reply", item("reply", 4402).about(taskID, id("reply")))
 	golden(t, "item-assign", item("assign", 4403).about(taskID, id("task")))
-	review := item("review", 4404).about(taskID, "")
-	review.AI, review.Commit = ID(reviewer), commit
+	review := item("review", 4404).about(taskID, report)
+	review.AI = ID(reviewer)
 	golden(t, "item-review", review)
 	golden(t, "item-reviewed", item("reviewed", 4405).about(taskID, id("review")))
-	golden(t, "item-checks", item("checks", 4406).about(taskID, id("checks")))
 	golden(t, "item-resume", item("resume", 4407).about(taskID, ""))
 	golden(t, "item-decided", item("decided", 4408).about(taskID, id("decision")))
 	confirmed := item("confirmed", 4409).about("", id("brief"))
@@ -37,9 +36,6 @@ func TestItemGoldens(t *testing.T) {
 	notice := item("notice", 4410).about(taskID, "")
 	notice.AI, notice.Code, notice.Detail = ID(secretary), "timeout", "Turn deadline reached."
 	golden(t, "item-notice", notice)
-	merge := item("merge", 4411).about(taskID, "")
-	merge.Commit, merge.PR = commit, 31
-	golden(t, "item-merge", merge)
 
 	for _, name := range exampleNames(t) {
 		if after, ok := strings.CutPrefix(name, "item-"); ok {
@@ -53,14 +49,15 @@ func TestItemGoldens(t *testing.T) {
 
 func TestInboxGoldens(t *testing.T) {
 	assign := item("assign", 4403).about(taskID, id("task"))
-	review := item("review", 4404).about(taskID, "")
-	review.AI, review.Commit = ID(reviewer), commit
+	review := item("review", 4404).about(taskID, report)
+	review.AI = ID(reviewer)
 	row := taskExample()
 	message := exampleRow[TaskBody, NoCard](t, messageExample{kind: "task", author: "system"}, TaskBody{taskID}, nil, 790)
 	inbox := Inbox{"inbox", ID(group), []InboxItem{
 		// The assignment that follows a confirmed brief: the plain item, its task message and the task.
 		{assign, wireJSON(t, message), &row},
-		{Item: review, Task: &row},
+		// A review: the report under review beside the task.
+		{review, wireJSON(t, reportRow(t)), &row},
 	}}
 	golden(t, "inbox", inbox)
 	golden(t, "ack", Ack{"ack", ID(group), 4403})

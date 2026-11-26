@@ -12,13 +12,10 @@ package proto
 type ToolLists struct {
 	Secretary ToolList `json:"secretary"`
 	// Group is the group session of a working AI.
-	Group  ToolList `json:"group"`
-	Review ToolList `json:"review"`
-	// TaskLevel1 and TaskLevel23 are a task session at level 1, and at level
-	// 2 or 3.
-	TaskLevel1  ToolList `json:"task_level_1"`
-	TaskLevel23 ToolList `json:"task_level_2_3"`
-	External    ToolList `json:"external"`
+	Group    ToolList `json:"group"`
+	Review   ToolList `json:"review"`
+	Task     ToolList `json:"task"`
+	External ToolList `json:"external"`
 }
 
 // ToolList is the result of tools/list, in the order of the tables of
