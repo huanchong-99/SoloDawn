@@ -840,6 +840,16 @@ class Signalling implements Hub, Session {
   }
 }
 
+type Fake = (options: Options) => Session | undefined;
+let simulated: Fake | undefined;
+
+/** Development only: the demo of web/features/sim answers in place of the signalling paths and
+ *  the nodes, for every session it returns one for. The build has neither this nor the demo. */
+export function simulate(fake: Fake) {
+  if (import.meta.env.DEV) simulated = fake;
+}
+
 /** Opens this tab's signalling paths. Only the tab that holds the device's lock may call it
  *  (tablock.ts), and it closes the session when it loses the lock. */
-export const connect = (options: Options): Session => new Signalling(options);
+export const connect = (options: Options): Session =>
+  (import.meta.env.DEV && simulated?.(options)) || new Signalling(options);

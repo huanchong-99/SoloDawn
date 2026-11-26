@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi, type Moc
 import { FakePC, transportStats } from '../../features/peer-fakes';
 import type { Device } from './identity';
 import type { Link } from './groups.svelte';
-import { connect, type Listener, type Options, type Session } from './peer';
+import { connect, simulate, type Listener, type Options, type Session } from './peer';
 import { goldens } from './mock';
 import type { Ctl, RequestType, Welcome } from './proto';
 
@@ -1518,5 +1518,18 @@ describe('the path', () => {
     await wait(5000);
     expect(onpath).not.toHaveBeenCalled();
     expect(pc.statsAsked).toBe(asked);
+  });
+});
+
+describe('simulate', () => {
+  it('answers in place of the signalling for the sessions the fake returns, and no other', () => {
+    const fake = { close() {} } as Session;
+    simulate((options) => (options.name === 'demo' ? fake : undefined));
+    expect(connect({ urls: [rv], device, known, name: 'demo' })).toBe(fake);
+    expect(clients).toEqual([]);
+    session = connect({ urls: [rv], device, known, name: 'Browser' });
+    expect(session).not.toBe(fake);
+    expect(clients).toHaveLength(1);
+    simulate(() => undefined);
   });
 });
