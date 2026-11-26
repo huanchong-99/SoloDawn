@@ -88,7 +88,7 @@ func (b *m2Browser) connect(loop *home.Loop, homeID string, now int64) error {
 	re := b.re
 	build := func(gs []proto.GroupSummary) any {
 		return proto.Welcome{
-			Type: "welcome", Success: proto.Success{Re: re, OK: true}, V: 1,
+			Type: "welcome", Success: proto.Success{Re: re, OK: true}, V: 3,
 			Device: homeID, Time: now, Addrs: []string{}, Groups: gs, Owner: true,
 		}
 	}
@@ -552,8 +552,8 @@ func (w *m2World) createGroup(name string) error {
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: gid, Timestamp: w.clock.Load(), Group: gid},
 			Op:          "create",
 		},
-		Name: name, Kind: "project", Repo: "https://git.example/solo/web.git",
-		Base: "main", Forge: "none", Checks: []string{}, MemberName: "alex",
+		Name:       name,
+		MemberName: "alex",
 	}
 	if err := w.execOK(w.browserA, cmd); err != nil {
 		return err
@@ -581,7 +581,7 @@ func (w *m2World) hostAddsWorker(aiName, groupName string) error {
 			Op:          "add_ai",
 			ID:          aiID,
 		},
-		CLI: "claude", Name: aiName, Account: "personal", Secretary: false, Approvers: []string{w.cluster.Owner.ID()},
+		CLI: "claude", Name: aiName, Workspace: "/work/" + aiName, Account: "personal", Approvers: []string{w.cluster.Owner.ID()},
 	}
 	raw, err := marshalNoEscape(cmd)
 	if err != nil {

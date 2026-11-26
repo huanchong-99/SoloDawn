@@ -32,7 +32,6 @@ import (
 
 const (
 	s2ScenarioTimeout = 3 * time.Minute
-	s2ForgeProg       = "s2forge"
 	s2PName           = "P"
 	s2QName           = "Q"
 	s2SecretaryName   = "Secretary"
@@ -58,22 +57,8 @@ func init() {
 
 func s2DispatchSubproc() {
 	prog := m5ProgName(os.Args[0])
-	if dir := os.Getenv("SOLODAWN_S2_FORGE_DIR"); dir != "" {
-		s2MaybeExitForgeOrGH(prog, dir, os.Args[1:])
-	}
 	if logPath := os.Getenv("SOLODAWN_S2_CLI_LOG"); logPath != "" {
 		s2MaybeExitFakeCLI(prog, logPath, os.Args[1:])
-	}
-}
-
-func s2MaybeExitForgeOrGH(prog, dir string, args []string) {
-	if prog == s2ForgeProg {
-		os.Exit(s2RunForge(dir, args))
-	}
-	if prog == "gh" {
-		wd, _ := os.Getwd()
-		_ = s2AppendJSONLine(filepath.Join(dir, "gh-calls.jsonl"), s2ForgeCall{Args: args, Dir: wd})
-		os.Exit(1)
 	}
 }
 
@@ -83,70 +68,6 @@ func s2MaybeExitFakeCLI(prog, logPath string, args []string) {
 		return
 	}
 	os.Exit(s2RunFakeCLI(prog, ver, logPath, args))
-}
-
-type s2ForgeCall struct {
-	Args []string `json:"args"`
-	Dir  string   `json:"dir"`
-}
-
-type s2ForgeReply struct {
-	Stdout string `json:"stdout,omitempty"`
-	Stderr string `json:"stderr,omitempty"`
-	Exit   int    `json:"exit,omitempty"`
-}
-
-func s2RunForge(dir string, args []string) int {
-	wd, _ := os.Getwd()
-	if err := s2AppendJSONLine(filepath.Join(dir, "calls.jsonl"), s2ForgeCall{Args: args, Dir: wd}); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	reply, err := s2PopForgeReply(dir, args)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	if err := s2WatchForgeGit(dir, wd, args); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	fmt.Fprint(os.Stdout, reply.Stdout)
-	fmt.Fprint(os.Stderr, reply.Stderr)
-	return reply.Exit
-}
-
-func s2PopForgeReply(dir string, args []string) (s2ForgeReply, error) {
-	path := s2ForgeReplyPath(dir, args)
-	if path == "" {
-		return s2ForgeReply{}, nil
-	}
-	var replies []s2ForgeReply
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		err = json.Unmarshal(raw, &replies)
-	}
-	if err != nil || len(replies) == 0 {
-		return s2ForgeReply{}, err
-	}
-	if len(replies) > 1 {
-		err = os.WriteFile(path, mustMarshalNoEscape(replies[1:]), 0o600)
-	}
-	return replies[0], err
-}
-
-func s2ForgeReplyPath(dir string, args []string) string {
-	if len(args) > 0 {
-		cand := filepath.Join(dir, filepath.Base(args[0])+".json")
-		if _, err := os.Stat(cand); err == nil {
-			return cand
-		}
-	}
-	def := filepath.Join(dir, "default.json")
-	if _, err := os.Stat(def); err == nil {
-		return def
-	}
-	return ""
 }
 
 type s2CLILogEntry struct {
@@ -172,10 +93,6 @@ func s2RunFakeCLI(vendor, version, logPath string, args []string) int {
 	}
 	if vendor == s2QTeamCLI && s2WatchInteractive(args) {
 		return s2RunWatchInteractive()
-	}
-	if err := s2PrepareForgeTurn(vendor); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
 	}
 	obs := newS2CLIObserver(vendor, logPath, args)
 	if s2ScriptExists(vendor) {
@@ -453,10 +370,7 @@ type s2Cast struct {
 	Ctx        context.Context
 	Root       string
 	BinDir     string
-	ForgeDir   string
 	CLILogPath string
-	RepoDir    string
-	BareDir    string
 	RVURL      string
 	P          *s2Person
 	Q          *s2Person
@@ -480,7 +394,6 @@ func startS2Cast(t testing.TB, cleanup func(func()), f fixtures, cfg s2CastConfi
 	c.addUndo(cancel)
 	for _, step := range []func() error{
 		func() error { return c.prepareDirsAndPath(t) },
-		c.prepareGitRepos,
 		func() error { return c.prepareRendezvous(cfg.Rendezvous) },
 		func() error { return c.prepareAndStartNodes(t) },
 		c.connectBrowsersAndRegisterCLIs,
@@ -524,9 +437,8 @@ func (c *s2Cast) prepareDirsAndPath(t testing.TB) error {
 	}
 	c.Root = realRoot
 	c.BinDir = filepath.Join(realRoot, "bin")
-	c.ForgeDir = filepath.Join(realRoot, "forge")
 	c.CLILogPath = filepath.Join(realRoot, "s2-cli.jsonl")
-	if err := errors.Join(os.MkdirAll(c.BinDir, 0o700), os.MkdirAll(c.ForgeDir, 0o700)); err != nil {
+	if err := os.MkdirAll(c.BinDir, 0o700); err != nil {
 		return err
 	}
 	if err := c.linkBinHelpers(); err != nil {
@@ -543,27 +455,12 @@ func (c *s2Cast) linkBinHelpers() error {
 		return err
 	}
 	ext := m5ExeExt()
-	for _, name := range []string{s2ForgeProg, "gh", "claude", "codex"} {
+	for _, name := range []string{"claude", "codex"} {
 		if err := m5CopyExec(exe, filepath.Join(c.BinDir, name+ext)); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func (c *s2Cast) prepareGitRepos() error {
-	c.RepoDir = filepath.Join(c.Root, "src-repo")
-	c.BareDir = filepath.Join(c.Root, "origin.git")
-	if err := initLocalGitRepo(c.RepoDir); err != nil {
-		return err
-	}
-	if err := initBareRepo(c.BareDir, "main"); err != nil {
-		return err
-	}
-	if err := runGitIn(c.RepoDir, "remote", "add", "origin", c.BareDir); err != nil {
-		return err
-	}
-	return runGitIn(c.RepoDir, "push", "-u", "origin", "main")
 }
 
 func (c *s2Cast) prepareRendezvous(sharedURL string) error {
@@ -678,7 +575,6 @@ func (c *s2Cast) buildNodeEnv(n *s2Node) []string {
 		"XDG_CONFIG_HOME="+n.Root,
 		"LocalAppData="+n.Root,
 		"SOLODAWN_S2_NODE="+n.Name,
-		"SOLODAWN_S2_FORGE_DIR="+c.ForgeDir,
 		"SOLODAWN_S2_CLI_LOG="+c.CLILogPath,
 		"SOLODAWN_FAKECLI_LOG="+filepath.Join(n.Root, "fakecli.log"),
 		"SOLODAWN_FAKE_CLAUDE_SCRIPT="+filepath.Join(n.Root, "claude.json"),
@@ -803,7 +699,7 @@ func sendSignedCmdRaw(ctx context.Context, conn *peer.Connection, signer identit
 	})
 }
 
-func (c *s2Cast) CreateProjectGroup(p *s2Person, home *s2Node, name, forge string) (proto.ID, error) {
+func (c *s2Cast) CreateGroup(p *s2Person, home *s2Node, name string) (proto.ID, error) {
 	gid := c.NextID()
 	bc := p.Conns[home.ID()]
 	create := proto.GroupCreate{
@@ -817,16 +713,7 @@ func (c *s2Cast) CreateProjectGroup(p *s2Person, home *s2Node, name, forge strin
 			Op: "create",
 		},
 		Name:       name,
-		Kind:       "project",
-		Repo:       c.BareDir,
-		Base:       "main",
-		Forge:      forge,
-		Checks:     []string{},
 		MemberName: p.Name,
-	}
-	if forge == "custom" {
-		templates := proto.ForgeTemplates(s2FakeConfig(c).Templates)
-		create.Templates = &templates
 	}
 	if _, err := c.SendCmd(p, bc.conn, create); err != nil {
 		return "", err
@@ -892,6 +779,10 @@ func syncS2Group(ctx context.Context, conn *peer.Connection, gid proto.ID) error
 
 func (c *s2Cast) JoinAI(p *s2Person, hostNode, homeNode *s2Node, gid proto.ID, agent, memberName string, secretary bool) (proto.AIMemberRow, error) {
 	hostBC := p.Conns[hostNode.ID()]
+	workspace, err := c.Workspace(hostNode, gid, memberName)
+	if err != nil {
+		return proto.AIMemberRow{}, err
+	}
 	joinCmd := proto.HostJoin{
 		HostCommand: proto.HostCommand{
 			Type:      "host.join",
@@ -904,11 +795,17 @@ func (c *s2Cast) JoinAI(p *s2Person, hostNode, homeNode *s2Node, gid proto.ID, a
 		Agent:     agent,
 		Name:      memberName,
 		Secretary: secretary,
+		Workspace: workspace,
 	}
 	if _, err := c.SendCmd(p, hostBC.conn, joinCmd); err != nil {
 		return proto.AIMemberRow{}, err
 	}
 	return c.waitAIMember(p.Conns[homeNode.ID()], gid, hostNode.ID(), agent, memberName)
+}
+
+// Workspace makes the folder an AI of the cast works in: its own, on its node and in its group.
+func (c *s2Cast) Workspace(n *s2Node, gid proto.ID, ai string) (string, error) {
+	return aiWorkspace(n.Root, gid, ai)
 }
 
 func (c *s2Cast) waitAIMember(homeBC *peerBrowserConn, gid proto.ID, wantHost, wantCLI, wantName string) (proto.AIMemberRow, error) {
@@ -974,18 +871,6 @@ func (c *s2Cast) CLILogs() ([]s2CLILogEntry, error) {
 	return s2ReadJSONLines[s2CLILogEntry](c.CLILogPath)
 }
 
-func (c *s2Cast) SetForgeReplies(op string, replies ...s2ForgeReply) error {
-	return os.WriteFile(filepath.Join(c.ForgeDir, op+".json"), mustMarshalNoEscape(replies), 0o600)
-}
-
-func (c *s2Cast) ForgeCalls() ([]s2ForgeCall, error) {
-	return s2ReadJSONLines[s2ForgeCall](filepath.Join(c.ForgeDir, "calls.jsonl"))
-}
-
-func (c *s2Cast) GHCalls() ([]s2ForgeCall, error) {
-	return s2ReadJSONLines[s2ForgeCall](filepath.Join(c.ForgeDir, "gh-calls.jsonl"))
-}
-
 func TestS2Cast(t *testing.T) {
 	stopTimer := armDeadlineCleanups(t)
 	defer stopTimer()
@@ -996,7 +881,6 @@ func TestS2Cast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startS2Cast: %v", err)
 	}
-	verifyS2PathAndForge(t, cast)
 	verifyS2NodesAndAccounts(t, cast)
 	verifyS2SecondBrowser(t, cast)
 	verifyS2PGroupAndCrossNodeAI(t, cast)
@@ -1010,57 +894,7 @@ func buildS2TestFixtures(t *testing.T) fixtures {
 	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/solodawn").CombinedOutput(); err != nil {
 		t.Fatalf("go build solodawn: %v\n%s", err, out)
 	}
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	return fixtures{t: t, bin: bin, stamped: map[string]string{}}
-}
-
-func verifyS2PathAndForge(t *testing.T, cast *s2Cast) {
-	t.Helper()
-	resolved, err := exec.LookPath(s2ForgeProg)
-	if err != nil || filepath.Dir(resolved) != cast.BinDir {
-		t.Fatalf("LookPath(%s) = %q, %v; want dir %q", s2ForgeProg, resolved, err, cast.BinDir)
-	}
-	if err := cast.SetForgeReplies("checks", s2ForgeReply{Exit: 8}, s2ForgeReply{Stdout: "green\n", Exit: 0}); err != nil {
-		t.Fatal(err)
-	}
-	verifyS2ForgeExec(t, cast, resolved)
-}
-
-func verifyS2ForgeExec(t *testing.T, cast *s2Cast, resolved string) {
-	t.Helper()
-	special := `feat: a "b"; $(touch ` + filepath.Join(cast.Root, "marker") + `)`
-	code1, out1 := runS2ForgeCmd(cast, resolved, "checks", "--title="+special)
-	code2, out2 := runS2ForgeCmd(cast, resolved, "checks", "second")
-	if code1 != 8 || code2 != 0 || out1 != "" || out2 != "green\n" {
-		t.Fatalf("forge replies = (%d, %q), (%d, %q)", code1, out1, code2, out2)
-	}
-	if _, err := os.Stat(filepath.Join(cast.Root, "marker")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("marker file must not exist, stat err = %v", err)
-	}
-	assertS2ForgeRecorded(t, cast, special)
-}
-
-func runS2ForgeCmd(cast *s2Cast, prog string, args ...string) (int, string) {
-	cmd := exec.Command(prog, args...)
-	cmd.Dir = cast.RepoDir
-	cmd.Env = append(os.Environ(), "SOLODAWN_S2_FORGE_DIR="+cast.ForgeDir)
-	out, _ := cmd.CombinedOutput()
-	return cmd.ProcessState.ExitCode(), string(out)
-}
-
-func assertS2ForgeRecorded(t *testing.T, cast *s2Cast, wantTitle string) {
-	t.Helper()
-	calls, err := cast.ForgeCalls()
-	if err != nil || len(calls) != 2 {
-		t.Fatalf("ForgeCalls = %+v, %v", calls, err)
-	}
-	if !slices.Equal(calls[0].Args, []string{"checks", "--title=" + wantTitle}) {
-		t.Fatalf("calls[0].Args = %q", calls[0].Args)
-	}
-	if ghCalls, err := cast.GHCalls(); err != nil || len(ghCalls) != 0 {
-		t.Fatalf("GHCalls = %+v, %v", ghCalls, err)
-	}
 }
 
 func verifyS2NodesAndAccounts(t *testing.T, cast *s2Cast) {
@@ -1121,9 +955,9 @@ func tryS2OwnerWelcome(cast *s2Cast, b *peerBrowser, nodeID string) (bool, error
 
 func verifyS2PGroupAndCrossNodeAI(t *testing.T, cast *s2Cast) {
 	t.Helper()
-	gid, err := cast.CreateProjectGroup(cast.P, cast.P1, "Alpha", "none")
+	gid, err := cast.CreateGroup(cast.P, cast.P1, "Alpha")
 	if err != nil {
-		t.Fatalf("CreateProjectGroup P1: %v", err)
+		t.Fatalf("CreateGroup P1: %v", err)
 	}
 	if _, err := cast.JoinAI(cast.P, cast.P1, cast.P1, gid, s2SecretaryCLI, s2SecretaryName, true); err != nil {
 		t.Fatalf("JoinAI Secretary on P1: %v", err)
@@ -1137,9 +971,9 @@ func verifyS2PGroupAndCrossNodeAI(t *testing.T, cast *s2Cast) {
 
 func verifyS2QAIsAndCLILogs(t *testing.T, cast *s2Cast) {
 	t.Helper()
-	gid, err := cast.CreateProjectGroup(cast.Q, cast.Q1, "Q-Smoke", "none")
+	gid, err := cast.CreateGroup(cast.Q, cast.Q1, "Q-Smoke")
 	if err != nil {
-		t.Fatalf("CreateProjectGroup Q1: %v", err)
+		t.Fatalf("CreateGroup Q1: %v", err)
 	}
 	qTeam, err := cast.JoinAI(cast.Q, cast.Q1, cast.Q1, gid, s2QTeamCLI, s2QTeamName, false)
 	if err != nil {

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -235,7 +234,7 @@ func (w *s2PeopleWorld) initCastGroup(ctx context.Context, name string) error {
 	w.cast = cast
 	w.pView = newS2BrowserView()
 	w.qView = newS2BrowserView()
-	gid, err := cast.CreateProjectGroup(cast.P, cast.P1, name, "none")
+	gid, err := cast.CreateGroup(cast.P, cast.P1, name)
 	if err != nil {
 		return err
 	}
@@ -398,7 +397,7 @@ func openS2PeopleCtl(ctx context.Context, cleanup func(func()), b *peerBrowser, 
 
 func verifyJoiningWelcome(ctx context.Context, conn *peer.Connection) error {
 	raw, err := requestWait(ctx, conn, nil, func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 2, Kind: "browser", Name: "Joiner", Addrs: []string{}}
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 3, Kind: "browser", Name: "Joiner", Addrs: []string{}}
 	})
 	if err != nil {
 		return err
@@ -407,8 +406,8 @@ func verifyJoiningWelcome(ctx context.Context, conn *peer.Connection) error {
 	if err := proto.Decode(raw, &welc); err != nil {
 		return err
 	}
-	if welc.V != 2 || welc.Owner || len(welc.Groups) != 0 {
-		return fmt.Errorf("joining welcome = %+v, want v=2, owner=false and empty groups", welc)
+	if welc.V != 3 || welc.Owner || len(welc.Groups) != 0 {
+		return fmt.Errorf("joining welcome = %+v, want v=3, owner=false and empty groups", welc)
 	}
 	return nil
 }
@@ -559,8 +558,8 @@ func (w *s2PeopleWorld) createControllableGroup(groupName string) error {
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: gid, Timestamp: ch.nowTime().UnixMilli(), Group: gid},
 			Op:          "create",
 		},
-		Name: groupName, Kind: "project", Repo: "https://git.example/alpha.git",
-		Base: "main", Forge: "none", Checks: []string{}, MemberName: "P",
+		Name:       groupName,
+		MemberName: "P",
 	})
 	if err != nil {
 		return err
@@ -1160,7 +1159,7 @@ func (w *s2PeopleWorld) givenCastWithSecretaryAndQ(ctx context.Context, groupNam
 	if err != nil {
 		return err
 	}
-	w.otherGID, err = w.cast.CreateProjectGroup(w.cast.P, w.cast.P1, soloName, "none")
+	w.otherGID, err = w.cast.CreateGroup(w.cast.P, w.cast.P1, soloName)
 	if err != nil {
 		return err
 	}
@@ -1180,17 +1179,9 @@ func (w *s2PeopleWorld) verifyQTeamRowAndClone() error {
 	if w.qTeam.Host != w.cast.Q1.ID() || w.qTeam.User != w.cast.Q.ID() {
 		return fmt.Errorf("Q-team row = %+v, want host=%s user=%s", w.qTeam, w.cast.Q1.ID(), w.cast.Q.ID())
 	}
-	repo := filepath.Join(w.cast.Q1.Data, "projects", string(w.gid), "repo")
-	head, err := m5GitOut(repo, "rev-parse", "HEAD")
-	if err != nil {
-		return err
-	}
-	want, err := m5GitOut(w.cast.BareDir, "rev-parse", "HEAD")
-	if err != nil {
-		return err
-	}
-	if head != want {
-		return fmt.Errorf("Q1 clone HEAD = %s, want %s", head, want)
+	want, err := w.cast.Workspace(w.cast.Q1, w.gid, s2QTeamName)
+	if err != nil || w.qTeam.Workspace != want {
+		return fmt.Errorf("Q-team workspace = %q, want %q (%v)", w.qTeam.Workspace, want, err)
 	}
 	return nil
 }
@@ -1200,7 +1191,7 @@ func (w *s2PeopleWorld) verifyNonMemberHostAddAIRefused(wantCode string) error {
 		HostCommand: proto.HostCommand{
 			Type: "host.join", Nonce: w.cast.NextID(), Timestamp: time.Now().UnixMilli(), To: w.cast.Q1.ID(),
 		},
-		Group: w.otherGID, Home: w.cast.P1.ID(), Agent: s2QPersonalCLI, Name: s2QPersonalName,
+		Group: w.otherGID, Home: w.cast.P1.ID(), Agent: s2QPersonalCLI, Name: s2QPersonalName, Workspace: w.cast.Q1.Root,
 	}, wantCode)
 }
 
@@ -1210,7 +1201,7 @@ func (w *s2PeopleWorld) verifyQSecretaryJoinRefused(wantCode string) error {
 		HostCommand: proto.HostCommand{
 			Type: "host.join", Nonce: w.cast.NextID(), Timestamp: time.Now().UnixMilli(), To: w.cast.Q1.ID(),
 		},
-		Group: w.gid, Home: w.cast.P1.ID(), Agent: s2QPersonalCLI, Name: s2QPersonalName, Secretary: true,
+		Group: w.gid, Home: w.cast.P1.ID(), Agent: s2QPersonalCLI, Name: s2QPersonalName, Secretary: true, Workspace: w.cast.Q1.Root,
 	}, wantCode)
 }
 
@@ -1218,7 +1209,7 @@ func (w *s2PeopleWorld) givenSurfaceCast(ctx context.Context, sharedName, soloNa
 	if err := w.initCastGroup(ctx, sharedName); err != nil {
 		return err
 	}
-	solo, err := w.cast.CreateProjectGroup(w.cast.P, w.cast.P1, soloName, "none")
+	solo, err := w.cast.CreateGroup(w.cast.P, w.cast.P1, soloName)
 	if err != nil {
 		return err
 	}
@@ -1288,7 +1279,7 @@ func (w *s2PeopleWorld) verifyQ1SurfaceForP() error {
 }
 
 func (w *s2PeopleWorld) invitePIntoQ1Group() (*peerBrowserConn, error) {
-	qGroup, err := w.cast.CreateProjectGroup(w.cast.Q, w.cast.Q1, "Q-Shared", "none")
+	qGroup, err := w.cast.CreateGroup(w.cast.Q, w.cast.Q1, "Q-Shared")
 	if err != nil {
 		return nil, err
 	}

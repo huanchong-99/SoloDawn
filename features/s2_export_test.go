@@ -66,7 +66,7 @@ func (w *s2ExportWorld) group(name string) error {
 		return err
 	}
 	w.c = c
-	w.g, err = c.CreateProjectGroup(c.P, c.P1, name, "none")
+	w.g, err = c.CreateGroup(c.P, c.P1, name)
 	if err != nil {
 		return err
 	}
@@ -106,7 +106,7 @@ func (w *s2ExportWorld) dialQ(home string) (*peerBrowserConn, error) {
 		return nil, err
 	}
 	raw, err := bc.request(c.Ctx, func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 2, Kind: "browser", Name: q.Name, Addrs: []string{}}
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 3, Kind: "browser", Name: q.Name, Addrs: []string{}}
 	})
 	if err != nil {
 		return nil, err

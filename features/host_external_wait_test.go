@@ -55,9 +55,7 @@ func hostExternalWaitSteps(sc *godog.ScenarioContext, f fixtures) {
 		return runExtBubble(f.t, w.runTools)
 	})
 	sc.Step(`^it was listed the tools of "external" in tools.json and "approve"$`, w.expectTools)
-	sc.Step(`^"run_checks" and "submit_review" failed with "conflict" with no run open$`, func() error {
-		return w.expectAnswers(0, "conflict: run_checks needs a task run", "conflict: submit_review needs a review run")
-	})
+	sc.Step(`^"run_checks" and "submit_review" failed with "conflict" with no run open$`, rewritten("AC-2", "run_checks is removed: the external tools are submit_task by report and submit_review (MODEL-1126 plan 1.8, A10.21)"))
 	sc.Step(`^"next_item" answered {"none":true}, then after a mention run 1, and "done" ended that run$`, func() error {
 		return w.expectAnswers(2, `{"none":true}`, `"run":1`, `{"ok":true}`)
 	})
@@ -173,7 +171,7 @@ func (w *extWaitWorld) runTools(b *extBubble) error {
 	for _, tool := range listed.Tools {
 		w.tools = append(w.tools, tool.Name)
 	}
-	w.call(cs, "run_checks", nil)
+	w.call(cs, "submit_task", map[string]any{"summary": "Done."})
 	w.call(cs, "submit_review", map[string]any{"score": 5, "items": []any{}})
 	w.call(cs, "next_item", nil)
 	b.mention(1)

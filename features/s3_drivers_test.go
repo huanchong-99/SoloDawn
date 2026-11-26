@@ -125,7 +125,7 @@ func (w *s3DriverWorld) tools() error {
 		{host.GroupSession, true, "", lists.Secretary.Tools},
 		{host.GroupSession, false, "", lists.Group.Tools},
 		{host.ReviewSession, false, "review", lists.Review.Tools},
-		{host.TaskSession, false, "task", lists.TaskLevel23.Tools},
+		{host.TaskSession, false, "task", lists.Task.Tools},
 	} {
 		got, err := m.listSessionTools("tools", fmt.Sprint(spec.kind, spec.sec), spec.task, w.agent, spec.kind, spec.sec)
 		if err != nil {

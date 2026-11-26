@@ -62,6 +62,7 @@ func (d homeHostEvDisk) Thread(*string, int64, int) []proto.MsgRow { return nil 
 func (d homeHostEvDisk) Pending() []proto.MsgRow                   { return nil }
 func (d homeHostEvDisk) Queued() []store.Item                      { return nil }
 func (d homeHostEvDisk) OtherMember(string) bool                   { return false }
+func (d homeHostEvDisk) DeviceLog(string) []proto.Envelope         { return nil }
 
 type homeHostEvReceipts map[string]store.Outcome
 
@@ -160,7 +161,7 @@ func (w *homeHostEvWorld) setup(secMode string) error {
 		secID = ""
 	}
 	w.state.Group = proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: group}, Home: node.ID(), Secretary: secID, Forge: "none", Checks: []string{},
+		RowHeader: proto.RowHeader{Type: "group", ID: group}, Home: node.ID(), Secretary: secID,
 	}
 	owner := w.members["owner"]
 	w.state.People[owner] = proto.HumanMemberRow{
@@ -169,19 +170,19 @@ func (w *homeHostEvWorld) setup(secMode string) error {
 	}
 	w.state.AIs[w.members["secretary"]] = proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members["secretary"]}, Group: group, Kind: "ai", User: browser.ID(), Name: "secretary"},
-		Host:      laptop.ID(), Allow: []string{}, Approvers: []string{}, State: "dormant", Since: w.now.UnixMilli() - 10000, Path: "direct",
+		Host:      laptop.ID(), Workspace: "/work/secretary", Allow: []string{}, Approvers: []string{}, State: "dormant", Since: w.now.UnixMilli() - 10000, Path: "direct",
 	}
 	w.state.AIs[w.members["codex"]] = proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members["codex"]}, Group: group, Kind: "ai", User: browser.ID(), Name: "codex"},
-		Host:      laptop.ID(), Allow: []string{}, Approvers: []string{}, State: "dormant", Since: w.now.UnixMilli() - 10000, Path: "direct",
+		Host:      laptop.ID(), Workspace: "/work/codex", Allow: []string{}, Approvers: []string{}, State: "dormant", Since: w.now.UnixMilli() - 10000, Path: "direct",
 	}
 	w.state.AIs[w.members["claude"]] = proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members["claude"]}, Group: group, Kind: "ai", User: browser.ID(), Name: "claude"},
-		Host:      node.ID(), Allow: []string{}, Approvers: []string{}, State: "working", Task: w.taskID, Since: w.now.UnixMilli() - 5000, Path: "local",
+		Host:      node.ID(), Workspace: "/work/claude", Allow: []string{}, Approvers: []string{}, State: "working", Task: w.taskID, Since: w.now.UnixMilli() - 5000, Path: "local",
 	}
 	w.state.Tasks[w.taskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.taskID}, Group: group, Num: 1,
-		Title: "Handle host events", Slug: "handle-host-events", Origin: "brief",
+		Title: "Handle host events", Origin: "brief",
 		State: "active", Step: "local_check", Assignee: w.members["codex"], Reviewer: w.members["claude"], Depends: []string{},
 	}
 	w.state.Seq = 10

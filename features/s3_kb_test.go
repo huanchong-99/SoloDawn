@@ -54,7 +54,6 @@ type s3KBWorld struct {
 	clock      atomic.Int64
 	today      time.Time
 	root       string
-	repoSrc    string
 	cluster    *nodetest.Cluster
 	browser2   identity.Key
 	b1         homeFrameClient
@@ -118,10 +117,6 @@ func (w *s3KBWorld) bootNode(withSecondBrowser bool) error {
 		return err
 	}
 	w.root = root
-	w.repoSrc = filepath.Join(w.root, "src")
-	if err := initLocalGitRepo(w.repoSrc); err != nil {
-		return err
-	}
 	var extras []identity.Key
 	if withSecondBrowser {
 		w.browser2 = exampleKey("s3kb second browser")
@@ -185,8 +180,8 @@ func (w *s3KBWorld) createGroupAndAI(groupName, aiName string, syncSecond bool) 
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: gid, Timestamp: w.clock.Load(), Group: gid},
 			Op:          "create",
 		},
-		Name: groupName, Kind: "project", Repo: w.repoSrc, Base: "main", Forge: "none",
-		MemberName: "Owner", Checks: []string{},
+		Name:       groupName,
+		MemberName: "Owner",
 	}
 	if err := w.sendCmd(create); err != nil {
 		return err
@@ -204,12 +199,18 @@ func (w *s3KBWorld) createGroupAndAI(groupName, aiName string, syncSecond bool) 
 
 func (w *s3KBWorld) joinAI(groupName, aiName string) error {
 	n := w.cluster.Nodes[0]
+	gid := proto.ID(w.groups[groupName])
+	workspace, err := aiWorkspace(w.cluster.Root, gid, aiName)
+	if err != nil {
+		return err
+	}
 	joinRaw, err := marshalNoEscape(proto.HostJoin{
 		HostCommand: proto.HostCommand{Type: "host.join", Nonce: w.ids.next(), Timestamp: w.clock.Load(), To: n.Key.ID()},
-		Group:       proto.ID(w.groups[groupName]),
+		Group:       gid,
 		Home:        n.Key.ID(),
 		Agent:       "claude",
 		Name:        aiName,
+		Workspace:   workspace,
 	})
 	if err != nil {
 		return err

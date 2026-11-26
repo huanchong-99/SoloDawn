@@ -229,8 +229,8 @@ func (w *approveAccWorld) clock() time.Time {
 func (w *approveAccWorld) seedGroupRows(target *host.Host, waitS int, secretary bool) {
 	grp := proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: w.groupID, Seq: 1},
-		Name:      "Website", Kind: "project", Base: "main", Forge: "none",
-		Home: w.homeDev.ID(), Checks: []string{}, Limits: proto.Limits{ApprovalWaitS: waitS},
+		Name:      "Website",
+		Home:      w.homeDev.ID(), Limits: proto.Limits{ApprovalWaitS: waitS},
 	}
 	hum := proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.humanID, Seq: 2}, Group: w.groupID, Kind: "human", User: w.owner1.ID(), Name: "Owner"},

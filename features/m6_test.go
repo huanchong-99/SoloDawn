@@ -55,7 +55,6 @@ type m6World struct {
 	cleanup     func(func())
 	ctx         context.Context
 	root        string
-	repoDir     string
 	rvURL       string
 	ownerKey    identity.Key
 	browser     *peerBrowser
@@ -153,7 +152,7 @@ func (w *m6World) setupNodesAndGroup(twoNodes bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	w.ctx = ctx
 	w.cleanup(cancel)
-	if err := w.prepareRootAndRepo(); err != nil {
+	if err := w.prepareRoot(); err != nil {
 		return err
 	}
 	rvURL, err := startAcceptanceRelayRV(w.cleanup)
@@ -170,7 +169,7 @@ func (w *m6World) setupNodesAndGroup(twoNodes bool) error {
 	return w.createAndSyncGroup()
 }
 
-func (w *m6World) prepareRootAndRepo() error {
+func (w *m6World) prepareRoot() error {
 	rawRoot, err := shortTempRoot(w.f.t, w.cleanup, "sdm6")
 	if err != nil {
 		return err
@@ -180,8 +179,7 @@ func (w *m6World) prepareRootAndRepo() error {
 		return err
 	}
 	w.root = realRoot
-	w.repoDir = filepath.Join(realRoot, "repo")
-	return initLocalGitRepo(w.repoDir)
+	return nil
 }
 
 func (w *m6World) prepareAndStartNodes(twoNodes bool) error {
@@ -345,8 +343,8 @@ func (w *m6World) createAndSyncGroup() error {
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: w.groupID, Timestamp: time.Now().UnixMilli(), Group: w.groupID},
 			Op:          "create",
 		},
-		Name: m6GroupName, Kind: "project", Repo: w.repoDir, Base: "main",
-		Forge: "none", Checks: []string{}, MemberName: m6OwnerName,
+		Name:       m6GroupName,
+		MemberName: m6OwnerName,
 	}
 	if err := w.sendSignedCmd(w.homeLink.conn, w.ownerKey, create); err != nil {
 		return err
@@ -445,9 +443,13 @@ func (w *m6World) joinAIOnNode(np *m6NodeProc, link *peerBrowserConn, agent, mem
 	if err := w.sendSignedCmd(link.conn, w.ownerKey, setCmd); err != nil {
 		return err
 	}
+	workspace, err := aiWorkspace(w.root, w.groupID, memberName)
+	if err != nil {
+		return err
+	}
 	joinCmd := proto.HostJoin{
 		HostCommand: proto.HostCommand{Type: "host.join", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), To: np.key.ID()},
-		Group:       w.groupID, Home: w.homeNode.key.ID(), Agent: agent, Name: memberName, Secretary: false,
+		Group:       w.groupID, Home: w.homeNode.key.ID(), Agent: agent, Name: memberName, Workspace: workspace,
 	}
 	if err := w.sendSignedCmd(link.conn, w.ownerKey, joinCmd); err != nil {
 		return err

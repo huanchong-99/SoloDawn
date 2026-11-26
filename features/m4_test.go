@@ -125,7 +125,6 @@ type m4World struct {
 	cleanup       func(func())
 	tb            scenarioTB
 	root          string
-	repoDir       string
 	cluster       *nodetest.Cluster
 	activeHost    *host.Host
 	activeLink    *node.LocalLink
@@ -283,10 +282,6 @@ func (w *m4World) startNode() error {
 		return err
 	}
 	w.root = root
-	w.repoDir = filepath.Join(root, "src")
-	if err := initLocalGitRepo(w.repoDir); err != nil {
-		return err
-	}
 	w.browser2Key = newRandomPeerKey()
 	w.cluster = nodetest.Start(w.tb, nodetest.Config{
 		Root:          w.root,
@@ -319,8 +314,8 @@ func (w *m4World) createGroupAndSync() error {
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: w.groupID, Timestamp: time.Now().UnixMilli(), Group: w.groupID},
 			Op:          "create",
 		},
-		Name: m4GroupName, Kind: "project", Repo: w.repoDir, Base: "main",
-		Forge: "none", MemberName: "Owner", Checks: []string{},
+		Name:       m4GroupName,
+		MemberName: "Owner",
 	}
 	if err := w.sendOK(w.b1, create); err != nil {
 		return err
@@ -369,7 +364,11 @@ func m4HostWaitLimit(h *host.Host, gid string) (int, error) {
 
 func (w *m4World) joinAI(aiName, agent string) error {
 	n := w.node()
-	if err := configureHostAI(w.activeHost, w.activeLink, &w.ids, w.cluster.Owner.ID(), n.Key.ID(), w.groupID, aiName, agent); err != nil {
+	workspace, err := aiWorkspace(w.root, w.groupID, aiName)
+	if err != nil {
+		return err
+	}
+	if err := configureHostAI(w.activeHost, w.activeLink, &w.ids, w.cluster.Owner.ID(), n.Key.ID(), w.groupID, aiName, agent, workspace); err != nil {
 		return err
 	}
 	return w.awaitAISynced(aiName)

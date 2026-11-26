@@ -97,7 +97,12 @@ func (s *extScenario) joinExternal(p proto.HostJoin, group string) error {
 	w := &s.join
 	p.HostCommand = proto.HostCommand{Type: "host.join", Nonce: w.nextNonce(), Timestamp: time.Now().UnixMilli(), To: w.h.Key.ID()}
 	p.Group, p.Home, p.Agent = joinGroupIDs[group], w.remoteDevice, "external"
-	_, err := host.Surface["host.join"](context.Background(), w.h, nil, "owner-browser", json.RawMessage(accJSON(p)))
+	workspace, err := aiWorkspace(w.root, p.Group, p.Name)
+	if err != nil {
+		return err
+	}
+	p.Workspace = workspace
+	_, err = host.Surface["host.join"](context.Background(), w.h, nil, "owner-browser", json.RawMessage(accJSON(p)))
 	return err
 }
 
@@ -177,7 +182,7 @@ func runExtBubble(suiteT *testing.T, run func(*extBubble) error) error {
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: hlAI1, Seq: 2}, Group: hlGroup, Kind: "ai", User: "u", Name: "Scout"},
 			CLI:       "external", Host: hostKey.ID(), HostName: "host", Account: "team", Allow: []string{}, Approvers: []string{}, State: "offline", Path: "local",
 		})))
-		h.Sessions.Create(host.Session{SessionKey: host.SessionKey{Group: hlGroup, Member: hlAI1}, Kind: host.GroupSession, Folder: "repo", Agent: "external", Home: homeKey.ID(), Name: "Scout"})
+		h.Sessions.Create(host.Session{SessionKey: host.SessionKey{Group: hlGroup, Member: hlAI1}, Kind: host.GroupSession, Folder: handFolder, Agent: "external", Home: homeKey.ID(), Name: "Scout"})
 		h.Attach(homeKey.ID(), home)
 		synctest.Wait()
 		leave := h.ExternalPresent(hlGroup, hlAI1)

@@ -224,8 +224,8 @@ func (w *s3PresetWorld) foundGroupMembers() error {
 		{w.claudeID, "claude", "Claude Code", false},
 		{w.codexID, "codex", "Codex", false},
 	} {
-		add := fmt.Sprintf(`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"add_ai","id":%q,"cli":%q,"name":%q,"account":"personal","secretary":%v,"approvers":[%q]}`,
-			w.nextID("mem"), w.now.UnixMilli(), w.group, spec.id, spec.cli, spec.name, spec.sec, w.browser.ID())
+		add := fmt.Sprintf(`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"add_ai","id":%q,"cli":%q,"name":%q,"workspace":%q,"account":"personal","secretary":%v,"approvers":[%q]}`,
+			w.nextID("mem"), w.now.UnixMilli(), w.group, spec.id, spec.cli, spec.name, "/work/"+spec.name, spec.sec, w.browser.ID())
 		if err := w.cmdOK(w.hostConn, w.node, add); err != nil {
 			return err
 		}
@@ -478,7 +478,7 @@ func (w *s3PresetWorld) checkTwoTaskTurns(preset string) error {
 			Name:       "Reviewer",
 		}
 		revRaw, _ := json.Marshal(proto.InboxItem{
-			Item: proto.Item{Item: 2, AI: proto.ID(t.Reviewer), Why: "review", Task: proto.ID(t.ID), Commit: "abc1234"},
+			Item: proto.Item{Item: 2, AI: proto.ID(t.Reviewer), Why: "review", Task: proto.ID(t.ID), Msg: proto.ID(w.nextID("report"))},
 		})
 		revText, _, err := host.Compose(w.h, revSess, host.ItemsTurn, []json.RawMessage{revRaw})
 		if err != nil {

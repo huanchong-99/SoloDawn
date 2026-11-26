@@ -23,7 +23,7 @@ func init() {
 		sc.Step(`^the profile assignee has called the secretary in the task thread$`, w.callSecretary)
 		sc.Step(`^the profile secretary answers the call$`, w.answerCall)
 		sc.Step(`^the profile task (fails|passes) review on "([^"]*)"$`, w.review)
-		sc.Step(`^the profile task (fails|passes) hosted checks on "([^"]*)"$`, w.checkCloud)
+		sc.Step(`^the profile task (fails|passes) hosted checks on "([^"]*)"$`, rewritten("AC-3", "hosted checks are removed: the halves of A10.11 and A10.12 on two failed hosted checks go (MODEL-1126 plan 3.2)"))
 		sc.Step(`^the profile task is stuck on "([^"]*)" at (\d+) with ask (true|false)$`, w.stuck)
 		sc.Step(`^the profile task has no stuck counter$`, w.notStuck)
 		sc.Step(`^the profile home refuses submission of "([^"]*)" until the assignee asks$`, w.refuseSubmit)
@@ -46,11 +46,11 @@ func (w *homeProfileWorld) command(op string) proto.MemberCommand {
 }
 
 func (w *homeProfileWorld) join() error {
-	if err := w.setup("none"); err != nil {
+	if err := w.setup(); err != nil {
 		return err
 	}
 	w.ai = exampleID("profile new AI")
-	p := proto.MemberAddAI{MemberCommand: w.command("add_ai"), CLI: "claude", Name: "Opus", Account: "personal", Approvers: []string{}}
+	p := proto.MemberAddAI{MemberCommand: w.command("add_ai"), CLI: "claude", Name: "Opus", Workspace: "/work/Opus", Account: "personal", Approvers: []string{}}
 	if err := w.apply(w.hosts["assignee"], p); err != nil {
 		return err
 	}
@@ -85,8 +85,8 @@ func (w *homeProfileWorld) invalidTier(tier string) error {
 	return w.set(w.ownerKey, proto.ProfileSet{Tier: &tier}, "bad_request")
 }
 
-func (w *homeProfileWorld) taskWithSecretary(forge, tier string) error {
-	if err := w.setup(forge); err != nil {
+func (w *homeProfileWorld) taskWithSecretary(_, tier string) error {
+	if err := w.setup(); err != nil {
 		return err
 	}
 	w.state.Group.Limits.AskDepth = 4
@@ -120,15 +120,8 @@ func (w *homeProfileWorld) answerCall() error {
 	return w.checkAnswer("")
 }
 
-func (w *homeProfileWorld) reachCloud(commit string) error {
-	if err := w.reachReview(commit); err != nil {
-		return err
-	}
-	return w.checkAnswer("")
-}
-
 func (w *homeProfileWorld) review(verdict, commit string) error {
-	if err := w.reachProfileReview(commit); err != nil {
+	if err := w.reachReview(commit); err != nil {
 		return err
 	}
 	round := 1
@@ -143,29 +136,6 @@ func (w *homeProfileWorld) review(verdict, commit string) error {
 		return err
 	}
 	return w.checkReviewAnswer(fmt.Sprint(verdict == "passes"), round)
-}
-
-func (w *homeProfileWorld) reachProfileReview(commit string) error {
-	if err := w.reachCloud(commit); err != nil {
-		return err
-	}
-	if w.state.Group.Forge == "none" {
-		return nil
-	}
-	if err := w.cloudChecks("passing", commit); err != nil {
-		return err
-	}
-	return w.checkAnswer("")
-}
-
-func (w *homeProfileWorld) checkCloud(verdict, commit string) error {
-	if err := w.reachCloud(commit); err != nil {
-		return err
-	}
-	if err := w.cloudChecks(map[string]string{"fails": "failing", "passes": "passing"}[verdict], commit); err != nil {
-		return err
-	}
-	return w.checkAnswer("")
 }
 
 func (w *homeProfileWorld) stuck(kind string, n int, ask string) error {

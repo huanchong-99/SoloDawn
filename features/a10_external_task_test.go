@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,15 +22,18 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// externalNoMerge is what the steps that MODEL-1126 took away say when they fail.
+const externalNoMerge = "a task runs in its assignee's workspace and is done when its review passes: no worktree, branch, checks or merge (MODEL-1126 plan 1.5, 1.6, A10.22)"
+
 const externalCriteria = "External criteria"
 
 func externalTaskSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^the external home rejects a non-owner tool edit$`, w.nonOwnerEdit)
 	sc.Step(`^a project with external X and forge "([^"]+)"$`, w.setupForge)
-	sc.Step(`^the external brief runs with X as "([^"]+)"$`, w.runBrief)
+	sc.Step(`^the external brief runs with X as "([^"]+)"$`, rewritten("AC-3", externalNoMerge))
 	sc.Step(`^X takes the task of an external brief$`, w.takeBrief)
 	sc.Step(`^X's "([^"]+)" post "([^"]+)" appears in the external task's thread$`, w.inTaskThread)
-	sc.Step(`^the external task merges and its worktree is removed$`, w.merged)
+	sc.Step(`^the external task merges and its worktree is removed$`, rewritten("AC-3", externalNoMerge))
 	sc.Step(`^X starts an external task from the group run$`, w.startTask)
 	sc.Step(`^an external task run$`, w.takeTask)
 	sc.Step(`^an external task run and a managed secretary$`, w.takeTaskWithSecretary)
@@ -54,23 +56,8 @@ func externalTaskSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	externalManagedSteps(sc, w)
 }
 
-func (w *externalWorld) setupForge(forge string) error {
-	return s3Run(func() error { return w.setupProject(forge) }, func() error { return w.join("X", "api_key", "ZCode") })
-}
-
-func (w *externalWorld) prepareForge(forge string) error {
-	if forge == "none" {
-		return nil
-	}
-	m := &m5World{f: w.f, cleanup: w.cleanup}
-	if err := m.prepareHelperBinaries(true); err != nil {
-		return err
-	}
-	if err := m.initBareRemote(w.repoDir); err != nil {
-		return err
-	}
-	w.repoDir = m.repoDir
-	return setScenarioEnv(w.cleanup, "PATH", m.binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+func (w *externalWorld) setupForge(string) error {
+	return s3Run(w.setupProject, func() error { return w.join("X", "api_key", "ZCode") })
 }
 
 func (w *externalWorld) nonOwnerEdit() error {
@@ -462,21 +449,5 @@ func (w *externalWorld) confirmGone() error {
 			return nil
 		}
 		return fmt.Errorf("removed external member still at the home (read error %v)", err)
-	})
-}
-
-func (w *externalWorld) merged() error {
-	if err := w.waitExternalPush("external task merge", func() bool { return w.currentTask().State == "merged" }); err != nil {
-		return err
-	}
-	return waitUntil(5*time.Second, "merged worktree removal", func() error {
-		_, err := os.Stat(w.folder)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return abort(err)
-		}
-		return fmt.Errorf("merged worktree still present: %s", w.folder)
 	})
 }

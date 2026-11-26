@@ -184,9 +184,9 @@ func (w *homeSyncWorld) cmdCreate(s *home.State, c home.Command) (home.Result, *
 	if r := c.Decode(&p); r != nil {
 		return home.Result{}, r
 	}
-	grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: p.Name, Kind: "project", Home: s.Home, Secretary: w.aiID, Checks: []string{}, Created: c.Now}
+	grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: p.Name, Home: s.Home, Secretary: w.aiID, Created: c.Now}
 	hum := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.ownerID}, Group: s.ID, Kind: "human", User: c.Who.User, Name: "owner"}, Role: "owner"}
-	ai := proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.aiID}, Group: s.ID, Kind: "ai", User: c.Who.User, Name: "secretary"}, Host: w.laptop.ID()}
+	ai := proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.aiID}, Group: s.ID, Kind: "ai", User: c.Who.User, Name: "secretary"}, Host: w.laptop.ID(), Workspace: "/work/secretary"}
 	return home.Result{Rows: []home.Row{home.RowOf(grp), home.RowOf(hum), home.RowOf(ai)}, GroupsChanged: true}, nil
 }
 
@@ -224,7 +224,7 @@ func (w *homeSyncWorld) cmdForget(_ *home.State, c home.Command) (home.Result, *
 func (w *homeSyncWorld) cmdTouchTask(s *home.State, _ home.Command) (home.Result, *home.Refusal) {
 	task := proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: "task-live"}, Group: s.ID, Num: 1,
-		Title: "Sync", Slug: proto.MakeSlug("Sync"), Origin: "direct", State: "active", Step: "branch",
+		Title: "Sync", Origin: "direct", State: "active", Step: "branch",
 		Assignee: w.aiID, Pass: 90, Depends: []string{}, Stats: proto.TaskStats{Started: w.now.UnixMilli()}, Created: w.now.UnixMilli(),
 	}
 	return home.Result{Rows: []home.Row{home.RowOf(task)}}, nil

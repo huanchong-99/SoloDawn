@@ -18,6 +18,9 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
+// homeTaskNoMerge is what the steps that MODEL-1126 took away say when they fail.
+const homeTaskNoMerge = "a task has no branch and no step merge: the scenarios on its own branch and at step merge go (MODEL-1126 plan 3.2)"
+
 func init() {
 	stepSets["home_task"] = func(sc *godog.ScenarioContext, _ fixtures) { homeTaskSteps(sc) }
 }
@@ -40,6 +43,7 @@ func (d *homeTaskStore) Thread(*string, int64, int) []proto.MsgRow { return nil 
 func (d *homeTaskStore) Pending() []proto.MsgRow                   { return d.pending }
 func (d *homeTaskStore) Queued() []store.Item                      { return d.queued }
 func (d *homeTaskStore) OtherMember(string) bool                   { return false }
+func (d *homeTaskStore) DeviceLog(string) []proto.Envelope         { return nil }
 
 func (d *homeTaskStore) Receipt(signer, nonce string) (store.Outcome, error) {
 	out, ok := d.outcomes[signer+" "+nonce]
@@ -80,12 +84,12 @@ func homeTaskSteps(sc *godog.ScenarioContext) {
 func homeTaskGivenSteps(sc *godog.ScenarioContext, w *homeTaskWorld) {
 	sc.Step(`^a group home for task commands$`, w.setup)
 	sc.Step(`^task 1 is active for "([^"]*)" from a confirmed brief$`, w.seedActiveTask)
-	sc.Step(`^task 1 is active at step "merge" with a pending approval, a queued merge item and queued dependent task 2$`, w.seedMergeTask)
+	sc.Step(`^task 1 is active at step "merge" with a pending approval, a queued merge item and queued dependent task 2$`, rewritten("AC-3", homeTaskNoMerge))
 }
 
 func homeTaskActionSteps(sc *godog.ScenarioContext, w *homeTaskWorld) {
 	sc.Step(`^"([^"]*)" starts a direct task titled "([^"]*)" for the owner's request$`, w.startDirect)
-	sc.Step(`^the host of "([^"]*)" reports branch "([^"]*)" for task (\d+)$`, w.reportBranch)
+	sc.Step(`^the host of "([^"]*)" reports branch "([^"]*)" for task (\d+)$`, rewritten("AC-3", homeTaskNoMerge))
 	sc.Step(`^the host of "([^"]*)" reports a "([^"]*)" failure on task (\d+)$`, w.reportFail)
 	sc.Step(`^the host of "([^"]*)" sends the same failure command again$`, w.repeatLast)
 	sc.Step(`^the (secretary|owner) (?:tries to resume|resumes) task (\d+)$`, w.resumeBy)
@@ -109,7 +113,7 @@ func homeTaskCheckSteps(sc *godog.ScenarioContext, w *homeTaskWorld) {
 	sc.Step(`^the home queued "([^"]*)"$`, w.checkQueued)
 	sc.Step(`^task (\d+) has (\d+) failures and the home queued "([^"]*)"$`, w.checkForgiven)
 	sc.Step(`^the thread of task (\d+) holds a "([^"]*)" system message (mentioning|for) the owner$`, w.checkSystemMsg)
-	sc.Step(`^the pending approval of task (\d+) is "([^"]*)" and its merge item is retired$`, w.checkCancelledEffects)
+	sc.Step(`^the pending approval of task (\d+) is "([^"]*)" and its merge item is retired$`, rewritten("AC-3", homeTaskNoMerge))
 }
 
 func (w *homeTaskWorld) nextID() proto.ID {
@@ -133,7 +137,7 @@ func (w *homeTaskWorld) setup() error {
 	w.state.Logs[log.User] = log
 	w.state.Group = proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: grp}, Home: node.ID(), Secretary: w.members["secretary"],
-		Forge: "none", Pass: 90, PassFoundation: 70, Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5},
+		Pass: 90, PassFoundation: 70, Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5},
 	}
 	owner := w.members["owner"]
 	w.state.People[owner] = proto.HumanMemberRow{
@@ -145,7 +149,7 @@ func (w *homeTaskWorld) setup() error {
 		host := w.keys[name]
 		w.state.AIs[id] = proto.AIMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id}, Group: grp, Kind: "ai", User: browser.ID(), Name: name},
-			Host:      host.ID(),
+			Host:      host.ID(), Workspace: "/work/" + name,
 		}
 	}
 	w.state.Seq = 5
@@ -167,41 +171,10 @@ func (w *homeTaskWorld) seedActiveTask(aiName string) error {
 	w.state.Num = 1
 	w.state.Tasks[taskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: taskID, Seq: 5}, Group: w.state.ID, Num: 1,
-		Title: "Report path changes", Slug: "report-path-changes", Origin: "brief", Brief: w.brief,
-		State: "active", Step: "local_check", Commit: "c1", Assignee: w.members[aiName], Reviewer: w.members["ai-three"],
+		Title: "Report path changes", Origin: "brief", Brief: w.brief,
+		State: "active", Step: "work", Assignee: w.members[aiName], Reviewer: w.members["ai-three"],
 		Pass: 90, Depends: []string{}, Stats: proto.TaskStats{Started: w.now.UnixMilli() - 2000}, Created: w.now.UnixMilli() - 2000,
 	}
-	return nil
-}
-
-func (w *homeTaskWorld) seedMergeTask() error {
-	if err := w.seedActiveTask("ai-one"); err != nil {
-		return err
-	}
-	t1 := w.taskByNum(1)
-	t1.Step = "merge"
-	w.state.Tasks[t1.ID] = t1
-	t2ID := string(w.nextID())
-	w.state.Num = 2
-	w.state.Tasks[t2ID] = proto.TaskRow{
-		RowHeader: proto.RowHeader{Type: "task", ID: t2ID, Seq: 6}, Group: w.state.ID, Num: 2,
-		Title: "Dependent", Slug: "dependent", Origin: "brief", Brief: w.brief,
-		State: "queued", Step: "branch", Assignee: w.members["ai-two"], Reviewer: w.members["ai-one"],
-		Pass: 90, Depends: []string{t1.ID}, Wait: &proto.TaskWait{Kind: "depends", Since: w.now.UnixMilli() - 1000},
-	}
-	cardID := string(w.nextID())
-	body, _ := json.Marshal(proto.ApprovalBody{
-		Task: t1.ID, AI: t1.Assignee, Tool: "Bash", Command: "npm test", Category: "command", Approvers: []string{w.keys["owner"].ID()},
-	})
-	card := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: cardID, Seq: 7}, Pos: 7, Group: w.state.ID,
-		Thread: &t1.ID, Main: true, By: t1.Assignee, Kind: "approval", Timestamp: w.now.UnixMilli() - 500,
-		Mentions: []string{w.members["owner"]}, Body: body, State: &proto.CardState{Status: "pending"},
-	}
-	w.store.msgs[cardID] = card
-	w.store.pending = []proto.MsgRow{card}
-	commit := "c1"
-	w.store.queued = []store.Item{{ID: 41, Group: w.state.ID, AI: t1.Assignee, Why: "merge", Task: &t1.ID, Commit: &commit}}
 	return nil
 }
 
@@ -266,17 +239,6 @@ func (w *homeTaskWorld) startDirect(aiName, title string) error {
 			Op: "start", ID: w.nextID(),
 		},
 		Title: title, Plan: "Update the notice.", Re: &re, Origin: "direct",
-	}
-	return w.dispatch(w.keys[aiName], cmd)
-}
-
-func (w *homeTaskWorld) reportBranch(aiName, branch string, num int) error {
-	cmd := proto.TaskBranch{
-		TaskCommand: proto.TaskCommand{
-			HomeCommand: proto.HomeCommand{Type: "task", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.state.ID)},
-			Op:          "branch", ID: proto.ID(w.taskByNum(num).ID),
-		},
-		Branch: branch,
 	}
 	return w.dispatch(w.keys[aiName], cmd)
 }
@@ -478,15 +440,4 @@ func homeTaskMatchesSys(m proto.MsgRow, taskID, code, mode, owner string) bool {
 		return slices.Equal(m.Mentions, []string{owner})
 	}
 	return b.By == owner
-}
-
-func (w *homeTaskWorld) checkCancelledEffects(num int, cardStatus string) error {
-	t := w.taskByNum(num)
-	if len(w.store.pending) != 1 || w.store.pending[0].State.Status != cardStatus {
-		return fmt.Errorf("pending card state = %+v, want %s on task %s", w.store.pending, cardStatus, t.ID)
-	}
-	if !slices.Equal(w.retired, []int64{41}) {
-		return fmt.Errorf("retired %v, want [41]", w.retired)
-	}
-	return nil
 }

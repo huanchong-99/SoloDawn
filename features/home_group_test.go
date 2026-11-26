@@ -38,6 +38,7 @@ func (s *homeGroupStore) Thread(*string, int64, int) []proto.MsgRow { return nil
 func (s *homeGroupStore) Pending() []proto.MsgRow                   { return nil }
 func (s *homeGroupStore) Queued() []store.Item                      { return s.queued }
 func (s *homeGroupStore) OtherMember(string) bool                   { return false }
+func (s *homeGroupStore) DeviceLog(string) []proto.Envelope         { return nil }
 
 func (s *homeGroupStore) Receipt(signer, nonce string) (store.Outcome, error) {
 	out, ok := s.outcomes[signer+" "+nonce]
@@ -157,8 +158,8 @@ func (w *homeGroupWorld) createGroup(name, member string) error {
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: g, Timestamp: w.now.UnixMilli(), Group: g},
 			Op:          "create",
 		},
-		Name: name, Kind: "project", Repo: "https://git.example/team/repo.git",
-		Base: "main", Forge: "github", Checks: []string{"go test ./..."}, MemberName: member,
+		Name:       name,
+		MemberName: member,
 	})
 }
 
@@ -184,7 +185,7 @@ func (w *homeGroupWorld) addAI(name, cli, role string) error {
 			Op:          "add_ai",
 			ID:          proto.ID(id),
 		},
-		CLI: cli, Name: name, Account: "personal", Secretary: role == "secretary", Approvers: []string{w.browser.ID()},
+		CLI: cli, Name: name, Workspace: "/work/" + name, Account: "personal", Secretary: role == "secretary", Approvers: []string{w.browser.ID()},
 	})
 }
 
@@ -229,7 +230,7 @@ func (w *homeGroupWorld) invalidAttempt(attempt string) error {
 	case "the owner sends group create with g not n":
 		p := proto.GroupCreate{
 			GroupCommand: proto.GroupCommand{HomeCommand: proto.HomeCommand{Type: "group", Nonce: n, Timestamp: ts, Group: proto.ID(g)}, Op: "create"},
-			Name:         "Other", Kind: "project", Repo: "https://git.example/r.git", Base: "main", Forge: "none", Checks: []string{}, MemberName: "alex",
+			Name:         "Other", MemberName: "alex",
 		}
 		return w.apply(w.browser, p)
 	case "the owner sends group set with no fields":

@@ -11,9 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -127,7 +125,6 @@ type joinScenarioWorld struct {
 	key           identity.Key
 	remoteDevice  string
 	remoteHome    *joinScenarioHome
-	upstreams     map[string]string
 	mu            sync.Mutex
 	dials         map[string][]context.Context
 	restartedHost *host.Host
@@ -160,6 +157,10 @@ func (w *joinScenarioWorld) join(agent, name string, secretary bool, groupName, 
 	if !ok {
 		return fmt.Errorf("unknown scenario group %q", groupName)
 	}
+	workspace, err := aiWorkspace(w.root, gid, name)
+	if err != nil {
+		return err
+	}
 	payload := json.RawMessage(accJSON(proto.HostJoin{
 		HostCommand: proto.HostCommand{
 			Type:      "host.join",
@@ -172,6 +173,7 @@ func (w *joinScenarioWorld) join(agent, name string, secretary bool, groupName, 
 		Agent:     agent,
 		Name:      name,
 		Secretary: secretary,
+		Workspace: workspace,
 	}))
 	_, callErr := host.Surface["host.join"](context.Background(), w.h, nil, "owner-browser", payload)
 	return callErr
@@ -232,14 +234,7 @@ func registerJoinSetupSteps(sc *godog.ScenarioContext, w *joinScenarioWorld, cle
 		return nil
 	})
 	sc.Step(`^the owner joins "([^"]+)" as "([^"]+)" with secretary (true|false) to "([^"]+)" on "([^"]+)"$`, func(agent, name, secStr, groupName, remote string) error {
-		if err := w.join(agent, name, secStr == "true", groupName, remote); err != nil {
-			return err
-		}
-		if upstream := w.upstreams[groupName]; upstream != "" {
-			delete(w.upstreams, groupName)
-			return os.RemoveAll(upstream)
-		}
-		return nil
+		return w.join(agent, name, secStr == "true", groupName, remote)
 	})
 	sc.Step(`^the host restarts on its store and re-establishes home connections$`, func() error {
 		return w.restartAndReconnect()
@@ -263,7 +258,7 @@ func (w *joinScenarioWorld) initHostOnDisk(a1, a2, remote string, cleanup func(f
 	}
 	w.root, w.db, w.h, w.key = realRoot, db, h, key
 	w.remoteDevice, w.remoteHome = remote, newJoinScenarioHome(h)
-	w.upstreams, w.dials = map[string]string{}, map[string][]context.Context{}
+	w.dials = map[string][]context.Context{}
 	h.Connect = w.connect
 	return seedScenarioAgents(db, a1, a2)
 }
@@ -290,23 +285,10 @@ func (w *joinScenarioWorld) createRemoteGroup(remote, name string) error {
 	if !ok {
 		return fmt.Errorf("unknown group %q", name)
 	}
-	repoDir := filepath.Join(w.root, "remotes", strings.ToLower(name))
-	if _, err := workspaceCommand(w.root, "init", "-b", "main", repoDir); err != nil {
-		return err
-	}
-	if _, err := workspaceCommand(repoDir, "commit", "--allow-empty", "-m", "initial"); err != nil {
-		return err
-	}
-	w.upstreams[name] = repoDir
 	w.remoteHome.groups[string(gid)] = proto.GroupRow{
 		RowHeader:      proto.RowHeader{Type: "group", ID: string(gid), Seq: 1},
 		Name:           name,
-		Kind:           "project",
-		Repo:           repoDir,
-		Base:           "main",
-		Forge:          "none",
 		Home:           remote,
-		Checks:         []string{},
 		Pass:           90,
 		PassFoundation: 70,
 		Limits: proto.Limits{
@@ -334,17 +316,7 @@ func (w *joinScenarioWorld) restartAndReconnect() error {
 }
 
 func registerJoinAssertionSteps(sc *godog.ScenarioContext, w *joinScenarioWorld) {
-	sc.Step(`^the host dialled "([^"]+)" (\d+) times? and cloned "([^"]+)" and "([^"]+)" once each$`, func(remote string, wantDials int, g1, g2 string) error {
-		if err := w.checkDialCount(remote, wantDials); err != nil {
-			return err
-		}
-		for _, name := range []string{g1, g2} {
-			if err := w.checkCloneOnMain(name); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	sc.Step(`^the host dialled "([^"]+)" (\d+) times? and cloned "([^"]+)" and "([^"]+)" once each$`, rewritten("AC-2", "a join records the workspace of the AI and clones nothing (MODEL-1126 plan 3.2: host_join.feature)"))
 	sc.Step(`^the host holds (\d+) dormant group sessions and (\d+) stored homes entries$`, func(wantSessions, wantHomes int) error {
 		if err := checkDormantGroupSessions(w.h.Sessions.All(), wantSessions); err != nil {
 			return err
@@ -372,19 +344,6 @@ func (w *joinScenarioWorld) checkDialCount(remote string, wantDials int) error {
 	w.mu.Unlock()
 	if gotDials != wantDials {
 		return fmt.Errorf("dialled %s %d times, want %d", remote, gotDials, wantDials)
-	}
-	return nil
-}
-
-func (w *joinScenarioWorld) checkCloneOnMain(name string) error {
-	cloneGit := filepath.Join(w.root, "projects", string(joinGroupIDs[name]), "repo", ".git")
-	if _, err := os.Stat(cloneGit); err != nil {
-		return fmt.Errorf("missing clone for %s: %w", name, err)
-	}
-	cmd := exec.Command("git", "-C", filepath.Dir(cloneGit), "branch", "--show-current")
-	out, err := cmd.CombinedOutput()
-	if err != nil || strings.TrimSpace(string(out)) != "main" {
-		return fmt.Errorf("clone branch for %s: %q (%v)", name, out, err)
 	}
 	return nil
 }

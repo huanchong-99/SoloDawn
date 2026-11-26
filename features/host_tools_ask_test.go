@@ -173,12 +173,7 @@ func (w *askStepWorld) seedRows(waitSec int) {
 	w.h.Rows.Put(w.groupID, "group", w.groupID, json.RawMessage(accJSON(proto.GroupRow{
 		RowHeader:      proto.RowHeader{Type: "group", ID: w.groupID, Seq: 1},
 		Name:           "Website",
-		Kind:           "project",
-		Repo:           "https://git.example/team/website.git",
-		Base:           "main",
-		Forge:          "github",
 		Home:           "home-device",
-		Checks:         []string{},
 		Pass:           90,
 		PassFoundation: 70,
 		Limits:         proto.Limits{AskDepth: 4, AskWaitS: waitSec},

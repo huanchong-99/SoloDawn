@@ -47,7 +47,6 @@ type m3World struct {
 	cleanup     func(func())
 	tb          scenarioTB
 	root        string
-	repoSrc     string
 	cluster     *nodetest.Cluster
 	activeHost  *host.Host
 	sockPath    string
@@ -145,10 +144,6 @@ func (w *m3World) startCluster() error {
 		return err
 	}
 	w.root = root
-	w.repoSrc = filepath.Join(w.root, "src")
-	if err := initLocalGitRepo(w.repoSrc); err != nil {
-		return err
-	}
 	w.cluster = nodetest.Start(w.tb, nodetest.Config{Root: w.root, BinDir: w.f.fakeCLIs, Nodes: 1})
 	n := w.node()
 	w.activeHost = n.Host
@@ -186,12 +181,7 @@ func (w *m3World) createGroup(name string) error {
 			Op:          "create",
 		},
 		Name:       name,
-		Kind:       "project",
-		Repo:       w.repoSrc,
-		Base:       "main",
-		Forge:      "none",
 		MemberName: "Owner",
-		Checks:     []string{},
 	}
 	if err := w.sendBrowserCmd(payload); err != nil {
 		return err
@@ -263,7 +253,11 @@ func drainFramesUntil(client homeFrameClient, timeout time.Duration, stop func()
 func (w *m3World) configureAI(groupName, aiName, agent string) error {
 	n := w.node()
 	gid := proto.ID(w.groups[groupName])
-	if err := configureHostAI(n.Host, n.Link, &w.ids, w.cluster.Owner.ID(), n.Key.ID(), gid, aiName, agent); err != nil {
+	workspace, err := aiWorkspace(w.root, gid, aiName)
+	if err != nil {
+		return err
+	}
+	if err := configureHostAI(n.Host, n.Link, &w.ids, w.cluster.Owner.ID(), n.Key.ID(), gid, aiName, agent, workspace); err != nil {
 		return err
 	}
 	hasAI := func() bool {
@@ -789,7 +783,7 @@ func (w *m3World) whenListAllSessionTools() error {
 		{"secretary", host.GroupSession, true, "", lists.Secretary},
 		{"group", host.GroupSession, false, "", lists.Group},
 		{"review", host.ReviewSession, false, "t-rev", lists.Review},
-		{"task_level_3", host.TaskSession, false, "t-3", lists.TaskLevel23},
+		{"task_level_3", host.TaskSession, false, "t-3", lists.Task},
 	}
 	for _, sp := range specs {
 		chk, err := w.collectToolCheck(sp.name, sp.kind, sp.secretary, sp.task, sp.want)

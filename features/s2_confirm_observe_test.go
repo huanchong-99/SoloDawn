@@ -6,23 +6,23 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
-	"strings"
 
 	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
+
+// s2ConfirmNoWorktree is what the steps that MODEL-1126 took away say when they fail.
+const s2ConfirmNoWorktree = "a task runs in its assignee's workspace: there is no task worktree or review checkout (MODEL-1126 plan 1.5)"
 
 func s2ConfirmObservationSteps(sc *godog.ScenarioContext, w *s2ConfirmWorld) {
 	sc.Step(`^a confirmation "(msg|task|member|group)" row is seen as "([^"]+)":$`, w.awaitRow)
 	sc.Step(`^the confirmation "(msg|task|member|group)" rows contain (\d+) matches:$`, w.countRows)
 	sc.Step(`^"([^"]+)" receives a confirmation turn matching "([^"]+)"$`, w.awaitTurn)
 	sc.Step(`^"([^"]+)" has (\d+) confirmation items of kind "([^"]+)"$`, w.countItems)
-	sc.Step(`^Q1 has no confirmation task or review checkout$`, w.noQCheckout)
+	sc.Step(`^Q1 has no confirmation task or review checkout$`, rewritten("AC-3", s2ConfirmNoWorktree))
 	sc.Step(`^the approval "([^"]+)" mentions P and Q$`, w.approvalMentions)
 	sc.Step(`^P's confirmation browser sees "([^"]+)" as "([^"]+)"$`, w.browserCardStatus)
 }
@@ -219,35 +219,9 @@ func s2ConfirmCount(subject string, got, want int) error {
 	return nil
 }
 
-func (w *s2ConfirmWorld) noQCheckout() error {
-	for _, kind := range []string{"wt", "review"} {
-		path := filepath.Join(w.cast.Q1.Data, "projects", string(w.gid), kind)
-		entries, err := os.ReadDir(path)
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		if len(entries) != 0 {
-			return fmt.Errorf("Q1 has a %s checkout: %s", kind, entries[0].Name())
-		}
-	}
-	return nil
-}
-
 func (w *s2ConfirmWorld) awaitIdle(ai string) error {
 	return w.observe(func() (bool, error) {
 		ids, err := w.matchRows("member", map[string]any{"id": w.ais[ai].ID, "state": "waiting"})
 		return len(ids) == 1, err
 	})
-}
-
-func (w *s2ConfirmWorld) commitWork(ai, text string) error {
-	roots, err := filepath.Glob(filepath.Join(w.aiNode(ai).Data, "projects", string(w.gid), "wt", "*"))
-	if err != nil {
-		return err
-	}
-	if len(roots) != 1 {
-		return fmt.Errorf("%s: got %d task worktrees, want one", ai, len(roots))
-	}
-	_, err = m5GitCommitFiles(roots[0], map[string]string{"path.txt": strings.TrimSpace(text) + "\n"}, text)
-	return err
 }

@@ -68,16 +68,8 @@ func TestFeatures(t *testing.T) {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	fakes := buildFakeCLIs(t)
+	handFolder = t.TempDir()
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
-	// Git reads no user or system configuration, so a developer's settings
-	// (commit signing, hooks) cannot change what the scenarios see.
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	// A fixture's git command leaves no maintenance process behind, which
-	// would write on in a temporary directory that is being removed.
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "gc.autoDetach")
-	t.Setenv("GIT_CONFIG_VALUE_0", "false")
 	f := fixtures{t: t, bin: bin, fakeCLIs: fakes, stamped: map[string]string{}}
 	names := slices.Sorted(maps.Keys(stepSets))
 	dir, err := os.Getwd()

@@ -149,8 +149,8 @@ func (w *secScenarioWorld) seedRows(secName, ai1, ai2, ownerName, hostDev string
 	}
 	put("group", w.home.groupID, proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: w.home.groupID, Seq: 1},
-		Name:      "Website", Kind: "project", Base: "main", Forge: "none", Home: "home-dev",
-		Secretary: w.home.secMID, Checks: []string{}, Pass: 90, PassFoundation: 70, Created: 1_763_600_000_000,
+		Name:      "Website", Home: "home-dev",
+		Secretary: w.home.secMID, Pass: 90, PassFoundation: 70, Created: 1_763_600_000_000,
 	})
 	put("member", w.home.ownerMID, proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.home.ownerMID, Seq: 2}, Group: w.home.groupID, Kind: "human", User: w.ownerUID, Name: ownerName, LastSeen: 1_763_600_000_000},
@@ -171,7 +171,7 @@ func (w *secScenarioWorld) seedRows(secName, ai1, ai2, ownerName, hostDev string
 	}
 	put("task", w.taskID, proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.taskID, Seq: 10},
-		Group:     w.home.groupID, Num: 12, Title: "Show path", Slug: "show-path", Origin: "brief", Brief: w.home.briefID,
+		Group:     w.home.groupID, Num: 12, Title: "Show path", Origin: "brief", Brief: w.home.briefID,
 		State: "active", Step: "local_check", Assignee: w.home.claudeMID, Reviewer: w.home.codexMID, Pass: 90, Depends: []string{},
 		Stats: proto.TaskStats{Started: 1_763_600_000_000}, Created: 1_763_600_000_000,
 	})

@@ -302,8 +302,8 @@ func seedHLSettings(db *store.Store, homeID string) error {
 func seedHLRows(h *host.Host, hostID, homeID string, turnMinutes int) {
 	grp := proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: hlGroup, Seq: 1},
-		Name:      "Website", Kind: "project", Base: "main", Forge: "none",
-		Home: homeID, Secretary: hlAI2, Checks: []string{},
+		Name:      "Website",
+		Home:      homeID, Secretary: hlAI2,
 		Limits: proto.Limits{TurnMinutes: turnMinutes},
 	}
 	h.Rows.Put(hlGroup, "group", hlGroup, json.RawMessage(accJSON(grp)))
@@ -511,8 +511,8 @@ func runHLTurns(suiteT *testing.T, body func(t *testing.T, drv *hlDriver, h *hos
 func startHLTurns(ctx context.Context, h *host.Host, homeID string) error {
 	taskKey := host.SessionKey{Group: hlGroup, Member: hlAI1, Task: hlTask1}
 	grpKey := host.SessionKey{Group: hlGroup, Member: hlAI2}
-	h.Sessions.Create(host.Session{SessionKey: taskKey, Kind: host.TaskSession, Folder: "wt/1", Agent: "claude", Home: homeID, Name: "Claude Code"})
-	h.Sessions.Create(host.Session{SessionKey: grpKey, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: homeID, Name: "Sec", Secretary: true})
+	h.Sessions.Create(host.Session{SessionKey: taskKey, Kind: host.TaskSession, Folder: handFolder, Agent: "claude", Home: homeID, Name: "Claude Code"})
+	h.Sessions.Create(host.Session{SessionKey: grpKey, Kind: host.GroupSession, Folder: handFolder, Agent: "claude", Home: homeID, Name: "Sec", Secretary: true})
 	if err := host.Runner.Turn(ctx, h, taskKey, "task work", host.Turn{Kind: host.ItemsTurn, Thread: hlTask1}); err != nil {
 		return err
 	}
@@ -571,7 +571,7 @@ func runTimeoutScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 		synctest.Wait()
 
 		tKey := host.SessionKey{Group: hlGroup, Member: hlAI1, Task: hlTask1}
-		h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: "wt/1", Agent: "claude", Home: homeKey.ID(), Name: "Claude Code"})
+		h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: handFolder, Agent: "claude", Home: homeKey.ID(), Name: "Claude Code"})
 		if err := host.Runner.Turn(t.Context(), h, tKey, "long turn", host.Turn{Kind: host.ItemsTurn, Thread: hlTask1}); err != nil {
 			stepErr = err
 			return
@@ -647,7 +647,7 @@ func runRateLimitScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 		synctest.Wait()
 
 		grpKey := host.SessionKey{Group: hlGroup, Member: hlAI2}
-		h.Sessions.Create(host.Session{SessionKey: grpKey, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: homeKey.ID(), Name: "Sec", Secretary: true})
+		h.Sessions.Create(host.Session{SessionKey: grpKey, Kind: host.GroupSession, Folder: handFolder, Agent: "claude", Home: homeKey.ID(), Name: "Sec", Secretary: true})
 		if err := host.Runner.Turn(t.Context(), h, grpKey, "turn", host.Turn{Kind: host.ItemsTurn}); err != nil {
 			stepErr = err
 			return

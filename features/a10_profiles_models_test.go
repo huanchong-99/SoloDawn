@@ -6,9 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -65,11 +63,6 @@ func a10ModelSteps(sc *godog.ScenarioContext, f fixtures, cleanup func(func())) 
 }
 
 func (w *a10ModelsWorld) setupModels(all bool) error {
-	path := os.Getenv("PATH")
-	git, err := exec.LookPath("git")
-	if err != nil {
-		return err
-	}
 	f, err := w.modelBins(all)
 	if err != nil {
 		return err
@@ -77,19 +70,9 @@ func (w *a10ModelsWorld) setupModels(all bool) error {
 	if err := w.hostModelsWorld.setup(f, w.cleanup); err != nil {
 		return err
 	}
-	if err := a10ModelGit(git, f.fakeCLIs, path); err != nil {
-		return err
-	}
 	w.f = f
 	w.cluster = nodetest.Start(scenarioTB{TB: f.t, cleanup: w.cleanup}, nodetest.Config{Root: w.dir, BinDir: f.fakeCLIs, Nodes: 1, Now: func() time.Time { return w.now }})
 	return w.connect()
-}
-
-func a10ModelGit(git, dir, path string) error {
-	if runtime.GOOS == "windows" {
-		return os.Setenv("PATH", dir+string(os.PathListSeparator)+path)
-	}
-	return hostAgentsLinkOrCopy(git, filepath.Join(dir, hostAgentsExe("git")))
 }
 
 func (w *a10ModelsWorld) modelBins(all bool) (fixtures, error) {
@@ -127,7 +110,7 @@ func (w *a10ModelsWorld) connect() error {
 	go func() { defer close(done); w.sessions.Serve(ctx, w.cluster.Owner.ID(), false, w.ctl) }()
 	w.disconnect = func() { cancel(); <-done }
 	w.cleanup(w.disconnect)
-	w.ctl.in <- turnMustJSON(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "Owner", Addrs: []string{}})
+	w.ctl.in <- turnMustJSON(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 3, Kind: "browser", Name: "Owner", Addrs: []string{}})
 	_, err = w.nextFrame("welcome")
 	return err
 }
@@ -234,13 +217,10 @@ func (w *a10ModelsWorld) persistence() error {
 }
 
 func (w *a10ModelsWorld) persistenceGroup() error {
-	kw := &s3KBWorld{f: w.f, cleanup: w.cleanup, cluster: w.cluster, groups: map[string]string{}, aiByName: map[string]proto.AIMemberRow{}, repoSrc: filepath.Join(w.dir, "repo")}
+	kw := &s3KBWorld{f: w.f, cleanup: w.cleanup, cluster: w.cluster, groups: map[string]string{}, aiByName: map[string]proto.AIMemberRow{}}
 	kw.clock.Store(w.now.UnixMilli())
 	kw.attachBrowsers(false)
 	w.persist = kw
-	if err := initLocalGitRepo(kw.repoSrc); err != nil {
-		return err
-	}
 	if err := kw.declareClaudeAccount(); err != nil {
 		return err
 	}

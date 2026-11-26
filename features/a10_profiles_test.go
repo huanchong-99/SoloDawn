@@ -5,7 +5,6 @@ package features
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +14,9 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
+
+// a10NoChecks is what the steps that MODEL-1126 took away say when they fail.
+const a10NoChecks = "hosted checks go, and a submission is a report that pushes nothing: the ask-first rule is rewritten on submit_task by report (MODEL-1126 plan 1.6, 3.2)"
 
 func init() { stepSets["a10_profiles"] = a10ProfilesSteps }
 
@@ -51,15 +53,15 @@ func a10ProfilesSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^C's instructions hold the four rules of assignment$`, func() error { return w.turn.checkAssignmentRules() })
 	sc.Step(`^list_members answers as in step 1$`, w.listMembers)
 	sc.Step(`^(M|S) (fails|passes) a review$`, w.reviewTask)
-	sc.Step(`^M fails hosted checks$`, func() error { return w.checkTask("fails") })
-	sc.Step(`^M passes hosted checks on the next commit$`, func() error { return w.checkTask("passes") })
+	sc.Step(`^M fails hosted checks$`, rewritten("AC-3", a10NoChecks))
+	sc.Step(`^M passes hosted checks on the next commit$`, rewritten("AC-3", a10NoChecks))
 	sc.Step(`^task T has stuck kind "([^"]*)", n (\d+) and ask (true|false)$`, w.stuck)
 	sc.Step(`^task T has no stuck$`, w.notStuck)
 	sc.Step(`^the browser shows (no badge|the badge) "must ask a stronger AI" on task T$`, w.badge)
 	sc.Step(`^(M|S)'s (reviewed|checks) item ends with the line naming (S|C) and not (L|M) or (C|L)$`, w.escalation)
 	sc.Step(`^(M|S)'s reviewed item has no added line$`, w.noEscalation)
-	sc.Step(`^submit_task by (M|S) fails with "conflict" with no push, no pull request and no report$`, w.submitBlocked)
-	sc.Step(`^submit_task by (M|S) succeeds$`, w.submitOK)
+	sc.Step(`^submit_task by (M|S) fails with "conflict" with no push, no pull request and no report$`, rewritten("AC-3", a10NoChecks))
+	sc.Step(`^submit_task by (M|S) succeeds$`, rewritten("AC-3", a10NoChecks))
 	sc.Step(`^(L|S|C) replies to (M|L|S)'s call in the thread of (task T|another task)$`, w.reply)
 	sc.Step(`^the host of S goes offline$`, func() { w.setState("S", "offline") })
 	sc.Step(`^the host of S returns$`, func() { w.setState("S", "waiting") })
@@ -69,7 +71,7 @@ func a10ProfilesSteps(sc *godog.ScenarioContext, f fixtures) {
 }
 
 func (w *a10ProfileWorld) cast(assignee, mode string) error {
-	if err := w.setup("github"); err != nil {
+	if err := w.setup(); err != nil {
 		return err
 	}
 	w.assignee = assignee
@@ -102,7 +104,7 @@ func a10CastTier(name, mode string) string {
 
 func (w *a10ProfileWorld) add(name string) error {
 	w.ai = exampleID("a10 " + name)
-	p := proto.MemberAddAI{MemberCommand: w.command("add_ai"), CLI: "claude", Name: name, Account: "personal", Approvers: []string{}}
+	p := proto.MemberAddAI{MemberCommand: w.command("add_ai"), CLI: "claude", Name: name, Workspace: "/work/" + name, Account: "personal", Approvers: []string{}}
 	if err := w.apply(w.hosts["assignee"], p); err != nil {
 		return err
 	}
@@ -224,17 +226,15 @@ func (w *a10ProfileWorld) reviewTask(_, verdict string) error {
 	return w.review(verdict, fmt.Sprintf("a10-review-%d", w.commit))
 }
 
-func (w *a10ProfileWorld) checkTask(verdict string) error {
-	w.commit++
-	return w.checkCloud(verdict, fmt.Sprintf("a10-check-%d", w.commit))
-}
-
 func (w *a10ProfileWorld) badge(kind string) error {
 	stuck := w.state.Tasks[w.taskID].Stuck
 	return hostModelsEqual(stuck != nil && stuck.Ask, kind == "the badge")
 }
 
 func (w *a10ProfileWorld) compose(kind string) error {
+	if kind == "checks" {
+		return rewritten("AC-3", "hosted checks are removed: the halves of A10.11 and A10.12 on two failed hosted checks go (MODEL-1126 plan 3.2)")()
+	}
 	if err := w.syncTurn(); err != nil {
 		return err
 	}
@@ -243,10 +243,6 @@ func (w *a10ProfileWorld) compose(kind string) error {
 	msg := w.lastMsg
 	msg.ID, msg.Group, msg.Thread = turnCallID, turnGroupID, new(turnTaskID)
 	msg.Kind = "review"
-	if kind == "checks" {
-		msg.Kind = "checks"
-		msg.Body = turnMustJSON(proto.ChecksBody{Stage: "cloud", OK: false, Commit: "a10-check", Items: []proto.CheckItem{{Name: "test", OK: false}}})
-	}
 	raw := turnMustJSON(proto.InboxItem{Item: proto.Item{Item: 1, AI: proto.ID(s.Member), Why: kind, Task: proto.ID(s.Task)}, Msg: turnMustJSON(msg)})
 	var err error
 	w.turn.text, _, err = host.Compose(w.turn.h, s, host.ItemsTurn, []json.RawMessage{raw})
@@ -312,51 +308,4 @@ func (w *a10ProfileWorld) assignL() error {
 		return err
 	}
 	return w.checkAnswer("")
-}
-
-func (w *a10ProfileWorld) submitFixture() (*profileSubmitWorld, error) {
-	st := &profileSubmitWorld{tskScenario{t: w.f.t, cleanup: w.cleanup}}
-	if err := st.setupBlocked(); err != nil {
-		return nil, err
-	}
-	ids := map[string]string{"S": tskAccReviewID, "M": tskAccWorkerID, "L": string(exampleID("a10 submit L")), "C": string(exampleID("a10 submit C"))}
-	ids[w.assignee], ids[map[string]string{"M": "S", "S": "M"}[w.assignee]] = tskAccWorkerID, tskAccReviewID
-	for name, id := range ids {
-		ai := w.state.AIs[w.members[name]]
-		st.putSubmitMember(id, name, ai.Tier, ai.State, ai.Secretary)
-	}
-	task := st.home.currentTask()
-	task.Stuck = w.state.Tasks[w.taskID].Stuck
-	st.home.putTask(task)
-	return st, nil
-}
-
-func (w *a10ProfileWorld) submitBlocked(_ string) error {
-	st, err := w.submitFixture()
-	if err != nil {
-		return err
-	}
-	st.submitEarly()
-	coded, ok := errors.AsType[*host.Error](st.lastErr)
-	if !ok {
-		return fmt.Errorf("submission error = %v", st.lastErr)
-	}
-	if err := hostModelsEqual([]string{coded.Code, coded.Message}, []string{"conflict", `Ask a stronger AI before submitting again. Candidates: "S" (strong).`}); err != nil {
-		return err
-	}
-	if err := hostModelsEqual(len(st.home.allCmds()), 0); err != nil {
-		return err
-	}
-	return st.checkNoRemoteWrites()
-}
-
-func (w *a10ProfileWorld) submitOK(_ string) error {
-	st, err := w.submitFixture()
-	if err != nil {
-		return err
-	}
-	if err := st.whenRemoteChecksAndSubmit("Ready after advice."); err != nil {
-		return err
-	}
-	return st.checkSubmitted()
 }

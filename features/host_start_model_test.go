@@ -177,9 +177,12 @@ func (w *choiceWorld) setup(f fixtures, cleanup func(func()), first, second stri
 
 func (w *choiceWorld) joinProfile(agent, name, model, effort, tier string) error {
 	profile := proto.Profile{Model: model, Effort: effort, Tier: tier, Skills: "Go"}
-	p := proto.HostJoin{HostCommand: proto.HostCommand{Type: "host.join", Nonce: w.nextNonce(), Timestamp: time.Now().UnixMilli(), To: w.h.Key.ID()}, Group: joinGroupIDs["Website"], Home: "home-remote", Agent: agent, Name: name, ProfileSet: proto.ProfileSet{Model: &model, Effort: &effort, Tier: &tier, Skills: &profile.Skills}}
-	_, err := host.Surface["host.join"](context.Background(), w.h, nil, "owner-browser", json.RawMessage(accJSON(p)))
+	workspace, err := aiWorkspace(w.root, joinGroupIDs["Website"], name)
 	if err != nil {
+		return err
+	}
+	p := proto.HostJoin{HostCommand: proto.HostCommand{Type: "host.join", Nonce: w.nextNonce(), Timestamp: time.Now().UnixMilli(), To: w.h.Key.ID()}, Group: joinGroupIDs["Website"], Home: "home-remote", Agent: agent, Name: name, Workspace: workspace, ProfileSet: proto.ProfileSet{Model: &model, Effort: &effort, Tier: &tier, Skills: &profile.Skills}}
+	if _, err := host.Surface["host.join"](context.Background(), w.h, nil, "owner-browser", json.RawMessage(accJSON(p))); err != nil {
 		return err
 	}
 	w.home.mu.Lock()

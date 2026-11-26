@@ -96,8 +96,8 @@ func (w *homePauseWorld) seedStore(ownerDev, nodeDev, laptopDev, adminDev identi
 	ms := w.now.UnixMilli()
 	rows := []home.Row{
 		home.RowOf(proto.GroupRow{
-			RowHeader: proto.RowHeader{Type: "group", ID: w.group}, Name: "Project", Kind: "project",
-			Home: nodeDev.ID(), Secretary: w.members["secretary"], Forge: "none", Checks: []string{},
+			RowHeader: proto.RowHeader{Type: "group", ID: w.group}, Name: "Project",
+			Home: nodeDev.ID(), Secretary: w.members["secretary"],
 			Pass: 90, PassFoundation: 70, Limits: proto.Limits{Rounds: 10, WakesPerHour: 20}, Created: ms,
 		}),
 		w.humanRow("owner", ownerDev, "owner"),
@@ -111,7 +111,7 @@ func (w *homePauseWorld) seedStore(ownerDev, nodeDev, laptopDev, adminDev identi
 	for _, name := range []string{"secretary", "ai-one", "ai-two", "ai-three"} {
 		rows = append(rows, home.RowOf(proto.AIMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members[name]}, Group: w.group, Kind: "ai", User: ownerDev.ID(), Name: name},
-			CLI:       "claude", Host: laptopDev.ID(), Secretary: name == "secretary", Account: "personal",
+			CLI:       "claude", Host: laptopDev.ID(), Workspace: "/work/" + name, Secretary: name == "secretary", Account: "personal",
 			Allow: []string{}, Approvers: []string{ownerDev.ID()}, State: "waiting", Path: "direct",
 		}))
 	}
@@ -186,7 +186,7 @@ func (w *homePauseWorld) putTask(name, step, ai string, wait *proto.TaskWait) er
 	w.tasks[name] = id
 	w.loop.Event("seed", proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: id}, Group: w.group, Num: len(w.tasks),
-		Title: name, Slug: proto.MakeSlug(name), Origin: "brief", State: "active", Step: step,
+		Title: name, Origin: "brief", State: "active", Step: step,
 		Assignee: w.members[ai], Wait: wait, Pass: 90, Depends: []string{}, Created: w.now.UnixMilli(),
 	})
 	_, err := w.readRows(1)

@@ -129,8 +129,8 @@ func (w *turnStepWorld) seedOwnerSetting(db *store.Store) error {
 func (w *turnStepWorld) seedRows() {
 	w.h.Rows.Put(turnGroupID, "group", turnGroupID, turnMustJSON(proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: turnGroupID, Seq: 1},
-		Name:      "Website", Kind: "project", Base: "main", Forge: "github", Home: w.homeKey.ID(),
-		Checks: []string{}, Pass: 90, PassFoundation: 70, Created: turnTimeMS,
+		Name:      "Website", Home: w.homeKey.ID(),
+		Pass: 90, PassFoundation: 70, Created: turnTimeMS,
 	}))
 	w.h.Rows.Put(turnGroupID, "member", turnOwnerM, turnMustJSON(proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: turnOwnerM, Seq: 2}, Group: turnGroupID, Kind: "human", User: w.ownerID, Name: "owner", LastSeen: turnTimeMS},
@@ -149,7 +149,7 @@ func (w *turnStepWorld) taskRow() proto.TaskRow {
 	return proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: turnTaskID, Seq: 5},
 		Group:     turnGroupID, Num: 12, Title: "Node: report connection path changes",
-		Slug: "node-report-connection-path-changes", Origin: "brief", Brief: turnBriefID,
+		Origin: "brief", Brief: turnBriefID,
 		State: "active", Step: "branch", Assignee: turnAIID, Reviewer: turnPeerID,
 		Pass: 90, Depends: []string{}, Created: turnTimeMS,
 	}

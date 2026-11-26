@@ -18,10 +18,7 @@ func (w *s3DriverWorld) remote() error {
 	if err != nil {
 		return err
 	}
-	m.root, m.repoSrc = root, filepath.Join(root, "src")
-	if err := initLocalGitRepo(m.repoSrc); err != nil {
-		return err
-	}
+	m.root = root
 	m.cluster = nodetest.Start(m.tb, nodetest.Config{Root: root, BinDir: w.f.fakeCLIs, Nodes: 2})
 	hostNode := m.cluster.Nodes[1]
 	m.activeHost = hostNode.Host
@@ -44,8 +41,13 @@ func (w *s3DriverWorld) joinRemote() error {
 	if _, err := n.Host.Agents(context.Background(), false); err != nil {
 		return err
 	}
+	gid := proto.ID(m.groups["Website"])
+	workspace, err := aiWorkspace(m.root, gid, "Worker")
+	if err != nil {
+		return err
+	}
 	set := proto.AgentSet{HostCommand: newHostCmd(&m.ids, n.Key.ID(), "agent.set"), Agent: w.agent, Account: "api_key"}
-	join := proto.HostJoin{HostCommand: newHostCmd(&m.ids, n.Key.ID(), "host.join"), Group: proto.ID(m.groups["Website"]), Home: m.node().Key.ID(), Agent: w.agent, Name: "Worker"}
+	join := proto.HostJoin{HostCommand: newHostCmd(&m.ids, n.Key.ID(), "host.join"), Group: gid, Home: m.node().Key.ID(), Agent: w.agent, Name: "Worker", Workspace: workspace}
 	return s3Run(func() error { return callHostSurface(n.Host, link, m.cluster.Owner.ID(), "agent.set", set) },
 		func() error { return callHostSurface(n.Host, link, m.cluster.Owner.ID(), "host.join", join) },
 		func() error {

@@ -12,9 +12,7 @@ import (
 	"net"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -644,7 +642,7 @@ func (b *m7Browser) awaitReqReply(ctx context.Context, ch <-chan json.RawMessage
 
 func (b *m7Browser) hello() error {
 	build := func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "Owner Browser", Addrs: []string{}}
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 3, Kind: "browser", Name: "Owner Browser", Addrs: []string{}}
 	}
 	raw, err := b.request(b.ctx, build)
 	if err != nil {
@@ -804,7 +802,6 @@ type m7World struct {
 	ctx         context.Context
 	root        string
 	nodeDir     string
-	repoDir     string
 	cliLogPath  string
 	rvURL       string
 	turnAddr    string
@@ -879,12 +876,13 @@ func registerM7TakeoverSteps(sc *godog.ScenarioContext, w *m7World) {
 func registerM7RelayAndTaskSteps(sc *godog.ScenarioContext, w *m7World) {
 	sc.Step(`^the M7 owner sends takeover\.start for "([^"]+)" over that relayed ctl connection$`, w.whenSendTakeoverOnRelay)
 	sc.Step(`^takeover\.start is refused with error code "([^"]+)" and "([^"]+)" starts (\d+) CLI processes$`, w.thenRefusedWithNoCLIStart)
-	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" with no task named$`, w.whenOpenNoTaskTakeover)
-	sc.Step(`^an active "([^"]+)" task card exists for "([^"]+)" and its pty channel opens in the task worktree$`, w.thenOwnerTakeoverCardExists)
-	sc.Step(`^the M7 owner hands back "([^"]+)"'s terminal with nothing changed in the worktree$`, w.whenHandbackUnchanged)
-	sc.Step(`^that takeover task is "([^"]+)" with no open task session and (\d+) handback messages$`, w.thenTakeoverTaskCancelled)
-	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" again, commits "([^"]+)" with subject "([^"]+)" in the task worktree, and hands back$`, w.whenSecondNoTaskCommitAndHandback)
-	sc.Step(`^the second takeover task remains "([^"]+)" and its handback message lists commit "([^"]+)" and file "([^"]+)"$`, w.thenSecondTaskActiveWithCommit)
+	noTask := rewritten("AC-1", "a takeover of an AI without a task opens its group session and creates no task card (A7.7 replaced, MODEL-1126 plan 1.8)")
+	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" with no task named$`, noTask)
+	sc.Step(`^an active "([^"]+)" task card exists for "([^"]+)" and its pty channel opens in the task worktree$`, noTask)
+	sc.Step(`^the M7 owner hands back "([^"]+)"'s terminal with nothing changed in the worktree$`, noTask)
+	sc.Step(`^that takeover task is "([^"]+)" with no open task session and (\d+) handback messages$`, noTask)
+	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" again, commits "([^"]+)" with subject "([^"]+)" in the task worktree, and hands back$`, noTask)
+	sc.Step(`^the second takeover task remains "([^"]+)" and its handback message lists commit "([^"]+)" and file "([^"]+)"$`, noTask)
 	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" and verifies a non-relay selected pair in WebRTC statistics$`, w.whenOpenTakeoverVerifyDirectStats)
 	sc.Step(`^direct UDP is cut while TURN stays reachable so the same PeerConnection selects a relayed pair$`, w.whenCutDirectToRelay)
 	sc.Step(`^WebRTC selected-pair statistics report a relay candidate, the pty channel closes, and the node hands back "([^"]+)"$`, w.thenStatsRelayClosesPTYAndHandsBack)
@@ -976,11 +974,7 @@ func (w *m7World) prepareDirsAndEnv() error {
 	}
 	w.root = root
 	w.nodeDir = filepath.Join(root, "node")
-	w.repoDir = filepath.Join(root, "repo")
 	w.cliLogPath = filepath.Join(root, "fakecli.log")
-	if err := initLocalGitRepo(w.repoDir); err != nil {
-		return err
-	}
 	return errors.Join(
 		setScenarioEnv(w.cleanup, "SOLODAWN_FAKECLI_LOG", w.cliLogPath),
 		setScenarioEnv(w.cleanup, "SOLODAWN_FAKE_CLAUDE_SCRIPT", filepath.Join(root, "claude-init.json")),
@@ -1128,11 +1122,6 @@ func (w *m7World) createProjectGroup() error {
 			Op:          "create",
 		},
 		Name:       m7GroupName,
-		Kind:       "project",
-		Repo:       w.repoDir,
-		Base:       "main",
-		Forge:      "none",
-		Checks:     []string{},
 		MemberName: "Owner",
 	}
 	if err := w.browser.execCmd(cmd); err != nil {
@@ -1161,12 +1150,17 @@ func (w *m7World) joinAI(aiName string) error {
 	if err := w.browser.execCmd(setCmd); err != nil {
 		return err
 	}
+	workspace, err := aiWorkspace(w.root, w.groupID, aiName)
+	if err != nil {
+		return err
+	}
 	joinCmd := proto.HostJoin{
 		HostCommand: proto.HostCommand{Type: "host.join", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), To: w.pn.Key.ID()},
 		Group:       w.groupID,
 		Home:        w.pn.Key.ID(),
 		Agent:       agent,
 		Name:        aiName,
+		Workspace:   workspace,
 	}
 	if err := w.browser.execCmd(joinCmd); err != nil {
 		return err
@@ -1830,196 +1824,6 @@ func (w *m7World) checkReplayCode(wantCode string) error {
 		return fmt.Errorf("replayed takeover.start returned %q, want %q", code, wantCode)
 	}
 	return nil
-}
-
-func (w *m7World) whenOpenNoTaskTakeover(aiName string) error {
-	return w.openTakeoverSession(aiName, "", m7InteractiveHoldDoc())
-}
-
-func (w *m7World) findTakeoverTaskLocked(excludeID string) (proto.TaskRow, bool) {
-	for _, t := range w.browser.tasks {
-		if t.ID != excludeID && t.Origin == "takeover" {
-			return t, true
-		}
-	}
-	return proto.TaskRow{}, false
-}
-
-func (w *m7World) hasTaskCardMsgLocked(taskID string) bool {
-	m, ok := w.browser.msgs[taskID]
-	if !ok || m.Kind != "task" {
-		return false
-	}
-	var body proto.TaskBody
-	return proto.Decode(m.Body, &body) == nil && body.Task == taskID
-}
-
-func (w *m7World) thenOwnerTakeoverCardExists(wantTitle, aiName string) error {
-	err := w.browser.waitRows(m7Event, "the active takeover card "+wantTitle, func() bool {
-		t, ok := w.findTakeoverTaskLocked("")
-		return ok && t.State == "active" && t.Title == wantTitle && w.hasTaskCardMsgLocked(t.ID)
-	})
-	if err != nil {
-		return err
-	}
-	w.browser.mu.Lock()
-	t, _ := w.findTakeoverTaskLocked("")
-	w.browser.mu.Unlock()
-	w.firstTakeID = t.ID
-	wtDir := w.taskWorktreePath(t)
-	if _, statErr := os.Stat(wtDir); statErr != nil {
-		return fmt.Errorf("expected takeover worktree %s for %s: %w", wtDir, aiName, statErr)
-	}
-	return nil
-}
-
-func (w *m7World) taskWorktreePath(t proto.TaskRow) string {
-	return filepath.Join(w.nodeDir, "projects", string(w.groupID), "wt", fmt.Sprintf("%d-%s", t.Num, t.Slug))
-}
-
-func (w *m7World) whenHandbackUnchanged(aiName string) error {
-	return w.sendTakeoverEnd(aiName)
-}
-
-func (w *m7World) thenTakeoverTaskCancelled(wantState string, wantHandbacks int) error {
-	err := w.browser.waitRows(m7Event, "the takeover task in state "+wantState, func() bool {
-		return w.browser.tasks[w.firstTakeID].State == wantState
-	})
-	if err != nil {
-		return err
-	}
-	if err := w.waitNoTaskSession(w.firstTakeID); err != nil {
-		return err
-	}
-	w.browser.mu.Lock()
-	defer w.browser.mu.Unlock()
-	if got := w.countHandbackMsgsLocked(); got != wantHandbacks {
-		return fmt.Errorf("handback message count = %d, want %d", got, wantHandbacks)
-	}
-	return nil
-}
-
-func (w *m7World) waitNoTaskSession(taskID string) error {
-	return waitUntilEvery(30*time.Millisecond, m7Event, "task session "+taskID+" to go after cancel", func() error {
-		if w.hasOpenTaskSession(taskID) {
-			return errors.New("session open")
-		}
-		return nil
-	})
-}
-
-func (w *m7World) hasOpenTaskSession(taskID string) bool {
-	for _, s := range w.pn.Host.Sessions.All() {
-		if s.Task == taskID {
-			return true
-		}
-	}
-	return false
-}
-
-func (w *m7World) countHandbackMsgsLocked() int {
-	n := 0
-	for _, m := range w.browser.msgs {
-		if m.Kind == "handback" {
-			n++
-		}
-	}
-	return n
-}
-
-func (w *m7World) whenSecondNoTaskCommitAndHandback(aiName, fileName, subject string) error {
-	if err := w.openTakeoverSession(aiName, "", m7InteractiveHoldDoc()); err != nil {
-		return err
-	}
-	err := w.browser.waitRows(m7Event, "the first takeover task active", func() bool {
-		t, ok := w.findTakeoverTaskLocked(w.firstTakeID)
-		return ok && t.State == "active"
-	})
-	if err != nil {
-		return err
-	}
-	w.browser.mu.Lock()
-	t, _ := w.findTakeoverTaskLocked(w.firstTakeID)
-	w.browser.mu.Unlock()
-	w.secTakeID = t.ID
-	if err := w.commitInWorktree(w.taskWorktreePath(t), fileName, subject); err != nil {
-		return err
-	}
-	if err := w.setScript("claude", m7ClaudeHandbackDoc("Committed "+fileName+".", nil)); err != nil {
-		return err
-	}
-	return w.sendTakeoverEnd(aiName)
-}
-
-func (w *m7World) commitInWorktree(wtDir, fileName, subject string) error {
-	if err := os.WriteFile(filepath.Join(wtDir, fileName), []byte("owner takeover line\n"), 0o600); err != nil {
-		return err
-	}
-	if err := runGitIn(wtDir, "add", fileName); err != nil {
-		return err
-	}
-	if err := runGitIn(wtDir, "-c", "user.name=Owner", "-c", "user.email=owner@example.com", "commit", "-m", subject); err != nil {
-		return err
-	}
-	out, err := exec.Command("git", "-C", wtDir, "rev-parse", "HEAD").Output()
-	if err != nil {
-		return err
-	}
-	w.commitSHA = strings.TrimSpace(string(out))
-	return nil
-}
-
-func (w *m7World) thenSecondTaskActiveWithCommit(wantState, wantSubject, wantFile string) error {
-	if err := w.waitMsgAndAIState("Claude", "Committed "+wantFile+".", "waiting", m7Event); err != nil {
-		return err
-	}
-	w.browser.mu.Lock()
-	t := w.browser.tasks[w.secTakeID]
-	hb, ok := w.findHandbackForTaskLocked(w.secTakeID)
-	w.browser.mu.Unlock()
-	w.closeOpenSessions()
-	if t.State != wantState || !ok {
-		return fmt.Errorf("second task state=%q handbackFound=%v", t.State, ok)
-	}
-	return w.verifyHandbackBody(hb.Body, wantSubject, wantFile)
-}
-
-func (w *m7World) findHandbackForTaskLocked(taskID string) (proto.MsgRow, bool) {
-	for _, m := range w.browser.msgs {
-		if m.Kind == "handback" && m.Thread != nil && *m.Thread == taskID {
-			return m, true
-		}
-	}
-	return proto.MsgRow{}, false
-}
-
-func (w *m7World) verifyHandbackBody(raw json.RawMessage, wantSubject, wantFile string) error {
-	var body proto.HandbackBody
-	if err := proto.Decode(raw, &body); err != nil {
-		return err
-	}
-	if err := m7CheckHandbackFiles(body, wantFile); err != nil {
-		return err
-	}
-	return m7CheckHandbackCommit(body.Commits, w.commitSHA, wantSubject)
-}
-
-func m7CheckHandbackFiles(body proto.HandbackBody, wantFile string) error {
-	if !slices.Contains(body.Files, wantFile) || body.Added != 1 || body.Removed != 0 {
-		return fmt.Errorf("unexpected handback files/diff: %+v", body)
-	}
-	return nil
-}
-
-func m7CheckHandbackCommit(commits []proto.CommitSubject, headSHA, wantSubject string) error {
-	if len(commits) != 1 || commits[0].Subject != wantSubject || !m7SHAMatches(headSHA, commits[0].SHA) {
-		return fmt.Errorf("unexpected handback commits %+v for head %s", commits, headSHA)
-	}
-	return nil
-}
-
-func m7SHAMatches(fullSHA, reported string) bool {
-	return reported != "" && strings.HasPrefix(fullSHA, reported)
 }
 
 func (w *m7World) whenOpenTakeoverVerifyDirectStats(aiName string) error {

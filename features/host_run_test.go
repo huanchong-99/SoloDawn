@@ -425,7 +425,7 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T, c
 			rh := newHRHome()
 			h.Attach("home-dev", rh)
 			tKey := host.SessionKey{Group: hrGroup, Member: hrAI1, Task: hrTask1}
-			if err := h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: "wt/1-task", Agent: "claude", Home: "home-dev", Name: "Claude"}); err != nil {
+			if err := h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: handFolder, Agent: "claude", Home: "home-dev", Name: "Claude"}); err != nil {
 				stepErr = err
 				return
 			}
@@ -521,11 +521,11 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T, c
 				},
 			}
 			host.Drivers = map[string]host.Driver{"claude": drv2}
-			if err := h2.Sessions.Create(host.Session{SessionKey: k1, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: "home-dev", Name: "AI1"}); err != nil {
+			if err := h2.Sessions.Create(host.Session{SessionKey: k1, Kind: host.GroupSession, Folder: handFolder, Agent: "claude", Home: "home-dev", Name: "AI1"}); err != nil {
 				stepErr = err
 				return
 			}
-			if err := h2.Sessions.Create(host.Session{SessionKey: k2, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: "home-dev", Name: "AI2"}); err != nil {
+			if err := h2.Sessions.Create(host.Session{SessionKey: k2, Kind: host.GroupSession, Folder: handFolder, Agent: "claude", Home: "home-dev", Name: "AI2"}); err != nil {
 				stepErr = err
 				return
 			}
@@ -592,7 +592,7 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		}
 		cliDrv = newHRCLIDriver(cleanup, logFile)
 		host.Drivers = map[string]host.Driver{"claude": cliDrv}
-		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: "wt/1-task", Agent: "claude", Home: "home-dev", Name: "Claude"})
+		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: handFolder, Agent: "claude", Home: "home-dev", Name: "Claude"})
 	})
 	sc.Step(`^the scripted Claude CLI exits mid-turn after reporting session "([^"]+)"$`, func(id string) error {
 		crashScript := filepath.Join(dir, "crash.json")
@@ -656,10 +656,10 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		}
 		cliDrv = newHRCLIDriver(cleanup, logFile, script)
 		host.Drivers = map[string]host.Driver{"claude": cliDrv}
-		if err := h.Sessions.Create(host.Session{SessionKey: kA, Kind: host.GroupSession, Folder: "repo-a", Agent: "claude", Home: "home-dev", Name: "A", CLISession: "sess-a"}); err != nil {
+		if err := h.Sessions.Create(host.Session{SessionKey: kA, Kind: host.GroupSession, Folder: handFolder, Agent: "claude", Home: "home-dev", Name: "A", CLISession: "sess-a"}); err != nil {
 			return err
 		}
-		return h.Sessions.Create(host.Session{SessionKey: kB, Kind: host.GroupSession, Folder: "repo-b", Agent: "claude", Home: "home-dev", Name: "B", CLISession: "sess-b"})
+		return h.Sessions.Create(host.Session{SessionKey: kB, Kind: host.GroupSession, Folder: handFolder, Agent: "claude", Home: "home-dev", Name: "B", CLISession: "sess-b"})
 	})
 	sc.Step(`^turns alternate between the two sessions (\d+) times$`, func(switches int) error {
 		pairs := []host.SessionKey{kA, kB}
@@ -676,7 +676,7 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 	})
 	sc.Step(`^the lifecycle log records (\d+) non-overlapping start-exit pairs$`, func(total int) error {
 		kC := host.SessionKey{Group: hrGroup, Member: "end-slot"}
-		if err := h.Sessions.Create(host.Session{SessionKey: kC, Kind: host.GroupSession, Folder: "repo-c", Agent: "claude", Home: "home-dev", Name: "C", CLISession: "sess-c"}); err != nil {
+		if err := h.Sessions.Create(host.Session{SessionKey: kC, Kind: host.GroupSession, Folder: handFolder, Agent: "claude", Home: "home-dev", Name: "C", CLISession: "sess-c"}); err != nil {
 			return err
 		}
 		if err := host.Runner.Turn(suiteT.Context(), h, kC, "done", host.Turn{Kind: host.ItemsTurn}); err != nil {
@@ -718,7 +718,7 @@ func registerReplaceSteps(sc *godog.ScenarioContext, suiteT *testing.T, cleanup 
 		}
 		drv = &hrMemDriver{parentCtx: procCtx, noSess: map[int]bool{0: true}, autoEnd: true}
 		host.Drivers = map[string]host.Driver{"claude": drv}
-		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: "wt/1-task", Agent: "claude", Home: "home-dev", Name: "Claude", CLISession: "gone-id"})
+		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: handFolder, Agent: "claude", Home: "home-dev", Name: "Claude", CLISession: "gone-id"})
 	})
 	sc.Step(`^the task session receives a turn$`, func() error {
 		return host.Runner.Turn(suiteT.Context(), h, tKey, "work", host.Turn{Kind: host.ItemsTurn, Thread: hrTask1})

@@ -237,7 +237,7 @@ func (w *homeInboxWorld) enrollAIs(withSec bool) error {
 
 func (w *homeInboxWorld) addAI(id, cli, name string, secretary bool) error {
 	return w.cmd(w.laptop, w.laptopK, map[string]any{
-		"t": "member", "op": "add_ai", "id": id, "cli": cli, "name": name,
+		"t": "member", "op": "add_ai", "id": id, "cli": cli, "name": name, "workspace": "/work/" + name,
 		"account": "personal", "secretary": secretary, "approvers": []string{},
 	})
 }

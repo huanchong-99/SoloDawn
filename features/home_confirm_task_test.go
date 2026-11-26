@@ -175,24 +175,5 @@ func homeRoleSteps(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the assignee submits passing local checks$`, func() error {
-		task := w.state.Tasks[active]
-		p := taskCmd("branch")
-		if err := w.send(w.devices["host"], proto.TaskBranch{TaskCommand: p, Branch: fmt.Sprintf("task/%d-%s", task.Num, task.Slug)}); err != nil {
-			return err
-		}
-		if err := w.checkAnswer(""); err != nil {
-			return err
-		}
-		if err := w.send(w.devices["host"], proto.TaskChecked{TaskCommand: taskCmd("checked"), Commit: "commit", OK: true, Items: []proto.CheckItem{}}); err != nil {
-			return err
-		}
-		if err := w.checkAnswer(""); err != nil {
-			return err
-		}
-		if err := w.send(w.devices["host"], proto.TaskSubmitted{TaskCommand: taskCmd("submitted"), Commit: "commit"}); err != nil {
-			return err
-		}
-		return w.checkAnswer("")
-	})
+	sc.Step(`^the assignee submits passing local checks$`, rewritten("AC-3", "a task is submitted by a post of kind report: there is no branch, check or submitted command (MODEL-1126 plan 1.6)"))
 }
