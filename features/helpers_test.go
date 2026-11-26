@@ -51,7 +51,8 @@ func startTestTURN(cleanup func(func()), gen turn.RelayAddressGenerator) (string
 		return "", err
 	}
 	srv, err := turn.NewServer(turn.ServerConfig{
-		Realm: "test",
+		Realm:         "test",
+		LoggerFactory: pionLog,
 		AuthHandler: func(r *turn.RequestAttributes) (string, []byte, bool) {
 			return "peer", turn.GenerateAuthKey("peer", "test", "secret"), r.Username == "peer"
 		},

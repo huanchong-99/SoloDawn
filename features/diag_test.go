@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
+	"github.com/huanchong-99/SoloDawn/internal/peer"
+	"github.com/pion/logging"
 )
 
 const (
@@ -274,14 +276,23 @@ func startNodeCmd(t testing.TB, cleanup func(func()), cmd *exec.Cmd, name, data 
 	return stop, err
 }
 
-// diagCapture points log at diagLog, at debug level, for the suite; the
-// returned function puts the logger back.
+// pionLog writes pion's errors, and the debug lines of the TURN server
+// ("turn"), the TURN clients ("turnc") and the ICE agents, to diagLog
+// (issues.md FLAKY-33).
+var pionLog = &logging.DefaultLoggerFactory{Writer: &diagLog, DefaultLogLevel: logging.LogLevelError, ScopeLevels: map[string]logging.LogLevel{
+	"turn": logging.LogLevelDebug, "turnc": logging.LogLevelDebug, "ice": logging.LogLevelDebug,
+}}
+
+// diagCapture points log and the pion stacks of peer.Listen at diagLog, at
+// debug level, for the suite; the returned function puts them back.
 func diagCapture() func() {
 	out, flags := log.Writer(), log.Flags()
 	level := slog.SetLogLoggerLevel(slog.LevelDebug)
 	log.SetOutput(&diagLog)
 	log.SetFlags(log.Ldate | log.Lmicroseconds | log.LUTC)
+	peer.PionLog = pionLog
 	return func() {
+		peer.PionLog = nil
 		log.SetOutput(out)
 		log.SetFlags(flags)
 		slog.SetLogLoggerLevel(level)
