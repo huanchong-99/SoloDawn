@@ -49,9 +49,9 @@ function place(h: Held, behavior: ScrollBehavior) {
   scroller.scrollTo({ top: h.top, behavior });
 }
 
-// The line changed size: the message is put back at once if the change moved it. A smooth scroll
-// of the jump goes on: a scroll in the frame that a new IntersectionObserver first looks in can
-// leave it stale in Chromium, and the main line's `edge` is one.
+// The line changed size: the message is put back at once if the change moved it, and else left
+// alone: the observer also calls once when it starts, in the jump's first frame, where a scroll
+// would end a smooth jump at once.
 function keep(h: Held) {
   if (!h.el.isConnected) return release();
   if (fromEnd(h) !== h.end) place(h, 'auto');

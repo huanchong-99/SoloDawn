@@ -1,7 +1,17 @@
 import { flushSync, tick } from 'svelte';
 import { prefersReducedMotion } from 'svelte/motion';
 import { afterEach, expect, it, vi } from 'vitest';
-import { closePage, field, one, openPage, press, show, text, type } from '../../../features/page';
+import {
+  closePage,
+  field,
+  one,
+  openPage,
+  press,
+  scrollToTop,
+  show,
+  text,
+  type,
+} from '../../../features/page';
 import { Group, Home, homes } from '../../lib/groups.svelte';
 import { jumpToMessage } from '../../lib/jump';
 import { goldens } from '../../lib/mock';
@@ -151,6 +161,20 @@ it('lets the message jumped to go when the person sends a message', () => {
   type('hello');
   press('Enter');
   expect(scroller.style.overflowAnchor).toBe('');
+});
+
+// Chromium tells both when a jump to the oldest message held scrolls to the top in the frame
+// after the line drew the newest messages (e2e/jump.spec.ts).
+it('fetches the page before by the last of the changes the observer tells at once', () => {
+  const { group, home } = setup();
+  group.live = true;
+  const request = vi.mocked(home.ctl!.request).mockReturnValue(new Promise(() => {}));
+  const page = expect.objectContaining({ t: 'fetch', thread: null });
+  openPage(`#/groups/${group.g}`);
+  scrollToTop(true, false);
+  expect(request).not.toHaveBeenCalledWith(page);
+  scrollToTop(false, true);
+  expect(request).toHaveBeenCalledWith(page);
 });
 
 it('shows a task event after its task has disappeared', () => {

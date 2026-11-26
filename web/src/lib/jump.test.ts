@@ -206,7 +206,7 @@ describe('jumpToMessage in the main line', () => {
     ]);
   });
 
-  // Its first call, in the frame that the main line's IntersectionObserver may first look in.
+  // Its first call, in the first frame of the jump.
   it('leaves a smooth jump on its way while the line has not moved the message', async () => {
     const { jumpToMessage } = await load();
     const { scrollTo } = line(1000);
