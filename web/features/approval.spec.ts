@@ -145,7 +145,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'the group holds a pending brief, approval, decision and confirmation for the reader, and an approval for "Mina"',
         () => {
           scrolled = [];
-          Element.prototype.scrollIntoView = function () {
+          Element.prototype.scrollTo = function () {
             scrolled.push(this);
           };
           home.write(
@@ -196,7 +196,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         () => {
           expect(location.hash).toBe(`#/groups/${website}`);
           const msgEl = document.getElementById(`m-${approvalId}`)!;
-          expect(scrolled.at(-1)).toBe(msgEl);
+          expect(scrolled.at(-1)).toBe(one('.scroller'));
           expect(document.activeElement).toBe(msgEl.querySelector('button.btn-dawn'));
         },
       );
@@ -206,7 +206,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       });
       Then('focus moves to the brief message in the main line', () => {
         const briefEl = document.getElementById('m-b-1')!;
-        expect(scrolled.at(-1)).toBe(briefEl);
+        expect(scrolled.at(-1)).toBe(one('.scroller'));
         const target = briefEl.querySelector('button:not([disabled])') ?? briefEl;
         expect(document.activeElement).toBe(target);
       });
@@ -216,7 +216,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       });
       Then('focus moves to the decision message in the main line', () => {
         const decisionEl = document.getElementById('m-d-1')!;
-        expect(scrolled.at(-1)).toBe(decisionEl);
+        expect(scrolled.at(-1)).toBe(one('.scroller'));
         const target =
           decisionEl.querySelector('input:not([disabled]), textarea:not([disabled])') ?? decisionEl;
         expect(document.activeElement).toBe(target);
@@ -227,7 +227,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       });
       Then('focus moves to the Confirm button of that card', () => {
         const msgEl = document.getElementById('m-c-1')!;
-        expect(scrolled.at(-1)).toBe(msgEl);
+        expect(scrolled.at(-1)).toBe(one('.scroller'));
         expect(document.activeElement).toBe(msgEl.querySelector('button.btn-dawn'));
       });
       When('the four cards waiting on the reader are no longer pending', () => {

@@ -3,6 +3,7 @@ import { prefersReducedMotion } from 'svelte/motion';
 import { afterEach, expect, it, vi } from 'vitest';
 import { closePage, field, one, openPage, press, show, text, type } from '../../../features/page';
 import { Group, Home, homes } from '../../lib/groups.svelte';
+import { jumpToMessage } from '../../lib/jump';
 import { goldens } from '../../lib/mock';
 import { cards } from '../../lib/mounts.svelte';
 import { prefs } from '../../lib/prefs.svelte';
@@ -128,6 +129,28 @@ it.each([
   type('hello');
   press('Enter');
   expect(post).toHaveBeenCalledTimes(sent);
+});
+
+it('lets the message jumped to go when the person sends a message', () => {
+  const { group } = setup();
+  const msg = p.decode(p.MsgRow, goldens['row-msg-text']);
+  group.apply([{ ...msg, g: group.g }]);
+  openPage(`#/groups/${group.g}`);
+  vi.spyOn(group, 'post').mockReturnValue(new Promise(() => {}));
+  // A line of 3000 px in a scroller of 600, the message 1000 px below its top.
+  const scroller = one('.scroller');
+  const layout = (el: Element, props: Record<string, unknown>) => {
+    for (const [name, value] of Object.entries(props))
+      Object.defineProperty(el, name, { configurable: true, value });
+  };
+  layout(scroller, { clientHeight: 600, scrollHeight: 3000, scrollTo: () => {} });
+  layout(scroller.firstElementChild!, { offsetTop: 0, offsetHeight: 3000 });
+  layout(one(`#m-${msg.id}`), { offsetTop: 1000, offsetHeight: 100 });
+  jumpToMessage(new MouseEvent('click'), msg.id);
+  expect(scroller.style.overflowAnchor).toBe('none');
+  type('hello');
+  press('Enter');
+  expect(scroller.style.overflowAnchor).toBe('');
 });
 
 it('shows a task event after its task has disappeared', () => {

@@ -375,10 +375,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       );
       When('the reader clicks a main-line card link in the thread', () => {
         scrolled = undefined;
-        const target = one('#m-k-ap');
-        target.scrollIntoView = (arg) => {
+        one('.scroller').scrollTo = ((arg: ScrollToOptions) => {
           scrolled = arg;
-        };
+        }) as Element['scrollTo'];
         one<HTMLAnchorElement>('.thread a.tcard[href="#m-k-ap"]').click();
         flushSync();
       });
@@ -389,7 +388,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(route.page).toBe('chat');
           expect(route.params).toEqual({ g: website });
           expect(texts('.chat-head h2')).toEqual(['Website']);
-          expect(scrolled).toEqual({ behavior: 'smooth', block: 'center' });
+          expect(scrolled).toEqual({ top: expect.any(Number), behavior: 'smooth' });
           expect(one('#m-k-ap').contains(document.activeElement)).toBe(true);
         },
       );

@@ -4,6 +4,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { withoutInlineReplies } from '../../lib/call';
   import type { Group } from '../../lib/groups.svelte';
+  import { release } from '../../lib/jump';
   import type { Net } from '../../lib/net.svelte';
   import { card as cardOf, mounts, side } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
@@ -89,6 +90,7 @@
     if (!away) unseen = false;
   }
   function toLatest() {
+    release();
     scroller.scrollTo({ top: 0, behavior: prefersReducedMotion.current ? 'auto' : 'smooth' });
     scroller.focus({ preventScroll: true });
   }
