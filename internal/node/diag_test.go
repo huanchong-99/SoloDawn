@@ -11,11 +11,13 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/huanchong-99/SoloDawn/internal/peer"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
@@ -69,6 +71,11 @@ func TestDiagNodeEvents(t *testing.T) {
 	join := owner.Sign(fmt.Sprintf(`{"t":"host.none","n":%q,"ts":%d,"to":%q}`, sesID("diag"), time.Now().UnixMilli(), n.key.ID()))
 	fc.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 2}, Env: join})
 	fc.next(t)
+	// An offline target would retire the offer when the first candidate is
+	// reported offline, which can fail Offer itself (flows/connect.md step 15).
+	online, err := peer.Dial(t.Context(), "ws://127.0.0.1:"+strconv.Itoa(n.httpPort)+"/rv", owner)
+	mustNoErr(t, err)
+	t.Cleanup(func() { online.Close() })
 	conn, err := n.peer.Offer(t.Context(), owner.ID())
 	mustNoErr(t, err)
 	mustNoErr(t, conn.Close())
