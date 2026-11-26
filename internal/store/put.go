@@ -45,7 +45,7 @@ SELECT ?1, d->>'r', d->>'id', d->>'seq', coalesce(d->>'pos', d->>'seq'),
        coalesce(d->>'ts', d->>'created', ?2), ?2, CASE d->>'r' WHEN 'msg' THEN d->>'thread' END,
        d->>'r'='msg' AND (d->>'thread' IS NULL OR d->>'main'=1) AND d->>'gone' IS NULL,
        d->>'$.state.status' IS 'pending',
-       d->>'r'='task' AND (d->>'state' IS 'merged' OR d->>'state' IS 'cancelled'),
+       d->>'r'='task' AND (d->>'state' IS 'done' OR d->>'state' IS 'cancelled'),
        d->>'gone' IS NULL AND (d->>'r'='note' OR (d->>'r'='msg' AND d->>'kind' IS 'review')),
        coalesce(d->>'gone',0), d
 FROM input WHERE true

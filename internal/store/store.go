@@ -14,6 +14,10 @@ import (
 //go:embed schema.sql
 var schema string
 
+// migrations are applied in order; their count is the schema version, which an
+// export file also carries.
+var migrations = []string{schema, processedOffers, kbSchema, forgetGroups}
+
 type Store struct {
 	db   *sql.DB
 	jobs chan func()
@@ -42,7 +46,7 @@ func initialize(db *sql.DB) error {
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		return err
 	}
-	return migrate(db, []string{schema, processedOffers, kbSchema})
+	return migrate(db, migrations)
 }
 
 func migrate(db *sql.DB, migrations []string) error {
