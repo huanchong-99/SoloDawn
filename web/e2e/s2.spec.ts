@@ -9,8 +9,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from '
 import type {} from '../features/s2_cast';
 import { launch } from './config';
 import {
-  gitIdentityEnv,
-  initGitRepo,
+  chooseFolder,
+  createGroup,
+  makeFolder,
   openDirectContext,
   pairPrimaryBrowser,
   poll,
@@ -131,98 +132,13 @@ describe('step 2 in the browser', () => {
     expect(await p.getByRole('button', { name: 'Edit access' }).count()).toBe(0);
   });
 
-  test('A9.23 the team group has no task list, no brief and no AI cards', async () => {
-    const p = await open('P', '#/groups/{team}');
-    await texts(p, '[aria-label="Bulletin"]').toEqual([
-      'Claude Code\nWebsite\n\nOn a computer belonging to Alex\n\nThe website is ready.',
-    ]);
-    expect(await p.getByRole('combobox', { name: 'Message' }).getAttribute('placeholder')).toBe(
-      'Message the team',
-    );
-    expect(await p.locator('.member').count()).toBe(0);
-    expect(await p.getByRole('button', { name: 'Add AI' }).count()).toBe(0);
-  });
-
-  test('A9.23 P creates a team group in the dialog, and a bulletin shows there', async () => {
-    const p = await open('P', '#/groups');
-    await p.getByRole('button', { name: 'New group' }).click();
-    await p.getByRole('radio', { name: 'Team group' }).check();
-    const dialog = p.getByRole('dialog', { name: 'New group' });
-    expect(await dialog.getByLabel('Git repository').count()).toBe(0);
-    await dialog.getByLabel('Group name').fill('Studio');
-    await dialog.getByLabel('Your name in the group').fill('Alex');
-    await dialog.getByLabel('Home computer').selectOption('P1');
-    await dialog.getByRole('button', { name: 'Create group' }).click();
-    await texts(p, '.chat-head h2').toEqual(['Studio']);
-    const g = new URL(p.url()).hash.split('/')[2];
-    expect(await sent(p)).toEqual([
-      {
-        t: 'group',
-        g,
-        op: 'create',
-        name: 'Studio',
-        kind: 'team',
-        base: '',
-        forge: 'none',
-        checks: [],
-        member_name: 'Alex',
-      },
-    ]);
-    // P2 listed neither team group: it was told the first as it connected, then the new one.
-    const { p2, team } = await ids(p);
-    const { host } = new URL(p.url());
-    const notice = (g: string, name: string) => ({
-      t: 'home.add',
-      to: p2,
-      g,
-      home: expect.any(String),
-      name,
-      addrs: [`ws://${host}/rv`],
-    });
-    await expect
-      .poll(() => p.evaluate(() => window.s2.told()), { timeout: 5000 })
-      .toEqual([notice(team, 'Team'), notice(g, 'Studio')]);
-    await texts(p, '#chat-side h2, #chat-side summary b').toEqual([
-      'PEOPLE · 1',
-      'GROUP DETAILS',
-      'MOVE GROUP',
-    ]);
-    await p.evaluate((g) => window.s2.bulletin(g), g);
-    await texts(p, '[aria-label="Bulletin"] p:last-child').toEqual(['The website is ready.']);
-    await p.getByRole('button', { name: 'Invite', exact: true }).waitFor();
-    expect(await p.getByRole('button', { name: 'Add AI' }).count()).toBe(0);
-    await p.getByRole('button', { name: 'Edit group settings' }).click();
-    const settings = p.getByRole('dialog', { name: 'Edit group settings' });
-    expect(await settings.locator('input, textarea, select, summary').count()).toBe(1);
-    await settings.getByLabel('Group name').fill('Studio notices');
-    await settings.getByRole('button', { name: 'Save' }).click();
-    await settings.waitFor({ state: 'detached' });
-    expect((await sent(p)).at(-1)).toEqual({ t: 'group', g, op: 'set', name: 'Studio notices' });
-  });
-
-  test('A9.24 the dialog that joins an AI shows the check commands and each template', async () => {
-    const p = await open('P', '#/groups/{g}');
-    await p.getByRole('button', { name: 'Add AI' }).click();
-    await p.getByRole('dialog', { name: 'Add an AI' }).locator('summary').click();
-    await texts(p, 'dialog [aria-label="Group commands"] code').toEqual([
-      'https://git.example/team/website.git',
-      'main',
-      'pnpm check',
-      'pnpm test',
-      ...['git', 'push', 'origin', '{branch}'],
-      ...['forge', 'open', '--title={title}', '--body={summary}', '{base}', '{commit}'],
-      ...['forge', 'checks', '{request}', '{commit}'],
-      ...['forge', 'merge', '{request}', '{commit}'],
-    ]);
-  });
-
-  test('R-60, R-103 P corrects a check command and a limit, Q changes nothing', async () => {
+  test('R-60, R-103 P corrects a limit and has no check commands, Q changes nothing', async () => {
     const p = await open('P', '#/groups/{g}');
     await p.getByRole('button', { name: 'Edit group settings' }).click();
     const dialog = p.getByRole('dialog', { name: 'Edit group settings' });
     const save = dialog.getByRole('button', { name: 'Save' });
     expect(await save.isDisabled()).toBe(true);
-    await dialog.getByLabel('Check commands').fill('pnpm check\npnpm vitest run');
+    expect(await dialog.getByLabel('Check commands').count()).toBe(0);
     const limits = dialog.locator('details', { hasText: 'Limits' });
     await limits.locator('summary').click();
     const depth = limits.getByLabel('Chain of questions');
@@ -243,7 +159,6 @@ describe('step 2 in the browser', () => {
         t: 'group',
         g,
         op: 'set',
-        checks: ['pnpm check', 'pnpm vitest run'],
         limits: {
           rounds: 10,
           wakes_per_hour: 40,
@@ -317,21 +232,14 @@ describe('watching a terminal, with real nodes', () => {
       await mkdir(bin);
       await writeFile(join(bin, 'claude'), cli, { mode: 0o700 });
       const PATH = [bin, inject('e2e').bin, process.env.PATH].join(delimiter);
-      const active = (net = await startNet({ nodes: 3, env: () => ({ ...gitIdentityEnv, PATH }) }));
+      const active = (net = await startNet({ nodes: 3, env: () => ({ PATH }) }));
       const direct = (surface = await startDirectSurface(active.rendezvous, inject('browser')));
       const open = async () => (await openDirectContext(browser, contexts, direct)).newPage();
 
       const h = await open();
       await pairPrimaryBrowser(h, direct, active.nodes[0], 'H1');
       await h.locator('button', { hasText: 'New group' }).first().click();
-      const create = h.locator('dialog.dlg[open]');
-      await create.getByLabel('Group name').fill('Website');
-      await create
-        .getByLabel('Git repository')
-        .fill(await initGitRepo(active.dir, 'repo', '# Website\n'));
-      await create.getByLabel('Your name in the group').fill('Mina');
-      await create.locator('select.input').first().selectOption('none');
-      await create.locator('button.btn-primary', { hasText: 'Create group' }).click();
+      await createGroup(h, { name: 'Website', member: 'Mina' });
       const member = async (name: string, node: Node) => {
         await h.getByRole('button', { name: 'Invite', exact: true }).click();
         await h.getByRole('button', { name: 'Create link' }).click();
@@ -350,6 +258,7 @@ describe('watching a terminal, with real nodes', () => {
       await q.locator('.members button', { hasText: 'Add AI' }).click();
       const add = q.locator('dialog.dlg[open]');
       await add.locator('.choice', { hasText: 'Claude Code' }).locator('input').check();
+      await chooseFolder(add, await makeFolder(active.dir, 'website'));
       await add.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await q.locator('.member').getByRole('link', { name: 'Open terminal' }).click();
       await bar(q).toBe('Owner is driving');

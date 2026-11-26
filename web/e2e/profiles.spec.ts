@@ -6,9 +6,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from '
 import type {} from '../features/s2_cast';
 import { launch } from './config';
 import {
-  gitIdentityEnv,
+  chooseFolder,
+  createGroup,
   exec,
-  initGitRepo,
+  makeFolder,
   openDirectContext,
   poll,
   readPairingCode,
@@ -18,7 +19,7 @@ import {
 } from './direct';
 import { leader, startNet, stop, type Net, type Node, type Proc } from './nodes';
 
-async function createGroup(page: Page, surface: DirectSurface, node: Node, repo: string) {
+async function pairAndCreateGroup(page: Page, surface: DirectSurface, node: Node) {
   await page.goto(`${surface.url}#/onboarding`);
   const code = await readPairingCode(page, surface.signal);
   const paired = await node.run(
@@ -39,15 +40,7 @@ async function createGroup(page: Page, surface: DirectSurface, node: Node, repo:
   await page.locator('input[name="acct-qwen"][value="api_key"]').check();
   await finishOnboarding(page, true);
   await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
-  const dialog = page.locator('dialog.dlg[open]');
-  const inputs = dialog.locator('input.input');
-  await inputs.nth(0).fill('Profiles');
-  await inputs.nth(1).fill(repo);
-  await inputs.nth(2).fill('main');
-  await inputs.nth(3).fill('Owner');
-  await dialog.locator('select.input').first().selectOption('none');
-  await dialog.getByRole('button', { name: 'Create group', exact: true }).click();
-  await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
+  await createGroup(page, { name: 'Profiles', member: 'Owner' });
 }
 
 describe('AI profiles with fake CLIs', () => {
@@ -105,7 +98,6 @@ describe('AI profiles with fake CLIs', () => {
     net = await startNet({
       nodes: 1,
       env: () => ({
-        ...gitIdentityEnv,
         PATH: [bin, inject('e2e').bin, process.env.PATH ?? ''].join(delimiter),
         SOLODAWN_FAKE_CLAUDE_SCRIPT: claude,
         SOLODAWN_FAKE_CODEX_SCRIPT: codex,
@@ -115,8 +107,7 @@ describe('AI profiles with fake CLIs', () => {
     surface = await startDirectSurface(net.rendezvous, inject('browser'));
     const context = await openDirectContext(browser, contexts, surface);
     const page = await context.newPage();
-    const repo = await initGitRepo(net.dir, 'profiles-repo', '# Profiles\n');
-    await createGroup(page, surface, net.nodes[0], repo);
+    await pairAndCreateGroup(page, surface, net.nodes[0]);
     await page.locator('.members').getByRole('button', { name: 'Add AI', exact: true }).click();
     const dialog = page.locator('dialog.dlg[open]');
     await poll(() => dialog.locator('.choice').count()).toBe(5);
@@ -170,6 +161,7 @@ describe('AI profiles with fake CLIs', () => {
     await dialog.getByRole('combobox', { name: 'Level', exact: true }).selectOption('high');
     await dialog.getByRole('textbox', { name: 'Name in the group', exact: true }).fill('Opus');
     await dialog.getByPlaceholder('What this AI is good at, in one line').fill('Go backend');
+    await chooseFolder(dialog, await makeFolder(net.dir, 'opus'));
     await dialog.getByRole('button', { name: 'Add AI', exact: true }).click();
     await poll(() => dialog.count()).toBe(0);
     const member = page
@@ -193,6 +185,7 @@ describe('AI profiles with fake CLIs', () => {
     await dialog.getByRole('combobox', { name: 'Model', exact: true }).selectOption('haiku');
     await poll(() => dialog.locator('input[value="light"]').isChecked()).toBe(true);
     await dialog.getByRole('textbox', { name: 'Name in the group', exact: true }).fill('Haiku');
+    await chooseFolder(dialog, await makeFolder(net.dir, 'haiku'));
     await dialog.getByRole('button', { name: 'Add AI', exact: true }).click();
     await poll(() => dialog.count()).toBe(0);
     await poll(() => page.locator('.member h3').allTextContents()).toEqual(['Haiku', 'Opus']);
@@ -304,7 +297,7 @@ describe('AI profiles with fake CLIs', () => {
     ).toBe(1);
   });
 
-  test('A10.10–A10.12: the task badge follows authoritative review and checks escalation rows', async () => {
+  test('A10.10–A10.12: the task badge follows authoritative review escalation rows', async () => {
     const page = await cast('P');
     const task = JSON.parse(
       await readFile('../internal/proto/testdata/row-task-stuck.json', 'utf8'),
@@ -335,14 +328,12 @@ describe('AI profiles with fake CLIs', () => {
       { task, notice },
     );
     const badge = page.getByText('Must ask a stronger AI', { exact: true });
-    await poll(() => page.locator('.card .steps i').count()).toBe(6);
+    await poll(() => page.locator('.card .steps i').count()).toBe(3);
     await poll(() => badge.count()).toBe(0);
     for (const stuck of [
       { kind: 'review', n: 2, ask: true },
       { kind: 'review', n: 2, ask: false },
       { kind: 'review', n: 3, ask: true },
-      { kind: 'checks', n: 2, ask: true },
-      { kind: 'checks', n: 2, ask: false },
     ]) {
       await page.evaluate((stuck) => window.s2.update('task', 'g', { stuck }), stuck);
       await poll(() => badge.count()).toBe(stuck.ask ? 1 : 0);

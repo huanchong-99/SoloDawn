@@ -1,6 +1,6 @@
-// End-to-end milestone 2 (E-M2): group creation across two browsers without reload, sub-second
-// live message delivery, reconnect delta sync, and >1000-row cold reset with scroll-back and
-// preserved pending card (F-06, F-07, A2.1, A2.2).
+// End-to-end milestone 2 (E-M2): group creation with two AIs, each in its folder, across two
+// browsers without reload, sub-second live message delivery, reconnect delta sync, and >1000-row
+// cold reset with scroll-back and preserved pending card (F-06, F-07, A2.1, A2.2).
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright';
@@ -8,8 +8,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from '
 import { launch } from './config';
 import {
   claudeInitSteps,
-  gitIdentityEnv,
-  initGitRepo,
+  createGroup,
+  makeFolder,
   openDirectContext,
   pairPrimaryBrowser,
   poll,
@@ -298,12 +298,15 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
 
       const active = await startNet({
         nodes: 1,
-        env: () => ({ ...gitIdentityEnv, SOLODAWN_FAKE_CLAUDE_SCRIPT: claudeScript }),
+        env: () => ({ SOLODAWN_FAKE_CLAUDE_SCRIPT: claudeScript }),
       });
       net = active;
       const direct = await startDirectSurface(active.rendezvous, inject('browser'));
       surface = direct;
-      const repo = await initGitRepo(active.dir, 'project-repo', '# Handbook\n');
+      const folders = {
+        claude: await makeFolder(active.dir, 'handbook'),
+        codex: await makeFolder(active.dir, 'handbook-tools'),
+      };
 
       const ctx1 = await openDirectContext(browser, contexts, direct);
       const ctx2 = await openDirectContext(browser, contexts, direct);
@@ -319,25 +322,32 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
       await page1.locator('.rail .tabs a[href="#/groups"]').click();
       await poll(() => page1.url()).toContain('#/groups');
       await page1.locator('button', { hasText: 'New group' }).first().click();
+      // Claude Code is the secretary: its first turn raises the decision card used further down.
+      const groupId = await createGroup(page1, {
+        name: 'Handbook',
+        member: 'Alex',
+        ais: [
+          { cli: 'Claude Code', computer: 'home-box', name: 'Claude Code', folder: folders.claude },
+          { cli: 'Codex', computer: 'home-box', name: 'Codex', folder: folders.codex },
+        ],
+      });
+      const groupHash = `#/groups/${groupId}`;
+      await poll(() => page1.locator('.members .member').count()).toBe(2);
 
-      const createDlg = page1.locator('dialog.dlg[open]');
-      const textInputs = createDlg.locator('input.input');
-      await textInputs.nth(0).fill('Handbook');
-      await textInputs.nth(1).fill(repo);
-      await textInputs.nth(2).fill('main');
-      await textInputs.nth(3).fill('Alex');
-      await createDlg.locator('select.input').first().selectOption('none');
-      await createDlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
-
-      await poll(() => page1.url()).toMatch(/#\/groups\/[^/]+$/);
-      const groupHash = new URL(page1.url()).hash;
-      const groupId = groupHash.slice('#/groups/'.length);
-
-      // Second connected browser sees the new group in its list without reloading.
+      // Second connected browser sees the new group and both AIs, each in its folder, without
+      // reloading.
       await poll(() => page2.locator('.glist a.gitem b').allTextContents()).toContain('Handbook');
 
       await page2.locator('.glist a.gitem', { hasText: 'Handbook' }).click();
       await poll(() => new URL(page2.url()).hash).toBe(groupHash);
+      await poll(() => page2.locator('.members .member h3').allTextContents()).toEqual([
+        'Claude Code',
+        'Codex',
+      ]);
+      await poll(() => page2.locator('.members .member dd.ws code').allTextContents()).toEqual([
+        folders.claude,
+        folders.codex,
+      ]);
 
       // Post a message from Browser 1 and verify Browser 2 renders it within 1 second (A2.1).
       await poll(() => page1.locator('dialog.dlg[open]').count()).toBe(0);
@@ -354,16 +364,8 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
         .toContain('Hello live across browsers');
       expect(performance.now() - sentAt).toBeLessThan(1000);
 
-      // Add a secretary AI so an old pending card exists before the 1500-message gap.
-      await page1.locator('.members button', { hasText: 'Add AI' }).click();
-      const addDlg = page1.locator('dialog.dlg[open]');
-      await poll(() => addDlg.locator('.choice').count()).toBeGreaterThan(0);
-      await addDlg.locator('.sec-opt input[type="checkbox"]').check();
-      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.count()).toBe(0);
-      await poll(() => page1.locator('.members .member').count()).toBe(1);
-
-      await sendChatMessage(page1, 'Please check archive redirects');
+      // The secretary's turn on that message leaves an old pending card before the 1500-message
+      // gap.
       await poll(() => page2.locator('.chat nav.needbar').textContent()).toContain(
         'Keep legacy archive redirects?',
       );
@@ -456,11 +458,7 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
       const alex = await open();
       await pairPrimaryBrowser(alex, direct, active.nodes[0], 'alex-box');
       await alex.locator('button', { hasText: 'New group' }).first().click();
-      const create = alex.locator('dialog.dlg[open]');
-      await create.getByRole('radio', { name: 'Team group' }).check();
-      await create.getByLabel('Group name').fill('Studio');
-      await create.getByLabel('Your name in the group').fill('Alex');
-      await create.locator('button.btn-primary', { hasText: 'Create group' }).click();
+      await createGroup(alex, { name: 'Studio', member: 'Alex' });
       await poll(() => alex.locator('.chat-head h2').allTextContents()).toEqual(['Studio']);
       await sendChatMessage(alex, 'Welcome to the studio');
       await alex.getByRole('button', { name: 'Invite', exact: true }).click();

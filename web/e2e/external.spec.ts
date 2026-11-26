@@ -6,8 +6,9 @@ import type { Page } from 'playwright';
 import { expect, inject, test } from 'vitest';
 import { launch } from './config';
 import {
-  gitIdentityEnv,
-  initGitRepo,
+  chooseFolder,
+  createGroup,
+  makeFolder,
   openDirectContext,
   poll,
   readPairingCode,
@@ -31,22 +32,9 @@ async function pair(page: Page, surface: DirectSurface, node: Node) {
   expect(result.code, result.stderr).toBe(0);
 }
 
-async function createProject(page: Page, repo: string) {
-  await page.locator('button', { hasText: 'New group' }).first().click();
-  const form = page.getByRole('dialog');
-  const inputs = form.locator('input.input');
-  await inputs.nth(0).fill('External project');
-  await inputs.nth(1).fill(repo);
-  await inputs.nth(2).fill('main');
-  await inputs.nth(3).fill('Owner');
-  await form.locator('select.input').first().selectOption('none');
-  await form.getByRole('button', { name: 'Create group' }).click();
-  await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
-}
-
-async function joinExternal(page: Page, nodes: Node[]) {
+async function joinExternal(page: Page, nodes: Node[], folder: string) {
   await page.getByRole('button', { name: 'Add AI' }).click();
-  const form = page.getByRole('dialog');
+  const form = page.getByRole('dialog', { name: 'Add an AI' });
   for (const node of nodes) {
     await poll(() =>
       form.locator('.choice', { hasText: new RegExp(`external.*${node.name}`, 'i') }).count(),
@@ -59,6 +47,7 @@ async function joinExternal(page: Page, nodes: Node[]) {
   await form.getByRole('textbox', { name: 'Name in the group' }).fill('Scout');
   await form.getByRole('combobox', { name: /^Account/ }).selectOption('api_key');
   await form.getByRole('textbox', { name: 'Tool label' }).fill('ZCode');
+  await chooseFolder(form, folder);
   await form.getByRole('button', { name: 'Add AI' }).click();
 }
 
@@ -104,7 +93,7 @@ async function withExternalMCP(
 async function answerCheck(
   node: Node,
   exe: string,
-  member: string,
+  { member, folder }: { member: string; folder: string },
   answer: string,
   working: () => Promise<void>,
 ) {
@@ -112,13 +101,15 @@ async function answerCheck(
   expect(got.code, got.stderr).toBe(0);
   const handout = JSON.parse(got.stdout);
   expect(handout.text).toContain('Setup check: answer here in one line, then finish.');
+  // Every hand-out names the folder the AI was added with (A10.18).
+  expect(handout.folder).toBe(folder);
   await withExternalMCP(node, exe, member, handout.folder, answer, working);
   const done = await node.run('solodawn', 'done', '--member', member, '--run', String(handout.run));
   expect(done.code, done.stderr).toBe(0);
 }
 
-test('external setup, usage and removal (A10.17, A10.20, A10.25, A10.27)', async () => {
-  const net = await startNet({ nodes: 2, env: () => gitIdentityEnv });
+test('external setup, usage and removal (A10.17, A10.18, A10.20, A10.25, A10.27)', async () => {
+  const net = await startNet({ nodes: 2 });
   const surface = await startDirectSurface(net.rendezvous, inject('browser'));
   const browser = await launch(inject('browser'));
   try {
@@ -133,11 +124,10 @@ test('external setup, usage and removal (A10.17, A10.20, A10.25, A10.27)', async
     await page.goto(`${surface.url}#/onboarding`);
     await pair(page, surface, second);
     await page.goto(`${surface.url}#/groups`);
-    await createProject(
-      page,
-      await initGitRepo(net.dir, 'external-project', '# External project\n'),
-    );
-    await joinExternal(page, net.nodes);
+    await page.locator('button', { hasText: 'New group' }).first().click();
+    await createGroup(page, { name: 'External project', member: 'Owner' });
+    const folder = await makeFolder(net.dir, 'external-project');
+    await joinExternal(page, net.nodes, folder);
 
     const card = page.locator('#chat-side .member', { hasText: 'Scout' });
     await poll(() => card.textContent()).toMatch(/external.*ZCode/is);
@@ -158,11 +148,11 @@ test('external setup, usage and removal (A10.17, A10.20, A10.25, A10.27)', async
       await poll(() => card.textContent()).toMatch(/working/i);
     };
     await poll(() => card.textContent()).toMatch(/offline/i);
-    await answerCheck(node, exe, member, 'First scripted setup reply', working);
+    await answerCheck(node, exe, { member, folder }, 'First scripted setup reply', working);
     await poll(() => page.getByText('First scripted setup reply', { exact: true }).count()).toBe(1);
     await poll(() => card.textContent()).toMatch(/waiting/i);
     await panel.getByRole('button', { name: /send.*check/i }).click();
-    await answerCheck(node, exe, member, 'Second scripted setup reply', working);
+    await answerCheck(node, exe, { member, folder }, 'Second scripted setup reply', working);
     await poll(() => page.getByText('Second scripted setup reply', { exact: true }).count()).toBe(
       1,
     );
