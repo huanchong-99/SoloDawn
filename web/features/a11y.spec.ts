@@ -986,16 +986,15 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           });
           freshSvelte.flushSync();
 
-          const msgEl = one(`#m-${approvalId}`);
-          let jumpBehavior: ScrollBehavior | undefined;
-          msgEl.scrollIntoView = (opts) => {
-            jumpBehavior = (opts as ScrollIntoViewOptions)?.behavior;
-          };
-          jump(new MouseEvent('click', { cancelable: true }), approvalId, 'approval');
-          expect(jumpBehavior).toBe('auto');
-
           const scroller = one('.scroller');
           let scrollBehavior: ScrollBehavior | undefined;
+          scroller.scrollTo = ((opts?: ScrollToOptions) => {
+            scrollBehavior = opts?.behavior;
+          }) as typeof scroller.scrollTo;
+          jump(new MouseEvent('click', { cancelable: true }), approvalId, 'approval');
+          expect(scrollBehavior).toBe('auto');
+
+          scrollBehavior = undefined;
           scroller.scrollTo = ((opts?: ScrollToOptions) => {
             scrollBehavior = opts?.behavior;
             scroller.scrollTop = 0;

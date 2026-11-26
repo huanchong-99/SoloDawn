@@ -40,7 +40,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       'the groups "Website" and "Docs" read in a browser of their owner, set to English',
       async () => {
         scrolled = [];
-        Element.prototype.scrollIntoView = function () {
+        Element.prototype.scrollTo = function () {
           scrolled.push(this);
         };
         home = new TestHome('workstation');
@@ -158,7 +158,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         () => {
           expect(location.hash).toBe(`#/groups/${website}`);
           const briefEl = document.getElementById('m-br-live')!;
-          expect(scrolled.at(-1)).toBe(briefEl);
+          expect(scrolled.at(-1)).toBe(one('.scroller'));
           expect(document.activeElement?.textContent?.trim()).toBe('Confirm & start');
           expect(activeToasts()).toEqual([]);
         },
@@ -208,7 +208,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'the chat of "Website" opens with focus on the "Confirm" button of that card',
         async () => {
           const card = document.getElementById('m-cf-mine')!;
-          await vi.waitFor(() => expect(scrolled.at(-1)).toBe(card));
+          await vi.waitFor(() => expect(scrolled.at(-1)).toBe(one('.scroller')));
           expect(document.activeElement).toBe(card.querySelector('button.btn-dawn'));
           expect(activeToasts()).toEqual([]);
         },
@@ -407,7 +407,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then('the chat stays on "Website" and focus moves to task 12\'s card', () => {
         expect(location.hash).toBe(`#/groups/${website}`);
         const taskEl = document.getElementById(`m-${taskId}`)!;
-        expect(scrolled.at(-1)).toBe(taskEl);
+        expect(scrolled.at(-1)).toBe(one('.scroller'));
         expect(taskEl.contains(document.activeElement)).toBe(true);
         expect(toastTexts('p')).toEqual(['Docs · Mina']);
       });

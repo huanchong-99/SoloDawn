@@ -460,7 +460,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     a page or cannot be reached, the top says so and never claims to be the start. Messages stand
     under the day they were written on. A day keeps its key when messages are added before or
     after it, so the messages already drawn stay as they are. Its name stays at the top of the
-    line on a band of the page's colour, under which the messages pass. A message within five
+    line on a band of the page's colour, under which the messages pass. A jump to a message puts
+    it in the middle of the main line, as far as the line reaches, and keeps it there while pages
+    and messages arrive above and below it, until the person scrolls the line, sends a message or
+    jumps elsewhere; the browser's scroll anchoring is off meanwhile. A message the jump puts at
+    the end of the line is not held: the line keeps it and the newest in view. A message within five
     minutes of the one before it, by the same author, is drawn under it without a head; its time
     shows under the pointer, and for all such messages while keyboard focus is on the main line
     or on a button of the chat. That, and the focus ring of the main line, are for someone who
@@ -689,7 +693,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/net.svelte.ts`       | where the homes come from: `sourceOf`, `start` (`mock` and `live`), `runTab` lock |
 | `src/lib/mounts.svelte.ts`    | mounting points, `gather` of the areas' mounts, `card(kind)`                      |
 | `src/lib/motion.ts`           | `spring`, the curve of `--spring`; `shift`, the page cross-fade                   |
-| `src/lib/jump.ts`             | `jumpToMessage`: scroll and focus `#m-<id>` or a task's thread, without routing   |
+| `src/lib/jump.ts`             | `jumpToMessage`: scroll, focus and hold `#m-<id>` or a task's thread; `release`   |
 | `src/lib/proto.ts`            | wire schemas and types, `decode`, the `Ctl` interface                             |
 | `src/lib/mock.ts`             | wire examples by name, their schemas, `mockCtl`                                   |
 | `src/lib/rendezvous.ts`       | signalling client: sign-in, pacing, the receiver's checks                         |

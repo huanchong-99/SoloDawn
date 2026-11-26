@@ -3,6 +3,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { complete, fill, matching, mentioned, room, typing, unsent } from '../../lib/compose';
   import type { Group, Member } from '../../lib/groups.svelte';
+  import { release } from '../../lib/jump';
   import type { Net } from '../../lib/net.svelte';
   import { t } from '../../lib/prefs.svelte';
   import type { TaskRow } from '../../lib/proto';
@@ -81,6 +82,8 @@
 
   async function send() {
     if (!sendable) return;
+    // What is sent shows at the end of the main line, which the jump's hold would keep out of view.
+    release();
     busy = true;
     failed = '';
     const taken = text;

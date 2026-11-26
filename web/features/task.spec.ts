@@ -580,9 +580,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             windowClicks += 1;
           };
           window.addEventListener('click', onWindowClick);
-          one('#m-ap-card-1').scrollIntoView = (arg) => {
+          one('.scroller').scrollTo = ((arg: ScrollToOptions) => {
             scrolled = arg;
-          };
+          }) as Element['scrollTo'];
           const link = one<HTMLAnchorElement>('.card .kv a[href="#m-ap-card-1"]');
           expect(link.textContent?.trim()).toBe('Waiting for your approval');
           link.click();
@@ -599,7 +599,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(texts('.chat-head h2')).toEqual(['Website']);
           expect(one<HTMLDetailsElement>('.card details.fold').open).toBe(false);
           expect(windowClicks).toBe(0);
-          expect(scrolled).toEqual({ behavior: 'smooth', block: 'center' });
+          expect(scrolled).toEqual({ top: expect.any(Number), behavior: 'smooth' });
         },
       );
       When('the task waits for a reviewer, and then hits a merge conflict', () => {
