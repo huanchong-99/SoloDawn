@@ -84,10 +84,12 @@ step 1 drivers:
 
 **Listing folders is not a driver operation.** The folders a CLI was used
 in, which the owner chooses a workspace from, are found by the package
-`internal/host/workspaces`, one finder per CLI, from the CLI's own session
-files; it starts no CLI and uses no driver. The one exception is OpenCode,
-whose finder is handed a function that fetches from the server its driver
-already starts to list models (section 10.1). The sources, per CLI, and
+`internal/host/workspaces`, one finder per CLI. Claude Code's and Qwen
+Code's read the CLI's own session files and start no CLI. Codex's and
+OpenCode's ask the CLI's server, the one the host already starts to list
+models (section 10.1): Codex's finder is handed a function that sends a
+`thread/list` request over the `codex app-server` connection, OpenCode's
+one that fetches from `opencode serve`. Neither uses a driver. The sources, per CLI, and
 what the node does not open are in `contracts/local.md` section 7. A CLI
 whose history cannot be read lists nothing, and its owner types the folder:
 no capability of section 4 depends on it.
