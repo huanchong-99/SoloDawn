@@ -5,6 +5,7 @@ package features
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -71,10 +72,11 @@ func (r homeBriefReceipts) PutReceipt(signer, nonce string, _ int64, result stor
 func homeBriefSteps(sc *godog.ScenarioContext) {
 	w := &homeBriefWorld{now: time.UnixMilli(1763600000000)}
 	sc.Step(`^a group home with a secretary and three working AIs$`, w.start)
-	sc.Step(`^the secretary (?:posts|has posted) the brief$`, func() error { return w.post(nil) })
+	sc.Step(`^the secretary (?:posts|has posted) the brief$`, func() error { return w.post(nil, w.dependentTasks()) })
+	sc.Step(`^the secretary has posted a brief of two tasks for "([^"]*)", reviewed by "([^"]*)"$`, w.postForOne)
 	sc.Step(`^the secretary posts a brief that replaces it$`, func() error {
 		replaced := w.brief
-		return w.post(&replaced)
+		return w.post(&replaced, w.dependentTasks())
 	})
 	sc.Step(`^the owner (?:confirms|has confirmed) the brief$`, func() error {
 		return w.act(w.keys["the owner"], "confirm", "")
@@ -98,6 +100,7 @@ func homeBriefSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the home holds no task$`, func() error { return w.holds(0) })
 	sc.Step(`^the home holds (\d+) tasks$`, w.holds)
 	sc.Step(`^task 1 is "active" and task 2 is "queued" until task 1 is done$`, w.dependent)
+	sc.Step(`^task 1 is "active" and task 2 is "queued" waiting for "busy"$`, w.busyBehind)
 	sc.Step(`^the home has queued "([^"]*)"$`, func(items string) error {
 		return w.queued(strings.Split(items, ", "))
 	})
@@ -148,8 +151,27 @@ func (w *homeBriefWorld) id() proto.ID {
 	return exampleID("brief nonce " + strconv.Itoa(w.nonce))
 }
 
-// post sends the secretary's brief, which replaces another when replaces is set.
-func (w *homeBriefWorld) post(replaces *string) error {
+// dependentTasks are the tasks of the brief of the feature.
+func (w *homeBriefWorld) dependentTasks() []proto.BriefTask {
+	m := w.members
+	return []proto.BriefTask{
+		{Title: "Report path changes", Assignee: m["ai-one"], Reviewer: m["ai-two"], Depends: []int{}},
+		{Title: "Show the path", Assignee: m["ai-two"], Reviewer: m["ai-one"], Depends: []int{0}},
+	}
+}
+
+// postForOne posts a brief of two tasks that depend on nothing, both for one AI.
+func (w *homeBriefWorld) postForOne(assignee, reviewer string) error {
+	a, r := w.members[assignee], w.members[reviewer]
+	return w.post(nil, []proto.BriefTask{
+		{Title: "Report path changes", Assignee: a, Reviewer: r, Depends: []int{}},
+		{Title: "Show the path", Assignee: a, Reviewer: r, Depends: []int{}},
+	})
+}
+
+// post sends the secretary's brief of these tasks, which replaces another when
+// replaces is set.
+func (w *homeBriefWorld) post(replaces *string, tasks []proto.BriefTask) error {
 	m := w.members
 	post := proto.Post[proto.BriefBody]{
 		HomeCommand: proto.HomeCommand{Type: "post", Nonce: w.id(), Timestamp: w.now.UnixMilli() - 500, Group: proto.ID(w.state.ID), As: proto.ID(m["secretary"])},
@@ -157,11 +179,7 @@ func (w *homeBriefWorld) post(replaces *string) error {
 		Body: proto.BriefBody{
 			Title: "Show the connection path", Goal: "People see how a peer is connected.",
 			Criteria: []string{"A path change shows within 1 s."}, Scope: proto.BriefScope{In: []string{"node events", "web indicator"}, Out: []string{}},
-			Tasks: []proto.BriefTask{
-				{Title: "Report path changes", Assignee: m["ai-one"], Reviewer: m["ai-two"], Depends: []int{}},
-				{Title: "Show the path", Assignee: m["ai-two"], Reviewer: m["ai-one"], Depends: []int{0}},
-			},
-			Pass: 90, Requester: m["owner"], Replaces: replaces,
+			Tasks: tasks, Pass: 90, Requester: m["owner"], Replaces: replaces,
 		},
 	}
 	payload, err := json.Marshal(post)
@@ -264,6 +282,24 @@ func (w *homeBriefWorld) dependent() error {
 		return fmt.Errorf("task 2 has no task message: %+v", msg)
 	}
 	return nil
+}
+
+// busyBehind checks that task 2 depends on nothing and waits for the folder
+// that task 1 holds.
+func (w *homeBriefWorld) busyBehind() error {
+	one, two := w.task(1), w.task(2)
+	got := fmt.Sprintf("task 1 is %s waiting for %s; task 2 is %s waiting for %s, depending on %v", one.State, briefWait(one.Wait), two.State, briefWait(two.Wait), two.Depends)
+	if want := "task 1 is active waiting for nothing; task 2 is queued waiting for busy, depending on []"; got != want {
+		return errors.New(got)
+	}
+	return nil
+}
+
+func briefWait(wait *proto.TaskWait) string {
+	if wait == nil {
+		return "nothing"
+	}
+	return wait.Kind
 }
 
 // queued checks the items queued since the last check, written as "why

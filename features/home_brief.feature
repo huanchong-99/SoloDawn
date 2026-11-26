@@ -32,6 +32,15 @@ Feature: Briefs and their confirmation in the home
     When 15 minutes pass and task 1 is done
     Then task 2 is "active", started when task 1 was done, and the home has queued "notice secretary task 1, assign ai-three task 2"
 
+  Scenario: A brief of two tasks for one AI queues the second until the first is done, which then starts by itself (A5.20)
+    Given a group home with a secretary and three working AIs
+    And the secretary has posted a brief of two tasks for "ai-one", reviewed by "ai-two"
+    When the owner confirms the brief
+    Then task 1 is "active" and task 2 is "queued" waiting for "busy"
+    And the home has queued "assign ai-one task 1, confirmed secretary"
+    When 15 minutes pass and task 1 is done
+    Then task 2 is "active", started when task 1 was done, and the home has queued "notice secretary task 1, assign ai-one task 2"
+
   Scenario: Sending a brief back tells the secretary, and a new brief supersedes it
     Given a group home with a secretary and three working AIs
     And the secretary has posted the brief

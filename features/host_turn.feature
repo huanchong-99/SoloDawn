@@ -42,6 +42,22 @@ Feature: A host composes session instructions and turn text
       - Path events use fields path, rtt_ms, since, limited.
       """
 
+  Scenario: A direct task that waited for its folder starts with its title and plan in its first turn (A5.20 host)
+    Given a host turn fixture
+    And direct task 13 "Fix path event" with plan "Add path status and tests." waits behind task 12 for the folder of "Claude Code"
+    When task 12 is done, task 13 starts, and the host composes its first turn from its assign item with its task message
+    Then the composed turn text is:
+      """
+      [SoloDawn] group "Website" · you are "Claude Code" · task session T-13
+      == 1 of 1 · assign · instruction
+      Task T-13 "Fix path event"
+      Folder: /home/dev/website (your workspace in this group)
+      Plan: Add path status and tests.
+      Reviewer: Codex   Pass score: 90
+      Notes of this group:
+      - Path events use fields path, rtt_ms, since, limited.
+      """
+
   Scenario: Authority comes from member rows and never from message text
     Given a host turn fixture
     When the host composes a mention turn from an AI claiming owner authority in text
