@@ -58,18 +58,14 @@ afterEach(() => {
 });
 
 describe('what a person may do to a task', () => {
-  it('is for an admin, by its state, and only the cancel once it is being merged', () => {
+  it('is for an admin, by its state', () => {
     for (const role of ['owner', 'admin']) {
       const group = makeGroup(role);
-      expect(taskOps(group, task({ state: 'queued', step: 'branch' }))).toEqual([
-        'assign',
-        'cancel',
-      ]);
+      expect(taskOps(group, task({ state: 'queued', step: 'work' }))).toEqual(['assign', 'cancel']);
       expect(taskOps(group, task({ state: 'active' }))).toEqual(['pause', 'assign', 'cancel']);
       expect(taskOps(group, task({ state: 'paused' }))).toEqual(['resume', 'assign', 'cancel']);
       expect(taskOps(group, task({ state: 'failed' }))).toEqual(['resume', 'assign', 'cancel']);
-      expect(taskOps(group, task({ state: 'active', step: 'merge' }))).toEqual(['cancel']);
-      expect(taskOps(group, task({ state: 'merged', step: 'merge' }))).toEqual([]);
+      expect(taskOps(group, task({ state: 'done' }))).toEqual([]);
       expect(taskOps(group, task({ state: 'cancelled' }))).toEqual([]);
     }
     const member = makeGroup('member');
@@ -122,11 +118,12 @@ describe('what a person may do to a task', () => {
   it('says what an assign does: who stops, and which owners are asked', () => {
     const group = makeGroup();
     expect(assignNotes(group, base, {})).toEqual([]);
-    expect(assignNotes(group, base, { assignee: claude })).toEqual([
-      'Codex stops here. Changes it has not committed are lost; its commits carry over.',
-    ]);
+    const stops = 'Codex stops here. What it changed stays in its folder.';
+    expect(assignNotes(group, base, { assignee: claude })).toEqual([stops]);
+    for (const state of ['paused', 'failed'])
+      expect(assignNotes(group, task({ state }), { assignee: claude })).toEqual([stops]);
     expect(assignNotes(group, base, { assignee: qwen })).toEqual([
-      'Codex stops here. Changes it has not committed are lost; its commits carry over.',
+      stops,
       'Mina is asked first: Qwen Code is theirs.',
     ]);
     expect(assignNotes(group, base, { reviewer: qwen })).toEqual([
@@ -134,12 +131,12 @@ describe('what a person may do to a task', () => {
     ]);
     prefs.lang = 'zh-CN';
     expect(assignNotes(group, base, { assignee: qwen })).toEqual([
-      'Codex 就此停下。没提交的改动会丢，提交过的会接着用。',
+      'Codex 就此停下。它做的改动留在它的文件夹里。',
       'Qwen Code 是 Mina 的，要先等对方确认。',
     ]);
     prefs.lang = 'en';
-    // Before the branch there is nothing to lose; an AI that left is nobody's to stop.
-    expect(assignNotes(group, task({ branch: undefined }), { assignee: claude })).toEqual([]);
+    // A task that has not started has nobody at work; an AI that left is nobody's to stop.
+    expect(assignNotes(group, task({ state: 'queued' }), { assignee: claude })).toEqual([]);
     expect(assignNotes(group, task({ assignee: 'gone' }), { assignee: claude })).toEqual([]);
     const stray = makeGroup('owner', row('row-member-ai', { id: 'stray', name: 'S', user: 'x' }));
     expect(assignNotes(stray, base, { reviewer: 'stray' })).toEqual([
@@ -158,20 +155,13 @@ describe('what a person may do to a task', () => {
       queued('d', { num: 23, state: 'active' }),
       { r: 'task', id: 'e', seq: 900, gone: true },
     );
-    const tell = [
-      'Its AIs stop and its open cards close.',
-      'Changes not committed yet are lost; the branch stays.',
-    ];
+    const tell = ['Its AIs stop and its open cards close.'];
     expect(cancelNotes(makeGroup(), base)).toEqual(tell);
     expect(cancelNotes(group, base)).toEqual([
       ...tell,
       'Tasks that wait for it could then never start: T-20, T-21.',
     ]);
-    expect(cancelNotes(makeGroup(), task({ step: 'merge' }))).toEqual([
-      'It has passed review and may be merging right now.',
-      ...tell,
-    ]);
-    const before = task({ state: 'queued', step: 'branch', branch: undefined });
+    const before = task({ state: 'queued', step: 'work' });
     expect(cancelNotes(makeGroup(), before)).toEqual(['It will never start.']);
   });
 });
@@ -180,9 +170,9 @@ describe('why a task stands still', () => {
   it('is said for every wait that no card carries', () => {
     const group = makeGroup();
     const paused = (kind: string) => task({ state: 'paused', wait: wait(kind) });
-    expect(taskHold(group, paused('manual'))).toEqual({
+    expect(taskHold(group, row<TaskRow>('row-task-paused'))).toEqual({
       kind: 'manual',
-      text: 'Paused by hand. Its AIs stay stopped until it is resumed.',
+      text: 'Secretary paused the task. Its AIs stay stopped until it is resumed.',
       tone: undefined,
     });
     expect(taskHold(group, { ...paused('rounds'), thread: { count: 12, rounds: 10 } })).toEqual({
@@ -200,15 +190,48 @@ describe('why a task stands still', () => {
       text: 'Ready for review, and nobody is named to do it. The secretary or an admin names a reviewer.',
       tone: undefined,
     });
-    expect(taskHold(group, task({ wait: wait('conflict') }))).toEqual({
-      kind: 'conflict',
-      text: 'The merge did not go through. The secretary or an admin hands it back to be fixed.',
-      tone: undefined,
-    });
     for (const kind of ['approval', 'decision', 'confirm'])
       expect(taskHold(group, task({ wait: wait(kind) }))).toBeUndefined();
     expect(taskHold(group, base)).toBeUndefined();
-    expect(taskHold(group, task({ state: 'merged' }))).toBeUndefined();
+    expect(taskHold(group, task({ state: 'done' }))).toBeUndefined();
+  });
+
+  it('names who paused a task by hand, also after they left', () => {
+    const group = makeGroup();
+    const paused = (by: string) =>
+      taskHold(group, task({ state: 'paused', wait: { ...wait('manual'), by } }))!.text;
+    expect(paused(owner.id)).toBe(
+      'Alex paused the task. Its AIs stay stopped until it is resumed.',
+    );
+    group.apply([{ r: 'member', id: 'mina', seq: 900, gone: true }]);
+    prefs.lang = 'zh-CN';
+    expect(paused('mina')).toBe('Mina 暂停了任务。恢复之前，做它的 AI 都先停着。');
+  });
+
+  it('is said of a task queued for its folder by the started task that has it', () => {
+    const folder = { host: 'office', workspace: '/home/dev/site', seq: 900 };
+    const group = makeGroup(
+      'owner',
+      row('row-member-ai', { id: codex, name: 'Codex', ...folder }),
+      row('row-member-ai', { id: claude, name: 'Claude Code', ...folder }),
+      row('row-member-ai', { id: qwen, name: 'Qwen', user: 'mina-user', host: 'pc', seq: 900 }),
+      row('row-task', { id: 'a', num: 7, state: 'paused', assignee: claude }),
+      row('row-task', { id: 'b', num: 8, state: 'done', assignee: codex }),
+      row('row-task', { id: 'c', num: 9, state: 'active', assignee: qwen }),
+      { r: 'task', id: 'd', seq: 900, gone: true },
+    );
+    const queued = task({ id: 'q', state: 'queued', wait: wait('busy') });
+    group.apply([{ ...queued, seq: 901 }]);
+    expect(taskHold(group, queued)).toEqual({
+      kind: 'busy',
+      text: 'Waits for its folder, which T-7 is using.',
+      tone: undefined,
+    });
+    group.apply([row('row-task', { id: 'a', seq: 902, state: 'done', assignee: claude })]);
+    expect(taskHold(group, queued)).toBeUndefined();
+    prefs.lang = 'zh-CN';
+    group.apply([row('row-task', { id: 'c', num: 9, seq: 903, state: 'failed', assignee: codex })]);
+    expect(taskHold(group, queued)!.text).toBe('等它的文件夹空出来：T-9 正在用。');
   });
 
   it('is said of a stopped task by what its reader can do', () => {
@@ -231,7 +254,7 @@ describe('why a task stands still', () => {
   it('is said of a queued task by the tasks it waits for', () => {
     const group = makeGroup(
       'owner',
-      row('row-task', { id: 'a', num: 3, state: 'merged' }),
+      row('row-task', { id: 'a', num: 3, state: 'done' }),
       row('row-task', { id: 'b', num: 4, state: 'active' }),
       row('row-task', { id: 'c', num: 5, state: 'failed' }),
       row('row-task', { id: 'd', num: 6, state: 'cancelled' }),
@@ -240,14 +263,14 @@ describe('why a task stands still', () => {
       taskHold(group, task({ state: 'queued', depends, wait: wait('depends') }));
     expect(queued('a', 'b', 'c')).toEqual({
       kind: 'depends',
-      text: 'Waits for T-4, T-5 to be merged.',
+      text: 'Waits for T-4, T-5 to be done.',
       tone: undefined,
     });
     expect(queued('b', 'd')!.text).toBe('Cannot start: a task it waits for was cancelled (T-6).');
     expect(queued('a')).toBeUndefined();
     expect(queued('unknown')).toBeUndefined();
     prefs.lang = 'zh-CN';
-    expect(queued('b', 'c')!.text).toBe('等 T-4、T-5 合并以后开工。');
+    expect(queued('b', 'c')!.text).toBe('等 T-4、T-5 完成以后开工。');
   });
 });
 
@@ -264,11 +287,10 @@ describe('a role that an owner denied', () => {
     taskHold(makeGroup('owner', ...(cards.length ? cards : [card()])), { ...given, ...changes });
 
   it('is said of its assignee at every step, and of its reviewer at the review', () => {
-    for (const step of ['branch', 'local_check', 'review'])
-      expect(said({ step })).toEqual({ kind: 'denied', text });
+    for (const step of ['work', 'review']) expect(said({ step })).toEqual({ kind: 'denied', text });
     const reviews = { assignee: codex, reviewer: qwen };
     expect(said({ ...reviews, step: 'review' })?.text).toBe(text);
-    expect(said({ ...reviews, step: 'local_check' })).toBeUndefined();
+    expect(said({ ...reviews, step: 'work' })).toBeUndefined();
     expect(said({ assignee: codex, step: 'review' })).toBeUndefined();
     prefs.lang = 'zh-CN';
     expect(said()!.text).toBe('Mina 没同意 Qwen Code 参与。由秘书或管理员换一个 AI。');
@@ -291,7 +313,7 @@ describe('a role that an owner denied', () => {
     expect(said({ asked: [qwen, codex] }, card({}, codex))).toBeUndefined();
     expect(said({}, card({}, 'gone'))).toBeUndefined();
     expect(said({ wait: wait('confirm') })).toBeUndefined();
-    expect(said({ state: 'merged' })).toBeUndefined();
+    expect(said({ state: 'done' })).toBeUndefined();
     expect(said({ state: 'failed', wait: null })!.kind).toBe('failed');
     expect(said({ wait: wait('reviewer') })!.kind).toBe('reviewer');
   });
@@ -303,14 +325,14 @@ describe('the terminals of a task', () => {
 
   it("are of the reader's own assignee, and of their reviewer from the first review on", () => {
     expect(names({ step: 'review' })).toEqual(['Claude Code', 'Codex']);
-    expect(names({ step: 'local_check' })).toEqual(['Claude Code', 'Codex']);
-    expect(names({ step: 'local_check', review: undefined })).toEqual(['Codex']);
+    expect(names({ step: 'work' })).toEqual(['Claude Code', 'Codex']);
+    expect(names({ step: 'work', review: undefined })).toEqual(['Codex']);
     expect(names({ step: 'review', review: undefined })).toEqual(['Claude Code', 'Codex']);
-    expect(names({ step: 'local_check', reviewer: qwen })).toEqual(['Codex']);
+    expect(names({ step: 'work', reviewer: qwen })).toEqual(['Codex']);
     expect(names({ reviewer: qwen })).toEqual(['Codex']);
     expect(names({ assignee: qwen, reviewer: undefined })).toEqual([]);
     expect(names({ state: 'paused' })).toEqual(['Claude Code', 'Codex']);
-    for (const state of ['queued', 'merged', 'cancelled']) expect(names({ state })).toEqual([]);
+    for (const state of ['queued', 'done', 'cancelled']) expect(names({ state })).toEqual([]);
   });
 
   it('are not offered again while one is open', () => {

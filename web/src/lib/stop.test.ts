@@ -42,10 +42,10 @@ function computer(name: string, owner = true) {
   return home;
 }
 
-function groupOf(home: Home, changes: object = {}, role = 'owner', kind = 'row-group') {
+function groupOf(home: Home, changes: object = {}, role = 'owner') {
   const group = new Group(home, gid);
   group.apply([
-    row(kind, { id: gid, ...changes }),
+    row('row-group', { id: gid, ...changes }),
     row('row-member-human', { id: 'alex', user, role }),
   ]);
   home.groups = [group];
@@ -78,12 +78,17 @@ describe('setPaused', () => {
 });
 
 describe('mayPause', () => {
-  it('is for the owner and the admins of a project group', () => {
+  it('is for the owner and the admins of a group that has AIs', () => {
     const home = computer('workstation');
-    expect(mayPause(groupOf(home))).toBe(true);
-    expect(mayPause(groupOf(home, {}, 'admin'))).toBe(true);
-    expect(mayPause(groupOf(home, {}, 'member'))).toBe(false);
-    expect(mayPause(groupOf(home, {}, 'owner', 'row-group-team'))).toBe(false);
+    const withAI = (role: string) => {
+      const group = groupOf(home, {}, role);
+      group.apply([ai('codex')]);
+      return group;
+    };
+    expect(mayPause(withAI('owner'))).toBe(true);
+    expect(mayPause(withAI('admin'))).toBe(true);
+    expect(mayPause(withAI('member'))).toBe(false);
+    expect(mayPause(groupOf(home))).toBe(false);
     expect(mayPause(new Group(home, gid))).toBe(false);
   });
 });

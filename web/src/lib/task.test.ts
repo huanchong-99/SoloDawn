@@ -3,12 +3,12 @@ import { Group, Home } from './groups.svelte';
 import { goldens } from './mock';
 import { prefs } from './prefs.svelte';
 import { decode, Row, type TaskRow } from './proto';
-import { reviewLine, taskBadge, taskSteps, taskTitle, threadPreview, waitBadge } from './task';
+import { reviewLine, taskBadge, taskSteps, threadPreview, waitBadge } from './task';
 
 const row = <T extends Row = Row>(name: string, changes: object = {}) =>
   ({ ...decode(Row, goldens[name]), ...changes }) as T;
 
-function makeGroup(forge = 'github', withGroupRow = true) {
+function makeGroup(withGroupRow = true) {
   const owner = row<Extract<Row, { r: 'member'; kind: 'human' }>>('row-member-human');
   const home = new Home({ user: owner.user, sign: () => new Promise(() => {}) });
   const group = new Group(home, owner.g);
@@ -18,7 +18,7 @@ function makeGroup(forge = 'github', withGroupRow = true) {
     row('row-member-ai', { id: 'LXCZmuGAXkvO-bSrOkuCfw', name: 'Claude Code', cli: 'claude' }),
     row('row-member-human', { id: 'mina', name: 'Mina', user: 'mina-user' }),
   ];
-  if (withGroupRow) initial.unshift(row('row-group', { forge }));
+  if (withGroupRow) initial.unshift(row('row-group'));
   group.apply(initial);
   return { group, owner };
 }
@@ -26,26 +26,16 @@ function makeGroup(forge = 'github', withGroupRow = true) {
 describe('task helpers', () => {
   prefs.lang = 'en';
 
-  it("shows a takeover's task title in the reader's language and any other as written", () => {
-    const base = row<TaskRow>('row-task');
-    const takeover = { ...base, origin: 'takeover', title: 'Owner takeover' } as TaskRow;
-    expect(taskTitle(base)).toBe(base.title);
-    expect(taskTitle(takeover)).toBe('Terminal takeover');
-    prefs.lang = 'zh-CN';
-    expect(taskTitle(takeover)).toBe('终端接管');
-    prefs.lang = 'en';
-  });
-
   it('computes badges across terminal, paused, queued, waiting and active states', () => {
     const { group, owner } = makeGroup();
     const base = row<TaskRow>('row-task');
 
-    expect(taskBadge(group, { ...base, state: 'merged' })).toEqual({
-      text: 'Merged · 86',
+    expect(taskBadge(group, { ...base, state: 'done' })).toEqual({
+      text: 'Done · 86',
       tone: 'ok',
     });
-    expect(taskBadge(group, { ...base, state: 'merged', review: undefined })).toEqual({
-      text: 'Merged',
+    expect(taskBadge(group, { ...base, state: 'done', review: undefined })).toEqual({
+      text: 'Done',
       tone: 'ok',
     });
     expect(taskBadge(group, { ...base, state: 'cancelled' })).toEqual({ text: 'Cancelled' });
@@ -78,6 +68,8 @@ describe('task helpers', () => {
       dot: 'paused',
     });
     expect(taskBadge(group, { ...base, state: 'queued' })).toEqual({ text: 'Queued' });
+    const busy = { kind: 'busy', since: 1 };
+    expect(taskBadge(group, { ...base, state: 'queued', wait: busy })).toEqual({ text: 'Queued' });
 
     expect(taskBadge(group, base)).toEqual({ text: 'Sent back · round 1', tone: 'danger' });
     expect(taskBadge(group, { ...base, review: { ...base.review!, ok: true } })).toEqual({
@@ -87,10 +79,6 @@ describe('task helpers', () => {
     });
     expect(taskBadge(group, { ...base, wait: { kind: 'reviewer', since: 1 } })).toEqual({
       text: 'Waiting for a reviewer',
-    });
-    expect(taskBadge(group, { ...base, wait: { kind: 'conflict', since: 1 } })).toEqual({
-      text: 'Merge conflict',
-      tone: 'danger',
     });
     expect(taskBadge(group, { ...base, assignee: 'departed', review: undefined })).toEqual({
       text: 'In progress',
@@ -159,7 +147,7 @@ describe('task helpers', () => {
     ai({ seq: 903, state: 'takeover', task: task.id });
     expect(taskBadge(group, task)).toEqual(takeover);
     expect(taskBadge(group, { ...task, state: 'paused' })).toEqual(takeover);
-    expect(taskBadge(group, { ...task, wait: { kind: 'conflict', since: 1 } })).toEqual(takeover);
+    expect(taskBadge(group, { ...task, wait: { kind: 'reviewer', since: 1 } })).toEqual(takeover);
     expect(taskBadge(group, { ...task, state: 'cancelled' })).toEqual({ text: 'Cancelled' });
     expect(taskBadge(group, { ...task, assignee: 'departed' })).toEqual(rejected);
     prefs.lang = 'zh-CN';
@@ -191,299 +179,74 @@ describe('task helpers', () => {
     prefs.lang = 'en';
   });
 
-  it('maps step segments across all states, steps and forge modes', () => {
-    const { group, owner } = makeGroup('github', false);
+  it('maps the three steps across all states and steps', () => {
+    const { group, owner } = makeGroup(false);
     const base = row<TaskRow>('row-task-waiting', { wait: null });
-    const rejected = row<TaskRow>('row-task').review!;
+    const marks = (task: TaskRow, status = 'In progress') =>
+      taskSteps(group, task, status).items.map((item) => item.mark);
 
     const queued = taskSteps(group, { ...base, state: 'queued' }, 'Queued');
-    expect(queued.summary).toBe('0 / 6');
-    expect(queued.aria).toBe('Progress: 0 of 6 steps, Queued');
-    expect(queued.items.map((item) => [item.label, item.mark, item.skipped])).toEqual([
-      ['Work', undefined, false],
-      ['Local checks', undefined, false],
-      ['Open PR', undefined, false],
-      ['Hosted checks', undefined, false],
-      ['Review', undefined, false],
-      ['Merge', undefined, false],
+    expect(queued.summary).toBe('0 / 3');
+    expect(queued.aria).toBe('Progress: 0 of 3 steps, Queued');
+    expect(queued.items.map((item) => [item.key, item.label, item.mark])).toEqual([
+      ['work', 'Work', undefined],
+      ['review', 'Review', undefined],
+      ['done', 'Done', undefined],
     ]);
 
-    const merged = taskSteps(group, { ...base, state: 'merged' }, 'Merged');
-    expect(merged.summary).toBe('6 / 6');
-    expect(merged.aria).toBe('Progress: 6 of 6 steps, Merged');
-    expect(merged.items.map((item) => item.mark)).toEqual([
-      'done',
-      'done',
-      'done',
-      'done',
-      'done',
-      'done',
+    const done = taskSteps(group, { ...base, state: 'done', step: 'review' }, 'Done');
+    expect(done.summary).toBe('3 / 3');
+    expect(done.aria).toBe('Progress: 3 of 3 steps, Done');
+    expect(done.items.map((item) => item.mark)).toEqual(['done', 'done', 'done']);
+
+    const work = taskSteps(group, { ...base, step: 'work' }, 'In progress');
+    expect(work.summary).toBe('Work · 1 / 3');
+    expect(work.aria).toBe('Progress: step 1 of 3, Work (In progress)');
+    expect(work.items.map((item) => item.mark)).toEqual(['now', undefined, undefined]);
+
+    const review = taskSteps(group, { ...base, step: 'review' }, 'In progress');
+    expect(review.summary).toBe('Review · 2 / 3');
+    expect(review.items.map((item) => item.mark)).toEqual(['done', 'now', undefined]);
+    // A review that sent the work back is the badge's to say; the bar shows where the task is.
+    expect(marks(row<TaskRow>('row-task'), 'Sent back')).toEqual(['done', 'now', undefined]);
+    expect(marks({ ...base, step: 'work', review: row<TaskRow>('row-task').review })).toEqual([
+      'now',
+      undefined,
+      undefined,
     ]);
 
-    expect(taskSteps(group, { ...base, step: 'unknown' }, 'In progress').summary).toBe(
-      'Work · 1 / 6',
-    );
-    expect(
-      taskSteps(
-        group,
-        { ...base, step: 'branch', checks: { local: { ok: true, at: 1, commit: 'c1' } } },
-        'In progress',
-      ).summary,
-    ).toBe('Work · 1 / 6');
-    expect(
-      taskSteps(
-        group,
-        { ...base, step: 'branch', checks: { local: { ok: false, at: 1, commit: 'c1' } } },
-        'In progress',
-      ).items[0].mark,
-    ).toBe('now');
+    for (const kind of ['approval', 'decision', 'confirm'])
+      expect(marks({ ...base, wait: { kind, who: [owner.user], since: 1 } }, 'Waiting')).toEqual([
+        'wait',
+        undefined,
+        undefined,
+      ]);
+    for (const wait of [
+      { kind: 'confirm', who: ['mina-user'], since: 1 },
+      { kind: 'decision', since: 1 },
+      { kind: 'reviewer', who: [owner.user], since: 1 },
+    ])
+      expect(marks({ ...base, step: 'review', wait }, 'Waiting')).toEqual([
+        'done',
+        'now',
+        undefined,
+      ]);
 
-    const localNone = taskSteps(group, { ...base, step: 'local_check', checks: {} }, 'In progress');
-    expect(localNone.summary).toBe('Local checks · 2 / 6');
-    expect(localNone.items[1].mark).toBe('now');
-
-    const localFail = taskSteps(
-      group,
-      { ...base, step: 'local_check', checks: { local: { ok: false, at: 1, commit: 'c1' } } },
-      'In progress',
-    );
-    expect(localFail.items.map((item) => item.mark)).toEqual([
+    expect(marks({ ...base, state: 'paused', step: 'review' }, 'Paused')).toEqual([
+      'done',
+      undefined,
+      undefined,
+    ]);
+    expect(marks({ ...base, state: 'cancelled' }, 'Cancelled')).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(marks({ ...base, state: 'failed', step: 'review' }, 'Stopped')).toEqual([
       'done',
       'fail',
       undefined,
-      undefined,
-      undefined,
-      undefined,
     ]);
-
-    const openPr = taskSteps(
-      group,
-      {
-        ...base,
-        step: 'local_check',
-        checks: { local: { ok: true, at: 1, commit: 'c1' } },
-        review: { ...rejected, ok: true },
-        wait: { kind: 'approval', since: 1 },
-      },
-      'In progress',
-    );
-    expect(openPr.summary).toBe('Open PR · 3 / 6');
-    expect(
-      taskSteps(
-        group,
-        {
-          ...base,
-          step: 'local_check',
-          checks: { local: { ok: true, at: 1, commit: 'c1' } },
-          review: { ...rejected, ok: true },
-          wait: null,
-        },
-        'In progress',
-      ).summary,
-    ).toBe('Open PR · 3 / 6');
-    expect(openPr.aria).toBe('Progress: step 3 of 6, Open PR (In progress)');
-
-    expect(
-      taskSteps(
-        group,
-        {
-          ...base,
-          step: 'local_check',
-          pr: 9,
-          checks: { local: { ok: true, at: 1, commit: 'c1' } },
-        },
-        'In progress',
-      ).summary,
-    ).toBe('Local checks · 2 / 6');
-
-    expect(
-      taskSteps(
-        group,
-        {
-          ...base,
-          step: 'local_check',
-          checks: { local: { ok: true, at: 1, commit: 'c1' } },
-          review: rejected,
-        },
-        'Sent back',
-      ).summary,
-    ).toBe('Local checks · 2 / 6');
-
-    const conflictStep = taskSteps(
-      group,
-      {
-        ...base,
-        step: 'local_check',
-        checks: { local: { ok: true, at: 1, commit: 'c1' } },
-        wait: { kind: 'conflict', since: 1 },
-      },
-      'Merge conflict',
-    );
-    expect(conflictStep.summary).toBe('Local checks · 2 / 6');
-    expect(conflictStep.items[1].mark).toBe('fail');
-
-    expect(
-      taskSteps(
-        group,
-        { ...base, step: 'branch', wait: { kind: 'conflict', since: 1 } },
-        'Merge conflict',
-      ).items[0].mark,
-    ).toBe('fail');
-
-    expect(
-      taskSteps(
-        group,
-        {
-          ...base,
-          step: 'cloud_check',
-          pr: 9,
-          checks: { cloud: { ok: false, at: 1, commit: 'c1' } },
-        },
-        'In progress',
-      ).items[3].mark,
-    ).toBe('fail');
-    expect(
-      taskSteps(
-        group,
-        {
-          ...base,
-          step: 'cloud_check',
-          pr: 9,
-          checks: { cloud: { ok: true, at: 1, commit: 'c1' } },
-        },
-        'In progress',
-      ).items[3].mark,
-    ).toBe('now');
-    expect(
-      taskSteps(group, { ...base, step: 'cloud_check', pr: 9 }, 'In progress').items[3].mark,
-    ).toBe('now');
-
-    expect(
-      taskSteps(
-        group,
-        { ...base, wait: { kind: 'approval', who: [owner.user], since: 1 } },
-        'Waiting',
-      ).items[0].mark,
-    ).toBe('wait');
-    expect(
-      taskSteps(
-        group,
-        { ...base, wait: { kind: 'decision', who: [owner.user], since: 1 } },
-        'Waiting',
-      ).items[0].mark,
-    ).toBe('wait');
-    expect(
-      taskSteps(
-        group,
-        { ...base, wait: { kind: 'confirm', who: [owner.user], since: 1 } },
-        'Waiting',
-      ).items[0].mark,
-    ).toBe('wait');
-    expect(
-      taskSteps(
-        group,
-        { ...base, wait: { kind: 'confirm', who: ['mina-user'], since: 1 } },
-        'Waiting',
-      ).items[0].mark,
-    ).toBe('now');
-    expect(
-      taskSteps(
-        group,
-        { ...base, wait: { kind: 'reviewer', who: [owner.user], since: 1 } },
-        'Waiting',
-      ).items[0].mark,
-    ).toBe('now');
-    expect(
-      taskSteps(
-        group,
-        { ...base, wait: { kind: 'decision', who: ['mina-user'], since: 1 } },
-        'Waiting',
-      ).items[0].mark,
-    ).toBe('now');
-    expect(
-      taskSteps(group, { ...base, wait: { kind: 'decision', since: 1 } }, 'Waiting').items[0].mark,
-    ).toBe('now');
-
-    expect(
-      taskSteps(
-        group,
-        {
-          ...base,
-          step: 'review',
-          pr: undefined,
-          checks: { cloud: { ok: true, at: 1, commit: 'c1' } },
-        },
-        'In progress',
-      ).items.map((item) => item.mark),
-    ).toEqual(['done', 'done', undefined, 'done', 'now', undefined]);
-
-    expect(
-      taskSteps(
-        group,
-        { ...base, step: 'review', pr: undefined, checks: {} },
-        'In progress',
-      ).items.map((item) => item.mark),
-    ).toEqual(['done', 'done', undefined, undefined, 'now', undefined]);
-
-    expect(
-      taskSteps(
-        group,
-        { ...base, step: 'review', pr: 9, checks: {}, review: { ...rejected, ok: true } },
-        'In progress',
-      ).items.map((item) => item.mark),
-    ).toEqual(['done', 'done', 'done', 'done', 'now', undefined]);
-
-    expect(taskSteps(group, row<TaskRow>('row-task'), 'Sent back').items[4].mark).toBe('fail');
-    expect(
-      taskSteps(
-        group,
-        {
-          ...base,
-          step: 'merge',
-          pr: 9,
-          checks: { cloud: { ok: false, at: 1, commit: 'c1' } },
-          review: rejected,
-        },
-        'In progress',
-      ).items[5].mark,
-    ).toBe('now');
-    expect(
-      taskSteps(group, { ...base, state: 'paused', step: 'merge', pr: 9 }, 'Paused').items[5].mark,
-    ).toBeUndefined();
-    expect(
-      taskSteps(group, { ...base, state: 'cancelled', step: 'merge', pr: 9 }, 'Cancelled').items[5]
-        .mark,
-    ).toBeUndefined();
-    expect(
-      taskSteps(group, { ...base, state: 'failed', step: 'branch' }, 'Stopped').items[0].mark,
-    ).toBe('fail');
-
-    const localGroup = makeGroup('none').group;
-    expect(
-      taskSteps(
-        localGroup,
-        {
-          ...base,
-          state: 'merged',
-          checks: { local: { ok: true, at: 1, commit: 'c1' } },
-        },
-        'Merged',
-      ).items.map((item) => [item.mark, item.skipped]),
-    ).toEqual([
-      ['done', false],
-      ['done', false],
-      [undefined, true],
-      [undefined, true],
-      ['done', false],
-      ['done', false],
-    ]);
-    expect(
-      taskSteps(
-        localGroup,
-        { ...base, step: 'local_check', checks: { local: { ok: true, at: 1, commit: 'c1' } } },
-        'In progress',
-      ).summary,
-    ).toBe('Local checks · 2 / 6');
   });
 
   it('formats review metadata and thread previews across present and missing members', () => {

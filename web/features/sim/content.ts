@@ -1,5 +1,6 @@
 // What the people and AIs of the demo world say, in Chinese, the language of its owner. The
 // interface keeps its own language switch; only the content of the world is fixed.
+import { devices } from './ids';
 import type { Agent } from './node';
 
 const claudeModels = [
@@ -43,6 +44,32 @@ export function agents(accounts: Record<string, string | null>): Agent[] {
   ];
 }
 
+/** The folder that each person's files are under, by computer: a folder elsewhere does not exist
+ *  there. */
+export const homeDirs: Record<string, string> = {
+  [devices.macbook]: '/Users/alex/',
+  [devices.office]: '/home/alex/',
+  [devices.minaPc]: '/Users/mina/',
+};
+
+/** The folders each CLI of a computer was used in, newest first (host.workspaces). */
+export const folders: Record<string, Record<string, string[]>> = {
+  [devices.macbook]: {
+    claude: [
+      '/Users/alex/dev/solodawn-site',
+      '/Users/alex/dev/blog',
+      '/Users/alex/dev/design-system',
+      '/Users/alex/notes',
+    ],
+    codex: ['/Users/alex/dev/solodawn-site', '/Users/alex/dev/api'],
+  },
+  [devices.office]: {
+    claude: ['/home/alex/infra'],
+    codex: ['/home/alex/solodawn-site', '/home/alex/reports'],
+  },
+  [devices.minaPc]: { claude: ['/Users/mina/work/solodawn-site'] },
+};
+
 /** The first sentence of a request, as the title of a brief. */
 export function titleOf(text: string): string {
   const plain = text.replace(/@\S+/g, '').trim();
@@ -54,18 +81,20 @@ export const words = {
   briefLead: '需求我整理成了任务说明，你看一下，确认后我就派活：',
   briefAgain: '按你的意见改好了，再看一下：',
   confirmed: '收到，已经派下去了。进度会在各自的任务里更新。',
-  allMerged: '这批任务都合并了，没有遗留问题。',
+  allDone: '这批任务都完成了。要合并的分支我来安排。',
   oneAI: '这个群现在只有一个干活的 AI。任务要有人复核，再加一个 AI 我就能派活。',
   answer:
     '我查了一下：官网用 Vite 构建、Svelte 写页面，部署在 GitHub Pages。要我把细节整理成文档吗？',
   criteria: ['手机和电脑上显示都正常', '相关测试全部通过', '不影响现有页面'],
   scopeIn: ['前端页面', '对应的测试'],
   scopeOut: ['后端接口', '设计稿以外的样式调整'],
-  testsTitle: '补测试和使用说明',
+  testsTitle: '补测试',
+  docsTitle: '写使用说明',
   start: (title: string) => `开始做「${title}」，先看一下相关代码。`,
-  coded: '改好了，正在跑本地检查。',
+  coded: '改好了，正在跑项目自己的测试。',
   testFailed: '有一个测试没过：手机宽度下按钮被挤到了第二行。我改一下布局再跑。',
-  fixed: '修好了，重新跑检查。',
+  fixed: '修好了，测试全部通过。',
+  revised: '按评审意见改好了，重新跑了测试。',
   approvalWhy: '要用真实浏览器截图来验证手机布局，需要装 Playwright。',
   approvalCommand: 'pnpm add -D @playwright/test\npnpm exec playwright install chromium',
   approved: '已经装好，用浏览器截图验证了三种屏幕宽度。',
@@ -78,15 +107,26 @@ export const words = {
   ],
   decided: (choice: string) => `好，按「${choice}」来做。`,
   decidedText: (text: string) => `收到：「${text}」。按这个来。`,
-  submitted: '本地检查通过，已经提交并开了 PR。',
+  report: (num: number) =>
+    `做完了：改了 3 个文件，加了对应的测试，pnpm test 全部通过。改动提交在分支 t-${num} 上，已推送到 origin。`,
   reviewItems: [
     {
-      text: '小屏幕下的间距可以再统一一点，不影响合并。',
+      text: '小屏幕下的间距可以再统一一点，不影响通过。',
       veto: false,
       file: 'src/routes/Home.svelte',
       line: 42,
     },
   ],
+  sentBackItems: [
+    {
+      text: '导出按钮在手机宽度下被挤到了第二行。',
+      veto: false,
+      file: 'src/routes/Home.svelte',
+      line: 57,
+    },
+  ],
+  passed: '看过了，通过。',
+  sentBack: '还差一点，改完再交。',
   handback: '主人刚才在终端里直接改了几处，我已经把改动整理好，接着做剩下的部分。',
   mention: [
     '收到，我先看看相关代码，有结论了在这里回你。',
@@ -99,6 +139,7 @@ export const words = {
   directDone: '@Mina 登录页的报错文案已经改成中文了，一共 6 处，截图放在话题里。',
   minaThanks: '谢谢！我晚点看。',
   leoHello: '大家好，我是 Leo，负责官网的文案。',
+  addedHello: '我进来了，有需要我的地方 @ 我。',
   minaWatching: 'Mina 想看你接管的终端。',
 };
 
@@ -106,14 +147,14 @@ export const words = {
 export const banners: Record<string, string> = {
   claude: [
     '\x1b[38;5;209m✻\x1b[0m \x1b[1mClaude Code\x1b[0m v2.1.40（演示终端）',
-    '\x1b[2m  cwd: ~/solodawn/官网改版\x1b[0m',
+    '\x1b[2m  cwd: ~/dev/solodawn-site\x1b[0m',
     '',
     '\x1b[2m  会话已从任务里接过来，历史都在。输入要做的事，回车发送。\x1b[0m',
     '',
   ].join('\r\n'),
   codex: [
     '\x1b[1m>_ OpenAI Codex\x1b[0m (v0.51.0)  （演示终端）',
-    '\x1b[2m  model: gpt-5.4   directory: ~/solodawn/官网改版\x1b[0m',
+    '\x1b[2m  model: gpt-5.4   directory: ~/solodawn-site\x1b[0m',
     '',
   ].join('\r\n'),
 };

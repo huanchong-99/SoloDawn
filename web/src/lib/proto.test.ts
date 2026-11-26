@@ -8,12 +8,10 @@ import * as p from './proto';
  *  example has, `optional` may be left out, `nullable` may be null, `fraction` are the numbers that
  *  need not be integers, `id` the texts that are random ids, and `opaque` the members that the Go
  *  type of the frame keeps as JSON. A path names its members with dots and leaves out the places
- *  in a list. `cases` are examples with one value replaced, and `slugs` task titles with the slug
- *  the home makes of each. */
+ *  in a list. `cases` are examples with one value replaced. */
 interface Wire {
   shapes: Record<string, Record<'optional' | 'nullable' | 'fraction' | 'id' | 'opaque', string[]>>;
   cases: { name: string; file: string; at: string[]; value: unknown; ok: boolean }[];
-  slugs: { title: string; slug: string }[];
 }
 
 const wire: Wire = JSON.parse(goldens.wire);
@@ -31,15 +29,6 @@ const at = (value: unknown, path: string[]) => path.reduce((o, k) => (o as Obj)[
 const named = (path: string[]) => path.filter((k) => !/^\d+$/.test(k)).join('.');
 const accepts = (name: string, value: unknown) =>
   v.safeParse(schemaOf[name], value, { abortEarly: true }).success;
-
-it.each(['', 'plain text', 42])('bulletin rows read from as plain text: %s', (from) => {
-  const row = JSON.parse(goldens['row-msg-bulletin']);
-  row.body.from = from;
-  expect(v.safeParse(p.MsgRow, row).success).toBe(typeof from === 'string');
-  const post = JSON.parse(goldens['post-bulletin']);
-  post.body.from = from;
-  expect(v.safeParse(p.Post, post).success).toBe(false);
-});
 
 /** The example with one change made to a copy of the object at `path`. */
 function variant(name: string, path: string[], change: (o: Obj) => void) {
@@ -325,7 +314,7 @@ describe('message contracts', () => {
     { code: 'rate_limited', ai: 'a', resets: 17 },
     { code: 'login_invalid', ai: 'a', detail: 'signed out' },
     { code: 'task_failed', task: 't', reason: 'failures' },
-    { code: 'task_merged', task: 't', commit: 'abc', merge_commit: 'def' },
+    { code: 'task_done', task: 't' },
     { code: 'no_secretary' },
     { code: 'session_replaced', ai: 'a', task: 't' },
     { code: 'member_joined', member: 'm2', by: 'm1' },
@@ -417,6 +406,7 @@ describe('decode', () => {
     ['cmd-invite-link', 'cmd'],
     ['cmd-noted', 'cmd'],
     ['host-info-answer', 'host.info'],
+    ['host-workspaces-answer', 'host.workspaces'],
   ];
   const pushes = ['rows', 'reset', 'devlog', 'groups', 'host-info-push'];
 
@@ -518,15 +508,11 @@ describe('decode', () => {
 });
 
 describe('objects and errors as Go reads them', () => {
-  it('refuses an array for usage and checks, whose fields are all optional', () => {
+  it('refuses an array for usage, whose fields are all optional', () => {
     const member = JSON.parse(goldens['row-member-ai']);
-    const task = JSON.parse(goldens['row-task']);
     expect(accepts('row-member-ai', member)).toBe(true);
-    expect(accepts('row-task', task)).toBe(true);
     expect(accepts('row-member-ai', { ...member, usage: [] })).toBe(false);
     expect(accepts('row-member-ai', { ...member, usage: {} })).toBe(true);
-    expect(accepts('row-task', { ...task, checks: [] })).toBe(false);
-    expect(accepts('row-task', { ...task, checks: {} })).toBe(true);
   });
 
   it('reads a frame with err as an error, whatever ok says', () => {
@@ -538,22 +524,6 @@ describe('objects and errors as Go reads them', () => {
     expect(v.is(p.CmdResult, JSON.parse(text))).toBe(false);
     expect(v.is(p.CmdResult, { re: 1, ok: true })).toBe(true);
     expect(() => p.decode(p.Frame, '{"re":1,"ok":true,"err":"conflict"}')).toThrow();
-  });
-});
-
-describe('slugs', () => {
-  it.each(wire.slugs)('takes the slug the home makes of the title $title', ({ slug }) => {
-    expect(v.is(p.Slug, slug)).toBe(true);
-    expect(slug.length).toBeLessThanOrEqual(40);
-  });
-
-  it("is the type of a task row's slug, and the row's branch follows from it", () => {
-    for (const name of ['row-task', 'row-task-waiting', 'row-task-paused', 'row-task-confirm']) {
-      const row = p.decode(p.TaskRow, goldens[name]);
-      expect(wire.slugs).toContainEqual({ title: row.title, slug: row.slug });
-      expect(row.branch ?? `task/${row.num}-${row.slug}`).toBe(`task/${row.num}-${row.slug}`);
-    }
-    expect(wire.cases.filter((c) => c.at.at(-1) === 'slug' && !c.ok).length).toBeGreaterThan(20);
   });
 });
 
@@ -584,11 +554,14 @@ describe('commands', () => {
     }
   });
 
-  it.each(['task', 'checks', 'system', 'unknown'])('refuses a post of kind %s', (kind) => {
-    const post = JSON.parse(goldens['post-text']);
-    expect(v.is(p.Post, post)).toBe(true);
-    expect(v.is(p.Post, { ...post, kind })).toBe(false);
-  });
+  it.each(['task', 'checks', 'bulletin', 'system', 'unknown'])(
+    'refuses a post of kind %s',
+    (kind) => {
+      const post = JSON.parse(goldens['post-text']);
+      expect(v.is(p.Post, post)).toBe(true);
+      expect(v.is(p.Post, { ...post, kind })).toBe(false);
+    },
+  );
 
   it('mentions the people who may decide an approval', () => {
     const row = p.decode(p.MsgRow, goldens['row-msg-approval-pending']);
@@ -620,7 +593,7 @@ describe('commands', () => {
   it('refuses a host event with a code the contract does not have', () => {
     const status = JSON.parse(goldens['member-status-rate_limited']);
     expect(accepts('member-status', status)).toBe(true);
-    expect(accepts('member-status', { ...status, event: { code: 'task_merged' } })).toBe(false);
+    expect(accepts('member-status', { ...status, event: { code: 'task_done' } })).toBe(false);
   });
 
   // commands.md 1.7: off: true ends the reminders, whatever else the payload holds.
@@ -730,7 +703,17 @@ describe('host surface', () => {
       login_ok: true,
       caps: {},
       driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'none' },
-      groups: [{ g: row.g, member: row.id, level: 3, state: row.state, queued: 0, watchers: [] }],
+      groups: [
+        {
+          g: row.g,
+          member: row.id,
+          workspace: row.workspace,
+          level: 3,
+          state: row.state,
+          queued: 0,
+          watchers: [],
+        },
+      ],
       models: [],
     });
   });
@@ -822,9 +805,8 @@ describe('MCP tool lists', () => {
 
   it('reads tools.json as it is written, and nothing it does not name', () => {
     expect(lists).toStrictEqual(JSON.parse(goldens.tools));
-    expect(Object.keys(lists.secretary.tools[0].inputSchema.properties)[0]).toBe('group');
-    expect(lists.secretary.tools[0].inputSchema.properties.group).toEqual({ type: 'string' });
-    for (const kind of ['group', 'review', 'task_level_1', 'task_level_2_3', 'external'] as const) {
+    // The secretary posts in its own group only: no tool names another one.
+    for (const kind of Object.keys(lists) as (keyof p.ToolLists)[]) {
       expect(lists[kind].tools[0].inputSchema.properties).not.toHaveProperty('group');
     }
     const described = JSON.parse(goldens.tools);
@@ -839,8 +821,8 @@ describe('MCP tool lists', () => {
       expect(names(kind), kind).not.toContain('approve');
     }
     expect(names('secretary')).toEqual(expect.arrayContaining(['propose_brief', 'set_task']));
-    expect(names('task_level_1')).not.toContain('submit_task');
-    expect(names('task_level_2_3')).toContain('submit_task');
+    expect(names('task')).toContain('submit_task');
+    expect(names('review')).toContain('submit_review');
   });
 
   it('lists the external tools with task and decision recipients optional', () => {
@@ -858,8 +840,6 @@ describe('MCP tool lists', () => {
       'note_list',
       'kb_put',
       'kb_search',
-      'push_branch',
-      'run_checks',
       'submit_task',
       'start_task',
       'submit_review',
@@ -936,7 +916,7 @@ describe('inbox', () => {
     const { items } = p.decode(p.Inbox, goldens.inbox);
     expect(items.map((entry) => Object.keys(entry))).toEqual([
       ['item', 'msg', 'task'],
-      ['item', 'task'],
+      ['item', 'msg', 'task'],
     ]);
     for (const { item, msg, task } of items) {
       expect(item.task).toBe(task!.id);

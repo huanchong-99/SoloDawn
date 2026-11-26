@@ -26,6 +26,18 @@ export interface Computer {
   online: boolean;
 }
 
+/** A folder of the owner's computer that a CLI was used in, and who has it as a workspace there:
+ *  an AI of the group being added to, which can share it, or another group, whose folder it stays
+ *  (planning/contracts/local.md section 7). */
+export interface Folder {
+  path: string;
+  used: number;
+  /** The names of the AIs of this group that have it: they share it. */
+  ais?: string[];
+  /** The name of the other group whose AI has it: it cannot be chosen. */
+  other?: string;
+}
+
 /** The one-time pairing link returned by `pair.browser` (planning/flows/pairing.md section C). */
 export interface PairLink {
   link: string;
@@ -57,9 +69,9 @@ function activeCtl(home: Home): p.Ctl | undefined {
   return home.owner ? home.ctl : undefined;
 }
 
-/** Whether a computer of the owner learns the home of `group` from this browser alone: no AI
- *  joins a team group, and another person's computer is known by `home.add` only. */
-const unheard = ({ home, info }: Group) => !home.owner || info?.kind === 'team';
+/** Whether a computer of the owner learns the home of `group` from this browser alone: another
+ *  person's computer is known by `home.add` only (contracts/step-2/people.md section 7, point 2). */
+const unheard = ({ home }: Group) => !home.owner;
 
 /** The members that run `agent` on the computer `device` and have another account type in their
  *  group than `account`, which is declared for that CLI (R-50). */
@@ -139,6 +151,31 @@ export class Nodes {
       ),
     );
     return answers.find((answer) => answer.err)?.err;
+  }
+
+  /** The folders that the CLI `agent` of the owned computer `home` was used in, newest first
+   *  (`host.workspaces`), each with who has it by the computer's last `host.info`; `group` is the
+   *  group the AI is being added to, none while it is being created. */
+  async folders(home: Home, agent: string, group?: Group): Promise<Folder[] | p.ErrorResponse> {
+    const ctl = home.ctl;
+    const answer = await (ctl ? ctl.request({ t: 'host.workspaces', agent }).catch(lost) : lost());
+    if (answer.err) return answer;
+    return answer.workspaces.map((folder) => ({
+      ...folder,
+      ...this.holder(home, folder.path, group),
+    }));
+  }
+
+  /** Who has `path` as a workspace on the owned computer `home`: another group, by its name, or
+   *  the AIs of `group`, by their names. Nobody: an empty object. A folder is the workspace of AIs
+   *  of one group only (contracts/local.md section 7). */
+  holder(home: Home, path: string, group?: Group): Pick<Folder, 'ais' | 'other'> {
+    const info = this.infos.get(home);
+    const entries = (info?.agents ?? []).flatMap(({ groups }) => groups);
+    const here = entries.filter((entry) => entry.workspace === path);
+    const other = here.find((entry) => entry.g !== group?.g);
+    if (other) return { other: info!.homes.find(({ g }) => g === other.g)?.name ?? other.g };
+    return here.length ? { ais: here.map((entry) => group!.nameOf(entry.member)) } : {};
   }
 
   /** Asks an online owner node (`to`) for a one-time browser pairing link (`pair.browser`). */

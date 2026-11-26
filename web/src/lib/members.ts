@@ -1,11 +1,18 @@
 // Member-panel projections and add-AI candidate selection (planning/contracts/rows.md section 2,
 // planning/contracts/commands.md section 1.2 and section 2).
-import { lost, newId, type Group, type Home } from './groups.svelte';
+import { lost, newId, type Group, type Home, type NewGroup } from './groups.svelte';
 import type { Net } from './net.svelte';
 import { cliName } from './onboard.svelte';
 import { t, type Key } from './prefs.svelte';
-import { taskTitle } from './task';
-import type { AIMemberRow, HostInfoPush, HostJoin, HumanMemberRow, MsgRow, TaskRow } from './proto';
+import type {
+  AIMemberRow,
+  ErrorResponse,
+  HostInfoPush,
+  HostJoin,
+  HumanMemberRow,
+  MsgRow,
+  TaskRow,
+} from './proto';
 import { hostHomeOf } from './terminal.svelte';
 import { clock, dayOf, now } from './when';
 
@@ -129,7 +136,7 @@ export function waitingOnOther(group: Group, ai: AIMemberRow, task: TaskRow | un
   }
   if (who) return t('member.state.waiting.who').replace('{who}', who);
   return task
-    ? `${t('member.state.waiting')} · T-${task.num} ${taskTitle(task)}`
+    ? `${t('member.state.waiting')} · T-${task.num} ${task.title}`
     : t('member.state.waiting');
 }
 
@@ -161,7 +168,7 @@ export function statusOf(group: Group, ai: AIMemberRow): { st: string; text: str
   }
   if (ai.state === 'working') {
     const base = t('member.state.working');
-    return { st: 'working', text: task ? `${base} · T-${task.num} ${taskTitle(task)}` : base };
+    return { st: 'working', text: task ? `${base} · T-${task.num} ${task.title}` : base };
   }
   const idle = idleStates[ai.state];
   return idle
@@ -231,7 +238,7 @@ export function watchDisabledReason(net: Net, ai: AIMemberRow): string | undefin
 export const openTasks = (group: Group, ai: AIMemberRow): TaskRow[] =>
   ([...group.rows.values()] as TaskRow[])
     .filter((task) => [task.assignee, task.reviewer].includes(ai.id))
-    .filter((task) => !['merged', 'cancelled'].includes(task.state))
+    .filter((task) => !['done', 'cancelled'].includes(task.state))
     .sort((a, b) => a.num - b.num);
 
 /** Registered AIs on the owner's connected computers, marking those already in `group`. */
@@ -286,21 +293,34 @@ export function suggestedName(
   return agent ? freeName(group, cliName(agent)) : '';
 }
 
-/** Worded error text for `host.join` failures, or undefined for generic `Failure` codes. */
-export function joinError(code: string): string | undefined {
+/** A refusal: its code, and the words of the node or home that refused. */
+export type Refusal = ErrorResponse['err'];
+
+/** Worded error text for `host.join` failures, or undefined for generic `Failure` codes. A
+ *  `conflict` of the node is about the folder: its words name the group that has it (contracts/
+ *  commands.md section 2). A taken name is the dialog's to see before it sends. */
+export function joinError({ code, msg }: Refusal): string | undefined {
+  if (code === 'conflict') return t('member.join.error.folder').replace('{msg}', () => msg);
   return t(`member.join.error.${code}` as Key);
 }
 
-/** Signs and sends `host.join` to `target`, returning the refusal code or an empty string on ok. */
-export async function joinGroup(
-  target: Home | undefined,
-  group: Group,
-  candidate: Candidate,
-  name: string,
-  secretary: boolean,
-  draft: Draft,
-): Promise<string> {
-  if (!target?.ctl) return 'lost';
+/** An AI to add to a group: the CLI on one of the person's computers, its name and folder there,
+ *  whether it is the secretary, and its profile. */
+export interface NewAI {
+  candidate: Candidate;
+  name: string;
+  secretary: boolean;
+  /** The folder it works in, from `Nodes.folders` or typed by the person. */
+  workspace: string;
+  draft: Draft;
+}
+
+/** Signs and sends `host.join` to the computer of the AI, for group `g` homed on the device
+ *  `home`; the refusal, or nothing on ok (contracts/commands.md section 2). */
+export async function joinGroup(g: string, home: string, ai: NewAI) {
+  const { candidate, name, secretary, workspace, draft } = ai;
+  const target = candidate.home;
+  if (!target.ctl) return lost().err;
   const external = candidate.agent === 'external';
   const { account, tool, ...profile } = draft;
   const env = await target.me.sign(
@@ -309,15 +329,78 @@ export async function joinGroup(
       n: newId(),
       ts: Date.now(),
       to: candidate.device,
-      g: group.g,
-      home: group.info!.home,
+      g,
+      home,
       agent: candidate.agent,
       name,
       secretary: !external && secretary,
+      workspace,
       ...profile,
       ...(external && { account, tool: tool || undefined }),
     }),
   );
   const answer = await target.ctl.request({ t: 'cmd', env }).catch(lost);
-  return answer.err ? answer.err.code : '';
+  return answer.err;
+}
+
+/** A person this one may add to a group without an invitation, with a name to give them. */
+export interface Known {
+  user: string;
+  name: string;
+}
+
+/** The people in the groups homed on `home` that this person reads, less this person and those
+ *  already in `group`: they can be added with `member add_person`. Each comes with the name they
+ *  have in the first of those groups (contracts/step-2/people.md section 2.5). */
+export function knownPeople(home: Home, group?: Group): Known[] {
+  const known = new Map(
+    home.groups
+      .flatMap(humanMembers)
+      .reverse()
+      .map(({ user, name }) => [user, name]),
+  );
+  for (const user of [home.me.user, ...(group ? humanMembers(group) : []).map((p) => p.user)])
+    known.delete(user);
+  return [...known]
+    .map(([user, name]) => ({ user, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Adds a known person to group `g` of `home`; the refusal, or nothing on ok. */
+export async function addPerson(home: Home, g: string, { user, name }: Known) {
+  const answer = await home.command({ t: 'member', g, op: 'add_person', user, name });
+  return answer.err;
+}
+
+/** What the create dialog chose (contracts/commands.md 1.1). */
+export interface Founding extends NewGroup {
+  people: Known[];
+  ais: NewAI[];
+}
+
+/** Where making a group stopped: `group create`, or the person or AI at `index` of its list. */
+export interface Stop {
+  step: 'group' | 'people' | 'ais';
+  index: number;
+  err: Refusal;
+}
+
+/** Creates a group on `home`, then adds each person and joins each AI, one at a time, in the
+ *  order chosen (contracts/commands.md 1.1). Nothing in it is atomic: the first refusal stops it,
+ *  and is answered with where it came; what came before it stays done. */
+export async function found(
+  home: Home,
+  { people, ais, ...named }: Founding,
+): Promise<{ g: string; stopped?: Stop }> {
+  const { g, answer } = await home.create(named);
+  if (answer.err) return { g, stopped: { step: 'group', index: 0, err: answer.err } };
+  for (const [index, person] of people.entries()) {
+    const err = await addPerson(home, g, person);
+    if (err) return { g, stopped: { step: 'people', index, err } };
+  }
+  for (const [index, ai] of ais.entries()) {
+    const err = await joinGroup(g, home.device, ai);
+    if (err) return { g, stopped: { step: 'ais', index, err } };
+  }
+  return { g };
 }

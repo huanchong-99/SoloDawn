@@ -7,9 +7,12 @@ import {
   candidatesOf,
   canMakeSecretary,
   humanMembers,
+  addPerson,
+  found,
   isAdmin,
   joinError,
   joinGroup,
+  knownPeople,
   openTasks,
   otherWaiter,
   pathLabel,
@@ -23,6 +26,8 @@ import {
   waitingOnMe,
   waitingOnOther,
   watchDisabledReason,
+  type Candidate,
+  type NewAI,
 } from './members';
 import { goldens } from './mock';
 import type { Net } from './net.svelte';
@@ -420,8 +425,6 @@ describe('AI status and path projections', () => {
     });
     expect(waitingOnOther(group, ai, tNullWait)).toBe('Waiting · T-13 Clean up');
     expect(waitingOnOther(group, ai, tNoWho)).toBe('Waiting · T-14 Review step');
-    const takeover = { ...tNoWho, origin: 'takeover', title: 'Owner takeover' } as p.TaskRow;
-    expect(waitingOnOther(group, ai, takeover)).toBe('Waiting · T-14 Terminal takeover');
     expect(waitingOnOther(group, ai, undefined)).toBe('Waiting');
 
     // Main-line non-pending, plain text, and another AI's pending card are skipped
@@ -647,7 +650,7 @@ describe('AI status and path projections', () => {
       task(3, 'queued', 'ai-o', 'other'),
       task(5, 'paused', 'ai-o', 'other'),
       task(4, 'active', 'other', 'ai-o'),
-      task(1, 'merged', 'ai-o', 'other'),
+      task(1, 'done', 'ai-o', 'other'),
       task(2, 'cancelled', 'ai-o', 'other'),
       task(6, 'active', 'other', 'another'),
       gone,
@@ -758,6 +761,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
                 {
                   g: 'other-group',
                   member: 'm0',
+                  workspace: '/srv/docs',
                   level: 3,
                   state: 'dormant',
                   queued: 0,
@@ -766,6 +770,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
                 {
                   g: gid,
                   member: 'm1',
+                  workspace: '/srv/site',
                   level: 3,
                   state: 'working',
                   queued: 0,
@@ -785,6 +790,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
                 {
                   g: 'other-group',
                   member: 'm2',
+                  workspace: '/srv/docs',
                   level: 3,
                   state: 'working',
                   queued: 0,
@@ -908,19 +914,23 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
   });
 
   it('words home_unreachable, conflict and lost in joinError and leaves others to Failure', () => {
-    expect(joinError('home_unreachable')).toBe(
+    const err = (code: string, msg = '') => joinError({ code, msg });
+    expect(err('home_unreachable')).toBe(
       "The AI's computer cannot reach this group's home right now. Try again when both are online.",
     );
-    expect(joinError('conflict')).toBe('That name is already used in this group.');
-    expect(joinError('lost')).toBe("Not sent: the AI's computer cannot be reached.");
-    expect(joinError('forbidden')).toBeUndefined();
+    // A conflict of the node is about the folder, and its words name the group that has it.
+    expect(err('conflict', 'the folder is the workspace of an AI of the group "Docs"')).toBe(
+      'This folder is already the workspace of another group. The computer said: the folder is the workspace of an AI of the group "Docs"',
+    );
+    expect(err('lost')).toBe("Not sent: the AI's computer cannot be reached.");
+    expect(err('forbidden')).toBeUndefined();
   });
 
-  it('signs host.join in joinGroup and handles missing target, offline target, refusal and rejection', async () => {
-    const { group } = makeGroup({ secretary: undefined });
+  it('signs host.join in joinGroup and handles an offline computer, refusal and rejection', async () => {
+    const offline = makeHome({ online: false });
     const candidate = {
       key: 'dev-2:codex',
-      home: makeHome(),
+      home: offline,
       device: 'dev-2',
       hostName: 'laptop',
       agent: 'codex',
@@ -928,27 +938,33 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
       loginOk: true,
       inGroup: false,
     };
-
+    const workspace = '/home/dev/website';
     const draft = { model: 'o3', effort: 'high', tier: 'strong', skills: 'Protocol design' };
-    expect(await joinGroup(undefined, group, candidate, 'Codex', false, draft)).toBe('lost');
-    expect(
-      await joinGroup(makeHome({ online: false }), group, candidate, 'Codex', false, draft),
-    ).toBe('lost');
+    const ai = (changes: Partial<NewAI> = {}): NewAI => ({
+      candidate,
+      name: 'Lead',
+      secretary: true,
+      workspace,
+      draft,
+      ...changes,
+    });
+    expect(await joinGroup(gid, homeDev, ai())).toMatchObject({ code: 'lost' });
 
     const sent: unknown[] = [];
     const target = makeHome();
+    candidate.home = target;
     vi.spyOn(Date, 'now').mockReturnValue(1763600000123);
     target.ctl = makeOnlineCtl(async (req) => {
       sent.push(req);
       return { re: 1, ok: true };
     });
 
-    expect(await joinGroup(target, group, candidate, 'Lead', true, draft)).toBe('');
+    expect(await joinGroup(gid, homeDev, ai())).toBeUndefined();
     expect(sent).toHaveLength(1);
     const frame = sent[0] as { t: string; env: p.Envelope };
     expect(frame.t).toBe('cmd');
     expect(frame.env.k).toBe('dev-k');
-    expect(JSON.parse(frame.env.p)).toEqual({
+    expect(p.decode(p.HostJoin, frame.env.p)).toEqual({
       t: 'host.join',
       n: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
       ts: 1763600000123,
@@ -958,13 +974,15 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
       agent: 'codex',
       name: 'Lead',
       secretary: true,
+      workspace,
       model: 'o3',
       effort: 'high',
       tier: 'strong',
       skills: 'Protocol design',
     });
 
-    expect(await joinGroup(target, group, candidate, 'Default', false, newDraft())).toBe('');
+    const plain = ai({ name: 'Default', secretary: false, draft: newDraft() });
+    expect(await joinGroup(gid, homeDev, plain)).toBeUndefined();
     expect(JSON.parse((sent[1] as { env: p.Envelope }).env.p)).toEqual({
       t: 'host.join',
       n: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
@@ -975,6 +993,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
       agent: 'codex',
       name: 'Default',
       secretary: false,
+      workspace,
       model: '',
       effort: '',
       tier: 'standard',
@@ -983,13 +1002,9 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
 
     const external = { ...candidate, agent: 'external', account: null, key: 'dev-2:external' };
     expect(selectableCandidates([external, { ...candidate, account: null }])).toEqual([external]);
-    expect(
-      await joinGroup(target, group, external, 'Scout', true, {
-        ...draft,
-        account: 'api_key',
-        tool: 'ZCode',
-      }),
-    ).toBe('');
+    const scout = (account: string, tool: string) =>
+      ai({ candidate: external, name: 'Scout', draft: { ...draft, account, tool } });
+    expect(await joinGroup(gid, homeDev, scout('api_key', 'ZCode'))).toBeUndefined();
     const fields = (i: number) => {
       const { n, ts, ...payload } = JSON.parse((sent[i] as { env: p.Envelope }).env.p);
       return payload;
@@ -1002,41 +1017,161 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
       agent: 'external',
       name: 'Scout',
       secretary: false,
+      workspace,
       ...draft,
       account: 'api_key',
       tool: 'ZCode',
     });
-    expect(
-      await joinGroup(target, group, external, 'Scout', false, {
-        ...draft,
-        account: 'team',
-        tool: '',
-      }),
-    ).toBe('');
+    expect(await joinGroup(gid, homeDev, scout('team', ''))).toBeUndefined();
     expect(fields(3)).toEqual({ ...fields(2), account: 'team', tool: undefined });
-    expect(
-      await joinGroup(target, group, candidate, 'Lead', true, {
-        ...draft,
-        account: 'team',
-        tool: 'other',
-      }),
-    ).toBe('');
+    const other = ai({ draft: { ...draft, account: 'team', tool: 'other' } });
+    expect(await joinGroup(gid, homeDev, other)).toBeUndefined();
     expect(fields(4)).toEqual({
       ...fields(0),
     });
 
     target.ctl = makeOnlineCtl(async () => ({
       re: 2,
-      err: { code: 'home_unreachable', msg: 'timeout' },
+      err: { code: 'conflict', msg: 'the folder of Docs' },
     }));
-    expect(await joinGroup(target, group, candidate, 'Lead', false, draft)).toBe(
-      'home_unreachable',
-    );
+    expect(await joinGroup(gid, homeDev, ai())).toEqual({
+      code: 'conflict',
+      msg: 'the folder of Docs',
+    });
 
     target.ctl = makeOnlineCtl(async () => {
       throw new Error('closed');
     });
-    expect(await joinGroup(target, group, candidate, 'Lead', false, draft)).toBe('lost');
+    expect(await joinGroup(gid, homeDev, ai())).toMatchObject({ code: 'lost' });
     vi.restoreAllMocks();
+  });
+});
+
+describe('people and groups made with them', () => {
+  const person = (g: string, id: string, user: string, name: string) =>
+    row<p.HumanMemberRow>('row-member-human', { id, g, user, name });
+
+  /** A home with two of this person's groups: Website with Mina and Leo, Docs with Mina as Mi. */
+  function twoGroups() {
+    const home = makeHome();
+    const website = new Group(home, gid);
+    const docs = new Group(home, 'docs');
+    website.apply([
+      person(gid, meMemberId, meUser, 'Alex'),
+      person(gid, 'mina-1', 'mina-u', 'Mina'),
+      person(gid, 'leo-1', 'leo-u', 'Leo'),
+      row('row-member-ai', { id: 'ai-1', g: gid }),
+    ]);
+    docs.apply([
+      person('docs', 'alex-2', meUser, 'Alex'),
+      person('docs', 'mina-2', 'mina-u', 'Mi'),
+    ]);
+    home.groups = [website, docs];
+    return { home, website, docs };
+  }
+
+  it('knows the people of the groups on a home, by the name of their first group there', () => {
+    const { home, docs } = twoGroups();
+    expect(knownPeople(home)).toEqual([
+      { user: 'leo-u', name: 'Leo' },
+      { user: 'mina-u', name: 'Mina' },
+    ]);
+    expect(knownPeople(home, docs)).toEqual([{ user: 'leo-u', name: 'Leo' }]);
+    docs.apply([{ r: 'member', id: 'mina-2', seq: nextSeq(), gone: true }]);
+    expect(knownPeople(home, docs)).toEqual([
+      { user: 'leo-u', name: 'Leo' },
+      { user: 'mina-u', name: 'Mina' },
+    ]);
+    expect(knownPeople(makeHome())).toEqual([]);
+  });
+
+  it('adds a known person with member add_person', async () => {
+    const { home } = twoGroups();
+    const sent: p.Envelope[] = [];
+    home.ctl = makeOnlineCtl(async (req) => {
+      sent.push((req as { env: p.Envelope }).env);
+      return sent.length > 1
+        ? { re: 2, err: { code: 'not_found', msg: 'no log' } }
+        : { re: 1, ok: true };
+    });
+    const mina = { user: 'mina-u', name: 'Mina' };
+    expect(await addPerson(home, gid, mina)).toBeUndefined();
+    expect(p.decode(p.MemberAddPerson, sent[0].p)).toEqual({
+      t: 'member',
+      n: expect.any(String),
+      ts: expect.any(Number),
+      g: gid,
+      op: 'add_person',
+      ...mina,
+    });
+    expect(await addPerson(home, gid, mina)).toEqual({ code: 'not_found', msg: 'no log' });
+  });
+
+  it('creates a group, then adds its people and joins its AIs one at a time, up to a refusal', async () => {
+    const home = makeHome();
+    const sent: Record<string, unknown>[] = [];
+    let refuse = (_fields: Record<string, unknown>) => false;
+    home.ctl = makeOnlineCtl(async (req) => {
+      const fields = JSON.parse((req as { env: p.Envelope }).env.p);
+      sent.push(fields);
+      // Each answer waits a moment: what is sent one at a time is never sent together.
+      await new Promise((later) => setTimeout(later));
+      return refuse(fields)
+        ? { re: 2, err: { code: 'conflict', msg: 'taken' } }
+        : { re: 1, ok: true };
+    });
+    const candidate: Candidate = {
+      key: 'dev:claude',
+      home,
+      device: home.device,
+      hostName: 'workstation',
+      agent: 'claude',
+      account: 'personal',
+      loginOk: true,
+      inGroup: false,
+    };
+    const ai = (name: string) => ({
+      candidate,
+      name,
+      secretary: false,
+      workspace: '/x',
+      draft: newDraft(),
+    });
+    const founding = {
+      name: 'Docs',
+      member_name: 'Alex',
+      people: [
+        { user: 'mina-u', name: 'Mina' },
+        { user: 'leo-u', name: 'Leo' },
+      ],
+      ais: [ai('Claude'), ai('Claude 2')],
+    };
+    const steps = () => sent.map((fields) => [fields.t, fields.name]);
+    const made = await found(home, founding);
+    expect(made).toEqual({ g: sent[0].g });
+    expect(steps()).toEqual([
+      ['group', 'Docs'],
+      ['member', 'Mina'],
+      ['member', 'Leo'],
+      ['host.join', 'Claude'],
+      ['host.join', 'Claude 2'],
+    ]);
+    expect(sent.slice(1).map((fields) => fields.g)).toEqual(Array(4).fill(made.g));
+    expect(sent[3].home).toBe(home.device);
+
+    const err = { code: 'conflict', msg: 'taken' };
+    for (const [stop, at, step, index] of [
+      ['Leo', 3, 'people', 1],
+      ['Claude', 4, 'ais', 0],
+      ['Docs', 1, 'group', 0],
+    ] as const) {
+      sent.length = 0;
+      refuse = (fields) => fields.name === stop;
+      expect(await found(home, founding)).toEqual({
+        g: sent[0].g,
+        stopped: { step, index, err },
+      });
+      expect(sent).toHaveLength(at);
+    }
   });
 });

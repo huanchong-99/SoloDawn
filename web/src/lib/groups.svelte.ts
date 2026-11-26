@@ -309,18 +309,9 @@ export class Group {
   }
 }
 
-/** What the person fills in to create a group (contracts/commands.md 1.1). A team group leaves
- *  `repo` out (contracts/step-2/watch-team.md section 7). */
-export interface NewGroup {
-  name: string;
-  kind: 'project' | 'team';
-  repo?: string;
-  base: string;
-  forge: string;
-  checks: string[];
-  member_name: string;
-  templates?: p.GroupCreate['templates'];
-}
+/** What the person fills in to create a group: its name and their own name in it. People and AIs
+ *  are added after it exists (contracts/commands.md 1.1). */
+export type NewGroup = Pick<p.GroupCreate, 'name' | 'member_name'>;
 
 /** One connection to a node, from before it exists until it is gone. */
 export interface Link {

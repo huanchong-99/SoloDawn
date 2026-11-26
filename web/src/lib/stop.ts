@@ -11,7 +11,7 @@ export const setPaused = (group: Group, paused: boolean) =>
   group.home.command({ t: 'group', g: group.g, op: paused ? 'pause' : 'resume' });
 
 /** Whether this person may stop the AIs of the group: an admin, where a group has AIs. */
-export const mayPause = (group: Group) => group.info?.kind === 'project' && isAdmin(group);
+export const mayPause = (group: Group) => isAdmin(group) && aiMembers(group).length > 0;
 
 /** How many AIs of the group run a turn now. */
 export const working = (group: Group) =>

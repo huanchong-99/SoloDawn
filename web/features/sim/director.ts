@@ -52,7 +52,8 @@ export class Director extends Scene implements Hands {
     const commands: Record<string, () => Answer> = {
       task: () => this.ops.apply(payload),
       jump: () => this.talk.jump(payload),
-      member: () => this.people.member(payload),
+      // `add_person` is the test home's own command.
+      member: () => (payload.op === 'add_person' ? undefined : this.people.member(payload)),
       invite: () => this.people.invite(payload),
       join: () => this.people.join(payload),
       note: () => this.#note(payload),
@@ -94,6 +95,7 @@ export class Director extends Scene implements Hands {
       post: () => this.talk.heard(g, payload.n as string),
       act: () => this.#acted(g, payload),
       group: () => this.#group(node, payload),
+      member: () => this.people.added(g, payload),
     };
     after[payload.t as string]?.();
   }
@@ -118,21 +120,11 @@ export class Director extends Scene implements Hands {
     if (!paused && ai.state === 'paused' && active) this.setAI(g, ai.id, { state: 'working' });
   }
 
-  /** `group create`: the test home wrote example rows; they become those of this person. */
+  /** `group create`: the test home wrote example rows; they become those of this person. People
+   *  and AIs are added by the commands that follow (contracts/commands.md 1.1). */
   #created(node: SimNode, payload: Fields) {
     const g = payload.g as string;
-    const kind = payload.kind === 'team' ? 'team' : 'project';
-    this.world.write(
-      g,
-      group({
-        g,
-        name: payload.name as string,
-        home: node.device,
-        kind,
-        repo: payload.repo as string,
-        checks: payload.checks as string[],
-      }),
-    );
+    this.world.write(g, group({ g, name: payload.name as string, home: node.device }));
     this.world.write(g, person(g, ids.me, this.world.me, payload.member_name as string, 'owner'));
   }
 
@@ -167,6 +159,9 @@ export class Director extends Scene implements Hands {
 
   info(node: SimNode) {
     return this.host.info(node);
+  }
+  workspaces(node: SimNode, agent: string) {
+    return this.host.workspaces(node, agent);
   }
   watchStart(node: SimNode, g: string, member: string) {
     return this.host.watchStart(node, g, member);

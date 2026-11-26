@@ -46,14 +46,13 @@ export class Channel implements p.PtyChannel {
 const prompt = '\r\n\x1b[36m> \x1b[0m';
 
 /** A takeover's CLI: it echoes what is typed, and answers a line when Enter is pressed. */
-export function takeoverTerminal(cli: string, typed: () => void): Channel {
+export function takeoverTerminal(cli: string): Channel {
   const channel = new Channel();
   let line = '';
   const keys: Record<string, () => void> = {
     '\r': () => {
       const said = line.trim();
       line = '';
-      if (said) typed();
       setTimeout(() => channel.write((said ? terminalReply(said) : '') + prompt), said ? 700 : 0);
     },
     '\x7f': () => {

@@ -1128,17 +1128,9 @@ describe('commands', () => {
     expect(await refused).toEqual({ re: 4, err: { code: 'conflict', msg: 'nothing to jump' } });
   });
 
-  it('create a project group that the nonce names, as the wire example of the command has it', async () => {
+  it('create a group that the nonce names, as the wire example of the command has it', async () => {
     const { home, asked } = joined();
-    const creating = home.create({
-      name: 'Docs',
-      kind: 'project',
-      repo: 'https://git.example/team/docs.git',
-      base: 'main',
-      forge: 'github',
-      checks: ['pnpm test'],
-      member_name: 'Alex',
-    });
+    const creating = home.create({ name: 'Docs', member_name: 'Alex' });
     await vi.waitFor(() => expect(asked).toHaveLength(2));
     const payload = p.decode(p.GroupCreate, signed[0]);
     expect(payload).toEqual({
@@ -1148,32 +1140,11 @@ describe('commands', () => {
       g: payload.n,
       op: 'create',
       name: 'Docs',
-      kind: 'project',
-      repo: 'https://git.example/team/docs.git',
-      base: 'main',
-      forge: 'github',
-      checks: ['pnpm test'],
       member_name: 'Alex',
     });
     expect(Object.keys(JSON.parse(signed[0]))).toEqual(keysOf('group-create'));
     asked[1].answer({ re: 2, ok: true });
     expect(await creating).toEqual({ g: payload.n, answer: { re: 2, ok: true } });
-  });
-
-  it('create a team group without a repository, as the wire example of the command has it', async () => {
-    const { home, asked } = joined();
-    const fields = { kind: 'team' as const, base: '', forge: 'none', checks: [] };
-    void home.create({ name: 'Studio', ...fields, member_name: 'Alex' });
-    await vi.waitFor(() => expect(asked).toHaveLength(2));
-    const payload = p.decode(p.GroupCreate, signed[0]);
-    const command = { t: 'group', g: payload.n, op: 'create', name: 'Studio', ...fields };
-    expect(payload).toEqual({
-      ...command,
-      n: expect.any(String),
-      ts: 1763600000000,
-      member_name: 'Alex',
-    });
-    expect(Object.keys(JSON.parse(signed[0]))).toEqual(keysOf('group-create-team'));
   });
 
   it('give each command a nonce of its own, or the one handed to them', async () => {

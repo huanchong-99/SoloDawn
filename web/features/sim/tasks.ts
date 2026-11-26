@@ -1,26 +1,23 @@
 // The tasks of the demo world, moved through their steps as planning/contracts/task-machine.md
-// says: branch, local checks, pull request, hosted checks, review by the other AI, merge, and the
-// secretary's summary. Each task has a script: the first of a brief asks for an approval and fails
-// a test once, the second puts a decision to the person, any other just works.
+// says: work in the assignee's folder, a report, a review by the other AI, done, and the
+// secretary's summary. One folder takes one task at a time: the next one waits, queued. Each task
+// has a script: the first of a brief asks for an approval, fails a test once and is sent back by
+// its first review, the second puts a decision to the person, any other just works.
 import type * as p from '../../src/lib/proto';
 import { words } from './content';
-import { sha, system, task as taskRow, type Fields } from './rows';
+import { system, task as taskRow, type Fields } from './rows';
 import { Scene, type Msg, type Task } from './scene';
 
 const step = 3000;
 const scripts = ['build', 'decide'];
-const slugs: Record<string, string> = { build: 'feature', decide: 'tests-docs' };
-const stats: Record<string, { files: number; added: number; removed: number }> = {
-  build: { files: 4, added: 86, removed: 14 },
-  decide: { files: 3, added: 120, removed: 8 },
-  plain: { files: 2, added: 40, removed: 6 },
-};
-/** The stages of the local step, by script, in order. */
+/** The stages of the work step, by script, in order. Work sent back by a review is revised. */
 const stages: Record<string, string[]> = {
-  build: ['ask', 'coded', 'fail', 'fixed', 'pass'],
-  decide: ['coded', 'ask', 'pass'],
-  plain: ['coded', 'pass'],
+  build: ['ask', 'coded', 'fail', 'fixed', 'report'],
+  decide: ['coded', 'ask', 'report'],
+  plain: ['coded', 'report'],
+  again: ['revised', 'resubmit'],
 };
+const started = ['active', 'paused', 'failed'];
 
 type Brief = Extract<p.MsgRow, { kind: 'brief' }>['body'];
 const isCard = (kind: string) => ['approval', 'decision', 'confirm'].includes(kind);
@@ -53,7 +50,27 @@ export class Tasks extends Scene {
     this.flags(id).push(flag);
   }
 
-  /** Task-machine row 1: one task per entry of a confirmed brief. */
+  /** The folder of an AI: its computer and its workspace there. */
+  #folder(g: string, ai: string) {
+    const member = this.ai(g, ai);
+    return member && `${member.host} ${member.workspace}`;
+  }
+
+  /** Whether another started task has the folder of `ai` (task-machine section 2). */
+  busy(g: string, ai: string, self?: string) {
+    const folder = this.#folder(g, ai);
+    return this.tasksOf(g).some(
+      (t) => t.id !== self && started.includes(t.state) && this.#folder(g, t.assignee) === folder,
+    );
+  }
+
+  /** What a task that is not started waits for: a task it depends on, or its folder. */
+  #waits(g: string, t: { id?: string; assignee: string; depends: string[] }) {
+    if (t.depends.some((id) => this.task(g, id)?.state !== 'done')) return 'depends';
+    return this.busy(g, t.assignee, t.id) ? 'busy' : undefined;
+  }
+
+  /** Task-machine row 1: one task per entry of a confirmed brief, judged in its order. */
   create(g: string, brief: Msg) {
     const body = brief.body as Brief;
     const made: string[] = [];
@@ -63,16 +80,31 @@ export class Tasks extends Scene {
 
   #make(g: string, brief: Msg, entry: Brief['tasks'][number], i: number, made: string[]) {
     const depends = entry.depends.map((index) => made[index]);
-    const waits = depends.some((id) => this.task(g, id)?.state !== 'merged');
     const num = Math.max(0, ...this.tasksOf(g).map((each) => each.num)) + 1;
-    const script = scripts[i] ?? 'plain';
-    const spec = { g, num, title: entry.title, slug: `${slugs[script] ?? 'part'}-${num}` };
     const roles = { assignee: entry.assignee, reviewer: entry.reviewer, brief: brief.id, depends };
-    const row = this.world.write(g, taskRow({ ...spec, ...roles }, waits ? 'queued' : 'active'));
+    const spec = { g, num, title: entry.title, ...roles };
+    const row = this.world.write(g, taskRow(spec, this.#waits(g, roles)));
     const id = row.id as string;
-    this.world.memory.flags[id] = [`script:${script}`];
+    this.world.memory.flags[id] = [`script:${scripts[i] ?? 'plain'}`];
     this.post('task', { g, by: 'system', id }, { task: id });
     return id;
+  }
+
+  /** Starting the queued tasks (task-machine section 2): in the order of their numbers, each judged
+   *  against the tasks as the ones before it left them. */
+  start(g: string) {
+    const queued = this.tasksOf(g)
+      .filter((t) => t.state === 'queued')
+      .sort((a, b) => a.num - b.num);
+    for (const t of queued) {
+      const waits = this.#waits(g, t);
+      if (waits && waits !== t.wait?.kind)
+        this.setTask(g, t.id, { wait: { kind: waits, since: Date.now() } });
+      if (waits) continue;
+      const stats = { ...t.stats, started: Date.now() };
+      this.setTask(g, t.id, { state: 'active', wait: this.wait(g, t.id), stats });
+      this.kick(g, t.id);
+    }
   }
 
   /** Whether the task can move now: active, with nothing to wait for, in a group that is not
@@ -142,40 +174,33 @@ export class Tasks extends Scene {
   advance(g: string, id: string) {
     const t = this.task(g, id);
     if (!this.#runnable(g, t)) return;
-    const steps: Record<string, (t: Task) => void> = {
-      branch: (t) => this.#branch(g, t),
-      local_check: (t) => this.#local(g, t),
-      cloud_check: (t) => this.#cloud(g, t),
-      review: (t) => this.#review(g, t),
-      merge: (t) => this.#merge(g, t),
-    };
-    steps[t.step](t);
+    if (t.step === 'review') this.#review(g, t);
+    else this.#work(g, t);
   }
 
   #say(g: string, t: Task, text: string, by = t.assignee) {
     this.post('progress', { g, by, thread: t.id, text });
   }
 
-  #branch(g: string, t: Task) {
+  /** Step `work`, in the assignee's folder: it starts, then takes the next stage of its script. */
+  #work(g: string, t: Task) {
     if (!this.#has(t.id, 'started')) {
       this.#mark(t.id, 'started');
       this.setAI(g, t.assignee, { state: 'working', task: t.id });
       this.#say(g, t, words.start(t.title));
-    } else {
-      this.setTask(g, t.id, { step: 'local_check', branch: `task/${t.num}-${t.slug}` });
+      return this.kick(g, t.id);
     }
-    this.kick(g, t.id);
-  }
-
-  #local(g: string, t: Task) {
-    const stage = stages[this.#script(t.id)].find((each) => !this.#has(t.id, each)) ?? 'pass';
+    const script = t.review?.ok === false ? 'again' : this.#script(t.id);
+    const stage = stages[script].find((each) => !this.#has(t.id, each)) ?? 'report';
     this.#mark(t.id, stage);
     const run: Record<string, () => void> = {
       ask: () => this.#ask(g, t),
       coded: () => this.#say(g, t, words.coded),
-      fail: () => this.#checks(g, t, false),
+      fail: () => this.#say(g, t, words.testFailed),
       fixed: () => this.#say(g, t, words.fixed),
-      pass: () => this.#submit(g, t),
+      revised: () => this.#say(g, t, words.revised),
+      report: () => this.#report(g, t),
+      resubmit: () => this.#report(g, t),
     };
     run[stage]();
     if (stage !== 'ask') this.kick(g, t.id);
@@ -231,120 +256,63 @@ export class Tasks extends Scene {
     return { task: t.id, question, context, options, recommended: 'B', to: [user] };
   }
 
-  #checks(g: string, t: Task, ok: boolean, stage = 'local') {
-    const commit = (t.commit as string | undefined) ?? sha();
-    const items = [
-      { name: 'pnpm check', ok: true },
-      ok
-        ? { name: 'pnpm test', ok, detail: '51 passed' }
-        : { name: 'pnpm test', ok, detail: '1 failed: pricing.test.ts › 手机宽度下按钮不换行' },
-    ];
-    this.post('checks', { g, by: 'system', thread: t.id }, { stage, ok, commit, items });
-    const checks = {
-      ...t.checks,
-      [stage === 'cloud' ? 'cloud' : 'local']: { ok, at: Date.now(), commit },
-    };
-    if (!ok) this.#say(g, t, words.testFailed);
-    return { commit, checks };
-  }
-
-  #submit(g: string, t: Task) {
-    const { commit, checks } = this.#checks(g, t, true);
-    const size = stats[this.#script(t.id)];
-    const pr = 12 + t.num;
-    this.post(
-      'report',
-      { g, by: t.assignee, thread: t.id, text: words.submitted },
-      { commit, ...size, pr },
-    );
-    const pr_url = `https://github.com/example/solodawn-site/pull/${pr}`;
-    const stats_ = { ...t.stats, added: size.added, removed: size.removed };
-    this.setTask(g, t.id, { step: 'cloud_check', commit, checks, pr, pr_url, stats: stats_ });
-  }
-
-  #cloud(g: string, t: Task) {
-    const { checks } = this.#checks(g, t, true, 'cloud');
+  /** Task-machine row 5: the assignee's report is the submission; its reviewer takes over. */
+  #report(g: string, t: Task) {
+    const text = words.report(t.num);
+    const report = this.post('report', { g, by: t.assignee, thread: t.id, text });
     const reviewer = t.reviewer ?? this.working(g).find((ai) => ai.id !== t.assignee)?.id;
-    this.setTask(g, t.id, { step: 'review', checks, failures: 0, reviewer });
-    t = { ...t, reviewer };
+    this.setTask(g, t.id, { step: 'review', report: report.id, failures: 0, reviewer });
     this.setAI(g, t.assignee, { state: 'waiting', task: undefined });
     this.drain(g, t.assignee);
-    this.setAI(g, t.reviewer!, { state: 'working', task: t.id });
-    this.kick(g, t.id, step + 1000);
+    this.setAI(g, reviewer!, { state: 'working', task: t.id });
   }
 
+  /** Task-machine row 7: the reviewer scores the report. The first review of the first task of a
+   *  brief sends the work back; any other passes, and the task is done. */
   #review(g: string, t: Task) {
-    const score = 92;
-    const round = (t.review?.round ?? 0) + 1;
-    const body = {
-      task: t.id,
-      num: t.num,
-      title: t.title,
-      commit: t.commit,
-      round,
-      score,
-      pass: t.pass,
-      ok: true,
-      items: words.reviewItems,
-    };
-    this.post('review', { g, by: t.reviewer!, thread: t.id, text: '看过了，可以合并。' }, body);
-    const review = {
-      round,
-      failed: t.review?.failed ?? 0,
-      score,
-      ok: true,
-      by: t.reviewer!,
-      commit: t.commit!,
-      at: Date.now(),
-    };
-    this.setTask(g, t.id, { step: 'merge', review });
+    const ok = this.#script(t.id) !== 'build' || t.review !== undefined;
+    const review = this.#scored(g, t, ok);
     this.setAI(g, t.reviewer!, { state: 'waiting', task: undefined });
     this.drain(g, t.reviewer!);
+    if (ok) return this.#done(g, { ...t, review });
+    this.setTask(g, t.id, { step: 'work', review });
+    this.setAI(g, t.assignee, { state: 'working', task: t.id });
     this.kick(g, t.id);
   }
 
-  #merge(g: string, t: Task) {
-    const ended = Date.now();
-    this.post(
-      'system',
-      { g, by: 'system', thread: t.id },
-      { code: 'task_merged', task: t.id, commit: t.commit, merge_commit: sha() },
-    );
-    const merged = this.setTask(g, t.id, {
-      state: 'merged',
-      wait: null,
-      stats: { ...t.stats, ended },
-    })!;
+  /** Posts the reviewer's review of the task's report, and answers the task's `review` field. */
+  #scored(g: string, t: Task, ok: boolean) {
+    const score = ok ? 92 : 78;
+    const round = (t.review?.round ?? 0) + 1;
+    const failed = (t.review?.failed ?? 0) + Number(!ok);
+    const items = ok ? words.reviewItems : words.sentBackItems;
+    const { num, title, pass } = t;
+    const body = { task: t.id, num, title, report: t.report, round, score, pass, ok, items };
+    const text = ok ? words.passed : words.sentBack;
+    this.post('review', { g, by: t.reviewer!, thread: t.id, text }, body);
+    return { round, failed, score, ok, by: t.reviewer!, report: t.report!, at: Date.now() };
+  }
+
+  /** A passed review ends the task: its cards expire, the tasks that waited for it or its folder
+   *  start, and the secretary sums it up. */
+  #done(g: string, t: Task) {
+    this.post('system', { g, by: 'system', thread: t.id }, { code: 'task_done', task: t.id });
+    const stats = { ...t.stats, ended: Date.now() };
+    const done = this.setTask(g, t.id, { state: 'done', wait: null, review: t.review, stats })!;
     this.#expire(g, t.id);
-    this.setAI(g, t.assignee, { state: 'waiting', task: undefined });
-    this.drain(g, t.assignee);
-    this.world.after(1500, () => this.#summary(g, merged));
-    this.#unblock(g);
+    this.world.after(1500, () => this.#summary(g, done));
+    this.start(g);
   }
 
   #summary(g: string, t: Task) {
     const secretary = this.secretary(g);
     if (!secretary) return;
     const minutes = Math.max(1, Math.round((t.stats.ended! - t.stats.started) / 60_000));
-    const { added, removed } = t.stats;
     const { score, round: rounds } = t.review!;
-    const body = { task: t.id, score, rounds, minutes, added, removed, pr: t.pr };
+    const body = { task: t.id, score, rounds, minutes };
     this.post('summary', { g, by: secretary.id, thread: t.id, main: true }, body);
-    const left = this.tasksOf(g).filter(
-      (each) => each.brief === t.brief && each.state !== 'merged',
-    );
-    if (t.brief && !left.length) this.post('text', { g, by: secretary.id, text: words.allMerged });
-  }
-
-  /** Task-machine row 8: a queued task whose dependencies all merged becomes active. */
-  #unblock(g: string) {
-    for (const t of this.tasksOf(g)) {
-      if (t.state !== 'queued') continue;
-      if (t.depends.every((id) => this.task(g, id)?.state === 'merged')) {
-        this.setTask(g, t.id, { state: 'active', wait: null });
-        this.kick(g, t.id);
-      }
-    }
+    const left = this.tasksOf(g).filter((each) => each.brief === t.brief && each.state !== 'done');
+    if (t.brief && !left.length) this.post('text', { g, by: secretary.id, text: words.allDone });
   }
 
   /** The pending cards of a task that ended become `expired`. */

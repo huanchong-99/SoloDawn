@@ -164,12 +164,6 @@ describe('classify, whoOf, titleOf and targetIdOf', () => {
     expect(titleOf(group, watchMine)).toBe('Let Pat watch Codex’s terminal.');
   });
 
-  it('names the AI of a bulletin, not the person whose computer sent it', () => {
-    const { group } = makeReadyGroup();
-    const bulletin = row<p.MsgRow>('row-msg-bulletin', { by: ownerId });
-    expect(whoOf(group, bulletin)).toBe('Claude Code');
-  });
-
   it('classifies a notice of the home that mentions the reader, in its own words', () => {
     const { group } = makeReadyGroup();
     const notice = (id: string, seq: number, body: object, changes: object = {}) =>

@@ -85,7 +85,7 @@ async function open(mode: Mode, reset: boolean) {
   const device = await loadDevice({ crypto, idb: () => indexedDB });
   const saved = read();
   const world = new World(device.id, mode, localStorage);
-  const fresh = reset || saved?.mode !== mode || saved.me !== device.id;
+  const fresh = reset || saved?.v !== 2 || saved.mode !== mode || saved.me !== device.id;
   if (fresh) await create(world, device);
   else {
     computers(world);

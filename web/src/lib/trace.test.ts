@@ -1,4 +1,4 @@
-// Standalone verification of both signed task transcripts (flows/trace-task.md).
+// Standalone verification of the signed task transcript (flows/trace-task.md).
 import * as v from 'valibot';
 import { describe, expect, it } from 'vitest';
 import { DeviceLog } from './devlog';
@@ -6,15 +6,7 @@ import { openCommand, verifyEnvelope } from './identity';
 import { goldens } from './mock';
 import * as p from './proto';
 
-const cmdSchemas: Record<string, v.GenericSchema> = {
-  post: p.Post,
-  act: p.Act,
-  'task/branch': p.TaskBranch,
-  'task/checked': p.TaskChecked,
-  'task/submitted': p.TaskSubmitted,
-  'task/cloud': p.TaskChecked,
-  'task/merged': p.TaskMerged,
-};
+const cmdSchemas: Record<string, v.GenericSchema> = { post: p.Post, act: p.Act };
 
 async function verifyLog(trace: p.TaskTrace) {
   const log = await DeviceLog.replay(crypto, trace.devlog.user, trace.devlog.entries);
@@ -23,8 +15,7 @@ async function verifyLog(trace: p.TaskTrace) {
   return valid;
 }
 
-function verifyCast(trace: p.TaskTrace, valid: Set<string>, remote: boolean) {
-  expect(trace.group.forge).toBe(remote ? 'github' : 'none');
+function verifyCast(trace: p.TaskTrace, valid: Set<string>) {
   expect(trace.owner.user).toBe(trace.devlog.user);
   expect(valid.has(trace.group.home)).toBe(true);
   const ais = new Map(trace.ais.map((ai) => [ai.id, ai]));
@@ -35,7 +26,7 @@ function verifyCast(trace: p.TaskTrace, valid: Set<string>, remote: boolean) {
     .find((cmd) => cmd.kind === 'brief');
   const reviewer = ais.get(brief.body.tasks[0].reviewer)!;
   expect(reviewer.secretary).toBe(false);
-  expect(reviewer.host === trace.group.home).toBe(!remote);
+  expect(reviewer.host).toBe(trace.group.home);
   return ais;
 }
 
@@ -107,13 +98,8 @@ function verifyItemRows(entry: p.Inbox['items'][number], state: TraceState) {
   const task = state.tasks.get(entry.item.task ?? '');
   expect(entry.task).toStrictEqual(task);
   expect(entry.msg).toStrictEqual(state.msgs.get(entry.item.msg ?? ''));
-  verifyItemCommit(entry.item, task);
-}
-
-/** An item's commit and pull request are the task's: the commit that was submitted. */
-function verifyItemCommit(item: p.Item, task: p.TaskRow | undefined) {
-  if (item.commit) expect(item.commit).toBe(task?.commit);
-  if (item.pr) expect(item.pr).toBe(task?.pr);
+  // A review item carries the report under review (contracts/datachannel.md section 6).
+  if (entry.item.why === 'review') expect(entry.item.msg).toBe(task?.report);
 }
 
 function verifyStepInboxes(
@@ -136,31 +122,28 @@ function verifyStepInboxes(
   }
 }
 
-function verifyFinalOutcome(trace: p.TaskTrace, state: TraceState, remote: boolean) {
-  expect(state.whys).toEqual(['mention', 'assign', 'confirmed', 'review', 'merge', 'notice']);
-  expect(trace.steps.length).toBe(remote ? 12 : 11);
+function verifyFinalOutcome(trace: p.TaskTrace, state: TraceState) {
+  expect(state.whys).toEqual(['mention', 'assign', 'confirmed', 'review', 'notice']);
+  expect(trace.steps.length).toBe(7);
   expect(state.tasks.size).toBe(1);
   const [task] = [...state.tasks.values()];
-  expect([task.num, task.state, task.step]).toEqual([trace.num + 1, 'merged', 'merge']);
-  expect(task.pr !== undefined).toBe(remote);
-  expect(task.checks.cloud !== undefined).toBe(remote);
-  const mergedSys = [...state.msgs.values()].find((m) => m.kind === 'system');
-  if (mergedSys?.kind !== 'system' || mergedSys.body.code !== 'task_merged')
-    throw new Error('no task_merged message');
-  expect(mergedSys.body.commit).toBe(task.commit);
-  expect(mergedSys.body.merge_commit).not.toBe(task.commit);
-  const summary = [...state.msgs.values()].find((m) => m.kind === 'summary');
-  expect(summary?.kind === 'summary' ? summary.body.pr !== undefined : false).toBe(remote);
+  expect([task.num, task.state, task.step]).toEqual([trace.num + 1, 'done', 'review']);
+  const msgs = [...state.msgs.values()];
+  const report = msgs.find((m) => m.kind === 'report');
+  expect(task.report).toBe(report?.id);
+  const review = msgs.find((m) => m.kind === 'review');
+  expect(review?.kind === 'review' && review.body.report).toBe(task.report);
+  const done = msgs.find((m) => m.kind === 'system');
+  expect(done?.body).toStrictEqual({ code: 'task_done', task: task.id });
+  const summary = msgs.find((m) => m.kind === 'summary');
+  expect(summary?.body).toMatchObject({ task: task.id, score: task.review?.score });
 }
 
-describe('signed task transcripts', () => {
-  it.each([
-    ['trace-remote', true],
-    ['trace-local', false],
-  ] as const)('%s parses alone and verifies end to end', async (name, remote) => {
-    const trace = p.decode(p.TaskTrace, goldens[name]);
+describe('the signed task transcript', () => {
+  it('trace-local parses alone and verifies end to end', async () => {
+    const trace = p.decode(p.TaskTrace, goldens['trace-local']);
     const valid = await verifyLog(trace);
-    const ais = verifyCast(trace, valid, remote);
+    const ais = verifyCast(trace, valid);
     const state: TraceState = {
       seq: trace.seq,
       confirmEnv: undefined,
@@ -174,6 +157,6 @@ describe('signed task transcripts', () => {
       await verifyStepRows(step, state);
       verifyStepInboxes(step.inboxes, trace.group.id, ais, state);
     }
-    verifyFinalOutcome(trace, state, remote);
+    verifyFinalOutcome(trace, state);
   });
 });

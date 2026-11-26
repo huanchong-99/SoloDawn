@@ -5,7 +5,7 @@ import type { Kind } from './mounts.svelte';
 import { t } from './prefs.svelte';
 import type { TaskRow } from './proto';
 
-/** Highlight state of one segment in the six-step task bar. */
+/** Highlight state of one segment in the three-step task bar. */
 export type StepMark = 'done' | 'now' | 'wait' | 'fail' | undefined;
 
 /** Visual model of the task status pill. */
@@ -16,14 +16,8 @@ export interface Badge {
   dot?: 'working' | 'paused' | 'takeover';
 }
 
-const stepKeys = ['work', 'checks', 'pr', 'cloud', 'review', 'merge'] as const;
-const stepPos: Record<string, number> = {
-  branch: 0,
-  local_check: 1,
-  cloud_check: 3,
-  review: 4,
-  merge: 5,
-};
+/** The three positions the card draws: work, review, done (contracts/task-machine.md section 1). */
+const stepKeys = ['work', 'review', 'done'] as const;
 const idleStates = new Set(['paused', 'cancelled']);
 
 type CardWait = 'approval' | 'decision' | 'confirm';
@@ -41,12 +35,11 @@ function cardWaitBadge(group: Group, kind: CardWait, who?: string[]): Badge {
   return { text };
 }
 
-/** Words `task.wait` for the status badge and the checks link when an active wait is present. */
+/** Words `task.wait` for the status badge when an active wait is present. */
 export function waitBadge(group: Group, wait: TaskRow['wait']): Badge | undefined {
   if (!wait) return undefined;
   if (isCardWait(wait.kind)) return cardWaitBadge(group, wait.kind, wait.who);
-  if (wait.kind === 'reviewer') return { text: t('task.badge.reviewer') };
-  return wait.kind === 'conflict' ? { text: t('task.badge.conflict'), tone: 'danger' } : undefined;
+  return wait.kind === 'reviewer' ? { text: t('task.badge.reviewer') } : undefined;
 }
 
 function failedBadge(task: TaskRow): Badge {
@@ -63,10 +56,10 @@ function failedBadge(task: TaskRow): Badge {
 }
 
 function finalBadge(task: TaskRow): Badge | undefined {
-  if (task.state === 'merged') {
+  if (task.state === 'done') {
     const text = task.review
-      ? t('task.badge.merged.score').replace('{n}', `${task.review.score}`)
-      : t('task.badge.merged');
+      ? t('task.badge.done.score').replace('{n}', `${task.review.score}`)
+      : t('task.badge.done');
     return { text, tone: 'ok' };
   }
   if (task.state === 'cancelled') return { text: t('task.badge.cancelled') };
@@ -100,81 +93,37 @@ export function taskBadge(group: Group, task: TaskRow): Badge {
   return task.state === 'queued' ? { text: t('task.badge.queued') } : activeBadge(group, task);
 }
 
-const isRemote = (index: number) => index === 2 || index === 3;
-
-function readyForPr(task: TaskRow, noForge: boolean): boolean {
-  if (noForge || task.pr !== undefined || task.checks.local?.ok !== true) return false;
-  return task.review?.ok !== false && task.wait?.kind !== 'conflict';
-}
-
-function stepIndex(task: TaskRow, noForge: boolean): number {
-  return task.step === 'local_check' && readyForPr(task, noForge) ? 2 : (stepPos[task.step] ?? 0);
-}
-
-function activeStepFailed(task: TaskRow, at: number): boolean {
-  if (task.wait?.kind === 'conflict') return true;
-  if (at === 1) return task.checks.local?.ok === false;
-  if (at === 3) return task.checks.cloud?.ok === false;
-  return at === 4 && task.review?.ok === false;
-}
-
 function waitsOnViewer(group: Group, task: TaskRow): boolean {
   const { wait } = task;
   return wait !== null && isCardWait(wait.kind) && Boolean(wait.who?.includes(group.home.me.user));
 }
 
-function currentMark(group: Group, task: TaskRow, at: number): StepMark {
+function currentMark(group: Group, task: TaskRow): StepMark {
   if (task.state === 'failed') return 'fail';
   if (idleStates.has(task.state)) return undefined;
-  if (waitsOnViewer(group, task)) return 'wait';
-  return activeStepFailed(task, at) ? 'fail' : 'now';
+  return waitsOnViewer(group, task) ? 'wait' : 'now';
 }
 
-function remoteStepDone(task: TaskRow, index: number): boolean {
-  if (index === 2) return task.pr !== undefined;
-  return index === 3 ? task.checks.cloud !== undefined || task.pr !== undefined : true;
-}
-
-function pastStepDone(task: TaskRow, index: number, noForge: boolean): boolean {
-  if (noForge) return !isRemote(index);
-  return task.state === 'merged' || remoteStepDone(task, index);
-}
-
-function segmentMark(
-  task: TaskRow,
-  index: number,
-  at: number,
-  cur: StepMark,
-  noForge: boolean,
-): StepMark {
-  if (task.state === 'merged' || index < at)
-    return pastStepDone(task, index, noForge) ? 'done' : undefined;
-  return index === at ? cur : undefined;
-}
-
-/** Computes the six-step bar segments, trailing step text, and accessible summary. */
+/** Computes the three-step bar segments, trailing step text, and accessible summary. A done task
+ *  has every segment done; a queued one, none. */
 export function taskSteps(group: Group, task: TaskRow, status: string) {
-  const noForge = group.info?.forge === 'none';
-  const at = stepIndex(task, noForge);
-  const cur = currentMark(group, task, at);
-  const queued = task.state === 'queued';
+  const at = task.state === 'done' ? stepKeys.length : Number(task.step === 'review');
+  const cur = task.state === 'queued' ? undefined : currentMark(group, task);
   const items = stepKeys.map((key, i) => ({
     key,
     label: t(`task.step.${key}`),
-    mark: queued ? undefined : segmentMark(task, i, at, cur, noForge),
-    skipped: noForge && isRemote(i),
+    mark: (i < at ? 'done' : i === at && cur) || undefined,
   }));
-  if (queued)
-    return { items, summary: '0 / 6', aria: t('task.steps.queued').replace('{status}', status) };
-  if (task.state === 'merged') {
-    return { items, summary: '6 / 6', aria: t('task.steps.merged').replace('{status}', status) };
-  }
+  if (task.state === 'queued')
+    return { items, summary: '0 / 3', aria: t('task.steps.queued').replace('{status}', status) };
+  if (task.state === 'done')
+    return { items, summary: '3 / 3', aria: t('task.steps.done').replace('{status}', status) };
   const step = items[at].label;
   const aria = t('task.steps.at')
     .replace('{n}', `${at + 1}`)
     .replace('{step}', step)
     .replace('{status}', status);
-  return { items, summary: `${step} · ${at + 1} / 6`, aria };
+  return { items, summary: `${step} · ${at + 1} / 3`, aria };
 }
 
 /** Formats the review line of `<dl class="kv">` from `task.review`, `task.reviewer` and `task.pass`. */
@@ -196,11 +145,6 @@ export function reviewLine(group: Group, task: TaskRow) {
     : t('task.review.none').replace('{pass}', pass);
   return { meta };
 }
-
-/** A task's title. A takeover's task has the host's English one (flows/takeover.md A): it is shown
- *  in the reader's language. */
-export const taskTitle = (task: TaskRow) =>
-  task.origin === 'takeover' ? t('task.takeover') : task.title;
 
 /** Formats the collapsed thread preview line from `task.thread`. */
 export function threadPreview(group: Group, task: TaskRow): string {

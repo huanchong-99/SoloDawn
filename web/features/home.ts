@@ -196,13 +196,12 @@ export class TestHome {
 
   #apply(payload: Fields & { n: string; g: string; ts: number }): object {
     if (payload.t === 'group' && payload.op === 'create') {
-      const row = payload.kind === 'team' ? 'row-group-team' : 'row-group';
-      this.add(payload.g, payload.name as string, row);
-      for (const connection of this.#connections)
-        connection.push({ t: 'groups', groups: this.#listed() });
+      this.add(payload.g, payload.name as string);
+      this.#relist();
       return { ok: true };
     }
     if (this.refuse) return { err: { code: this.refuse, msg: 'refused by the test' } };
+    if (payload.t === 'member' && payload.op === 'add_person') return this.#addPerson(payload);
     if (payload.t === 'post' && this.groups.has(payload.g)) {
       const { n, ts, g, kind, thread, main, text, mentions, re, body } = payload;
       this.write(g, {
@@ -219,6 +218,33 @@ export class TestHome {
     }
     if (this.reply) return this.reply(payload);
     return { err: { code: 'bad_request', msg: 'not a command this home knows' } };
+  }
+
+  #relist() {
+    for (const connection of this.#connections)
+      connection.push({ t: 'groups', groups: this.#listed() });
+  }
+
+  /** `member add_person` (contracts/step-2/people.md section 2.5): a person of another group here
+   *  becomes a member, with what an accepted join writes but the device rows, which this home does
+   *  not keep. */
+  #addPerson(payload: Fields & { n: string; g: string }): object {
+    const { n, g, user, name } = payload;
+    const people = (rows: Map<string, Fields>) =>
+      [...rows.values()].filter((row) => row.r === 'member' && row.kind === 'human');
+    const group = this.groups.get(g)!;
+    const known = [...this.groups.entries()].some(
+      ([other, { rows }]) => other !== g && people(rows).some((row) => row.user === user),
+    );
+    if (!known) return { err: { code: 'not_found', msg: 'no log of this person here' } };
+    const taken = people(group.rows).some((row) => row.user === user || row.name === name);
+    if (taken) return { err: { code: 'conflict', msg: 'a member already' } };
+    this.write(g, example('row-member-human', { id: n, g, user, name, role: 'member' }));
+    const body = { code: 'member_joined', member: n, by: owner };
+    const id = `msg-${group.seq + 1}`;
+    this.write(g, example('row-msg-system', { id, ts: Date.now(), thread: null, body }));
+    this.#relist();
+    return { ok: true };
   }
 }
 
@@ -295,7 +321,7 @@ export function browser(home: TestHome, me = user, Store = Home) {
       };
       const welcome = await connection.ctl.request({
         t: 'hello',
-        v: 1,
+        v: 3,
         kind: 'browser',
         name: 'test',
         addrs: [],
@@ -317,8 +343,8 @@ export interface OwnedNode {
 }
 
 /** A computer of the person's own, as the client holds it: besides what `browser` does, it
- *  answers `host.info`, `agent.set`, `pair.browser`, `host.offline` and `host.online`, and keeps
- *  those commands. */
+ *  answers `host.info`, `host.workspaces` (with the wire example), `agent.set`, `pair.browser`,
+ *  `host.offline` and `host.online`, and keeps those commands. */
 export function ownedNode(
   name: string,
   device: string,
@@ -364,12 +390,16 @@ export function ownedNode(
         if (entry && parsed.account) entry.account = parsed.account;
         return { re: 1, ok: true };
       }
+      // What the node answers itself; anything else is the test home's.
+      const own: Record<string, (req: { env?: p.Envelope }) => unknown> = {
+        'host.info': () => structuredClone(info),
+        'host.workspaces': () =>
+          p.decodeAnswer('host.workspaces', goldens['host-workspaces-answer']),
+        cmd: (req) => req.env && handleCmd(req.env),
+      };
       const ctl = {
-        request: async (req: { t: string; env?: p.Envelope }) => {
-          if (req.t === 'host.info') return structuredClone(info);
-          const cmdAnswer = req.t === 'cmd' && req.env ? handleCmd(req.env) : undefined;
-          return cmdAnswer ?? base.ctl.request(req as never);
-        },
+        request: async (req: { t: string; env?: p.Envelope }) =>
+          (await own[req.t]?.(req)) ?? base.ctl.request(req as never),
       } as p.Ctl;
       drop = () => {
         base.close();
@@ -377,7 +407,7 @@ export function ownedNode(
       };
       const welcome = (await base.ctl.request({
         t: 'hello',
-        v: 1,
+        v: 3,
         kind: 'browser',
         name: 'test',
         addrs: [],

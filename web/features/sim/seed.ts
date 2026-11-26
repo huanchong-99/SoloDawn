@@ -1,17 +1,23 @@
 // The computers of the demo world and, unless it starts empty for onboarding, its two groups with
-// a short history: a project group with a secretary and two working AIs, where one task was done
-// yesterday, and a team group the person shares with Mina.
+// a short history: a group with a secretary and three working AIs, each in its folder on its
+// computer, where one task was done yesterday, and a group of people only that the person shares
+// with Mina.
 import { agents, words } from './content';
 import { devices, ids, users } from './ids';
-import { ai, group, msg, person, sha, system, task, type AISpec, type Row } from './rows';
+import { ai, group, msg, person, system, task, type AISpec, type Row } from './rows';
 import type { World } from './world';
 
 const hour = 3_600_000;
 const minute = 60_000;
 
-/** The AIs of the project group, by member id. */
+/** The AIs of the website group, by member id. The secretary and Claude Code share one folder. */
 export function siteAIs(me: string): AISpec[] {
-  const mac = { host: devices.macbook, hostName: 'MacBook Pro', user: me };
+  const mac = {
+    host: devices.macbook,
+    hostName: 'MacBook Pro',
+    user: me,
+    workspace: '/Users/alex/dev/solodawn-site',
+  };
   return [
     {
       ...mac,
@@ -40,6 +46,7 @@ export function siteAIs(me: string): AISpec[] {
       user: me,
       host: devices.office,
       hostName: '办公室台式机',
+      workspace: '/home/alex/solodawn-site',
       account: 'team',
       model: 'gpt-5.4',
       effort: 'high',
@@ -53,6 +60,7 @@ export function siteAIs(me: string): AISpec[] {
       user: users.mina,
       host: devices.minaPc,
       hostName: 'Mina 的笔记本',
+      workspace: '/Users/mina/work/solodawn-site',
       model: 'sonnet',
     },
   ];
@@ -92,7 +100,7 @@ export function seed(world: World, now = Date.now()) {
   const { mac, office } = computers(world);
   mac.paired = office.paired = true;
   site(world, now);
-  team(world, now);
+  talk(world, now);
 }
 
 const at = (now: number, ago: number) => ({ ts: now - ago });
@@ -105,8 +113,6 @@ function site(world: World, now: number) {
     g,
     name: '官网改版',
     home: devices.macbook,
-    repo: 'https://github.com/example/solodawn-site.git',
-    checks: ['pnpm check', 'pnpm test'],
     secretary: ids.secretary,
     created: now - 50 * hour,
   };
@@ -165,14 +171,13 @@ function briefRow(world: World, day: number): Row {
   );
 }
 
+/** Yesterday's task: worked on, reported, passed its review, done, summed up. */
 function done(world: World, day: number, brief: string) {
   const g = ids.site;
-  const commit = sha();
   const made = task({
     g,
     num: 1,
     title: '价格表在小屏上改成纵向卡片',
-    slug: 'pricing-cards',
     assignee: ids.claude,
     reviewer: ids.codex,
     brief,
@@ -184,21 +189,13 @@ function done(world: World, day: number, brief: string) {
     g,
     msg('progress', { ...thread(ids.claude, 6), text: '开始做，先看一下价格表的样式。' }),
   );
-  const items = [
-    { name: 'pnpm check', ok: true },
-    { name: 'pnpm test', ok: true, detail: '48 passed' },
-  ];
-  world.write(g, msg('checks', thread('system', 20), { stage: 'local', ok: true, commit, items }));
-  world.write(
-    g,
-    msg('report', thread(ids.claude, 21), { commit, files: 3, added: 64, removed: 21, pr: 12 }),
-  );
-  world.write(g, msg('checks', thread('system', 25), { stage: 'cloud', ok: true, commit, items }));
+  const report = msg('report', { ...thread(ids.claude, 21), text: words.report(1) });
+  world.write(g, report);
   const review = {
     task: id,
     num: 1,
     title: made.title,
-    commit,
+    report: report.id,
     round: 1,
     score: 94,
     pass: 90,
@@ -209,35 +206,29 @@ function done(world: World, day: number, brief: string) {
     g,
     msg('review', { ...thread(ids.codex, 30), text: '改得干净，小屏和大屏都看过了。' }, review),
   );
-  const merged = system(g, { code: 'task_merged', task: id, commit, merge_commit: sha() }, id);
-  world.write(g, { ...merged, ts: day + 36 * minute });
-  world.write(g, finished(made, commit, day));
-  const summary = { task: id, score: 94, rounds: 1, minutes: 32, added: 64, removed: 21, pr: 12 };
-  world.write(g, msg('summary', { ...thread(ids.secretary, 37), main: true }, summary));
+  world.write(g, { ...system(g, { code: 'task_done', task: id }, id), ts: day + 30 * minute });
+  world.write(g, finished(made, report.id, day));
+  const summary = { task: id, score: 94, rounds: 1, minutes: 26 };
+  world.write(g, msg('summary', { ...thread(ids.secretary, 31), main: true }, summary));
 }
 
-function finished(made: Row, commit: string, day: number): Row {
-  const check = { ok: true, at: day + 25 * minute, commit };
+function finished(made: Row, report: string, day: number): Row {
   return {
     ...made,
-    state: 'merged',
-    step: 'merge',
-    commit,
-    branch: 'task/1-pricing-cards',
-    pr: 12,
-    pr_url: 'https://github.com/example/solodawn-site/pull/12',
-    checks: { local: check, cloud: check },
+    state: 'done',
+    step: 'review',
+    report,
     review: {
       round: 1,
       failed: 0,
       score: 94,
       ok: true,
       by: ids.codex,
-      commit,
+      report,
       at: day + 30 * minute,
     },
-    thread: { count: 6, rounds: 0 },
-    stats: { added: 64, removed: 21, started: day + 4 * minute, ended: day + 36 * minute },
+    thread: { count: 5, rounds: 0 },
+    stats: { started: day + 4 * minute, ended: day + 30 * minute },
     created: day + 4 * minute,
   };
 }
@@ -282,20 +273,18 @@ function today(world: World, now: number) {
   world.write(g, msg('confirm', card, body, { status: 'pending' }));
 }
 
-function team(world: World, now: number) {
-  const g = ids.team;
+/** A group of people only, homed on the office computer: Mina is in it, so she can be added to a
+ *  new group made there without an invitation. */
+function talk(world: World, now: number) {
+  const g = ids.talk;
   const home = world.node(devices.office)!;
   home.groups.set(g, { name: '产品讨论', seq: 0, rows: new Map() });
-  world.write(
-    g,
-    group({ g, name: '产品讨论', home: devices.office, kind: 'team', created: now - 72 * hour }),
-  );
+  world.write(g, group({ g, name: '产品讨论', home: devices.office, created: now - 72 * hour }));
   world.write(g, person(g, ids.me, world.me, 'Alex', 'owner'));
-  world.write(g, person(g, ids.minaTeam, users.mina, 'Mina', 'admin'));
+  world.write(g, person(g, ids.minaTalk, users.mina, 'Mina', 'admin'));
   const demoDay = '下周三要给客户演示新官网，在那之前大家别合并大改动。';
-  world.write(g, msg('text', { g, by: ids.minaTeam, text: demoDay, ...at(now, 26 * hour) }));
-  const body = { from: ids.site, group: '官网改版', ai: '秘书' };
-  const bulletin = '「官网改版」T-1 已合并：价格表在手机上不再溢出。';
-  world.write(g, msg('bulletin', { g, by: ids.me, text: bulletin, ...at(now, 23 * hour) }, body));
+  world.write(g, msg('text', { g, by: ids.minaTalk, text: demoDay, ...at(now, 26 * hour) }));
+  const news = '「官网改版」T-1 已完成：价格表在手机上不再溢出。';
+  world.write(g, msg('text', { g, by: ids.me, text: news, ...at(now, 23 * hour) }));
   world.write(g, msg('text', { g, by: ids.me, text: '收到，我会盯着。', ...at(now, 22 * hour) }));
 }

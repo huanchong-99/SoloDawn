@@ -23,8 +23,8 @@ export interface Memory {
   invites: Record<string, { g: string; expires: number }>;
   /** Watch grants: who may watch which AI. */
   grants: { g: string; member: string; user: string }[];
-  /** Open takeovers, by `g:member`: the task the terminal is on, and whether anything was typed. */
-  takeovers: Record<string, { task?: string; typed: boolean; made?: boolean }>;
+  /** Open takeovers, by `g:member`: the task the terminal is on, if any. */
+  takeovers: Record<string, { task?: string }>;
 }
 
 const emptyMemory = (): Memory => ({
@@ -45,9 +45,10 @@ interface SavedNode {
   paired: boolean;
 }
 
-/** The world as localStorage holds it. */
+/** The world as localStorage holds it. A world of another version is not read: its rows may
+ *  have another shape. */
 export interface Saved {
-  v: 1;
+  v: 2;
   mode: Mode;
   me: string;
   nodes: SavedNode[];
@@ -61,6 +62,7 @@ export interface Hands {
   command(node: SimNode, payload: Fields): Promise<object | undefined> | object | undefined;
   applied(node: SimNode, payload: Fields): void;
   info(node: SimNode): p.HostInfoPush;
+  workspaces(node: SimNode, agent: string): object;
   watchStart(node: SimNode, g: string, member: string): object;
   channel(node: SimNode, label: string): p.PtyChannel | undefined;
   heard(node: SimNode, frame: p.Devlog | p.PTYResize): void;
@@ -151,6 +153,9 @@ export class World implements NodeWorld {
   info(node: SimNode) {
     return this.hands.info(node);
   }
+  workspaces(node: SimNode, agent: string) {
+    return this.hands.workspaces(node, agent);
+  }
   watchStart(node: SimNode, g: string, member: string) {
     return this.hands.watchStart(node, g, member);
   }
@@ -186,7 +191,7 @@ export class World implements NodeWorld {
       offline: node.offline,
       paired: node.paired,
     })) as SavedNode[];
-    return { v: 1, mode: this.mode, me: this.me, nodes, memory: this.memory };
+    return { v: 2, mode: this.mode, me: this.me, nodes, memory: this.memory };
   }
 
   /** Puts back what a saved world held into this one, whose computers are already added. */

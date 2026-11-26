@@ -2,7 +2,6 @@
 // (planning/contracts/step-2/confirm.md sections 1 and 3).
 import type { Group } from './groups.svelte';
 import { prefs, t } from './prefs.svelte';
-import { taskTitle } from './task';
 import type { MsgRow } from './proto';
 import { clock } from './when';
 
@@ -41,7 +40,7 @@ export function confirmSentence(group: Group, msg: Confirm): string {
     return t('confirm.request.task')
       .replace('{ai}', ai)
       .replace('{task}', () => `T-${task.num}`)
-      .replace('{title}', () => taskTitle(task));
+      .replace('{title}', () => task.title);
   return t(sentences[msg.body.what as keyof typeof sentences])
     .replace('{ai}', ai)
     .replace('{who}', () => requester(group, msg));

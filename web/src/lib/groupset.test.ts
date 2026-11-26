@@ -1,9 +1,9 @@
 import { expect, it } from 'vitest';
-import { changesOf, commandsIn, draftOf, limitFields } from './groupset';
+import { changesOf, draftOf, limitFields } from './groupset';
 import { goldens } from './mock';
 import * as p from './proto';
 
-const info = p.decode(p.GroupRow, goldens['row-group-custom']);
+const info = p.decode(p.GroupRow, goldens['row-group']);
 const limits = {
   rounds: 10,
   wakes_per_hour: 20,
@@ -18,19 +18,11 @@ const limits = {
 
 /** The fields of the command after a change of the draft, when the row now has `now`. */
 function after(change: (draft: ReturnType<typeof draftOf>) => void, now = limits) {
-  const row = { ...info, limits, checks: ['go vet ./...'] };
+  const row = { ...info, limits };
   const draft = draftOf(row);
   change(draft);
   return changesOf(draftOf(row), draft, now);
 }
-
-it('reads a command from each line that has one', () => {
-  expect(commandsIn('  go vet ./...\n\n \t\r\ngo test ./...  \n')).toEqual([
-    'go vet ./...',
-    'go test ./...',
-  ]);
-  expect(commandsIn('')).toEqual([]);
-});
 
 it('shows every limit of the row once, the wait for an approval in minutes', () => {
   expect(limitFields).toEqual([
@@ -48,34 +40,25 @@ it('shows every limit of the row once, the wait for an approval in minutes', () 
 });
 
 it('drafts the row as it is, in a copy', () => {
-  const draft = draftOf({ ...info, name: 'Website', secretary: 'm7', checks: ['a b', 'c'] });
-  expect(draft).toMatchObject({
+  const draft = draftOf({ ...info, name: 'Website', secretary: 'm7' });
+  expect(draft).toStrictEqual({
     name: 'Website',
-    checks: 'a b\nc',
     pass: info.pass,
     pass_foundation: info.pass_foundation,
+    limits: { ...info.limits, approval_wait_s: info.limits.approval_wait_s / 60 },
     secretary: 'm7',
-    templates: info.templates,
   });
-  expect(draft.templates).not.toBe(info.templates);
+  expect(draft.limits).not.toBe(info.limits);
   expect(draftOf({ ...info, secretary: undefined }).secretary).toBe('');
 });
 
 it('sends only what changed', () => {
   expect(after(() => {})).toStrictEqual({});
   expect(after((draft) => (draft.name = ` ${info.name} `))).toStrictEqual({});
-  expect(after((draft) => (draft.checks += '\n\n'))).toStrictEqual({});
   expect(after((draft) => (draft.name = ' Docs '))).toStrictEqual({ name: 'Docs' });
-  expect(after((draft) => (draft.checks = 'pnpm check\n pnpm test'))).toStrictEqual({
-    checks: ['pnpm check', 'pnpm test'],
-  });
-  expect(after((draft) => (draft.checks = ''))).toStrictEqual({ checks: [] });
   expect(after((draft) => (draft.pass = 80))).toStrictEqual({ pass: 80 });
   expect(after((draft) => (draft.pass_foundation = 60))).toStrictEqual({ pass_foundation: 60 });
   expect(after((draft) => (draft.secretary = 'm8'))).toStrictEqual({ secretary: 'm8' });
-  expect(after((draft) => (draft.templates!.push[0] = 'jj'))).toStrictEqual({
-    templates: { ...info.templates, push: ['jj', ...info.templates!.push.slice(1)] },
-  });
 });
 
 it('sends the limits whole, with those of the row now where the person left them', () => {

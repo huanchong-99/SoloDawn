@@ -14,6 +14,7 @@
   "member.join.cancel": "取消",
   "member.join.cli": "电脑和 AI",
   "member.join.error.conflict": "这个名字在群里已经有人用了。",
+  "member.join.error.folder": "这个文件夹已经是另一个群的工作区。电脑的回答：{msg}",
   "member.join.error.home_unreachable": "AI 所在的电脑现在连不上这个群的家。等两边都在线后再试。",
   "member.join.error.lost": "没有发出去：连不上 AI 所在的电脑。",
   "member.join.joined": "已在群里 · 再加一位",
