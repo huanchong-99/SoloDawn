@@ -849,6 +849,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-26 · bug · FLAKY-34: A7.4 failed once: the test browser dropped the interactive CLI's first output
+
+- Symptom: CI run 45758291863 (`test (macos-latest)`, `rebuild` ed742b4e8), A7.4 on the fifth Codex takeover: `timed out after 15s waiting for "\"ready\":" in the pty output; saw 1:` with nothing received. The fake CLI log ends with `start codex` (the CLI ran); the goroutine dump shows the host's `pumpOut` attached to that PTY and waiting to read (`internal/host/pty.go:286`), with nothing left to send. The same code passed on the PR runs and in 8 runs under CPU load on the Mac.
+- Cause: the fixture, not the node. The test browser opened `pty:<g>:<member>` with `CreateDataChannel` and set `OnMessage` after it returned (`features/m7_test.go` `openPTY` and `newM7PTY`, before this fix lines 741-745 and 155-167). On a connected PeerConnection pion opens the channel and starts its read loop inside `CreateDataChannel`, and drops a message that arrives while no `OnMessage` handler is set (`pion/webrtc/v4@v4.2.26/datachannel.go:319-332`, `peerconnection.go:2728-2730`). The CLI printed `{"ready":…}` at start, so the node sends it the moment the channel opens (flows/takeover.md step 7); when the test goroutine was descheduled for the node's round trip, the line was lost. A 300 ms sleep between `CreateDataChannel` and `newM7PTY` failed A7.4 every time with the same message and the same fake CLI log. `dispatchWorld.channel` (`features/peer_dispatch_test.go`), which A9.20's owner terminal uses and which also waits for the CLI's first output, had the same window. A browser cannot lose these bytes: it sets `onmessage` in the same task, before any event runs.
+- Status: resolved on branch `fix/a74-flake`. Both fixtures open their channels with `openBrowserChannel` (`features/peer_dispatch_test.go:233`): the PeerConnection's API detaches data channels (`browserAPI`, `:266`), so a message stays in the SCTP stream until the channel's reader takes it, and opened and closed follow the detached reader. With the same 300 ms sleep A7.4 passes.
+
 ### 2026-11-26 · bug · A jump to a card older than the messages read drifts out of view
 
 - Symptom: a reminder opens a task whose card is far back and was not read (160 messages): its thread opens and has the focus, but after the gap to the newer messages is paged in, the card is not where the jump put it. Measured with Playwright Firefox 1555 and Chromium 1248, 1280x720, real pages through a fake `fetch`, card 160 back fetched with `seek`; the thread open or not makes no difference. A card that is held, or 25 messages back, stays in place in both.
@@ -2004,6 +2010,7 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Cause: the vitest github-actions reporter (on whenever `GITHUB_ACTIONS` is set) appends a report to `$GITHUB_STEP_SUMMARY` after every test run (`jobSummary`), and Stryker runs the tests once per mutant.
 - Status: resolved. The Mutate step runs Stryker with `GITHUB_STEP_SUMMARY` empty and then writes the score table and the mutants that lived or have no coverage to the summary.
 - Mutants of the final gate that could not change behaviour, so the code that held them is gone: `confirm.ts` `if (state.status === 'expired') return label` (the label of an expired card has no `{who}`, so the replacement callback is never called) and `notify.svelte.ts` `route.page === 'terminal'` (only the terminal page has a `member` in its address, and `route.params` is not typed by page).
+
 ### 2026-11-26 · bug · A9.21 timed out on Windows: the relay's round trip read 0
 
 - Symptom: on PR #420, `test (windows-latest)` (run 45758838792), A9.21 waited 2m54s for the TURN relay and saw the direct `srflx` pair until ICE failed. It passed on Windows in earlier runs and on the Mac.

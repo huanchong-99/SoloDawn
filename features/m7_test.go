@@ -146,27 +146,21 @@ func (n *m7TransportNet) ListenUDP(network string, locAddr *net.UDPAddr) (transp
 
 type m7PTY struct {
 	dc     *webrtc.DataChannel
-	opened chan struct{} // closed once by dc.OnOpen
-	closed chan struct{} // closed once by dc.OnClose
+	opened chan struct{} // closed once by browserChannel
+	closed chan struct{} // closed once by browserChannel
 	notify chan struct{} // single reader: waitOutput
 	mu     sync.Mutex
 	buf    bytes.Buffer
 }
 
-func newM7PTY(dc *webrtc.DataChannel) *m7PTY {
-	p := &m7PTY{
-		dc:     dc,
-		opened: make(chan struct{}),
-		closed: make(chan struct{}),
-		notify: make(chan struct{}, 1),
+func openM7PTY(pc *webrtc.PeerConnection, label string) (*m7PTY, error) {
+	p := &m7PTY{notify: make(chan struct{}, 1)}
+	c, err := openBrowserChannel(pc, label, func(data []byte, _ bool) { p.appendData(data) })
+	if err != nil {
+		return nil, err
 	}
-	dc.OnOpen(func() { close(p.opened) })
-	dc.OnClose(func() {
-		close(p.closed)
-		p.signalNotify()
-	})
-	dc.OnMessage(func(m webrtc.DataChannelMessage) { p.appendData(m.Data) })
-	return p
+	p.dc, p.opened, p.closed = c.DataChannel, c.opened, c.closed
+	return p, nil
 }
 
 func (p *m7PTY) appendData(data []byte) {
@@ -229,8 +223,8 @@ type m7Browser struct {
 	ice        []proto.ICEServer
 	pc         *webrtc.PeerConnection
 	ctl        *webrtc.DataChannel
-	ctlOpened  chan struct{}           // closed once by ctl.OnOpen
-	ctlClosed  chan struct{}           // closed once by ctl.OnClose
+	ctlOpened  chan struct{}           // closed once by browserChannel
+	ctlClosed  chan struct{}           // closed once by browserChannel
 	answers    chan proto.Answer       // single reader: awaitAnswer
 	remoteICE  chan proto.ICECandidate // single reader: applyRemoteICE
 	cutDirect  chan struct{}
@@ -256,8 +250,6 @@ func newM7Browser(ctx context.Context, key identity.Key, nodeID string, mode m7C
 		ctrl:      &m7NetControl{turnAddr: turnAddr},
 		mode:      mode,
 		ice:       iceServers,
-		ctlOpened: make(chan struct{}),
-		ctlClosed: make(chan struct{}),
 		answers:   make(chan proto.Answer, 4),
 		remoteICE: make(chan proto.ICECandidate, 64),
 		cutDirect: make(chan struct{}),
@@ -316,8 +308,7 @@ func (b *m7Browser) buildPeerConnection(relayIP net.IP) (*webrtc.PeerConnection,
 			return nil, err
 		}
 	}
-	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
-	return api.NewPeerConnection(m7WebRTCConfig(b.ice, b.mode))
+	return browserAPI(se).NewPeerConnection(m7WebRTCConfig(b.ice, b.mode))
 }
 
 func m7WebRTCConfig(servers []proto.ICEServer, mode m7CandMode) webrtc.Configuration {
@@ -336,18 +327,15 @@ func m7WebRTCConfig(servers []proto.ICEServer, mode m7CandMode) webrtc.Configura
 }
 
 func (b *m7Browser) initCtlChannel() error {
-	dc, err := b.pc.CreateDataChannel("ctl", nil)
+	c, err := openBrowserChannel(b.pc, "ctl", func(data []byte, isString bool) {
+		if isString {
+			b.onCtlFrame(data)
+		}
+	})
 	if err != nil {
 		return err
 	}
-	b.ctl = dc
-	dc.OnOpen(func() { close(b.ctlOpened) })
-	dc.OnClose(func() { close(b.ctlClosed) })
-	dc.OnMessage(func(m webrtc.DataChannelMessage) {
-		if m.IsString {
-			b.onCtlFrame(m.Data)
-		}
-	})
+	b.ctl, b.ctlOpened, b.ctlClosed = c.DataChannel, c.opened, c.closed
 	return nil
 }
 
@@ -739,11 +727,10 @@ func (b *m7Browser) execCmd(v any) error {
 }
 
 func (b *m7Browser) openPTY(gid, mid string) (*m7PTY, error) {
-	dc, err := b.pc.CreateDataChannel("pty:"+gid+":"+mid, nil)
+	p, err := openM7PTY(b.pc, "pty:"+gid+":"+mid)
 	if err != nil {
 		return nil, err
 	}
-	p := newM7PTY(dc)
 	if err := p.waitOpen(b.ctx); err != nil {
 		return nil, err
 	}
