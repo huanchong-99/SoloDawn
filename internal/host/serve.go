@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -47,6 +48,16 @@ func serverAddress(out io.Reader) string {
 		}
 	}
 	return ""
+}
+
+// wireBody is the JSON body of a request to a CLI's server. A request without
+// a value has none: a GET with a body loses its event stream when a Go reverse
+// proxy forwards it (issues.md, 2026-11-26).
+func wireBody(v any) io.Reader {
+	if v == nil {
+		return http.NoBody
+	}
+	return strings.NewReader(marshalWire(v))
 }
 
 // readSSE calls handle with the data of each event of an event stream. It
