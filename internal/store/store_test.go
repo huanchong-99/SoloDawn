@@ -47,11 +47,12 @@ func TestSchemaAndReopen(t *testing.T) {
 	check(t, err)
 	equal(t, scalar[string](t, s.db, "PRAGMA journal_mode"), "wal")
 	equal(t, s.db.Stats().MaxOpenConnections, 0)
-	equal(t, scalar[int](t, s.db, "PRAGMA user_version"), 3)
+	equal(t, scalar[int](t, s.db, "PRAGMA user_version"), 4)
 	equal(t, scalar[string](t, s.db, `SELECT group_concat(name,',' ORDER BY name) FROM pragma_table_list
 		WHERE name NOT LIKE 'sqlite_%' AND strict=1`), "agent,approval,audit,device_log,grp,inbox,peer,perm,processed_offer,push_sub,receipt,row,session,setting,usage")
 	equal(t, scalar[string](t, s.db, `SELECT group_concat(name,',' ORDER BY name) FROM sqlite_schema
 		WHERE type='index' AND name NOT LIKE 'sqlite_%'`), "audit_by_ts,audit_item,inbox_by_host,row_by_seq,row_by_thread,row_keep,row_main,row_named,row_pending")
+	equal(t, columns(t, s, "session"), "g,member,task,kind,folder,agent,home,name,secretary,cli_session,state,last_active,report")
 	_, err = s.db.Exec("INSERT INTO setting VALUES('name','test')")
 	check(t, err)
 	check(t, s.Close())

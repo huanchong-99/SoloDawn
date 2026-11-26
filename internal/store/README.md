@@ -5,12 +5,17 @@
 logs and push subscriptions. A move removes the group's data and records its
 new device in the `moved` setting. Import binds the group to the receiving node,
 rebuilds the knowledge-base index and assigns destination-local inbox IDs.
-Receipts and session rows are not copied.
+Receipts and session rows are not copied. The file's `PRAGMA user_version` is the node's schema
+version; `ExportedGroup` and `ImportGroup` refuse a file of another version in one line (a file of
+`v3.0.0-rc.1` has 0).
 
-`Open(path)` migrates the node database and enables WAL for files. Three migrations run in order,
+`Open(path)` migrates the node database and enables WAL for files. Four migrations run in order,
 saved as `PRAGMA user_version`: `schema.sql` (the tables of
-[storage](../../planning/contracts/storage.md)), `processed_offer` (`offers.go`) and the
-knowledge-base index. A database with a higher version is refused. Use
+[storage](../../planning/contracts/storage.md)), `processed_offer` (`offers.go`), the
+knowledge-base index, and `forget.go`, which deletes every group of the model before 2026-11-26
+with its sessions, approvals, levels and the devices and push subscriptions of everyone but the
+node's owner, and replaces `session.takeover_at` by `session.report` (storage section 7). A
+database with a higher version is refused. Use
 `:memory:` for isolated tests. Each `Write` callback runs on the one writer;
 return its first error to roll back counters, rows, inbox items and receipts
 together. Item numbering happens inside that callback, after allocating the id.

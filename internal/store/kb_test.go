@@ -65,15 +65,12 @@ func TestMigrateKBBackfillsLiveDocumentsAndRollsBackOnError(t *testing.T) {
 		}
 		return nil
 	}))
-	check(t, db.Close())
-
-	s := openDB(t, path)
-	equal(t, scalar[int](t, s.db, "PRAGMA user_version"), 3)
-	v1 := snapshot(t, s, "g1")
-	equal(t, kbIDs(t, v1, "路径", 10), []string{"k1"})
-	equal(t, kbIDs(t, v1, "writer", 10), []string{"k1"})
-	v2 := snapshot(t, s, "g2")
-	equal(t, kbIDs(t, v2, "路径", 10), []string{"k2"})
+	check(t, migrate(db, migrations[:3]))
+	defer db.Close()
+	equal(t, scalar[int](t, db, "PRAGMA user_version"), 3)
+	match := "SELECT group_concat(g||':'||id,',' ORDER BY g) FROM kb WHERE kb MATCH ?"
+	equal(t, scalar[string](t, db, match, buildKBQuery("路径")), "g1:k1,g2:k2")
+	equal(t, scalar[string](t, db, match, buildKBQuery("writer")), "g1:k1")
 }
 
 func TestMigrateKBAndSyncErrorBranches(t *testing.T) {

@@ -71,6 +71,7 @@ func verifyExportFile(t *testing.T, path string) {
 	db, err := sql.Open("sqlite", transferURI(path, "ro"))
 	check(t, err)
 	defer db.Close()
+	equal(t, scalar[int](t, db, "PRAGMA user_version"), 4)
 	equal(t, scalar[string](t, db, "SELECT group_concat(name,',' ORDER BY name) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'"),
 		"device_log,grp,inbox,push_sub,row")
 	equal(t, scalar[int](t, db, "SELECT count(*) FROM row"), 6)
@@ -97,6 +98,24 @@ func verifyImportedGroup(t *testing.T, destination *Store) {
 		return tx.Ack("a", "host", 10)
 	}))
 	equal(t, scalar[int](t, destination.db, "SELECT count(*) FROM inbox"), 1)
+}
+
+func TestImportRefusesAFileOfAnotherVersion(t *testing.T) {
+	source := openDB(t, ":memory:")
+	target := openDB(t, ":memory:")
+	check(t, source.Write(seedExport))
+	path := filepath.Join(t.TempDir(), "rc1.sqlite")
+	check(t, source.ExportGroup("a", path, ""))
+	file, err := sql.Open("sqlite", path)
+	check(t, err)
+	_, err = file.Exec("PRAGMA user_version=0")
+	check(t, err)
+	check(t, file.Close())
+	const refused = "the file was written by another version of SoloDawn (file version 0, this node 4)"
+	_, err = ExportedGroup(path)
+	equal(t, err.Error(), refused)
+	equal(t, target.ImportGroup("a", path, "owner", "P2", func(*Tx) error { return nil }).Error(), refused)
+	equal(t, scalar[int](t, target.db, "SELECT count(*) FROM row"), 0)
 }
 
 func TestExportFailureDoesNotMove(t *testing.T) {

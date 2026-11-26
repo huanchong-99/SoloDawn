@@ -34,7 +34,7 @@ func TestRetention(t *testing.T) {
 		id, state, brief string
 		mt               int64
 	}{
-		{"done", "merged", "", old}, {"cancel", "cancelled", "", old}, {"just-done", "merged", "", cut},
+		{"done", "done", "", old}, {"cancel", "cancelled", "", old}, {"just-done", "done", "", cut},
 		{"active", "active", "", old}, {"queue", "queued", "confirmed", old},
 	} {
 		put(t, s, "g", x.mt, proto.TaskRow{RowHeader: header("task", x.id, int64(8+i)), Group: "g", State: x.state, Brief: x.brief, Created: old})

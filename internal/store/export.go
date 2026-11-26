@@ -65,6 +65,7 @@ func (tx *Tx) exportCopy(group, file string) error {
 		return fmt.Errorf("group is not homed here: %w", err)
 	}
 	ddl, _, _ := strings.Cut(schema, "CREATE TABLE receipt")
+	ddl += fmt.Sprintf("PRAGMA user_version=%d;", len(migrations))
 	dst, _ := sql.Open("sqlite", transferURI(file, "rw"))
 	defer dst.Close()
 	return transaction(dst, func(out *Tx) error { return tx.exportTables(out, ddl, group) })
@@ -149,10 +150,30 @@ func transferURI(file, mode string) string {
 func ExportedGroup(file string) (string, error) {
 	db, _ := sql.Open("sqlite", transferURI(file, "ro"))
 	defer db.Close()
+	if err := checkVersion(db, "main"); err != nil {
+		return "", err
+	}
 	return exportedGroup(db, "main")
 }
 
-func exportedGroup(db interface{ QueryRow(string, ...any) *sql.Row }, schema string) (string, error) {
+type querier interface {
+	QueryRow(string, ...any) *sql.Row
+}
+
+// checkVersion refuses a file written by a node of another schema version; a
+// file of v3.0.0-rc.1 has 0.
+func checkVersion(db querier, schema string) error {
+	var version int
+	if err := db.QueryRow("PRAGMA " + schema + ".user_version").Scan(&version); err != nil {
+		return err
+	}
+	if version != len(migrations) {
+		return fmt.Errorf("the file was written by another version of SoloDawn (file version %d, this node %d)", version, len(migrations))
+	}
+	return nil
+}
+
+func exportedGroup(db querier, schema string) (string, error) {
 	var group string
 	err := db.QueryRow("SELECT min(g) FROM " + schema + ".grp HAVING count(*)=1").Scan(&group)
 	return group, err
@@ -162,6 +183,9 @@ func exportedGroup(db interface{ QueryRow(string, ...any) *sql.Row }, schema str
 func (s *Store) ImportGroup(group, file, owner, home string, load func(*Tx) error) error {
 	return s.onWriter(func() error {
 		return s.transfer(transferURI(file, "ro"), func(tx *Tx) error {
+			if err := checkVersion(tx, "transfer"); err != nil {
+				return err
+			}
 			if err := tx.checkImport(group, owner); err != nil {
 				return err
 			}
