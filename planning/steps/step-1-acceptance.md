@@ -34,9 +34,11 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   version and path.
 - **A1.3** On one local network the path is `direct`. With UDP and the ICE-TCP
   port blocked the path is `relay` and the indicator says so within 1
-  second. After unblocking, the path becomes `direct` within one probe
-  interval plus 5 seconds. A `host.info` request sent every second is
-  answered throughout.
+  second. A `host.info` request sent every second is answered throughout.
+  (The sentence on becoming `direct` again after unblocking was removed by
+  the decision of 2026-11-21: no relay-free probe and move. A relayed
+  connection becomes direct only when ICE finds a direct pair itself or at
+  the next reconnect.)
 - **A1.4** With the rendezvous stopped, open **direct** connections keep
   working for 10 minutes. (The sentence on reconnecting without the
   rendezvous was removed by the decisions of 2026-11-21, no local-network
@@ -72,12 +74,9 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   the notice (`flows/connect.md` F). Run with a valid device id beginning with
   `-`. After takeover, a reconnect trigger in the first tab opens no
   signalling or peer connection.
-- **A1.13** Force a move through a probe. Close the old connection after C
-  sends `hello` and deliver `welcome` before the 10-second deadline. C sends
-  no new offer and completes the move. Repeat with `welcome` withheld through
-  the deadline. With the old connection closed, C starts one ordinary
-  reconnect. With the old connection still serving, C discards the probe and
-  `host.info` continues on the old connection.
+- **A1.13** Removed by the decision of 2026-11-21: no relay-free probe and
+  move (units PR-1 and W-3 are not built; `internal/peer/README.md`,
+  "Limitations").
 
 ## M2. Groups, messages, sync
 
@@ -98,12 +97,10 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   than a removed deletion marker is reset.
 - **A2.6** With the home stopped the browser shows "cannot reach the group
   home" and is read-only; when it returns, sync resumes without reload.
-- **A2.7** During a move from a relayed to a direct path (as in A1.3) a
-  command is sent every second and a row is written every second: every
-  command is answered once and every row is applied once. A row written
-  while a first read is being sent is neither missing at `synced` nor
-  applied twice. A deleted row does not come back when an older `fetch`
-  page arrives after the deletion.
+- **A2.7** A row written while a first read is being sent is neither
+  missing at `synced` nor applied twice. A deleted row does not come back
+  when an older `fetch` page arrives after the deletion. (The sentence on a
+  move from a relayed to a direct path was removed with A1.3 and A1.13.)
 
 ## M3. AI sessions
 
@@ -147,9 +144,8 @@ These tests need a task session, so they follow the first slice of M5
 - **A4.4** At level 1 a request to edit a file changes nothing on disk and
   produces no card.
 - **A4.5** At level 3 no card appears.
-- **A4.6** An approval envelope from a device outside the owner's log,
-  injected at the home by a test hook, is ignored by the host and the
-  command does not run.
+- **A4.6** Removed under the owner's rule of 2026-11-21: no defence in code
+  against an approval from a device outside the owner's log.
 - **A4.7** Pausing the group interrupts a running turn within 2 seconds.
   Mentions made while paused are delivered after resume. A task that waits
   for an approval is not woken by the resume.

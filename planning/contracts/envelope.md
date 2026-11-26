@@ -112,12 +112,12 @@ failure with one error code:
    `contracts/conventions.md` section 2.
 4. `not_for_me`: `to`, when there, is the receiver's device id; an empty
    `to` is a value like any other, and is not that id. A signalling payload
-   must carry `to`; a beacon (`contracts/rendezvous.md` section 4) carries
-   none and is not checked for one. A host command without one is refused
+   must carry `to`. (A beacon, which carried none, was cut on 2026-11-21:
+   `contracts/rendezvous.md` section 4.) A host command without one is refused
    with the same code by the node that receives it (`contracts/commands.md`
    section 2).
 5. `stale`: `ts` is at most two minutes from the receiver's clock for a
-   signalling payload or a beacon, and at most 24 hours for a command,
+   signalling payload, and at most 24 hours for a command,
    earlier or later. Exactly two minutes, or exactly 24 hours, still passes.
 
 A command that passes these checks and was already accepted is not an

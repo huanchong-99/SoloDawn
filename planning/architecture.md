@@ -222,7 +222,7 @@ session at any time (C-6); an AI runs one turn at a time per group.
 | The node pushes the task branch and opens the pull request through tools | the AI runs `git push` and `gh` itself | no approval card for the task's own branch and no command inspection (Q-10) |
 | stdio MCP shim per session | HTTP MCP server in the node | stdio has the longest idle timeout in Claude Code `[documented]`; caller identity comes from the shim's arguments |
 | Signed signalling, ephemeral DTLS certificates | long-lived certificates as identity | one key per device; browsers cannot sign with a certificate key |
-| Non-relay probe connection, then move | ICE restart on the live connection | make-before-break; a failed probe costs nothing |
+| Non-relay probe connection, then move (cut 2026-11-21) | ICE restart on the live connection | make-before-break; a failed probe costs nothing |
 | Native CLI sandbox for level 2 | a command classifier in the node | a classifier is not a boundary and is a lot of code |
 | One binary with subcommands | separate node and rendezvous binaries | one release matrix; a node already embeds the signalling handler |
 
@@ -243,7 +243,7 @@ internal/host/          sessions, CLI drivers, MCP tools, workspaces, pty, audit
   instructions/         instruction texts per session kind
 internal/home/          command handling, task state machine, limits, inbox
 internal/rendezvous/    signalling handler, STUN, TURN, static file handler
-internal/peer/          signalling client, pion connections, path detection, probe-and-move
+internal/peer/          signalling client, pion connections, path detection
 internal/store/         SQLite schema and queries
 internal/identity/      keys, envelope sign and verify, device log
 internal/proto/         wire structs for every contract; testdata/ holds the golden JSON

@@ -105,9 +105,9 @@ HS-7b is restart-safe merge logic and was started on Astra; its Fable reviewer c
 | N-7 | 1 | Release workflow: six binaries, `SHA256SUMS`, `install.md` | A1.8 (builds) | `.github/workflows/release.yml`, `install.md` | — | A | S |
 | N-8 | 4 | `net_status`; the retention schedule | unit | `node/netstatus.go`, `node/schedule.go` | N-4 | A | S |
 | PR-0 | 2 | Seam in the peer dispatch of B-08: a table of offer kinds that peer files register into, and channel handlers that a node gives each `Peer` at `New`, each handed a `peer.Stream` (an `io.ReadWriteCloser` with the label and the remote device), so that probe offers and channels other than `ctl` (terminal, later `watch:*`) are handed over instead of refused (`datachannel.md` 1, 2, 7) | unit: a registered label is handed over, an unknown one is closed | the dispatch sites in the `peer/` files of B-08, `peer/registry.go`, `peer/stream.go` | B-08 | F | S |
-| PR-1 | 3 | The relay-free probe and the move as a reconnect; classifying again (`flows/connect.md` B) | A1.3, A1.13 | `peer/probe.go`; in `peer/signal.go`, `create` without TURN for a probe, `ordinaryOffer` closing a pending probe, and `answer` not taking the slot before `hello` | PR-0, B-07 | F | M |
-| PR-2 | 3 | Local-network beacon and remembered addresses (`rendezvous.md` 4) | A1.4 | `peer/beacon.go`, `peer/addrs.go` | B-08, P-2 | A | M |
-| PR-3 | 3 | Port mapping by UPnP and NAT-PMP, publishing the granted port (`rendezvous.md` 5.1). Uses go-nat-pmp (`NewClientWithTimeout`) and goupnp's `internetgateway2` (IGDv2 first, then IGDv1) directly, not go-nat, and replaces the go-nat pin in `deps_test.go` with them. Offering sockets are not mapped in this step: that helps in one topology only, where the relay also connects; it is revisited with the owner's router measurements, and PR-3 says so in 5.1. S-8's results: `spikes/S-8/results.md` in [#134](https://github.com/huanchong-99/SoloDawn/pull/134) | unit against the gateway of NET-1, tag `netsim`, in the `netsim` job | `peer/portmap.go` | B-08, X-1, NET-1, S-8 | A | M |
+| PR-1 | 3 | Cancelled (2026-11-21): The relay-free probe and the move as a reconnect; classifying again (`flows/connect.md` B) | A1.3, A1.13 | `peer/probe.go`; in `peer/signal.go`, `create` without TURN for a probe, `ordinaryOffer` closing a pending probe, and `answer` not taking the slot before `hello` | PR-0, B-07 | F | M |
+| PR-2 | 3 | Cancelled (2026-11-22): Local-network beacon and remembered addresses (`rendezvous.md` 4) | A1.4 | `peer/beacon.go`, `peer/addrs.go` | B-08, P-2 | A | M |
+| PR-3 | 3 | Cancelled (2026-11-21): Port mapping by UPnP and NAT-PMP, publishing the granted port (`rendezvous.md` 5.1). Uses go-nat-pmp (`NewClientWithTimeout`) and goupnp's `internetgateway2` (IGDv2 first, then IGDv1) directly, not go-nat, and replaces the go-nat pin in `deps_test.go` with them. Offering sockets are not mapped in this step: that helps in one topology only, where the relay also connects; it is revisited with the owner's router measurements, and PR-3 says so in 5.1. S-8's results: `spikes/S-8/results.md` in [#134](https://github.com/huanchong-99/SoloDawn/pull/134) | unit against the gateway of NET-1, tag `netsim`, in the `netsim` job | `peer/portmap.go` | B-08, X-1, NET-1, S-8 | A | M |
 | RV-1 | 2 | Starts from the compatible set pion/webrtc v4.2.26, pion/ice v4.4.8, golang.org/x/crypto v0.58.0 or later, which B-07 and B-08 are moving to now. B-07 already has routing by server name, `acme-tls/1` and metering on the data path; RV-1 adds A8.4 and does not route again (`rendezvous.md` 3, 6) | A8.4 with Pebble for issuance and renewal | `internal/rendezvous/tls.go` | B-07, S-6 | A | M |
 
 ## 5. Lanes WEB-LIB, UI-SHELL and UI
@@ -121,7 +121,7 @@ its components through the mounting points of U-0.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | W-1 | 1 | `rendezvous.ts`: handshake, `to`/`from`, `watch`, rooms, the `ice` request, over every signalling path (`rendezvous.md` 2) | A1.5 (browser half) | `lib/rendezvous.ts` | — | A | M |
 | W-2 | 1 | `peer.ts`: signed offer and candidates, early candidates held, `ctl` requests and pushes, path from the browser's statistics, reconnect with back-off, unanswered commands sent again | A1.11 (browser half) | `lib/peer.ts` | — | F | M |
-| W-3 | 2 | The probe and the move as a reconnect (`flows/connect.md` B) | A1.3, A1.13 (browser half) | `lib/move.ts` | W-2 | F | M |
+| W-3 | 2 | Cancelled (2026-11-21): The probe and the move as a reconnect (`flows/connect.md` B) | A1.3, A1.13 (browser half) | `lib/move.ts` | W-2 | F | M |
 | W-4 | 1 | One active tab: the lock, losing it, "Use here" as logic (`flows/connect.md` F) | A1.12 (logic) | `lib/tablock.ts` | — | A | S |
 | U-0 | 1 | Shell seams: the preference module and the one loader of message files, which each unit adds per area; mounting points for cards in the chat and for status in the top bar; shared package edits (xterm and its fit add-on), the route table with all seven pages, the connection handed to pages (mock or real), the per-slice feature convention for the web | existing `web.feature` passes | `web/src/App.svelte`, `lib/route.svelte.ts`, the preference module, the loader in `web/src/messages/`, `web/package.json`, the lock file, `web/features/` | F-06/F-07 | F | M |
 | U-1 | 2 | F-04 onboarding page | A1.1 (browser half) | `routes/Onboarding.svelte`, `cmp/pairing/` | U-0 | F | M |
@@ -150,7 +150,7 @@ the owner of the failing file.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | I-1 | 3 | M3 on the local link with fake CLIs | A3.1, A3.2, A3.4 to A3.7, A3.9, A3.10; A3.4 with a configured AI; the tool list against `tools.json` | `features/m3*` | N-1, HM-1, HM-5 to HM-7, HM-16, HS-1, HS-2, HS-8, HS-9, HS-13 to HS-15 | A | M |
 | I-3 | 3 | M2 on the local link with a test client | A2.1 to A2.6 (the `groups` push of A2.1 is in I-2) | `features/m2*` | N-1, HM-1 to HM-6 | A | M |
-| I-2 | 4 | M1 on real transport and NET-1; A2.7 during a move | A1.1 to A1.7, A1.9 to A1.11, A1.13, A2.7; tag `netsim`, in the `netsim` job | `features/m1*` | N-3, N-4, PR-1, PR-2, NET-1 | A | M |
+| I-2 | 4 | M1 on real transport and NET-1 | A1.1 to A1.3, A1.7, A1.9 to A1.11 (A1.4 is a real-machine step; A1.5, A1.6, A1.13 and the move of A2.7 are removed); tag `netsim`, in the `netsim` job | `features/m1*` | N-3, N-4, NET-1 | A | M |
 | I-4 | 4 | M4 without the `live` parts | A4.1 to A4.9 | `features/m4*` | I-1, HM-10, HM-14, HS-16a, HS-16b, HS-17, HS-18, HM-9, HS-3, HS-10 | A | M |
 | I-5 | 4 | M5 with `forge: none` and with a bare remote and a fake `gh`; the transcripts of P-3 replayed | A5.1 to A5.19 | `features/m5*` | I-1, P-3, HM-8 to HM-13, HS-4 to HS-7b, HS-10, HS-11 | A | L |
 | I-6 | 4 | M6 on one node and on two | A3.3, A6.1 to A6.4 | `features/m6*` | I-1, HM-15, HS-12, HS-21, N-4 | A | S |
@@ -175,7 +175,7 @@ them is in the rows above, in `steps/parallel-plan-step-2-3.md` and in
 | --- | --- | --- | --- | --- | --- |
 | S-5 | 1 | ConPTY, Unix socket, interrupt without signals; level 2 for Claude Code on Windows from documentation (Q-4) | Devin Windows | the real CLIs for the last confirmation | A |
 | S-6 | 1 | One port for HTTPS and TURN over TLS by server name, `turns:` clients, certificates for two names, cutting an open allocation | Devin Linux with a local certificate authority | a public server for the final run | A |
-| S-8 | 2 | Port mapping and hole punching in the simulation of NET-1; tests with tag `netsim`, in the `netsim` job | Devin Linux | a real router for the final run | A |
+| S-8 | 2 | Cancelled (2026-11-22): Port mapping and hole punching in the simulation of NET-1; tests with tag `netsim`, in the `netsim` job | Devin Linux | a real router for the final run | A |
 | S-9 | — | TCP simultaneous open; not scheduled, see step 3.4 | — | real NATs | — |
 
 ## 8. Test infrastructure follow-ups

@@ -15,6 +15,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open until a failure with the new diagnostics names the trigger. Cause 2 is removed on `fix/turn-client`: the socket of a TURN client over UDP, the only socket pion ICE opens with `ListenPacket`, passes on datagrams from the address it last sent to, its TURN server, and drops the rest as `turn.stray` (`turnNet`, `serverOnly`, `internal/peer/sockets.go`). Nothing else legitimately reaches that socket: a peer's relayed data comes through the server, as pion's own client already requires for data and channel data (`isTURNServer`), and host and server-reflexive candidates have their own sockets (the UDP mux of `Listen`, or pion's `ListenUDP`). The acceptance harness now writes pion's debug lines of the test TURN server (`turn`), the TURN clients (`turnc`) and the ICE agents (`ice`) of the test process into `nodes.log` (`peer.PionLog`, `features/diag_test.go`): cause 1 shows as `Failed to handle datagram: ... no allocation found`, a read loop that ends as `Exiting loop`. The child nodes' pion lines are not captured. The block of the whole agent per unanswered permission stays: it is pion's.
 - Stress on this Mac, `-race`, 10 processes in parallel with busy loops, 1-minute load 13 to 27: the outline 165 times with the change, 115 times without it. No `turn.stray`, no TURN request that timed out, no TURN read loop that ended before its close. 4 runs with the change (all at load 21 to 27) and 1 without it (load about 20) failed in `Q opens a second confirmation browser` with `not ready after 8s` twice: the browser's agent was silent for the 8 seconds and a UDP write of it to a peer address ended only at the close (`use of closed network connection`), the form of the entry "On a Mac with the Application Firewall, a UDP write can block every connection on one local address". 1 run with the change failed in the cast's set-up: Q1's node got 404 from its rendezvous and never came online (`failed to WebSocket dial: expected handshake response status code 101 but got 404`); not looked into, nothing in it touches TURN or ICE.
 
+### 2026-11-26 · deviation · The Computers page says a relayed node switches back to direct by itself
+
+- Symptom: a relayed computer shows "The node keeps trying a direct connection and switches back automatically." (`nodes.relay.body`, `web/src/messages/nodes.en.json:23`, `nodes.zh-CN.json:23`, shown by `web/src/routes/Nodes.svelte:190`). No code tries: the relay-free probe and move were cut on 2026-11-21 ([connect](planning/flows/connect.md) B).
+- Cause: the text predates the cut. A relayed connection becomes direct only when ICE finds a direct pair itself; a reconnect runs ICE again and stays relayed if direct is still blocked.
+- Status: resolved on 2026-11-26: `nodes.relay.body` (en and zh) now says the connection may turn direct after a reconnect or if the browser finds a direct path itself, and otherwise stays relayed. No test or e2e spec carries the text.
+
 ### 2026-11-26 · limitation · A task handed to an AI of another node can start without the last commits
 
 - Symptom: the new assignee's node creates its worktree from the published branch while the old assignee's node still pushes its last commits. The new AI's own push is then refused, and `push_branch` or `submit_task` fetches the branch under the clone's lock and tells it to merge `origin/<br>`, run the checks and push again (`planning/contracts/mcp-tools.md`). If the old node is off when the task moves, its unpushed commits stay on it: it pushes them when it comes back, and if the new AI has pushed by then, that push is refused, told once in the task's thread, and the commits stay on the old node's local branch.
@@ -61,7 +67,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a lost home that returns after its group was restored elsewhere lists the group too. The browser shows one copy, that of the home it reached first, so a reload can show the other; when the copy shown is deleted, the other appears at its home's next list.
 - Cause: nothing in `welcome.groups` says which copy is the newer (`planning/contracts/step-2/export.md` section 4 speaks of a lost home); `Home.#list` (`web/src/lib/groups.svelte.ts`) leaves a group to the home within reach that listed it first.
-- Status: open, accepted: the owner deletes the old copy.
+- Status: open, accepted: version 1 has no command or button that deletes a group, so a returned old home's copy stays; the owner treats it as a used scratch group (`docs/cookbook/i11-real-machine-checklist.md` step 10).
 
 ### 2026-11-26 · bug · The fixtures of the confirmation scenarios did not match the contracts
 
@@ -629,7 +635,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: in spike S-8 ([#134](https://github.com/huanchong-99/SoloDawn/pull/134)), 5 of 63 runs with TURN, a port-mapped answerer and a restricted-cone offerer selected the relay after 2.0 s, although direct pairs were valid from about 630 ms. None of 160 runs without a mapping, none of 160 with a mapped offerer, and none with another offerer NAT type did so.
 - Cause, from the ICE trace of [run 44704969215](https://github.com/huanchong-99/SoloDawn/actions/runs/44704969215): a check relayed through the answerer's TURN allocation reaches the offerer before that relay candidate is trickled, so the offerer files it as peer-reflexive and validates the pair. When the relay candidate arrives, pion ice v4.4.8 replaces the peer-reflexive candidate but keeps the pair's old priority (`agent.go:1247-1262`, `setPriorityOverride`). That pair stays the best valid one, and the controlling agent nominates only the best valid pair once its type's wait has passed, 2 s for relay (`selection.go:74-84`). Details in [`spikes/S-8/results.md`](https://github.com/huanchong-99/SoloDawn/blob/spike/S-8-portmap/spikes/S-8/results.md), section 2.
-- Workaround: the connection works over the relay, and the probe of `planning/flows/connect.md` section B moves it to a direct path.
+- Workaround: the connection works over the relay until its next reconnect; the probe that was to move it to a direct path was cut on 2026-11-21 (`planning/flows/connect.md` B).
 - Status: open, external; not reported upstream for now.
 
 ### 2026-11-26 · limitation · A7.9 mostly fails on a Mac with its firewall on
@@ -679,7 +685,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: the global setup of `web/e2e/config.ts` throws on Windows.
 - Cause: `web/e2e/nodes.ts` starts every process as the leader of its own process group, stops it with `process.kill(-pgid)`, and finds what a dead test process left with `ps`; Windows has neither.
-- Status: open. The browser workflows run on Linux and macOS; I-11 decides whether end-to-end tests run on Windows.
+- Status: accepted for version 1: Windows end-to-end is not part of version 1 (coordinator, 2026-11-26); the end-to-end tests do not run on Windows. Windows is covered by the Go suites on CI and the browsers by the Linux and macOS jobs.
 
 ### 2026-11-20 · limitation · Fake CLIs lack invalid-login and exhausted-limit captures
 

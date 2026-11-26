@@ -94,7 +94,7 @@ message only after `joined`, and again after each later `joined`.
 
 | `t` | Extra fields | Meaning |
 | --- | --- | --- |
-| `offer` | `to`, `conn`, `sdp`, `probe` | start connection `conn`; `probe` true means "no relay candidates, this is an attempt to replace a relayed connection" |
+| `offer` | `to`, `conn`, `sdp`, `probe` | start connection `conn`; `probe` true (no relay candidates, an attempt to replace a relayed connection) is refused: the probe is not built (section 5) |
 | `answer` | `to`, `conn`, `sdp` | accept |
 | `ice` | `to`, `conn`, `cand`, `mid` | one trickled candidate |
 
@@ -119,13 +119,13 @@ a `from` whose `k` is not the `k` of its envelope. Rules:
 - **Once only.** A receiver remembers each processed (signer, `conn`) until its
   clock is strictly past the offer's `ts + 120000` ms (`contracts/envelope.md`
   section 3, check 5), across a close or a restart. A remembered offer starts
-  and closes nothing: a copy for a live connection or pending probe gets the
+  and closes nothing: a copy for a live connection gets the
   same answer on its own path once there is one; a retired one is ignored.
 - **One inbound connection per device** (section 5.1, point 4). First applying
-  a valid non-probe offer, the node closes that signer's previous inbound
-  connection and pending inbound probe before the new checks, serialised per
-  signer, but not the connection it offered to that device. A probe waits
-  beside it until its first valid `hello` (section 5.1, point 10).
+  a valid ordinary offer, the node closes that signer's previous inbound
+  connection before the new checks, serialised per signer, but not the
+  connection it offered to that device. A probe offer is refused (the probe
+  was cut on 2026-11-21, section 5.1, point 10).
 - The offer creates one data channel labelled `ctl`, ordered and reliable.
 
 ## 3. Relay
@@ -151,31 +151,34 @@ a `from` whose `k` is not the `k` of its envelope. Rules:
   ranges; loopback only for a loopback relay (tests). Operators' NAT64 prefixes
   (RFC 6052) cannot be listed: use the host firewall. Packets to the server's
   own addresses go only to its relay allocations. The relay sees DTLS
-  ciphertext; clients leave it once a direct path works (`flows/connect.md`).
+  ciphertext; a connection leaves it when ICE finds a direct pair or at its next
+  reconnect (`flows/connect.md` B).
 
 ## 4. Finding a peer without the server
 
-A node keeps, per known device, a short list of signalling addresses:
+A node signals to a known device through the configured rendezvous URLs (and
+its own handler, for a device on the same machine). The official rendezvous
+is the default; a self-hoster replaces or adds to the list.
 
-1. **Local network**: every node sends a UDP multicast beacon every 30
-   seconds and when its network changes. Group `239.255.77.68`, port 47802.
-   The datagram is a signed envelope with payload
-   `{"t":"beacon","n":"…","ts":…,"port":47800}`. A node that recognises the
-   signer records `ws://<source address>:<port>/rv` for that device.
-2. **Remembered**: every signalling URL at which that device was last
-   reached, and the URLs the device itself reported in its `hello`
-   (`contracts/datachannel.md`), a mapped one included. ICE endpoints are
-   not remembered (section 5.1, point 9).
-3. **Rendezvous**: the configured rendezvous URLs. The official one is the
-   default; a self-hoster replaces or adds to the list.
+Not built: the local-network beacon (UDP multicast, port 47802) was cut on
+2026-11-21 (`internal/peer/README.md`, "Limitations"). The `Beacon` payload
+type stays in `internal/proto`; no code sends or reads it.
 
-Browsers cannot use 1, and can use 2 only for `localhost`: a page served over
-HTTPS may not open `ws://` to another machine, and whether it may open
-`ws://localhost` is `[unverified]` (`risks.md` T-18). A browser with no
-reachable rendezvous reaches only the node on its own machine, through that
-node's handler: step 1 forwards no signalling to other nodes (`risks.md`
-K-2). A self-hoster who puts a node's port behind a `wss://` address with a
-trusted certificate has, by that, a rendezvous a browser can use.
+Remembered addresses: a node remembers none for its own signalling (PR-2
+cancelled on 2026-11-22). It stores a home's `addrs` in `peer`
+(`internal/host/join.go`) and passes them on when a home moves, but dials
+none of them. A browser stores the `addrs` of each node's `welcome`
+(`web/src/lib/owner.ts`) and signals on them as well as on its rendezvous
+URL (`web/src/lib/net.svelte.ts`); from an HTTPS page a `ws://` one is
+blocked (`risks.md` T-18).
+
+A page served over HTTPS may not open `ws://` to another machine, and whether
+it may open `ws://localhost` is `[unverified]` (`risks.md` T-18). A browser
+with no reachable rendezvous reaches only the node on its own machine,
+through that node's handler: step 1 forwards no signalling to other nodes
+(`risks.md` K-2). A self-hoster who puts a node's port behind a `wss://`
+address with a trusted certificate has, by that, a rendezvous a browser can
+use.
 
 ## 5. ICE configuration
 
@@ -197,8 +200,10 @@ the review of section 5.1 measured. "Evidence n" is entry n of
   addresses (`SetICEMulticastDNSMode`, query only). A name that does not
   resolve is no obstacle: in S-1 the connections used the browser's
   address as its checks showed it (peer-reflexive) `[verified, S-1]`.
-- Both ends create a `probe` connection without TURN. The probe stays: not
-  every browser leaves the relay by itself `[verified, S-1]` (evidence 13).
+- No `probe` connection without TURN is built (cut on 2026-11-21): not every
+  browser leaves the relay by itself `[verified, S-1]` (evidence 13), and a
+  relayed connection moves to a direct pair only when ICE finds one or at the
+  next reconnect.
 
 ### 5.1 Ports: why a node offers from sockets of its own
 
@@ -237,42 +242,33 @@ the review of section 5.1 measured. "Evidence n" is entry n of
    agreement on which connection survives and how both sessions resume.
 6. **Not chosen: a second fixed port for offering.** One configured UDP
    port is kept. A second, shared offering port only separates the opposite
-   directions, and can give an ordinary connection and its probe the same
-   mux registration. A mapped port for ordinary offers, with private probe
-   sockets, is reconsidered if S-8 shows a material gain in reachability.
+   directions. Port mapping was cut on 2026-11-21 and S-8 on 2026-11-22, so
+   this is not reconsidered.
 7. **Hole punching** remains available; its success rate is not measured.
    ICE checks compatible host, reflexive and relay candidates. A live NAT
    mapping and a live local socket are two things, and either can outlive
-   the other (points 4 and 10). Two peers behind one NAT can use reachable
+   the other (point 4). Two peers behind one NAT can use reachable
    LAN host candidates; using each other's public mappings from inside it
    requires hairpinning, and if LAN routing or client isolation also blocks
-   the host path, another working pair is needed. S-8 measures these, and
-   hole punching across different NATs on ephemeral offer sockets (evidence 7).
-8. **Port mapping.** A forward or mapping to 47800/UDP benefits answered
-   connections (`risks.md` K-19). If the other direct UDP and IPv6 paths
+   the host path, another working pair is needed. Hole punching across
+   different NATs on ephemeral offer sockets is evidence 7; S-8, which was to
+   measure it, was cancelled on 2026-11-22.
+8. **Port forwarding.** A forward the owner sets up to 47800/UDP benefits
+   answered connections (`risks.md` K-19); the node asks the router for no
+   mapping (cut on 2026-11-21). If the other direct UDP and IPv6 paths
    fail, a pion answerer can dial the passive TCP endpoint the offerer
    advertises: verified on Linux with only the offerer's listener reachable
-   `[verified, A.1]` (evidence 8). S-8 verifies the router mapping,
-   reachability from outside and publication of the external port the
-   router actually grants. A mapped-address rule applies only to the
-   candidates that mapping serves. TURN is used when no direct pair works.
-9. **Remembered addresses** are unaffected: signalling URLs, a mapped one
-   included. ICE candidates are gathered anew for each connection, and an
-   ephemeral ICE endpoint is never a remembered signalling address.
-10. **The relay-free probe** stays make-before-break. Both ends omit TURN
-    on a probe, and a node keeps one pending probe beside the current
-    inbound connection. A probe can fail where a direct path exists: failed
-    direct checks of the old connection may still own an endpoint later
-    assigned to the probe `[verified, A.1]` (evidence 10). So the old
-    connection serves until the node has accepted `hello` on the probe
-    (`flows/connect.md` B).
+   `[verified, A.1]` (evidence 8). TURN is used when no direct pair works.
+9. **Remembered addresses** were cut with PR-2 (section 4). ICE candidates
+   are gathered anew for each connection.
+10. **The relay-free probe** was cut on 2026-11-21. What was measured for
+    it stays in `contracts/rendezvous-evidence.md` (entries 10 and 13).
 
-Browser: `RTCPeerConnection` with the `ice` list from `ready`; a `probe`
-connection drops the TURN entry.
+Browser: `RTCPeerConnection` with the `ice` list from `ready`.
 
 What ICE gives without more code: it checks compatible pairs as they become
 available and nominates a working pair; a higher-priority path found later
-may need a probe to take effect. Which direct paths step 1 tries together,
+takes effect only if ICE moves to it or at the next reconnect. Which direct paths step 1 tries together,
 with the relay on port 443 last, is R-131. TCP simultaneous open is not
 among them: pion does not perform it `[unverified]`, and spike S-9 measures
 what it would gain (`risks.md` Q-1).

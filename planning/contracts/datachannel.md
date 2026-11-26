@@ -49,7 +49,7 @@ The client's first message, `hello`, and the node's answer, `welcome`:
 | --- | --- |
 | `v` | protocol version. A node that cannot speak it answers `version` and keeps the connection open, so that the client can send `hello` again with a lower `v`. Steps 2 and 3 share `v` 2; a client sends 2 and, answered `version`, again 1 (`contracts/step-3/knowledge.md` section 8) |
 | `kind` | `browser` or `host` |
-| `addrs` | where the sender can be signalled. In `hello`, URLs at which this node may be reachable, `[]` from a browser. In `welcome`, what reaches the node without the rendezvous: its own `ws://<address>:<port>/rv` URLs, with the mapped external port when it has one, then its rendezvous URLs (`contracts/rendezvous.md` section 4) |
+| `addrs` | where the sender can be signalled. In `hello`, URLs at which this node may be reachable, `[]` from a browser. In `welcome`, what reaches the node without the rendezvous: its own `ws://<address>:<port>/rv` URLs, then its rendezvous URLs (`contracts/rendezvous.md` section 4) |
 | `time` | the node's clock, in Unix milliseconds, when it sends `welcome` |
 | `groups` | groups homed on this node that the peer's person may read |
 | `owner` | true if the peer is a device of this node's owner; the host surface is then available |
@@ -59,10 +59,9 @@ The client's first message, `hello`, and the node's answer, `welcome`:
   read no group here: `{"t":"groups","groups":[{"g":"Qm1…","name":"Website","seq":812}]}`.
 - A node keeps one inbound connection per client device. On first application
   of a valid ordinary offer it closes that signer's previous inbound
-  connection and any pending inbound probe before it starts the new checks; a
-  copy or a replay closes nothing, and a probe's first valid `hello` promotes
-  it (`contracts/rendezvous.md` 2.3; hello timeout: `flows/connect.md` step
-  11). Nothing is carried over: the client reads again with `sync`.
+  connection before it starts the new checks; a copy or a replay closes
+  nothing (`contracts/rendezvous.md` 2.3; hello timeout: `flows/connect.md`
+  step 15). Nothing is carried over: the client reads again with `sync`.
 - A `hello` on a connection that has already had one is answered with a
   fresh `welcome`. A client sends it again when pairing has enrolled the
   newcomer, whichever side that is, and reads `owner: true` from the answer.
