@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
+	"testing/synctest"
 	"time"
 
 	"github.com/coder/websocket"
@@ -856,6 +857,34 @@ func TestPairRoleBTakesCreatorExpiry(t *testing.T) {
 	if got := <-errCh; !errors.Is(got, errUnreached) {
 		t.Fatalf("Pair = %v, want errUnreached", got)
 	}
+}
+
+// Role b starts a timer only for a creator's expiry that ends its window
+// sooner, and that timer waits as long as the creator's window has left.
+func TestPairRoleBTimesTheCreatorsExpiry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		waits, fire := make(chan time.Duration, 2), make(chan time.Time)
+		p := newPairer(PairConfig{After: func(d time.Duration) <-chan time.Time {
+			waits <- d
+			return fire
+		}})
+		now := int64(1763600000000)
+		a := &pairAttempt{role: "b", link: PairLink{Expires: now + pairWindow.Milliseconds()}, cancel: func() {}, outcome: make(chan error, 1)}
+		p.takeExpiry(a, a.link.Expires, now)
+		synctest.Wait()
+		if len(waits) != 0 {
+			t.Fatal("an expiry equal to the own window started a timer")
+		}
+		p.takeExpiry(a, now+60_000, now)
+		synctest.Wait()
+		if got := <-waits; got != time.Minute || a.link.Expires != now+60_000 {
+			t.Fatalf("timer %v and expiry %d, want 1m and %d", got, a.link.Expires, now+60_000)
+		}
+		close(fire)
+		if err := <-a.outcome; !errors.Is(err, errPairExpired) {
+			t.Fatalf("outcome = %v, want errPairExpired", err)
+		}
+	})
 }
 
 func onlyAttempt(p *Pairer) *pairAttempt {

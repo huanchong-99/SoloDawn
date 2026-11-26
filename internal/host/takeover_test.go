@@ -1120,3 +1120,17 @@ func TestAIWithHeldItemsCanBeTakenOver(t *testing.T) {
 		}
 	})
 }
+
+// A look at an AI that has nothing held and is owed no turn reads no holds:
+// a takeover may start before delivery has left the AI.
+func TestAIWithNothingHeldCanBeTakenOverWhileDeliveryLooks(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		key := aiGroupKey{group: runGroup1, member: runAI1}
+		if _, _, ok := takeEligibleBatch(r.h, deliv(r.h), key, aiInfo{}); ok {
+			t.Fatal("a batch was taken from an empty queue")
+		}
+		if !takeoverState(r.h).claim(r.h, aiSlot(key), &takeover{}, true) {
+			t.Fatal("the AI is busy")
+		}
+	})
+}
