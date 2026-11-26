@@ -60,6 +60,16 @@ func TestRoleGateWaitsActivationAndExpiry(t *testing.T) {
 	cardTestSame(t, cftActivation(d, task, "r"), []Item{{AI: "r", Why: itemReview, Task: "t", Commit: "c"}})
 }
 
+func TestRoleHeldByAssigneeAndReviewerOnly(t *testing.T) {
+	s, _, task, _, _ := cftFixture()
+	for ai, want := range map[string]bool{"a": true, "r": true, "other": false} {
+		cardTestSame(t, s.cftHasRole("b", ai), want)
+	}
+	task.State = taskMerged
+	s.Tasks["t"] = task
+	cardTestSame(t, s.cftHasRole("b", "a"), false)
+}
+
 func TestRoleCardOverlayAndOrdinaryWaits(t *testing.T) {
 	s, d, task, card, c := cftFixture()
 	closed := card

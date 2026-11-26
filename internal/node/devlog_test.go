@@ -409,3 +409,21 @@ func TestLogsStoredEntryWinsOverAnother(t *testing.T) {
 	mustEqual(t, reopened.Log(owner.ID()).Entries, logs.Log(owner.ID()).Entries)
 	mustEqual(t, logs.Log(owner.ID()).Entries[2], stored)
 }
+
+// A connection that takes the log gets every frame of a change, in order, and
+// none after the first send that fails.
+func TestSyncOneSendsEveryFrameUntilASendFails(t *testing.T) {
+	nodeKey, owner := sesKey("sync-node"), sesKey("sync-owner")
+	s := &Sessions{cfg: SessionConfig{Logs: seedOwnedLogs(t, sesOpenStore(t), nodeKey, owner)}}
+	frames := make([]proto.Devlog, 3)
+	for i := range frames {
+		frames[i] = proto.Devlog{Type: "devlog", User: owner.ID()}
+	}
+	whole, broken := newFakeCtl(), newFakeCtl()
+	broken.failAfter = 2
+	for _, raw := range []*fakeCtl{whole, broken} {
+		s.sesSyncOne(&sesConn{welcomed: true, raw: raw}, owner.ID(), frames, nil)
+	}
+	mustEqual(t, whole.sends, 3)
+	mustEqual(t, broken.sends, 2)
+}

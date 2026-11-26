@@ -158,6 +158,29 @@ func TestGroupCLIUsageAndErrors(t *testing.T) {
 	mustEqual(t, runtime.exportGroup(Command{}).Error(), "invalid group or destination id")
 }
 
+// The ids are checked before the home is asked: an export that stays on this
+// node has no destination, and a destination must be a device id.
+func TestExportGroupChecksIDsBeforeAskingTheHome(t *testing.T) {
+	db := sesOpenStore(t)
+	logs, err := OpenLogs(db, sesKey("export-node").ID())
+	mustNoErr(t, err)
+	loop, err := home.StartLoop(home.LoopConfig{Store: db, Logs: logs.Log})
+	mustNoErr(t, err)
+	t.Cleanup(loop.Close)
+	runtime := &nodeRuntime{loop: loop}
+	file, device := filepath.Join(t.TempDir(), "group.sqlite"), testSeedKey(3).ID()
+	const invalid, notHome = "invalid group or destination id", "this node is not home to the group"
+	for cmd, want := range map[Command]string{
+		{Group: localGroupID, File: file}:                     notHome,
+		{Group: localGroupID, File: file, To: device}:         notHome,
+		{Group: localGroupID, File: file, To: "not a device"}: invalid,
+		{File: file}:             invalid,
+		{File: file, To: device}: invalid,
+	} {
+		mustEqual(t, runtime.exportGroup(cmd).Error(), want)
+	}
+}
+
 func serveGroupCLI(t *testing.T, runtime *nodeRuntime) string {
 	t.Helper()
 	runtime.ctx = t.Context()
