@@ -32,11 +32,11 @@ Feature: Connection indicator and my computers and AIs
     When the browser opens "#/nodes"
     Then the page lists "workstation" as "Online" on "macOS 15.2 · Node v0.3.1 · 2 of 4 AIs open" with link "Direct · 4 ms"
     And "workstation" warns "This computer is the home of 1 group — keep it on."
-    And "workstation" lists "Claude Code" as "Personal subscription" and "Signed in", working in "Website"
+    And "workstation" lists "Claude Code" as "Personal subscription" and "Signed in", working in "Website" in the folder "/home/dev/website"
     And "workstation" lists "Codex" as "Account type not set" and "Not signed in" with the three account choices
     When the person chooses "Team plan" for "Codex" on "workstation"
     Then "workstation" receives a signed "agent.set" command setting "codex" to "team" and lists "Codex" as "Team plan"
-    And the page lists "windows-box" as "Online" with link "Relay · 210 ms · 26 min", relay notice "Using a relay — speed and data are limited." and "Limited" AI state
+    And the page lists "windows-box" as "Online" with link "Relay · 210 ms · 26 min", relay notice "Using a relay — speed and data are limited." and "Limited" AI state in the folder "/home/dev/office" of "Website"
     When "windows-box" stops
     Then "windows-box" is marked "Offline" and its AIs say "Offline · wakes when the computer returns"
     And the indicator in the top bar has state "some" and reads "Some computers unreachable"

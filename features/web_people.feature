@@ -8,6 +8,14 @@ Feature: People in a group
     Then I can copy its link before it expires
     And after expiry the link is not offered for copying
 
+  Scenario: An owner adds a person of another group on this computer without a link
+    Given I am the group owner, and "Mina" is a member of another group on its home, and "Sam" was in one that is gone
+    When I open "Invite"
+    Then the dialog lists "Mina" and "Sam" under "In your other groups here", each with "Add", and offers "Cancel"
+    When I add Mina, and then Sam, whom the home no longer knows
+    Then the home has added Mina with "add_person", her row says "Added", and Sam's row says to send the link
+    And Mina is listed among the people of the group, and the dialog offers "Done" in place of "Cancel"
+
   Scenario: An owner changes roles and removes a person
     Given I am the group owner
     When I promote a person and the home updates their role

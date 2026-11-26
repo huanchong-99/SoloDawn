@@ -9,10 +9,13 @@ import {
   humanMembers,
   addPerson,
   found,
+  freeName,
+  hasAI,
   isAdmin,
   joinError,
   joinGroup,
   knownPeople,
+  nameClash,
   openTasks,
   otherWaiter,
   pathLabel,
@@ -158,6 +161,13 @@ describe('member lists, roles and addDisabledReason', () => {
     });
     g2.apply([earlySec, lateWork]);
     expect(aiMembers(g2).map((m) => m.name)).toEqual(['AAA Sec', 'ZZZ Worker']);
+  });
+
+  it('says whether a group has an AI member', () => {
+    const { group } = makeGroup();
+    expect(hasAI(group)).toBe(false);
+    group.apply([row<p.AIMemberRow>('row-member-ai', { id: 'ai-a', g: gid, name: 'Alpha AI' })]);
+    expect(hasAI(group)).toBe(true);
   });
 
   it('checks isAdmin across owner, admin, regular member and missing me', () => {
@@ -925,6 +935,23 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
     );
     expect(err('lost')).toBe("Not sent: the AI's computer cannot be reached.");
     expect(err('forbidden')).toBeUndefined();
+  });
+
+  it('words the refusals of a folder that is not there or not whole in joinError', () => {
+    const err = (code: string) => joinError({ code, msg: 'the node said' });
+    expect(err('not_found')).toBe('There is no such folder on that computer.');
+    expect(err('bad_request')).toBe(
+      'Give the whole path of the folder, such as /Users/you/project.',
+    );
+  });
+
+  it('numbers a free name from 2 and says when two names are one once trimmed', () => {
+    expect(freeName([], 'Codex')).toBe('Codex');
+    expect(freeName(['Codex', 'Codex 3'], 'Codex')).toBe('Codex 2');
+    expect(freeName(new Set(['Codex', 'Codex 2']), 'Codex')).toBe('Codex 3');
+    expect(nameClash(['Alex', 'Codex'])).toBe(false);
+    expect(nameClash(['Alex', ' Alex '])).toBe(true);
+    expect(nameClash([])).toBe(false);
   });
 
   it('signs host.join in joinGroup and handles an offline computer, refusal and rejection', async () => {

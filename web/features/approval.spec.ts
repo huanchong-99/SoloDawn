@@ -537,6 +537,79 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
+    'A card closed by a reassignment names who gave the task to which AI, also after that person left',
+    ({ Given, When, Then }) => {
+      const reassigned = '#m-netluHiPQf-UoheEIBfbLw';
+      Given('a pending command approval for "Codex" on task 12 without truncation', () => {
+        home.write(
+          website,
+          example('row-msg-approval-pending', {
+            id: approvalId,
+            body: approvalBody({ full: undefined }),
+          }),
+        );
+        flushSync();
+      });
+      When(
+        'the admin "Mina" gives T-12 to "Claude Code" and the home closes the card as reassigned by her',
+        async () => {
+          home.write(
+            website,
+            example('row-member-human', {
+              id: 'mina-m',
+              user: 'mina-u',
+              name: 'Mina',
+              role: 'admin',
+            }),
+          );
+          home.write(website, example('row-member-ai', { id: 'claude-m', name: 'Claude Code' }));
+          home.write(website, example('row-task', { assignee: 'claude-m' }));
+          home.write(
+            website,
+            example('row-msg-approval-reassigned', {
+              id: approvalId,
+              body: approvalBody({ full: undefined }),
+              state: { status: 'reassigned', by: 'mina-m', at: 1763600000000 },
+            }),
+          );
+          await new Promise((later) => setTimeout(later, 5));
+          flushSync();
+        },
+      );
+      Then(
+        'the card reads "Reassigned" and says "Mina gave the task to Claude Code; this request is closed."',
+        () => {
+          expect(texts(`${reassigned} .card-head .badge`).at(-1)).toBe(
+            `Reassigned · ${clock(1763600000000, 'en')}`,
+          );
+          expect(texts(`${reassigned} p.hint`)).toEqual([
+            'Mina gave the task to Claude Code; this request is closed.',
+          ]);
+        },
+      );
+      When('Mina leaves the group', async () => {
+        home.remove(website, 'member', 'mina-m');
+        await new Promise((later) => setTimeout(later, 5));
+        flushSync();
+      });
+      Then(
+        'the card still names Mina, in English and in Chinese "Mina 把任务改派给了 Claude Code，这个申请随之关闭。"',
+        () => {
+          expect(group.member('mina-m')).toBeUndefined();
+          expect(texts(`${reassigned} p.hint`)).toEqual([
+            'Mina gave the task to Claude Code; this request is closed.',
+          ]);
+          prefs.lang = 'zh-CN';
+          flushSync();
+          expect(texts(`${reassigned} p.hint`)).toEqual([
+            'Mina 把任务改派给了 Claude Code，这个申请随之关闭。',
+          ]);
+        },
+      );
+    },
+  );
+
+  Scenario(
     'Offline and refused actions disable or report errors cleanly',
     ({ Given, When, Then }) => {
       Given('a pending command approval for "Codex" on task 12 without truncation', () => {
@@ -659,9 +732,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             '等你审批',
             `已改派 · ${clock(1763600000000, 'zh-CN')}`,
           ]);
-          // The home writes no actor for a reassignment (contracts/messages.md 3.2): no one is named.
           expect(texts('section[aria-labelledby="states-approval"] p.hint')).toContain(
-            '任务已改派给别的 AI，这条申请作废。',
+            'Secretary 把任务改派给了 Codex，这个申请随之关闭。',
           );
         },
       );

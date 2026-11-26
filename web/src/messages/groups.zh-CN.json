@@ -31,7 +31,7 @@
   "groups.create.ais": "AI",
   "groups.create.ais.none": "还没有已接入的 AI。先在「电脑和 AI」页接入电脑，并为它的 AI 选好账号类型。",
   "groups.create.ai.name": "{ai} 在群里的名字",
-  "groups.create.ai.secretary": "设为秘书",
+  "groups.create.ai.secretary": "设为秘书：{ai}",
   "groups.create.partly": "群已经建好，但有几项没加上。可以在群的成员面板里再加。",
   "groups.create.added": "已加入",
   "groups.create.unsent": "没有发出去：前面一步被拒绝了",

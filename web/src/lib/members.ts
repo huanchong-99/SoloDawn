@@ -38,6 +38,9 @@ export function aiMembers(group: Group): AIMemberRow[] {
   return [...all.filter((m) => m.secretary), ...all.filter((m) => !m.secretary)];
 }
 
+/** Whether the group has an AI member. */
+export const hasAI = (group: Group): boolean => group.members.some((m) => m.kind === 'ai');
+
 /** Human members of the group, in name order. */
 export const humanMembers = (group: Group): HumanMemberRow[] =>
   group.members.filter((m): m is HumanMemberRow => m.kind === 'human');
@@ -283,13 +286,18 @@ export const selectableCandidates = (candidates: readonly Candidate[]): Candidat
 /** Whether the add-AI dialog offers making the new AI the group's secretary. */
 export const canMakeSecretary = (group: Group): boolean => !group.info?.secretary || isAdmin(group);
 
-function freeName(group: Group, base: string): string {
-  const taken = new Set(group.members.map((m) => m.name));
-  if (!taken.has(base)) return base;
+/** `base`, or else `base 2`, `base 3` and on: the first of them that is not among `taken`. */
+export function freeName(taken: Iterable<string>, base: string): string {
+  const used = new Set(taken);
+  if (!used.has(base)) return base;
   let n = 2;
-  while (taken.has(`${base} ${n}`)) n += 1;
+  while (used.has(`${base} ${n}`)) n += 1;
   return `${base} ${n}`;
 }
+
+/** Whether two of `names` are one name once trimmed: a dialog says so before it sends anything. */
+export const nameClash = (names: readonly string[]): boolean =>
+  new Set(names.map((each) => each.trim())).size < names.length;
 
 /** Suggests an unused member name in `group` for `agent` (or for a first secretary). */
 export function suggestedName(
@@ -297,10 +305,11 @@ export function suggestedName(
   agent: string | undefined,
   asSecretary: boolean,
 ): string {
+  const names = group.members.map((m) => m.name);
   if (asSecretary && !group.info?.secretary) {
-    return freeName(group, t('member.join.secretary.name'));
+    return freeName(names, t('member.join.secretary.name'));
   }
-  return agent ? freeName(group, cliName(agent)) : '';
+  return agent ? freeName(names, cliName(agent)) : '';
 }
 
 /** A refusal: its code, and the words of the node or home that refused. */

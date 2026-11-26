@@ -2,6 +2,7 @@ import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { flushSync } from 'svelte';
 import { expect, vi } from 'vitest';
 import { homes, type Group } from '../src/lib/groups.svelte';
+import { prefs } from '../src/lib/prefs.svelte';
 import * as p from '../src/lib/proto';
 import { browser, example, owner, TestHome } from './home';
 import { all, choose, closePage, one, openPage, read, texts } from './page';
@@ -300,12 +301,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       await received('pause');
       await onMenu();
     });
-    When('T-12 is paused by hand', () => task({ state: 'paused', wait: wait('manual') }));
+    When('the home holds T-12 as paused by Alex', () =>
+      task({ state: 'paused', wait: { ...wait('manual'), by: owner } }),
+    );
     Then(
-      'its card says "Paused by hand. Its AIs stay stopped until it is resumed." with "Resume"',
+      'its card says "Alex paused the task. Its AIs stay stopped until it is resumed." with "Resume"',
       () =>
         expect(hold()).toEqual([
-          'Paused by hand. Its AIs stay stopped until it is resumed.',
+          'Alex paused the task. Its AIs stay stopped until it is resumed.',
           'Resume',
         ]),
     );
@@ -316,12 +319,43 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     Then('the home receives "resume" for T-12', () => received('resume'));
   });
 
+  Scenario(
+    "A task paused by the secretary, or by a person who has left, names who paused it in the reader's language",
+    ({ Given, When, Then, And }) => {
+      const pausedBy = (by: string) => task({ state: 'paused', wait: { ...wait('manual'), by } });
+      Given('the secretary paused T-12', () => pausedBy(secretary));
+      Then(
+        'its card says "Secretary paused the task. Its AIs stay stopped until it is resumed." with "Resume"',
+        () =>
+          expect(hold()).toEqual([
+            'Secretary paused the task. Its AIs stay stopped until it is resumed.',
+            'Resume',
+          ]),
+      );
+      When('Mina, an admin, pauses it again and then leaves the group', async () => {
+        withMina();
+        pausedBy(mina);
+        home.remove(g, 'member', mina);
+        await settled(() => expect(group.member(mina)).toBeUndefined());
+      });
+      Then('its card says "Mina paused the task. Its AIs stay stopped until it is resumed."', () =>
+        expect(texts('.hold p')[0]).toBe(
+          'Mina paused the task. Its AIs stay stopped until it is resumed.',
+        ),
+      );
+      And('in Chinese it says "Mina 暂停了任务。恢复之前，做它的 AI 都先停着。"', () => {
+        prefs.lang = 'zh-CN';
+        flushSync();
+        expect(texts('.hold p')[0]).toBe('Mina 暂停了任务。恢复之前，做它的 AI 都先停着。');
+      });
+    },
+  );
+
   Scenario('A cancel takes two steps', ({ When, Then, And }) => {
     const asked = () =>
       expect(texts('.ask b, .ask p')).toEqual([
         'Cancel T-12 for good?',
         'Its AIs stop and its open cards close.',
-        'Changes not committed yet are lost; the branch stays.',
       ]);
     When('Alex picks "Cancel task"', () => pick('Cancel task'));
     Then(
@@ -382,7 +416,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     );
     Then('the form says that Codex stops and that Mina is asked first', () =>
       expect(texts('.notes p')).toEqual([
-        'Codex stops here. Changes it has not committed are lost; its commits carry over.',
+        'Codex stops here. What it changed stays in its folder.',
         'Mina is asked first: Qwen Code is theirs.',
       ]),
     );
@@ -430,55 +464,37 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     );
   });
 
-  Scenario(
-    'A task without a reviewer is given one, and one with a merge conflict goes back',
-    ({ Given, Then, When, And }) => {
-      Given('T-12 waits for a reviewer', () =>
-        task({ reviewer: undefined, wait: wait('reviewer') }),
-      );
-      Then(
-        'its card says "Ready for review, and nobody is named to do it. The secretary or an admin names a reviewer." with "Name a reviewer"',
-        () =>
-          expect(hold()).toEqual([
-            'Ready for review, and nobody is named to do it. The secretary or an admin names a reviewer.',
-            'Name a reviewer',
-          ]),
-      );
-      When('Alex presses "Name a reviewer"', async () => {
-        press('Name a reviewer');
-        await settled(() => expect(all('.ask select')).toHaveLength(2));
-        const reviewer = all<HTMLSelectElement>('.ask select')[1];
-        expect(reviewer.selectedOptions[0].text).toBe('Nobody yet');
-      });
-      And('Alex chooses "Claude Code · workstation" to review it', () =>
-        chooseAI(1, 'Claude Code · workstation'),
-      );
-      And('Alex presses "Reassign"', () => {
-        submit();
-      });
-      Then(
-        'the home receives "assign" for T-12 with Claude Code as its reviewer and no assignee',
-        async () => {
-          await received('assign', { reviewer: claude });
-          expect(sent[0]).not.toHaveProperty('assignee');
-          await settled(() => expect(all('.ask')).toEqual([]));
-        },
-      );
-      When('T-12 has a merge conflict', () => {
-        task({ wait: wait('conflict'), step: 'local_check' });
+  Scenario('A task without a reviewer is given one', ({ Given, Then, When, And }) => {
+    Given('T-12 waits for a reviewer', () => task({ reviewer: undefined, wait: wait('reviewer') }));
+    Then(
+      'its card says "Ready for review, and nobody is named to do it. The secretary or an admin names a reviewer." with "Name a reviewer"',
+      () =>
         expect(hold()).toEqual([
-          'The merge did not go through. The secretary or an admin hands it back to be fixed.',
-          'Hand back to Codex',
-        ]);
-        expect(one('.hold').dataset.tone).toBeUndefined();
-      });
-      And('Alex presses "Hand back to Codex"', () => press('Hand back to Codex'));
-      Then('the home receives "assign" for T-12 with Codex as its assignee', async () => {
-        await received('assign', { assignee: codex });
-        expect(sent).toHaveLength(2);
-      });
-    },
-  );
+          'Ready for review, and nobody is named to do it. The secretary or an admin names a reviewer.',
+          'Name a reviewer',
+        ]),
+    );
+    When('Alex presses "Name a reviewer"', async () => {
+      press('Name a reviewer');
+      await settled(() => expect(all('.ask select')).toHaveLength(2));
+      const reviewer = all<HTMLSelectElement>('.ask select')[1];
+      expect(reviewer.selectedOptions[0].text).toBe('Nobody yet');
+    });
+    And('Alex chooses "Claude Code · workstation" to review it', () =>
+      chooseAI(1, 'Claude Code · workstation'),
+    );
+    And('Alex presses "Reassign"', () => {
+      submit();
+    });
+    Then(
+      'the home receives "assign" for T-12 with Claude Code as its reviewer and no assignee',
+      async () => {
+        await received('assign', { reviewer: claude });
+        expect(sent[0]).not.toHaveProperty('assignee');
+        await settled(() => expect(all('.ask')).toEqual([]));
+      },
+    );
+  });
 
   Scenario('A stopped task is resumed, and a refusal is shown', ({ Given, Then, When }) => {
     const stopped = () => task({ state: 'failed', failures: 3, wait: null });
@@ -540,18 +556,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       await pick('Reassign');
       expect(all('.ask')).toHaveLength(1);
     });
-    And('T-12 enters "merge"', () => task({ step: 'merge' }));
-    Then('the form is gone and the menu of T-12 offers "Cancel task"', () => {
+    And('another admin cancels T-12', () => task({ state: 'cancelled', wait: null }));
+    Then('the form is gone and the card of T-12 has no menu', () => {
       expect(all('.ask')).toEqual([]);
-      expect(menu()).toEqual(['Cancel task']);
+      expect(all('.card .more')).toEqual([]);
     });
-    When('T-12 has a merge conflict', () => task({ wait: wait('conflict') }));
-    Then('the form stays away', () => expect(all('.ask')).toEqual([]));
-    When('T-12 enters "merge" again', () => task({ step: 'merge' }));
-    And('Alex picks "Cancel task"', () => pick('Cancel task'));
-    Then('the card also says "It has passed review and may be merging right now."', () =>
-      expect(texts('.ask p')[0]).toBe('It has passed review and may be merging right now.'),
-    );
   });
 
   Scenario('A pre-empted task carries on by itself', ({ Given, Then }) => {

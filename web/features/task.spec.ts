@@ -12,6 +12,7 @@ const feature = await loadFeature('../features/web_task.feature');
 
 const website = 'rZNvy-1jH6Z-BcPqA5U5BQ';
 const claudeId = 'LXCZmuGAXkvO-bSrOkuCfw';
+const codexId = '1PC8WineBrUQ-apCjx7tug';
 const task12 = 'DrtCn6htSBwmMPrFPbHJHA';
 const task13 = 'R0gyAncJnBJT8iCk5-s78A';
 const task14 = '6CnN7e5G1xM63en6iUJ6ew';
@@ -30,6 +31,7 @@ const kv = (label: string) => {
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   let home: TestHome;
   let reader: ReturnType<typeof browser>;
+  const group = () => reader.store.groups[0];
 
   async function read() {
     const answered = home.synced + home.groups.size;
@@ -109,7 +111,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'A task sent back by review shows its six-step bar, checks, review verdict and thread preview',
+    'A task sent back by review shows its three-step bar, folder, review verdict and thread preview',
     ({ When, Then, And }) => {
       When('the home writes the wire examples "row-task" and "row-msg-task"', () => {
         home.write(website, example('row-task'));
@@ -127,34 +129,18 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(badge.classList.contains('solid')).toBe(false);
         },
       );
-      And(
-        'the six-step bar marks "done, done, done, done, fail, -" and reads "Review · 5 / 6"',
-        () => {
-          expect(stepMarks()).toBe('done, done, done, done, fail, -');
-          expect(texts('.card .steps span')).toEqual(['Review · 5 / 6']);
-          expect(one('.card .steps').getAttribute('aria-label')).toBe(
-            'Progress: step 5 of 6, Review (Sent back · round 1)',
-          );
-        },
-      );
-      And(
-        'the metadata shows owner "Codex · workstation" and branch "task/12-show-connection-path" with link "PR #31"',
-        () => {
-          expect(kv('Owner')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Codex · workstation');
-          expect(kv('Branch')?.querySelector('code')?.textContent).toBe(
-            'task/12-show-connection-path',
-          );
-          const prLink = kv('Branch')?.querySelector('a');
-          expect(prLink?.textContent).toBe('PR #31');
-          expect(prLink?.getAttribute('href')).toBe('https://git.example/team/website/pull/31');
-        },
-      );
-      And('the checks line shows "Local checks passed" and "Hosted checks passed"', () => {
-        const res = [...(kv('Checks')?.querySelectorAll('.res') ?? [])];
-        expect(res.map((el) => [el.getAttribute('data-tone'), el.textContent?.trim()])).toEqual([
-          ['ok', 'Local checks passed'],
-          ['ok', 'Hosted checks passed'],
-        ]);
+      And('the three-step bar marks "done, now, -" and reads "Review · 2 / 3"', () => {
+        expect(stepMarks()).toBe('done, now, -');
+        expect(texts('.card .steps span')).toEqual(['Review · 2 / 3']);
+        expect(one('.card .steps').getAttribute('aria-label')).toBe(
+          'Progress: step 2 of 3, Review (Sent back · round 1)',
+        );
+      });
+      And('the metadata shows owner "Codex · workstation" and folder "/home/dev/website"', () => {
+        expect(kv('Owner')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Codex · workstation');
+        expect(kv('Folder')?.textContent).toBe('/home/dev/website');
+        const dts = one('.card .steps').closest('.card')!.querySelectorAll('.kv dt');
+        expect([...dts].map((dt) => dt.textContent)).toEqual(['Owner', 'Folder', 'Review']);
       });
       And('the review line shows "Round 1 · 86, sent back" and "Claude Code · pass 90"', () => {
         expect(kv('Review')?.querySelector('.res')?.getAttribute('data-tone')).toBe('danger');
@@ -182,10 +168,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then(
-        'the task card shows "打回 · 第 1 轮", "评审 · 5 / 6", "第 1 轮 86 分，打回" and an open thread fold',
+        'the task card shows "打回 · 第 1 轮", "评审 · 2 / 3", "第 1 轮 86 分，打回" and an open thread fold',
         () => {
           expect(texts('.card-head .badge')).toEqual(['打回 · 第 1 轮']);
-          expect(texts('.card .steps span')).toEqual(['评审 · 5 / 6']);
+          expect(texts('.card .steps span')).toEqual(['评审 · 2 / 3']);
           expect(kv('评审')?.querySelector('.res')?.textContent?.trim()).toBe(
             '第 1 轮 86 分，打回',
           );
@@ -196,242 +182,162 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     },
   );
 
+  Scenario('A task moves from queued through work and review to done', ({ When, Then }) => {
+    const baseTask = (changes: Record<string, unknown> = {}) => {
+      const raw = { ...example('row-task'), id: task15, num: 15, title: 'Add path badge' };
+      delete (raw as Record<string, unknown>).review;
+      delete (raw as Record<string, unknown>).report;
+      return {
+        ...raw,
+        state: 'queued',
+        step: 'work',
+        wait: { kind: 'depends', since: 1763600000000 },
+        depends: [task12],
+        thread: { count: 0, rounds: 0 },
+        ...changes,
+      } as p.Row & Record<string, unknown>;
+    };
+    const holds = () => texts('#m-msg-t15 .hold p');
+
+    When('a queued task "T-15" "Add path badge" waits for T-12', () => {
+      home.write(website, example('row-task'));
+      home.write(website, baseTask());
+      home.write(website, taskMsg('msg-t15', task15));
+      flushSync();
+    });
+    Then(
+      'the task card shows badge "Queued", steps "-, -, -" with "Queued · 0 / 3", "Waits for T-12 to be done." and "Not started · Claude Code to review · pass 90"',
+      () => {
+        expect(texts('.card-head .badge')).toEqual(['Queued']);
+        expect(stepMarks()).toBe('-, -, -');
+        expect(texts('.card .steps span')).toEqual(['Queued · 0 / 3']);
+        expect(one('.card .steps').getAttribute('aria-label')).toBe(
+          'Progress: 0 of 3 steps, Queued',
+        );
+        expect(holds()).toEqual(['Waits for T-12 to be done.']);
+        expect(kv('Review')?.textContent?.trim()).toBe(
+          'Not started · Claude Code to review · pass 90',
+        );
+      },
+    );
+    When('the task becomes active at step "work"', () => {
+      home.write(website, baseTask({ state: 'active', step: 'work', wait: null }));
+      flushSync();
+    });
+    Then(
+      'the task card shows working badge "In progress" and steps "now, -, -" with "Work · 1 / 3"',
+      () => {
+        const badge = one('.card-head .badge');
+        expect(badge.textContent?.trim()).toBe('In progress');
+        expect(badge.getAttribute('data-tone')).toBe('sky');
+        expect(badge.querySelector('.st')?.getAttribute('data-st')).toBe('working');
+        expect(stepMarks()).toBe('now, -, -');
+        expect(texts('.card .steps span')).toEqual(['Work · 1 / 3']);
+        expect(holds()).toEqual([]);
+      },
+    );
+    When('the assignee submits its report and the task is at step "review"', () => {
+      home.write(
+        website,
+        baseTask({ state: 'active', step: 'review', wait: null, report: 'report-t15' }),
+      );
+      flushSync();
+    });
+    Then('the three-step bar marks "done, now, -" with "Review · 2 / 3"', () => {
+      expect(stepMarks()).toBe('done, now, -');
+      expect(texts('.card .steps span')).toEqual(['Review · 2 / 3']);
+    });
+    When('the review passes with score 94 in round 2, and the task is done', () => {
+      home.write(
+        website,
+        baseTask({
+          state: 'done',
+          step: 'review',
+          wait: null,
+          report: 'report-t15',
+          review: {
+            round: 2,
+            failed: 1,
+            score: 94,
+            ok: true,
+            by: claudeId,
+            report: 'report-t15',
+            at: 1763600005000,
+          },
+        }),
+      );
+      flushSync();
+    });
+    Then(
+      'the task card shows ok badge "Done · 94", steps "done, done, done" with "Done · 3 / 3" and the review line "Round 2 · 94, passed"',
+      () => {
+        const badge = one('.card-head .badge');
+        expect(badge.textContent?.trim()).toBe('Done · 94');
+        expect(badge.getAttribute('data-tone')).toBe('ok');
+        expect(stepMarks()).toBe('done, done, done');
+        expect(texts('.card .steps span')).toEqual(['Done · 3 / 3']);
+        expect(kv('Review')?.querySelector('.res')?.getAttribute('data-tone')).toBe('ok');
+        expect(kv('Review')?.querySelector('.res')?.textContent?.trim()).toBe(
+          'Round 2 · 94, passed',
+        );
+      },
+    );
+  });
+
   Scenario(
-    'A task moves from queued through each step to merged, with and without a remote forge',
-    ({ When, Then }) => {
-      const baseTask = (changes: Record<string, unknown> = {}) => {
-        const raw = { ...example('row-task'), id: task15, num: 15, title: 'Add path badge' };
-        delete (raw as Record<string, unknown>).branch;
-        delete (raw as Record<string, unknown>).pr;
-        delete (raw as Record<string, unknown>).pr_url;
-        delete (raw as Record<string, unknown>).review;
-        delete (raw as Record<string, unknown>).commit;
-        return {
-          ...raw,
-          slug: 'add-path-badge',
+    'A task waits for its folder and starts when the folder is free',
+    ({ Given, When, Then }) => {
+      const card = () => one('#m-msg-t15');
+      const t15 = (changes: Record<string, unknown> = {}) =>
+        ({
+          ...example('row-task'),
+          id: task15,
+          num: 15,
+          title: 'Write the usage note',
           state: 'queued',
-          step: 'branch',
-          checks: {},
-          wait: { kind: 'depends', since: 1763600000000 },
-          depends: [task12],
+          step: 'work',
+          wait: { kind: 'busy', since: 1763600000000 },
+          review: undefined,
+          report: undefined,
           thread: { count: 0, rounds: 0 },
           ...changes,
-        } as p.Row & Record<string, unknown>;
-      };
-
-      let stepAfterFail = '';
-      let checkFailText = '';
-
-      When('a queued task "T-15" "Add path badge" is created without a branch yet', () => {
-        home.write(website, baseTask());
-        home.write(website, taskMsg('msg-t15', task15));
+        }) as p.Row & Record<string, unknown>;
+      Given('Codex works on T-12 in "/home/dev/website"', () => {
+        home.write(website, example('row-task', { state: 'active', step: 'work' }));
         flushSync();
+        expect(group().member(codexId)).toMatchObject({
+          name: 'Codex',
+          workspace: '/home/dev/website',
+        });
       });
-      Then(
-        'the task card shows badge "Queued", steps "-, -, -, -, -, -" with "0 / 6", no branch row, "Not run yet" and "Not started · Claude Code to review · pass 90"',
-        () => {
-          expect(texts('.card-head .badge')).toEqual(['Queued']);
-          expect(stepMarks()).toBe('-, -, -, -, -, -');
-          expect(texts('.card .steps span')).toEqual(['0 / 6']);
-          expect(one('.card .steps').getAttribute('aria-label')).toBe(
-            'Progress: 0 of 6 steps, Queued',
-          );
-          expect(kv('Branch')).toBeUndefined();
-          expect(kv('Checks')?.textContent?.trim()).toBe('Not run yet');
-          expect(kv('Review')?.textContent?.trim()).toBe(
-            'Not started · Claude Code to review · pass 90',
-          );
-        },
-      );
-      When('the task becomes active at step "branch"', () => {
-        home.write(website, baseTask({ state: 'active', step: 'branch', wait: null }));
-        flushSync();
-      });
-      Then(
-        'the task card shows working badge "In progress" and steps "now, -, -, -, -, -" with "Work · 1 / 6"',
-        () => {
-          const badge = one('.card-head .badge');
-          expect(badge.textContent?.trim()).toBe('In progress');
-          expect(badge.getAttribute('data-tone')).toBe('sky');
-          expect(badge.querySelector('.st')?.getAttribute('data-st')).toBe('working');
-          expect(stepMarks()).toBe('now, -, -, -, -, -');
-          expect(texts('.card .steps span')).toEqual(['Work · 1 / 6']);
-          expect(kv('Branch')).toBeUndefined();
-        },
-      );
       When(
-        'the task advances to "local_check" on branch "task/15-add-path-badge" with a failing local check, then a passing one',
+        'the home writes T-15 for Codex, queued until its folder is free, and a task message for it',
         () => {
-          home.write(
-            website,
-            baseTask({
-              state: 'active',
-              step: 'local_check',
-              wait: null,
-              branch: 'task/15-add-path-badge',
-              checks: { local: { ok: false, at: 1763600001000, commit: 'abc1234' } },
-            }),
-          );
-          flushSync();
-          stepAfterFail = stepMarks();
-          checkFailText = kv('Checks')?.textContent?.trim() ?? '';
-
-          home.write(
-            website,
-            baseTask({
-              state: 'active',
-              step: 'local_check',
-              wait: null,
-              branch: 'task/15-add-path-badge',
-              checks: { local: { ok: true, at: 1763600002000, commit: 'abc1234' } },
-            }),
-          );
+          home.write(website, t15());
+          home.write(website, taskMsg('msg-t15', task15));
           flushSync();
         },
       );
       Then(
-        'the six-step bar first marks "done, fail, -, -, -, -" with "Local checks failed", then "done, done, now, -, -, -" with "Open PR · 3 / 6" and "Local checks passed"',
+        'the card of T-15 shows "Queued", the folder "/home/dev/website" and "Waits for its folder, which T-12 is using."',
         () => {
-          expect(kv('Branch')?.textContent?.trim()).toBe('task/15-add-path-badge');
-          expect(stepAfterFail).toBe('done, fail, -, -, -, -');
-          expect(checkFailText).toBe('Local checks failed');
-          expect(stepMarks()).toBe('done, done, now, -, -, -');
-          expect(texts('.card .steps span')).toEqual(['Open PR · 3 / 6']);
-          expect(kv('Checks')?.textContent?.trim()).toBe('Local checks passed');
+          expect(card().querySelector('.card-head .badge')?.textContent?.trim()).toBe('Queued');
+          expect(card().querySelector('.kv code')?.textContent).toBe('/home/dev/website');
+          expect(
+            [...card().querySelectorAll('.hold p')].map((el) => el.textContent!.trim()),
+          ).toEqual(['Waits for its folder, which T-12 is using.']);
         },
       );
-      When(
-        'the task advances to "cloud_check" on PR 44 without a link yet and a failing hosted check',
-        () => {
-          home.write(
-            website,
-            baseTask({
-              state: 'active',
-              step: 'cloud_check',
-              wait: null,
-              branch: 'task/15-add-path-badge',
-              pr: 44,
-              checks: {
-                local: { ok: true, at: 1763600002000, commit: 'abc1234' },
-                cloud: { ok: false, at: 1763600003000, commit: 'abc1234' },
-              },
-            }),
-          );
-          flushSync();
-        },
-      );
-      Then(
-        'the branch line shows plain text "PR #44" with no link, and the six-step bar marks "done, done, done, fail, -, -" with "Hosted checks · 4 / 6" and "Hosted checks failed"',
-        () => {
-          expect(kv('Branch')?.querySelector('a')).toBeNull();
-          expect(kv('Branch')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-            'task/15-add-path-badge · PR #44',
-          );
-          expect(stepMarks()).toBe('done, done, done, fail, -, -');
-          expect(texts('.card .steps span')).toEqual(['Hosted checks · 4 / 6']);
-          expect(kv('Checks')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-            'Local checks passed Hosted checks failed',
-          );
-        },
-      );
-      When(
-        'hosted checks pass, the pull request URL arrives, the review passes with score 94 in round 2, and the task enters "merge"',
-        () => {
-          home.write(
-            website,
-            baseTask({
-              state: 'active',
-              step: 'merge',
-              wait: null,
-              branch: 'task/15-add-path-badge',
-              pr: 44,
-              pr_url: 'https://git.example/pull/44',
-              checks: {
-                local: { ok: true, at: 1763600002000, commit: 'abc1234' },
-                cloud: { ok: true, at: 1763600004000, commit: 'abc1234' },
-              },
-              review: {
-                round: 2,
-                failed: 1,
-                score: 94,
-                ok: true,
-                by: claudeId,
-                commit: 'abc1234',
-                at: 1763600005000,
-              },
-            }),
-          );
-          flushSync();
-        },
-      );
-      Then(
-        'the six-step bar marks "done, done, done, done, done, now" with "Merge · 6 / 6" and the review line shows "Round 2 · 94, passed"',
-        () => {
-          expect(kv('Branch')?.querySelector('a')?.getAttribute('href')).toBe(
-            'https://git.example/pull/44',
-          );
-          expect(stepMarks()).toBe('done, done, done, done, done, now');
-          expect(texts('.card .steps span')).toEqual(['Merge · 6 / 6']);
-          expect(kv('Review')?.querySelector('.res')?.getAttribute('data-tone')).toBe('ok');
-          expect(kv('Review')?.querySelector('.res')?.textContent?.trim()).toBe(
-            'Round 2 · 94, passed',
-          );
-        },
-      );
-      When('the task becomes "merged"', () => {
-        home.write(
-          website,
-          baseTask({
-            state: 'merged',
-            step: 'merge',
-            wait: null,
-            branch: 'task/15-add-path-badge',
-            pr: 44,
-            checks: {
-              local: { ok: true, at: 1763600002000, commit: 'abc1234' },
-              cloud: { ok: true, at: 1763600004000, commit: 'abc1234' },
-            },
-            review: {
-              round: 2,
-              failed: 1,
-              score: 94,
-              ok: true,
-              by: claudeId,
-              commit: 'abc1234',
-              at: 1763600005000,
-            },
-          }),
-        );
+      When('T-12 is done and the home starts T-15', () => {
+        home.write(website, example('row-task', { state: 'done', step: 'review' }));
+        home.write(website, t15({ state: 'active', wait: null }));
         flushSync();
       });
-      Then(
-        'the task card shows ok badge "Merged · 94" and steps "done, done, done, done, done, done" with "6 / 6"',
-        () => {
-          const badge = one('.card-head .badge');
-          expect(badge.textContent?.trim()).toBe('Merged · 94');
-          expect(badge.getAttribute('data-tone')).toBe('ok');
-          expect(stepMarks()).toBe('done, done, done, done, done, done');
-          expect(texts('.card .steps span')).toEqual(['6 / 6']);
-        },
-      );
-      When('the group has forge "none"', () => {
-        home.write(website, example('row-group', { id: website, name: 'Website', forge: 'none' }));
-        flushSync();
+      Then('the card of T-15 shows "In progress" with "Work · 1 / 3" and no longer waits', () => {
+        expect(card().querySelector('.card-head .badge')?.textContent?.trim()).toBe('In progress');
+        expect(card().querySelector('.steps span')?.textContent).toBe('Work · 1 / 3');
+        expect(card().querySelectorAll('.hold')).toHaveLength(0);
       });
-      Then(
-        'the merged six-step bar skips pull request and hosted checks as "done, done, -, -, done, done"',
-        () => {
-          expect(stepMarks()).toBe('done, done, -, -, done, done');
-          expect(all('.card .steps i').map((el) => el.classList.contains('skip'))).toEqual([
-            false,
-            false,
-            true,
-            true,
-            false,
-            false,
-          ]);
-        },
-      );
     },
   );
 
@@ -452,7 +358,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the task card shows solid dawn badge "Waiting for your confirmation", step "wait" and a checks link to the confirmation',
+        'the task card shows solid dawn badge "Waiting for your confirmation", step "wait" and a link to the confirmation',
         () => {
           const task = one('#m-msg-t15');
           const pill = task.querySelector<HTMLElement>('.card-head .badge')!;
@@ -498,10 +404,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'Waiting tasks distinguish waits on the reader from waits on another person, a reviewer or a conflict',
+    'Waiting tasks distinguish waits on the reader from waits on another person or a reviewer',
     ({ When, Then }) => {
       const seen: Array<[string, string | null, boolean, string]> = [];
-      let reviewerBadge = '';
       let scrolled: unknown;
       let windowClicks = 0;
 
@@ -511,19 +416,16 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then(
-        'the task card shows solid dawn badge "Waiting for your decision", steps "wait, -, -, -, -, -" with "Work · 1 / 6", and a checks link to "#m-TDRDfXwvOO-iOegSUoyidg"',
+        'the task card shows solid dawn badge "Waiting for your decision", steps "wait, -, -" with "Work · 1 / 3", and a link to "#m-TDRDfXwvOO-iOegSUoyidg"',
         () => {
           const badge = one('.card-head .badge');
           expect(badge.textContent?.trim()).toBe('Waiting for your decision');
           expect(badge.getAttribute('data-tone')).toBe('dawn');
           expect(badge.classList.contains('solid')).toBe(true);
-          expect(stepMarks()).toBe('wait, -, -, -, -, -');
-          expect(texts('.card .steps span')).toEqual(['Work · 1 / 6']);
-          expect(kv('Branch')).toBeUndefined();
-          expect(kv('Checks')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-            'Not run yet · Waiting for your decision',
-          );
-          expect(kv('Checks')?.querySelector('a')?.getAttribute('href')).toBe(
+          expect(stepMarks()).toBe('wait, -, -');
+          expect(texts('.card .steps span')).toEqual(['Work · 1 / 3']);
+          expect(kv('Waiting')?.textContent?.trim()).toBe('Waiting for your decision');
+          expect(kv('Waiting')?.querySelector('a')?.getAttribute('href')).toBe(
             '#m-TDRDfXwvOO-iOegSUoyidg',
           );
           expect(kv('Review')?.textContent?.trim()).toBe('Not started · pass 70');
@@ -602,42 +504,21 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(scrolled).toEqual({ top: expect.any(Number), behavior: 'smooth' });
         },
       );
-      When('the task waits for a reviewer, and then hits a merge conflict', () => {
+      When('the task waits for a reviewer', () => {
         home.write(
           website,
           example('row-task-waiting', {
             step: 'review',
-            pr: 19,
+            report: 'report-t13',
             wait: { kind: 'reviewer', since: 1763600000000 },
           }),
         );
         flushSync();
-        reviewerBadge = one('.card-head .badge').textContent?.trim() ?? '';
-
-        home.write(
-          website,
-          example('row-task-waiting', {
-            step: 'local_check',
-            pr: 19,
-            checks: { local: { ok: true, at: 1763600000000, commit: 'abc1234' } },
-            wait: { kind: 'conflict', since: 1763600000000 },
-          }),
-        );
-        flushSync();
       });
-      Then(
-        'the task card shows "Waiting for a reviewer", and then danger "Merge conflict" with step "fail"',
-        () => {
-          expect(reviewerBadge).toBe('Waiting for a reviewer');
-          const badge = one('.card-head .badge');
-          expect(badge.textContent?.trim()).toBe('Merge conflict');
-          expect(badge.getAttribute('data-tone')).toBe('danger');
-          expect(stepMarks()).toBe('done, fail, -, -, -, -');
-          expect(kv('Checks')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-            'Local checks passed Merge conflict',
-          );
-        },
-      );
+      Then('the task card shows "Waiting for a reviewer" at step "review"', () => {
+        expect(one('.card-head .badge').textContent?.trim()).toBe('Waiting for a reviewer');
+        expect(texts('.card .steps span')).toEqual(['Review · 2 / 3']);
+      });
     },
   );
 
@@ -651,15 +532,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       flushSync();
     });
     Then(
-      'the task card shows paused badge "Paused", steps "done, done, -, -, -, -" with "Review · 5 / 6", and "Local checks passed"',
+      'the task card shows paused badge "Paused" and steps "done, -, -" with "Review · 2 / 3"',
       () => {
         const badge = one('.card-head .badge');
         expect(badge.textContent?.trim()).toBe('Paused');
         expect(badge.querySelector('.st')?.getAttribute('data-st')).toBe('paused');
-        expect(stepMarks()).toBe('done, done, -, -, -, -');
-        expect(texts('.card .steps span')).toEqual(['Review · 5 / 6']);
-        expect(kv('Branch')?.textContent?.trim()).toBe('task/14-fix-the-relay-notice');
-        expect(kv('Checks')?.textContent?.trim()).toBe('Local checks passed');
+        expect(stepMarks()).toBe('done, -, -');
+        expect(texts('.card .steps span')).toEqual(['Review · 2 / 3']);
       },
     );
     When(
@@ -669,7 +548,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           website,
           example('row-task-paused', {
             state: 'failed',
-            step: 'local_check',
+            step: 'work',
             wait: null,
             failures: 3,
           }),
@@ -683,7 +562,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           example('row-task-paused', {
             state: 'failed',
             step: 'review',
-            pr: 22,
             wait: null,
             failures: 0,
             review: {
@@ -692,7 +570,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               score: 82,
               ok: false,
               by: claudeId,
-              commit: '9f2c1abf43f3224eb6826ef971a943dbab4795ce',
+              report: 'report-t14',
               at: 1763600001000,
             },
           }),
@@ -704,24 +582,24 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       'the task card shows solid danger badge "Stopped after 3 failures" with step "fail", and then "Stopped after 6 failed reviews"',
       () => {
         expect(crashBadge).toBe('Stopped after 3 failures');
-        expect(crashSteps).toBe('done, done, fail, -, -, -');
+        expect(crashSteps).toBe('fail, -, -');
         const badge = one('.card-head .badge');
         expect(badge.textContent?.trim()).toBe('Stopped after 6 failed reviews');
         expect(badge.getAttribute('data-tone')).toBe('danger');
         expect(badge.classList.contains('solid')).toBe(true);
-        expect(stepMarks()).toBe('done, done, done, done, fail, -');
+        expect(stepMarks()).toBe('done, fail, -');
       },
     );
     When('the task becomes "cancelled"', () => {
       home.write(
         website,
-        example('row-task-paused', { state: 'cancelled', step: 'review', pr: 22, wait: null }),
+        example('row-task-paused', { state: 'cancelled', step: 'review', wait: null }),
       );
       flushSync();
     });
     Then('the task card shows "Cancelled" with no active step marker', () => {
       expect(texts('.card-head .badge')).toEqual(['Cancelled']);
-      expect(stepMarks()).toBe('done, done, done, done, -, -');
+      expect(stepMarks()).toBe('done, -, -');
     });
   });
 
@@ -740,7 +618,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         });
       });
       Then(
-        'the "task" section is marked "Mounted by task" and renders "T-12" "Show connection path" with six steps',
+        'the "task" section is marked "Mounted by task" and renders "T-12" "Show connection path" with three steps',
         () => {
           const section = one('#states-task').closest('section')!;
           expect(section.querySelector('header .badge')?.textContent?.trim()).toBe(
@@ -748,7 +626,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           );
           expect(section.querySelector('.card-head .mono')?.textContent).toBe('T-12');
           expect(section.querySelector('.card-head h3')?.textContent).toBe('Show connection path');
-          expect(section.querySelectorAll('.steps i')).toHaveLength(6);
+          expect(section.querySelectorAll('.steps i')).toHaveLength(3);
         },
       );
     },

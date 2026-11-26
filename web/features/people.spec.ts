@@ -9,7 +9,7 @@ import { prefs } from '../src/lib/prefs.svelte';
 import { href } from '../src/lib/route.svelte';
 import { clock } from '../src/lib/when';
 import { browser, example, owner, TestHome } from './home';
-import { all, closePage, fill, go, one, openPage, text } from './page';
+import { all, closePage, fill, go, one, openPage, read, text } from './page';
 
 const feature = await loadFeature('../features/web_people.feature');
 const join = vi.fn<NonNullable<Net['join']>>();
@@ -45,9 +45,11 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
   let home: TestHome;
   let command: MockInstance<Home['command']>;
 
-  async function openAs(role: string) {
+  /** Opens the chat of "Website" as a person of `role`; `also` adds to the home first. */
+  async function openAs(role: string, also = () => {}) {
     home = new TestHome();
     home.add(g, 'Website');
+    also();
     home.write(g, example('row-member-human', { id: owner, g, name: 'Reader', role }));
     if (role !== 'owner') addPerson('Owner', 'owner');
     addPerson('Member', 'member');
@@ -117,6 +119,84 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       await vi.waitFor(() => expect(activeDialog()).toBeNull());
     });
   });
+
+  Scenario(
+    'An owner adds a person of another group on this computer without a link',
+    ({ Given, When, Then, And }) => {
+      const docs = 'ZG9jcy1ncm91cC0wMDAwMQ';
+      const row = (name: string) =>
+        all('dialog[open] .pick-row').find(
+          (each) => each.querySelector('b')!.textContent === name,
+        )!;
+      Given(
+        'I am the group owner, and "Mina" is a member of another group on its home, and "Sam" was in one that is gone',
+        async () => {
+          await openAs('owner', () => {
+            home.add(docs, 'Docs');
+            for (const name of ['Mina', 'Sam'])
+              home.write(
+                docs,
+                example('row-member-human', { id: name, g: docs, user: name, name }),
+              );
+          });
+          // The browser read Sam in "Docs"; the home has since forgotten him.
+          home.groups.get(docs)!.rows.delete('member Sam');
+        },
+      );
+      When('I open "Invite"', () => {
+        button('Invite').click();
+        flushSync();
+      });
+      Then(
+        'the dialog lists "Mina" and "Sam" under "In your other groups here", each with "Add", and offers "Cancel"',
+        () => {
+          expect(text('dialog[open] h3')).toBe('In your other groups here · 2');
+          expect(all('dialog[open] .pick-row b').map((each) => each.textContent)).toEqual([
+            'Mina',
+            'Sam',
+          ]);
+          expect(buttons(row('Mina')).map((each) => each.textContent!.trim())).toEqual(['Add']);
+          expect(
+            buttons(activeDialog().querySelector('footer')!).map((b) => b.textContent!.trim()),
+          ).toEqual(['Cancel', 'Create link']);
+        },
+      );
+      When('I add Mina, and then Sam, whom the home no longer knows', async () => {
+        button('Add', row('Mina')).click();
+        await vi.waitFor(() => expect(row('Mina').querySelector('.badge')).not.toBeNull());
+        button('Add', row('Sam')).click();
+        await vi.waitFor(() => expect(row('Sam').querySelector('small')).not.toBeNull());
+        flushSync();
+      });
+      Then(
+        'the home has added Mina with "add_person", her row says "Added", and Sam\'s row says to send the link',
+        () => {
+          const sent = home.asked
+            .filter((req) => req.t === 'cmd')
+            .map((req) => JSON.parse((req.env as { p: string }).p) as object);
+          expect(sent).toMatchObject([
+            { t: 'member', g, op: 'add_person', user: 'Mina', name: 'Mina' },
+            { t: 'member', g, op: 'add_person', user: 'Sam', name: 'Sam' },
+          ]);
+          expect(read(row('Mina').querySelector('.badge')!)).toBe('Added');
+          expect(row('Mina').querySelector('.badge')!.getAttribute('data-tone')).toBe('ok');
+          expect(buttons(row('Mina'))).toEqual([]);
+          expect(read(row('Sam').querySelector('small')!)).toBe(
+            'Not in any of your groups here any more: send them the link below.',
+          );
+        },
+      );
+      And(
+        'Mina is listed among the people of the group, and the dialog offers "Done" in place of "Cancel"',
+        async () => {
+          await vi.waitFor(() => expect(person('Mina')).toBeDefined());
+          expect(
+            buttons(activeDialog().querySelector('footer')!).map((b) => b.textContent!.trim()),
+          ).toEqual(['Done', 'Create link']);
+        },
+      );
+    },
+  );
 
   Scenario('An owner changes roles and removes a person', ({ Given, When, Then }) => {
     Given('I am the group owner', () => openAs('owner'));

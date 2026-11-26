@@ -4,8 +4,10 @@
   import {
     candidatesOf,
     found,
+    freeName,
     joinError,
     knownPeople,
+    nameClash,
     unavailable,
     type Candidate,
     type Refusal,
@@ -76,36 +78,23 @@
     none = !some;
   });
 
-  /** A name for a newly ticked AI that no other ticked AI has. */
-  function freeName(agent: string) {
-    const taken = new Set(Object.values(ais).map((ai) => ai.name));
-    const base = cliName(agent);
-    let n = 1;
-    while (taken.has(n === 1 ? base : `${base} ${n}`)) n += 1;
-    return n === 1 ? base : `${base} ${n}`;
-  }
-
   /** Ticks or unticks an AI. While any AI is ticked, one of them is the secretary: the first one
    *  ticked, until the person chooses another. */
   function tick(candidate: Candidate, on: boolean) {
-    if (on) ais[candidate.key] = { name: freeName(candidate.agent), workspace: '' };
+    // A newly ticked AI is named so that no other ticked AI has its name.
+    const taken = Object.values(ais).map((ai) => ai.name);
+    if (on) ais[candidate.key] = { name: freeName(taken, cliName(candidate.agent)), workspace: '' };
     else delete ais[candidate.key];
     if (!ais[secretary]) secretary = Object.keys(ais)[0] ?? '';
   }
 
   const ready = $derived(Object.values(ais).every((ai) => ai.workspace && ai.name.trim()));
 
-  /** Whether two members would have one name: the dialog says so before anything is sent. */
-  function clash() {
-    const named = [member, ...Object.values(ais).map((ai) => ai.name)].map((each) => each.trim());
-    return new Set(named).size < named.length;
-  }
-
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (outcome) return close();
     failed = '';
-    clashing = clash();
+    clashing = nameClash([member, ...Object.values(ais).map((ai) => ai.name)]);
     if (clashing) return;
     // The computer may have gone since it was chosen: nothing is sent to another in its place.
     // The first one left is chosen for the next try, and the person sees which.
@@ -290,7 +279,12 @@
                   disabled={Boolean(outcome)}
                   onchange={() => (secretary = candidate.key)}
                 />
-                <span>{t('groups.create.ai.secretary')}</span>
+                <span>
+                  {t('groups.create.ai.secretary').replace(
+                    '{ai}',
+                    () => ai.name.trim() || cliName(candidate.agent),
+                  )}
+                </span>
               </label>
             </div>
           {/if}
@@ -352,9 +346,13 @@
   .pick-row input {
     margin: 0 4px 0 0;
   }
+  /* A row that cannot be ticked fades its person or AI; the reason beside it stays in full. */
   .pick-row.dim {
-    opacity: 0.55;
     cursor: not-allowed;
+  }
+  .pick-row.dim b,
+  .pick-row.dim :global(.av) {
+    opacity: 0.55;
   }
   .ai + .ai {
     border-top: 1px solid var(--line);

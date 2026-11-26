@@ -5,6 +5,7 @@
   import { withoutInlineReplies } from '../../lib/call';
   import type { Group } from '../../lib/groups.svelte';
   import { release } from '../../lib/jump';
+  import { hasAI } from '../../lib/members';
   import type { Net } from '../../lib/net.svelte';
   import { card as cardOf, mounts, side } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
@@ -47,8 +48,7 @@
   const paging = $derived(group.paging());
   const line = $derived(days(withoutInlineReplies(group.main, Boolean(cardOf('call')))));
   // A group of people only has nobody to turn a request into a brief.
-  const hasAI = $derived(group.members.some((member) => member.kind === 'ai'));
-  const emptyBody = $derived(hasAI ? 'chat.empty.body' : 'chat.empty.people');
+  const emptyBody = $derived(hasAI(group) ? 'chat.empty.body' : 'chat.empty.people');
   const newest = $derived(group.main.at(-1)?.id);
   // Older messages may exist and cannot be had now: the home refused a page, or is not reachable.
   const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
@@ -182,7 +182,7 @@
           </div>
         {/if}
       {/each}
-      {#if group.info && hasAI && !group.info.secretary}
+      {#if group.info && hasAI(group) && !group.info.secretary}
         <p class="nosec"><Icon name="alert" sm />{t('chat.nosecretary')}</p>
       {/if}
     </div>

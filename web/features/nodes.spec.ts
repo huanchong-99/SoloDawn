@@ -217,7 +217,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         );
       });
       And(
-        '"workstation" lists "Claude Code" as "Personal subscription" and "Signed in", working in "Website"',
+        '"workstation" lists "Claude Code" as "Personal subscription" and "Signed in", working in "Website" in the folder "/home/dev/website"',
         () => {
           const ai = all('.card.node')[0].querySelectorAll('.ai-row')[0];
           expect(ai.textContent).toContain('Claude Code');
@@ -266,7 +266,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And(
-        'the page lists "windows-box" as "Online" with link "Relay · 210 ms · 26 min", relay notice "Using a relay — speed and data are limited." and "Limited" AI state',
+        'the page lists "windows-box" as "Online" with link "Relay · 210 ms · 26 min", relay notice "Using a relay — speed and data are limited." and "Limited" AI state in the folder "/home/dev/office" of "Website"',
         () => {
           const card = all('.card.node')[1];
           expect(card.querySelector('h3')!.textContent).toBe('windows-box');
@@ -280,6 +280,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           const permSt = card.querySelector('.perm .st')!;
           expect(permSt.getAttribute('data-st')).toBe('limited');
           expect(permSt.textContent!.trim()).toBe('Limited');
+          expect(card.querySelector('.perm')!.textContent!.replace(/\s+/g, ' ').trim()).toBe(
+            'Website Limited Folder: /home/dev/office',
+          );
         },
       );
       When('"windows-box" stops', () => {

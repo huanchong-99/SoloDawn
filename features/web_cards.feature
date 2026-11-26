@@ -1,7 +1,7 @@
 @web
 Feature: Brief, decision and summary cards of the web client
   The secretary proposes a brief with its goal, acceptance criteria, scope and task split, and
-  posts a summary card once a task is merged; AIs ask for a decision with options and a free-text
+  posts a summary card once a task is done; AIs ask for a decision with options and a free-text
   answer field. Each card renders every wire state and sends signed act commands to the group home
   (planning/contracts/messages.md sections 2.1, 2.4, 2.5, 3.1, 3.3; planning/contracts/commands.md
   section 1.4; acceptance test A5.1).
@@ -62,8 +62,8 @@ Feature: Brief, decision and summary cards of the web client
     When the connection to the home is lost
     Then the pending brief disables its action buttons while offline
 
-  Scenario: Summary cards show the merged task, review score, rounds, formatted duration and diff stats
+  Scenario: Summary cards show the done task, review score, rounds and formatted duration
     Given the secretary has posted the golden summary for "T-12" with text "All criteria passed."
-    And the secretary has posted a local-only summary of 1 round and 45 minutes with no pull request
-    Then the first summary card shows "Done", "T-12", "Merged", "Show connection path", "94", "2 rounds", "1h 12m", "+318 −42" and "PR #28"
-    And the second summary card shows "1 round", "45m" and "Changes"
+    And the secretary has posted summaries of 1 round in 45 minutes and of 3 rounds in 2 hours for a task the browser does not hold
+    Then the first summary card shows "Done", "T-12", "Show connection path", "94", "2 rounds" and "1h 12m"
+    And the second summary card shows "1 round" and "45m" without a title, and the third "2h"
