@@ -22,6 +22,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// externalNoClone is what the steps that MODEL-1126 took away say when they fail.
+const externalNoClone = "every hand-out names the folder X was added with, not a project clone (MODEL-1126 plan 3.3, A10.18)"
+
 func init() { stepSets["a10_external"] = externalSteps }
 
 type externalWorld struct {
@@ -61,7 +64,7 @@ func (w *externalWorld) setupX() error {
 }
 
 func (w *externalWorld) setup() error {
-	return w.setupProject("none")
+	return w.setupProject()
 }
 
 // prepareContext bounds the scenario.
@@ -72,9 +75,8 @@ func (w *externalWorld) prepareContext() error {
 	return nil
 }
 
-func (w *externalWorld) setupProject(forge string) error {
-	return s3Run(w.prepareContext, w.prepareRootAndRepo, w.prepareClaude, func() error { return w.prepareForge(forge) }, w.startNode,
-		func() error { return w.createExternalGroup(forge) })
+func (w *externalWorld) setupProject() error {
+	return s3Run(w.prepareContext, w.prepareRoot, w.prepareClaude, w.startNode, w.createAndSyncGroup)
 }
 
 func (w *externalWorld) startNode() error {
@@ -87,19 +89,6 @@ func (w *externalWorld) startNode() error {
 		func() error { return w.connectOwnerToNodes(false) })
 }
 
-func (w *externalWorld) createExternalGroup(forge string) error {
-	if forge == "none" {
-		return w.createAndSyncGroup()
-	}
-	h := w.homeHeader("group")
-	w.groupID, h.Group = h.Nonce, h.Nonce
-	cmd := proto.GroupCreate{GroupCommand: proto.GroupCommand{HomeCommand: h, Op: "create"},
-		Name: m6GroupName, Kind: "project", Repo: w.repoDir, Base: "main", Forge: forge, MemberName: m6OwnerName, Checks: []string{}}
-	return s3Run(func() error { return w.hostCommand(cmd) }, w.requestGroupSync, func() error {
-		return w.waitState(func() bool { return w.group.ID == string(w.groupID) })
-	})
-}
-
 func (w *externalWorld) header(typ string) proto.HostCommand {
 	return proto.HostCommand{Type: typ, Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), To: w.homeNode.key.ID()}
 }
@@ -108,9 +97,10 @@ func (w *externalWorld) homeHeader(typ string) proto.HomeCommand {
 	return proto.HomeCommand{Type: typ, Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID}
 }
 
-func (w *externalWorld) joinCmd(name, account string, tool *string) proto.HostJoin {
+func (w *externalWorld) joinCmd(name, account string, tool *string) (proto.HostJoin, error) {
+	workspace, err := aiWorkspace(w.root, w.groupID, name)
 	return proto.HostJoin{HostCommand: w.header("host.join"), Group: w.groupID, Home: w.homeNode.key.ID(), Agent: "external",
-		Name: name, Account: account, Tool: tool}
+		Name: name, Account: account, Tool: tool, Workspace: workspace}, err
 }
 
 func (w *externalWorld) hostCommand(cmd any) error {
@@ -118,7 +108,14 @@ func (w *externalWorld) hostCommand(cmd any) error {
 }
 
 func (w *externalWorld) join(name, account, tool string) error {
-	return s3Run(func() error { return w.hostCommand(w.joinCmd(name, account, &tool)) },
+	join := func() error {
+		cmd, err := w.joinCmd(name, account, &tool)
+		if err != nil {
+			return err
+		}
+		return w.hostCommand(cmd)
+	}
+	return s3Run(join,
 		func() error { return w.state(name, "offline") }, func() error { return w.checkJoin(name, account, tool) })
 }
 
@@ -132,10 +129,14 @@ func (w *externalWorld) checkJoin(name, account, tool string) error {
 }
 
 func (w *externalWorld) invalidJoins() error {
-	secretary := w.joinCmd("Bad secretary", "personal", nil)
+	noAccount, err1 := w.joinCmd("No account", "", nil)
+	secretary, err2 := w.joinCmd("Bad secretary", "personal", nil)
+	long, err3 := w.joinCmd("Long label", "team", new(strings.Repeat("文", 33)))
+	if err := errors.Join(err1, err2, err3); err != nil {
+		return err
+	}
 	secretary.Secretary = true
-	for _, cmd := range []any{w.joinCmd("No account", "", nil), secretary,
-		w.joinCmd("Long label", "team", new(strings.Repeat("文", 33))),
+	for _, cmd := range []any{noAccount, secretary, long,
 		proto.AgentSet{HostCommand: w.header("agent.set"), Agent: "external", Account: "personal"}} {
 		if err := externalRefusal(w.hostCommand(cmd), "bad_request"); err != nil {
 			return err
@@ -407,7 +408,7 @@ func externalRunnerSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^the external owner removes X$`, w.remove)
 	sc.Step(`^an external look rejects an unknown member$`, func() error { return w.missingWait(string(exampleID("unknown external"))) })
 	sc.Step(`^an external look rejects the removed member$`, func() error { return w.missingWait(w.aiByName["X"].ID) })
-	sc.Step(`^the external handout folder is the project clone$`, w.checkClone)
+	sc.Step(`^the external handout folder is the project clone$`, rewritten("AC-3", externalNoClone))
 	sc.Step(`^the "([^"]+)" runs (\d+) queued external items(?:, with the second mention arriving while X is working on the first)?$`, w.runQueued)
 }
 
@@ -589,17 +590,6 @@ func (w *externalWorld) externalPost(text string) error {
 	}
 	if count != 1 {
 		return fmt.Errorf("X posted %q %d times, want once", text, count)
-	}
-	return nil
-}
-
-func (w *externalWorld) checkClone() error {
-	origin, err := m5GitOut(w.run.Folder, "remote", "get-url", "origin")
-	if err != nil {
-		return err
-	}
-	if filepath.Clean(origin) != filepath.Clean(w.repoDir) {
-		return fmt.Errorf("handout origin = %q, want %q", origin, w.repoDir)
 	}
 	return nil
 }

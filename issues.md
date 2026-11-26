@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · limitation · Acceptance scenarios of the old model fail until units AC-1 to AC-3 rewrite them
+
+- Symptom: after unit AC-0 of MODEL-1126 `features/` compiles and its fixtures follow the new model (every AI joins with a workspace folder of its own, no bare repository, no fake `gh` or forge program, hello and welcome at version 3), but scenarios of the old model fail. The steps whose bodies the model took away fail on purpose with `rewritten by AC-<n>: <reason>` (`rewritten`, `features/helpers_test.go`); others fail because their expectations name the old model: step names `branch`, `local_check` and `merge` (`home_task`, `home_machine`, `home_review`), the roster line without the folder (`host_turn`, `host_profile`, `a10_profiles`, `a10_external`), the review checkout in the turn text (`host_turn.feature:2`), and a second task of one AI that now waits as `busy` (`m4.feature:33`, `m4.feature:48`, `m6.feature:26-39`, `s3_drivers.feature:20`).
+- Cause: plan `MODEL-1126/plan.md` section 4 gives the rewrite of these scenarios to AC-1 (M3 to M8), AC-2 (host and node) and AC-3 (home, step 2, step 3); the list by unit is `MODEL-1126/ac0-failing.md`.
+- Status: open until AC-1 to AC-3 merge.
+
 ### 2026-11-26 · bug · A task's menu stays open after one of its items is picked
 
 - Symptom: in headless Chromium (Playwright 1.64, a trusted click) on the demo world at `?demo`, opening the `⋯` menu of a running task and pressing 暂停, 换人 or 取消任务 carries the action out but leaves the popover open over the card (`.menu:popover-open` still matches, and no `toggle` event follows the click). The next press on `⋯` then closes it instead of opening it. Seen while taking the screenshots of the redesign; it is the same with the menu's styles as they were before the redesign (`web/src/components/task/TaskMenu.svelte` at fe89a231b and at 51aee6673).

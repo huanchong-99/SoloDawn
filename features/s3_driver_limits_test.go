@@ -121,13 +121,13 @@ func (w *s3DriverWorld) readOnly() error {
 
 func (w *s3DriverWorld) readOnlyAsked() error {
 	e := newEditWorld(w.caps.m3, w.agent)
-	return s3Run(func() error { return useEditCLIs(w.f, w.cleanup) }, e.askReadOnly, e.unchanged)
+	return s3Run(e.seedReadme, func() error { return useEditCLIs(w.f, w.cleanup) }, e.askReadOnly, e.unchanged)
 }
 
 // readOnlyEdit runs the member with a CLI that edits a file on every turn.
 func (w *s3DriverWorld) readOnlyEdit() error {
 	e := newEditWorld(w.caps.m3, w.agent)
-	return s3Run(func() error { return useEditCLIs(w.f, w.cleanup) },
+	return s3Run(e.seedReadme, func() error { return useEditCLIs(w.f, w.cleanup) },
 		e.tryReadOnly, e.unchanged, e.tryLevel3, e.changed)
 }
 

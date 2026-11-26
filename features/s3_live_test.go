@@ -35,9 +35,6 @@ func s3LiveRepoConfig(t *testing.T, cleanup func(func()), agent string) error {
 	if err != nil {
 		return err
 	}
-	if err := initLocalGitRepo(dir); err != nil {
-		return err
-	}
 	marker := filepath.Join(dir, "hook-ran")
 	if err := s3WriteHook(dir, marker, agent); err != nil {
 		return err

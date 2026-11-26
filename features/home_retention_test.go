@@ -158,8 +158,8 @@ func (w *homeRetWorld) foundGroup() error {
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: proto.ID(w.group), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.group)},
 			Op:          "create",
 		},
-		Name: "Website", Kind: "project", Repo: "https://example.invalid/website",
-		Base: "main", Forge: "none", Checks: []string{}, MemberName: "owner",
+		Name:       "Website",
+		MemberName: "owner",
 	}
 	if err := w.sendCmd(w.ownerConn, w.browser, create); err != nil {
 		return err
@@ -177,7 +177,7 @@ func (w *homeRetWorld) foundGroup() error {
 				HomeCommand: proto.HomeCommand{Type: "member", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.group)},
 				Op:          "add_ai", ID: proto.ID(ai.id),
 			},
-			CLI: "claude", Name: ai.name, Account: "personal", Secretary: ai.sec, Approvers: []string{},
+			CLI: "claude", Name: ai.name, Workspace: "/work/" + ai.name, Account: "personal", Secretary: ai.sec, Approvers: []string{},
 		}
 		if err := w.sendCmd(w.hostConn, w.laptop, add); err != nil {
 			return err
@@ -360,32 +360,13 @@ func (w *homeRetWorld) postOldReview(reviewText string) error {
 }
 
 func (w *homeRetWorld) submitAndReview(tid proto.ID, reviewText string) error {
-	branch := proto.TaskBranch{
-		TaskCommand: proto.TaskCommand{
-			HomeCommand: proto.HomeCommand{Type: "task", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.group)},
-			Op:          "branch", ID: tid,
+	report := w.nextID()
+	sub := proto.Post[proto.EmptyBody]{
+		HomeCommand: proto.HomeCommand{
+			Type: "post", Nonce: report, Timestamp: w.now.UnixMilli(),
+			Group: proto.ID(w.group), As: proto.ID(w.aiOne),
 		},
-		Branch: "task/1-review-target",
-	}
-	if err := w.sendCmd(w.hostConn, w.laptop, branch); err != nil {
-		return err
-	}
-	checked := proto.TaskChecked{
-		TaskCommand: proto.TaskCommand{
-			HomeCommand: proto.HomeCommand{Type: "task", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.group)},
-			Op:          "checked", ID: tid,
-		},
-		OK: true, Items: []proto.CheckItem{}, Commit: "c1",
-	}
-	if err := w.sendCmd(w.hostConn, w.laptop, checked); err != nil {
-		return err
-	}
-	sub := proto.TaskSubmitted{
-		TaskCommand: proto.TaskCommand{
-			HomeCommand: proto.HomeCommand{Type: "task", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.group)},
-			Op:          "submitted", ID: tid,
-		},
-		Commit: "c1", Stats: proto.DiffStats{Added: 4, Removed: 1},
+		Kind: "report", Thread: &tid, Text: "Ready for review.", Mentions: []proto.ID{}, Body: proto.EmptyBody{},
 	}
 	if err := w.sendCmd(w.hostConn, w.laptop, sub); err != nil {
 		return err
@@ -396,7 +377,7 @@ func (w *homeRetWorld) submitAndReview(tid proto.ID, reviewText string) error {
 			Group: proto.ID(w.group), As: proto.ID(w.aiTwo),
 		},
 		Kind: "review", Thread: &tid, Text: reviewText, Mentions: []proto.ID{},
-		Body: proto.ReviewSigned{Task: tid, Commit: "c1", Score: 92, Items: []proto.ReviewItem{}},
+		Body: proto.ReviewSigned{Task: tid, Report: report, Score: 92, Items: []proto.ReviewItem{}},
 	}
 	return w.sendCmd(w.hostConn, w.laptop, rev)
 }

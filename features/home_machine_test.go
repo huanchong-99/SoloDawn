@@ -40,7 +40,7 @@ func (m *homeMachine) send(sender, kind string, e home.Event) {
 	m.task, m.fx, m.err = home.Step(m.task, e)
 }
 
-// homeMachineItems writes inbox items as the scenarios do: why, then the AI or the notice code, then the commit.
+// homeMachineItems writes inbox items as the scenarios do: why, then the AI or the notice code, then the report.
 func homeMachineItems(items []home.TaskItem) string {
 	if len(items) == 0 {
 		return "nothing"
@@ -48,8 +48,8 @@ func homeMachineItems(items []home.TaskItem) string {
 	var out []string
 	for _, it := range items {
 		words := []string{it.Why, it.AI + it.Code}
-		if it.Commit != "" {
-			words = append(words, it.Commit)
+		if it.Report != "" {
+			words = append(words, it.Report)
 		}
 		if it.IfNone {
 			words = append(words, "unless queued")
@@ -63,8 +63,7 @@ func homeMachineSteps(sc *godog.ScenarioContext, _ fixtures) {
 	var m homeMachine
 	sc.Step(`^a task row that is "([^"]*)" at step "([^"]*)"$`, func(state, step string) {
 		m = homeMachine{task: proto.TaskRow{
-			Origin: "brief", State: state, Step: step, Commit: "c1", Assignee: "ai-assignee", Reviewer: "ai-reviewer",
-			Checks: proto.TaskChecks{Local: &proto.Check{OK: true, At: 1763599997000, Commit: "c1"}},
+			Origin: "brief", State: state, Step: step, Report: "c1", Assignee: "ai-assignee", Reviewer: "ai-reviewer",
 		}}
 	})
 	sc.Step(`^the task row has no reviewer and waits for one$`, func() {
@@ -75,10 +74,10 @@ func homeMachineSteps(sc *godog.ScenarioContext, _ fixtures) {
 		m.task.Wait = &proto.TaskWait{Kind: "approval", Msg: card, Who: []string{"owner"}, Since: 1763599999000}
 	})
 	sc.Step(`^the (host|secretary|admin|person|assignee|reviewer) sends "([^"]*)" to the task machine$`, func(sender, kind string) {
-		m.send(sender, kind, home.Event{Commit: "c1", OK: true})
+		m.send(sender, kind, home.Event{Report: "c1", OK: true})
 	})
 	sc.Step(`^the host sends "([^"]*)" for commit "([^"]*)" to the task machine$`, func(kind, commit string) {
-		m.send("host", kind, home.Event{Commit: commit, OK: true})
+		m.send("host", kind, home.Event{Report: commit, OK: true})
 	})
 	sc.Step(`^the secretary names "([^"]*)" as the task's (assignee|reviewer)$`, func(ai, role string) {
 		e := home.Event{Assignee: ai}

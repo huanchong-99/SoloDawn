@@ -41,7 +41,7 @@ func hostTurnInfoSteps(sc *godog.ScenarioContext, _ fixtures) {
 		return w.mentionInThread("Q", "Q-personal", text)
 	})
 	sc.Step(`^the host composes a reviewed turn for "Q-team" on task 12 from a review written by "P-AI"$`, w.composeReviewed)
-	sc.Step(`^the host composes a checks turn for "Q-team" on task 12 from a checks row written by the home$`, w.composeChecks)
+	sc.Step(`^the host composes a checks turn for "Q-team" on task 12 from a checks row written by the home$`, rewritten("AC-2", "the checks message and the item checks are removed (MODEL-1126 plan 3.1)"))
 	sc.Step(`^"Q-team" posted a decision card to "Q" on task 12 and "(P|Q)" chose option "([^"]+)"(?: as admin)?$`, w.composeTaskDecision)
 	sc.Step(`^"Q" confirms a brief posted by "Secretary" while "P" has not listed "Q"$`, func() error {
 		return w.composeSecretaryConfirmed(nil, tiQMemID)
@@ -78,8 +78,8 @@ func (w *turnInfoWorld) setup(cleanup func(func()), node string) error {
 func (w *turnInfoWorld) seedGroupAndMembers() {
 	w.h.Rows.Put(turnGroupID, "group", turnGroupID, turnMustJSON(proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: turnGroupID, Seq: 1},
-		Name:      "Website", Kind: "project", Base: "main", Forge: "github", Home: w.homeKey.ID(),
-		Secretary: turnSecID, Checks: []string{}, Pass: 90, PassFoundation: 70, Created: turnTimeMS,
+		Name:      "Website", Home: w.homeKey.ID(),
+		Secretary: turnSecID, Pass: 90, PassFoundation: 70, Created: turnTimeMS,
 	}))
 	w.putHuman(tiPMemID, w.pUser, "P", "owner")
 	w.putHuman(tiQMemID, w.qUser, "Q", "admin")
@@ -155,23 +155,11 @@ func (w *turnInfoWorld) composeReviewed() (err error) {
 		RowHeader: proto.RowHeader{Type: "msg", ID: turnCallID, Seq: 12},
 		Pos:       12, Group: turnGroupID, Thread: &th, By: tiPAIID, Kind: "review", Timestamp: turnTimeMS, Mentions: []string{},
 		Body: proto.ReviewBody{
-			Task: turnTaskID, Num: 12, Title: "Paths", Commit: "9f2c1ab", Round: 1, Score: 86, Pass: 90, OK: false,
+			Task: turnTaskID, Num: 12, Title: "Paths", Report: "9f2c1ab", Round: 1, Score: 86, Pass: 90, OK: false,
 			Items: []proto.ReviewItem{{Text: "No event after switching back to direct", File: &file, Line: &line}},
 		},
 	})
 	raw := turnMustJSON(proto.InboxItem{Item: proto.Item{Item: 2, AI: proto.ID(tiQTeamID), Why: "reviewed", Task: proto.ID(turnTaskID), Msg: proto.ID(turnCallID)}, Msg: msg})
-	w.text, _, err = host.Compose(w.h, w.taskSession(tiQTeamID, "Q-team"), host.ItemsTurn, []json.RawMessage{raw})
-	return err
-}
-
-func (w *turnInfoWorld) composeChecks() (err error) {
-	th := turnTaskID
-	msg := turnMustJSON(proto.MessageRow[proto.ChecksBody, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: turnCallID, Seq: 13},
-		Pos:       13, Group: turnGroupID, Thread: &th, By: "system", Kind: "checks", Timestamp: turnTimeMS, Mentions: []string{},
-		Body: proto.ChecksBody{Stage: "cloud", OK: false, Commit: "9f2c1ab", Items: []proto.CheckItem{{Name: "test", OK: false}}},
-	})
-	raw := turnMustJSON(proto.InboxItem{Item: proto.Item{Item: 3, AI: proto.ID(tiQTeamID), Why: "checks", Task: proto.ID(turnTaskID), Msg: proto.ID(turnCallID)}, Msg: msg})
 	w.text, _, err = host.Compose(w.h, w.taskSession(tiQTeamID, "Q-team"), host.ItemsTurn, []json.RawMessage{raw})
 	return err
 }

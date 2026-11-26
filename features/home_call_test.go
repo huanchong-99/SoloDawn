@@ -65,7 +65,7 @@ func (w *homeCallWorld) start() error {
 	w.state.Logs[log.User] = log
 	w.state.Group = proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: grp}, Home: node.ID(), Secretary: w.members["secretary"],
-		Forge: "none", Pass: 90, PassFoundation: 70,
+		Pass: 90, PassFoundation: 70,
 		Limits: proto.Limits{Rounds: 10, WakesPerHour: 20, TurnMinutes: 60, Failures: 3, ReviewRounds: 5, AskDepth: 4, AskWaitS: 45},
 	}
 	owner := w.members["owner"]
@@ -77,13 +77,13 @@ func (w *homeCallWorld) start() error {
 		mid := w.members[name]
 		w.state.AIs[mid] = proto.AIMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: mid}, Group: grp, Kind: "ai", User: browser.ID(), Name: name},
-			Host:      laptop.ID(),
+			Host:      laptop.ID(), Workspace: "/work/" + name,
 		}
 	}
 	w.taskID = string(exampleID("call task"))
 	w.state.Tasks[w.taskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.taskID, Seq: 6}, Group: grp, Num: 1,
-		Title: "Report path changes", Slug: proto.MakeSlug("Report path changes"), Origin: "brief",
+		Title: "Report path changes", Origin: "brief",
 		State: "active", Step: "local_check", Assignee: w.members["ai-one"], Reviewer: w.members["ai-two"],
 		Pass: 90, Depends: []string{}, Created: w.now.UnixMilli() - 60_000, Stats: proto.TaskStats{Started: w.now.UnixMilli() - 60_000},
 	}

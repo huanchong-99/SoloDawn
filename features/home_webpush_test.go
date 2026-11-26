@@ -292,7 +292,7 @@ func (w *homeWebPushWorld) createWith(who, groupName, aiName string) error {
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: gid, Timestamp: w.now.UnixMilli(), Group: gid},
 			Op:          "create",
 		},
-		Name: groupName, Kind: "project", Repo: "repo", Base: "main", Forge: "none", Checks: []string{}, MemberName: "Owner",
+		Name: groupName, MemberName: "Owner",
 	}
 	if err := w.execCmd(b.conn, b.peer, b.key, create); err != nil {
 		return err
@@ -302,7 +302,7 @@ func (w *homeWebPushWorld) createWith(who, groupName, aiName string) error {
 			HomeCommand: proto.HomeCommand{Type: "member", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: gid},
 			Op:          "add_ai", ID: proto.ID(w.aiID),
 		},
-		CLI: "codex", Name: aiName, Account: "api_key", Approvers: []string{},
+		CLI: "codex", Name: aiName, Workspace: "/work/" + aiName, Account: "api_key", Approvers: []string{},
 	}
 	return w.execCmd(w.hostConn, w.hostPeer, w.hostKey, addAI)
 }

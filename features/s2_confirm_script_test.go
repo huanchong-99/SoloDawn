@@ -19,7 +19,7 @@ type s2ConfirmTool struct {
 func s2ConfirmScriptSteps(sc *godog.ScenarioContext, w *s2ConfirmWorld) {
 	sc.Step(`^"([^"]+)" is scripted for confirmation tools:$`, w.script)
 	sc.Step(`^"([^"]+)" is waiting after its confirmation turn$`, w.awaitIdle)
-	sc.Step(`^"([^"]+)" has a task commit "([^"]+)"$`, w.commitWork)
+	sc.Step(`^"([^"]+)" has a task commit "([^"]+)"$`, rewritten("AC-3", s2ConfirmNoWorktree))
 	sc.Step(`^the secretary proposes a task "([^"]+)" for "([^"]+)"$`, w.proposeTask)
 	sc.Step(`^a confirmed personal task named "([^"]+)"$`, w.personalTask)
 	sc.Step(`^the secretary proposes another personal task "([^"]+)"$`, w.anotherTask)

@@ -19,6 +19,9 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
+// homeNoMerge is what the steps that MODEL-1126 took away say when they fail.
+const homeNoMerge = "a task is done when its review passes, and the tasks that wait for it are released then: there is no merge (MODEL-1126 plan 1.6)"
+
 func init() {
 	stepSets["home_brief"] = func(sc *godog.ScenarioContext, _ fixtures) { homeBriefSteps(sc) }
 }
@@ -50,6 +53,7 @@ func (d homeBriefDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d homeBriefDisk) Pending() []proto.MsgRow                   { return nil }
 func (d homeBriefDisk) Queued() []store.Item                      { return nil }
 func (d homeBriefDisk) OtherMember(string) bool                   { return false }
+func (d homeBriefDisk) DeviceLog(string) []proto.Envelope         { return nil }
 
 // homeBriefReceipts is a home.Receipts in memory.
 type homeBriefReceipts map[string]store.Outcome
@@ -102,7 +106,7 @@ func homeBriefSteps(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^the secretary gives task 2 to "([^"]*)" while it is queued$`, w.reassign)
 	sc.Step(`^task 2 is "queued" and the home has queued nothing that makes a worktree$`, w.stillQueued)
-	sc.Step(`^task 1 is merged$`, w.merge)
+	sc.Step(`^task 1 is merged$`, rewritten("AC-3", homeNoMerge))
 	sc.Step(`^task 2 is "active" and the home has queued "([^"]*)"$`, func(item string) error {
 		if task := w.task(2); task.State != "active" || task.Wait != nil {
 			return fmt.Errorf("task 2 is %s, waiting for %+v", task.State, task.Wait)
@@ -129,12 +133,12 @@ func (w *homeBriefWorld) start() error {
 	w.state.Logs[log.User] = log
 	// The group, its owner and its AIs, as group create and member add_ai leave them.
 	w.state.Group = proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: group}, Home: node.ID(), Secretary: w.members["secretary"],
-		Forge: "none", Pass: 90, PassFoundation: 70, Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5}}
+		Pass: 90, PassFoundation: 70, Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5}}
 	owner := w.members["owner"]
 	w.state.People[owner] = proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: owner}, Group: group, Kind: "human", User: browser.ID()}, Role: "owner"}
 	for _, name := range []string{"secretary", "ai-one", "ai-two", "ai-three"} {
 		id := w.members[name]
-		w.state.AIs[id] = proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id}, Group: group, Kind: "ai", User: browser.ID(), Name: name}, Host: laptop.ID()}
+		w.state.AIs[id] = proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id}, Group: group, Kind: "ai", User: browser.ID(), Name: name}, Host: laptop.ID(), Workspace: "/work/" + name}
 	}
 	w.state.Seq = 6
 	w.disk, w.receipts, w.answers, w.items = homeBriefDisk{}, homeBriefReceipts{}, nil, nil
@@ -318,36 +322,6 @@ func (w *homeBriefWorld) stillQueued() error {
 	for _, it := range w.items {
 		if slices.Contains([]string{"assign", "checks", "reviewed", "review", "resume", "merge"}, it.Why) {
 			return fmt.Errorf("queued %+v", it)
-		}
-	}
-	return nil
-}
-
-// merge brings task 1 to its merge, as rows 3 to 7 would, and reports it
-// merged, as unit HM-12 will: row 8 for task 1, then the release of each
-// queued task that depends on it, with Blocked while another dependency is
-// not merged.
-func (w *homeBriefWorld) merge() error {
-	one := w.task(1)
-	one.Step, one.Commit = "merge", "c1"
-	merged, _, err := home.Step(one, home.Event{Kind: home.OnMerged, By: home.ByHost, Now: w.now.UnixMilli(), Commit: "c1"})
-	if err != nil {
-		return err
-	}
-	w.state.Tasks[merged.ID] = merged
-	w.items = nil
-	for _, task := range w.state.Tasks {
-		if task.State != "queued" || !slices.Contains(task.Depends, merged.ID) {
-			continue
-		}
-		blocked := slices.ContainsFunc(task.Depends, func(dep string) bool { return w.state.Tasks[dep].State != "merged" })
-		released, fx, err := home.Step(task, home.Event{Kind: home.OnReleased, By: home.ByHome, Now: w.now.UnixMilli(), Blocked: blocked})
-		if err != nil {
-			return err
-		}
-		w.state.Tasks[released.ID] = released
-		for _, it := range fx.Items {
-			w.items = append(w.items, home.Item{AI: it.AI, Why: it.Why, Task: released.ID, Msg: released.ID})
 		}
 	}
 	return nil

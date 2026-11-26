@@ -306,39 +306,25 @@ func (c homeFrameClient) Send(frame any) error {
 	return nil
 }
 
-func runGitIn(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git %v: %w (%s)", args, err, out)
-	}
-	return nil
-}
-
-// initBareRepo makes dir a bare repository whose maintenance ends with the
-// push that starts it, and does not go on in the folder when it is removed.
-func initBareRepo(dir, base string) error {
-	if err := runGitIn("", "init", "--bare", "-b", base, dir); err != nil {
-		return err
-	}
-	return runGitIn(dir, "config", "gc.autoDetach", "false")
-}
-
-func initLocalGitRepo(dir string) error {
+// aiWorkspace makes the folder an AI works in, one per AI and group under
+// root, and returns it as the host records it: with its links resolved.
+func aiWorkspace(root string, group proto.ID, ai string) (string, error) {
+	dir := filepath.Join(root, "work", string(group), ai)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
+		return "", err
 	}
-	if err := runGitIn(dir, "init", "-b", "main"); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\n"), 0o600); err != nil {
-		return err
-	}
-	if err := runGitIn(dir, "add", "README.md"); err != nil {
-		return err
-	}
-	return runGitIn(dir, "-c", "user.name=Owner", "-c", "user.email=owner@example.com", "commit", "-m", "init")
+	return filepath.EvalSymlinks(dir)
+}
+
+// handFolder is the workspace of the sessions that scenarios create by hand
+// on a host: a folder that exists, as the host requires before it starts a
+// CLI there. TestFeatures sets it.
+var handFolder string
+
+// rewritten is the body of a step that the model change of 2026-11-26
+// (MODEL-1126) took away: it fails and says which unit rewrites it and why.
+func rewritten(unit, reason string) func() error {
+	return func() error { return fmt.Errorf("rewritten by %s: %s", unit, reason) }
 }
 
 func claudeInitMCP(startID int) []map[string]any {
@@ -979,7 +965,7 @@ func (c *peerBrowserConn) nextPush(ctx context.Context) (json.RawMessage, error)
 
 func requestBrowserHello(ctx context.Context, conn *peer.Connection) (proto.Welcome, error) {
 	raw, err := requestWait(ctx, conn, nil, func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "Owner Browser", Addrs: []string{}}
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 3, Kind: "browser", Name: "Owner Browser", Addrs: []string{}}
 	})
 	if err != nil {
 		return proto.Welcome{}, err
@@ -1304,7 +1290,7 @@ func callHostSurface(h *host.Host, from host.Owner, by, name string, payload any
 	return err
 }
 
-func configureHostAI(h *host.Host, from host.Owner, ids *seqIDGen, ownerID, homeID string, groupID proto.ID, aiName, agent string) error {
+func configureHostAI(h *host.Host, from host.Owner, ids *seqIDGen, ownerID, homeID string, groupID proto.ID, aiName, agent, workspace string) error {
 	if _, err := h.Agents(context.Background(), false); err != nil {
 		return err
 	}
@@ -1322,6 +1308,7 @@ func configureHostAI(h *host.Host, from host.Owner, ids *seqIDGen, ownerID, home
 		Home:        homeID,
 		Agent:       agent,
 		Name:        aiName,
+		Workspace:   workspace,
 	}
 	return callHostSurface(h, from, ownerID, "host.join", joinCmd)
 }

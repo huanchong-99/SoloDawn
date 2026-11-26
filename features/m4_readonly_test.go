@@ -13,6 +13,7 @@ import (
 
 	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/host"
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 func init() { stepSets["m4_readonly"] = m4ReadOnlySteps }
@@ -43,6 +44,9 @@ func m4ReadOnlySteps(sc *godog.ScenarioContext, f fixtures) {
 			return err
 		}
 		*w = *newEditWorld(m, agent)
+		if err := w.seedReadme(); err != nil {
+			return err
+		}
 		return useEditCLIs(f, cleanup)
 	})
 	sc.Step(`^a task of that AI runs at level 1$`, w.tryReadOnly)
@@ -50,6 +54,15 @@ func m4ReadOnlySteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^the CLI refused its own edit, the file and the worktree are unchanged and there is no card$`, w.unchanged)
 	sc.Step(`^a task of that AI runs at level 3$`, w.tryLevel3)
 	sc.Step(`^the same CLI edited the file and there is no card$`, w.changed)
+}
+
+// seedReadme puts the file the CLI edits into the AI's workspace.
+func (w *editWorld) seedReadme() error {
+	folder, err := aiWorkspace(w.m.root, proto.ID(w.m.groups["Website"]), "Worker")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(folder, "README.md"), []byte("hello\n"), 0o600)
 }
 
 func newEditWorld(m *m3World, agent string) *editWorld {
@@ -113,7 +126,7 @@ func (w *editWorld) try(level, text string, body []map[string]any) error {
 		return err
 	}
 	sess, ok := w.m.activeHost.Sessions.Get(host.SessionKey{Group: w.m.groups["Website"], Member: w.m.aiByName["Worker"].ID, Task: task})
-	w.folder = filepath.Join(w.m.node().Dir, "projects", w.m.groups["Website"], sess.Folder)
+	w.folder = sess.Folder
 	if !ok {
 		return fmt.Errorf("task %s has no session: %v", task, w.m.activeHost.Sessions.All())
 	}
@@ -153,12 +166,12 @@ func editServedAsk(event map[string]any, answer any) []map[string]any {
 }
 
 func (w *editWorld) unchanged() error {
-	status, err := exec.Command("git", "-C", w.folder, "status", "--porcelain").Output()
+	entries, err := os.ReadDir(w.folder)
 	if err != nil {
-		return fmt.Errorf("git status in %s: %w", w.folder, err)
+		return err
 	}
-	if len(status) != 0 {
-		return fmt.Errorf("the read-only session left changes: %s", status)
+	if len(entries) != 1 {
+		return fmt.Errorf("the read-only session left files in %s: %v", w.folder, entries)
 	}
 	return w.check("refused", "hello\n")
 }

@@ -263,7 +263,12 @@ func (w *hostCapsWorld) whenConfigureAPIKeyAI(aiName, agent string) error {
 	if err := w.send("agent.set", proto.AgentSet{HostCommand: w.header("agent.set"), Agent: agent, Account: "api_key"}); err != nil {
 		return err
 	}
-	join := proto.HostJoin{HostCommand: w.header("host.join"), Group: proto.ID(w.m3.groups["Website"]), Home: n.Key.ID(), Agent: agent, Name: aiName}
+	gid := proto.ID(w.m3.groups["Website"])
+	workspace, err := aiWorkspace(w.m3.root, gid, aiName)
+	if err != nil {
+		return err
+	}
+	join := proto.HostJoin{HostCommand: w.header("host.join"), Group: gid, Home: n.Key.ID(), Agent: agent, Name: aiName, Workspace: workspace}
 	if err := w.send("host.join", join); err != nil {
 		return err
 	}

@@ -236,6 +236,15 @@ func (e *accDeliverEnv) seedLiveGroup() {
 	e.attachAndFinishSync(3)
 }
 
+// joinGroupSessions writes the group session rows that host.join writes, with
+// the AI's workspace.
+func (e *accDeliverEnv) joinGroupSessions() {
+	for id, name := range map[string]string{accMember1: "Claude Code", accSecID: "Sec"} {
+		key := host.SessionKey{Group: accGroupID, Member: id}
+		e.h.Sessions.Create(host.Session{SessionKey: key, Kind: host.GroupSession, Folder: handFolder, Agent: "claude", Home: e.homeKey.ID(), Name: name, Secretary: id == accSecID})
+	}
+}
+
 func (e *accDeliverEnv) attachNoWait() {
 	e.closeHome()
 	e.home = newAccHome()
@@ -263,8 +272,8 @@ func (e *accDeliverEnv) waitCondition(desc string, ok func() bool) error {
 func accGroupRowJSON(homeID string, seq int64) string {
 	return accJSON(proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: accGroupID, Seq: seq},
-		Name:      "Website", Kind: "project", Base: "main", Forge: "none",
-		Home: homeID, Secretary: accSecID, Checks: []string{},
+		Name:      "Website",
+		Home:      homeID, Secretary: accSecID,
 	})
 }
 
@@ -278,7 +287,7 @@ func accMemberRowJSON(id, name, hostID string, sec bool, seq int64) string {
 func accTaskRowJSON(state string, seq int64) string {
 	return accJSON(proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: accTaskID, Seq: seq},
-		Group:     accGroupID, Num: 1, Title: "Fix", Slug: "fix", Origin: "brief",
+		Group:     accGroupID, Num: 1, Title: "Fix", Origin: "brief",
 		State: state, Step: "branch", Assignee: accMember1, Depends: []string{},
 	})
 }
@@ -334,6 +343,7 @@ func registerDeliverGivenSteps(sc *godog.ScenarioContext, f fixtures, cleanup fu
 				env.db.Close()
 			}
 		})
+		env.joinGroupSessions()
 		return nil
 	}
 	sc.Step(`^a paired host on disk with AI "Claude Code" in group "Website" homed on "home-1"$`, func() error {
@@ -349,12 +359,7 @@ func registerDeliverGivenSteps(sc *godog.ScenarioContext, f fixtures, cleanup fu
 			return err
 		}
 		env.seedLiveGroup()
-		key := host.SessionKey{Group: accGroupID, Member: accMember1}
-		s := host.Session{SessionKey: key, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: env.homeKey.ID(), Name: "Claude Code"}
-		if err := env.h.Sessions.Create(s); err != nil {
-			return err
-		}
-		return env.h.Sessions.Move(key, host.Dormant, host.Working)
+		return env.h.Sessions.Move(host.SessionKey{Group: accGroupID, Member: accMember1}, host.Dormant, host.Working)
 	})
 	sc.Step(`^"Claude Code" has an open ask waiting on call "call-1"$`, func() {
 		env.askCh, env.askDone = env.h.Await(accCallID, nil)

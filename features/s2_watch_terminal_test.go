@@ -63,7 +63,7 @@ func (t *s2TerminalWorld) takeover() error {
 		return err
 	}
 	var err error
-	t.group, err = c.CreateProjectGroup(c.P, c.P1, "Watch project", "none")
+	t.group, err = c.CreateGroup(c.P, c.P1, "Watch project")
 	if err != nil {
 		return err
 	}

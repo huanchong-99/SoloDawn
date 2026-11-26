@@ -503,7 +503,7 @@ func waitPathSignal(conn *peer.Connection, timeout <-chan time.Time) bool {
 
 func sendNetsimHello(ctx context.Context, conn *peer.Connection) error {
 	build := func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "browser", Addrs: []string{}}
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 3, Kind: "browser", Name: "browser", Addrs: []string{}}
 	}
 	raw, err := conn.Request(ctx, build)
 	if err != nil {

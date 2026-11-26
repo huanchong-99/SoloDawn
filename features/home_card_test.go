@@ -52,6 +52,7 @@ func (d homeCardDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d homeCardDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d homeCardDisk) Queued() []store.Item                      { return nil }
 func (d homeCardDisk) OtherMember(string) bool                   { return false }
+func (d homeCardDisk) DeviceLog(string) []proto.Envelope         { return nil }
 
 func (d homeCardDisk) Pending() []proto.MsgRow {
 	var list []proto.MsgRow
@@ -142,7 +143,7 @@ func (w *homeCardWorld) setup(assignee string) error {
 	w.state.Logs[guestLog.User] = guestLog
 	w.state.Group = proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: group}, Home: node.ID(),
-		Secretary: w.members["secretary"], Forge: "none", Pass: 90, PassFoundation: 70,
+		Secretary: w.members["secretary"], Pass: 90, PassFoundation: 70,
 		Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5, ApprovalWaitS: 600},
 	}
 	w.state.People[w.members["owner"]] = proto.HumanMemberRow{
@@ -157,13 +158,13 @@ func (w *homeCardWorld) setup(assignee string) error {
 		mid := w.members[name]
 		w.state.AIs[mid] = proto.AIMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: mid}, Group: group, Kind: "ai", User: b1.ID(), Name: name},
-			Host:      host.ID(), Secretary: name == "secretary", Approvers: []string{b1.ID()},
+			Host:      host.ID(), Workspace: "/work/" + name, Secretary: name == "secretary", Approvers: []string{b1.ID()},
 		}
 	}
 	w.taskID = string(exampleID("card task 1"))
 	w.state.Tasks[w.taskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.taskID, Seq: 7}, Group: group, Num: 1,
-		Title: "Install browser tests", Slug: proto.MakeSlug("Install browser tests"), Origin: "brief",
+		Title: "Install browser tests", Origin: "brief",
 		State: "active", Step: "local_check", Assignee: w.members[assignee], Reviewer: w.members["ai-two"],
 		Pass: 90, Depends: []string{}, Created: w.now.UnixMilli() - 5000, Stats: proto.TaskStats{Started: w.now.UnixMilli() - 5000},
 	}

@@ -62,7 +62,7 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 					if ref := c.Decode(&p); ref != nil {
 						return home.Result{}, ref
 					}
-					grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: p.Name, Checks: []string{}, Created: c.Now}
+					grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: p.Name, Created: c.Now}
 					mem := proto.HumanMemberRow{
 						MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-owner"}, Group: s.ID, Kind: "human", Name: "Owner", User: s.Owner},
 						Role:      "admin",

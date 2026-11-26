@@ -70,9 +70,13 @@ func (w *externalWorld) joinManaged(name string, secretary bool) error {
 	if name == "M" && w.aiByName["Secretary"].ID != "" {
 		agent = "codex"
 	}
+	workspace, err := aiWorkspace(w.root, w.groupID, name)
+	if err != nil {
+		return err
+	}
 	set := proto.AgentSet{HostCommand: w.header("agent.set"), Agent: agent, Account: "personal"}
 	join := proto.HostJoin{HostCommand: w.header("host.join"), Group: w.groupID, Home: w.homeNode.key.ID(),
-		Agent: agent, Name: name, Secretary: secretary}
+		Agent: agent, Name: name, Secretary: secretary, Workspace: workspace}
 	return s3Run(func() error { return w.hostCommand(set) }, func() error { return w.hostCommand(join) },
 		func() error { return w.waitState(func() bool { return w.aiByName[name].ID != "" }) })
 }
@@ -232,10 +236,6 @@ func externalRosterMatches(line, prefix, usage string) bool {
 	return line == want+" · "+externalRosterSkills
 }
 
-func (w *externalWorld) runBrief(role string) error {
-	return s3Run(func() error { return w.startBrief(role) }, func() error { return w.handleBriefRun(role) })
-}
-
 func (w *externalWorld) startBrief(role string) error {
 	return s3Run(w.joinSecretary, func() error { return w.joinManaged("M", false) },
 		func() error { return w.prepareBrief(role) })
@@ -265,22 +265,9 @@ func (w *externalWorld) prepareBrief(role string) error {
 	if err := w.scriptManagedBriefWork(role); err != nil {
 		return err
 	}
-	if err := w.setBriefGitIdentity(); err != nil {
-		return err
-	}
 	return s3Run(func() error { return w.scriptBrief(assignee, reviewer) },
 		func() error { return w.whenOwnerMentionsAI("Secretary", "Propose the external brief") },
 		w.confirmBrief)
-}
-
-func (w *externalWorld) setBriefGitIdentity() error {
-	repo := filepath.Join(w.homeNode.data, "projects", string(w.groupID), "repo")
-	for _, args := range [][]string{{"user.name", "fixture"}, {"user.email", "fixture@test.invalid"}} {
-		if _, err := m5GitOut(repo, "config", args[0], args[1]); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (w *externalWorld) scriptBrief(assignee, reviewer string) error {
@@ -319,47 +306,9 @@ func (w *externalWorld) confirmBrief() error {
 func (w *externalWorld) scriptManagedBriefWork(role string) error {
 	script := m5CodexScript("external-managed-review", m5PassingReview(100))
 	if role == "reviewer" {
-		script = m5CodexScript("external-managed-task", m5WorkerCalls(w.group.Forge != "none", "Managed task complete"))
+		script = m5CodexScript("external-managed-task", m5WorkerCalls("Managed task complete"))
 	}
 	return os.WriteFile(w.homeNode.scriptPath("codex"), []byte(script), 0o600)
-}
-
-func (w *externalWorld) handleBriefRun(role string) error {
-	if role == "reviewer" {
-		return w.reviewBrief()
-	}
-	return s3Run(w.awaitBriefHandout, func() error { return w.handout("task", "External work") },
-		w.commitExternalWork, w.pushExternalWork, func() error { return w.tool("run_checks", "{}", "ok") },
-		func() error { return w.tool("submit_task", `{"summary":"External task complete"}`, "ok") },
-		func() error { return w.end(w.run.Run) })
-}
-
-func (w *externalWorld) pushExternalWork() error {
-	if w.group.Forge == "none" {
-		return nil
-	}
-	return w.tool("push_branch", "{}", "ok")
-}
-
-func (w *externalWorld) commitExternalWork() error {
-	w.folder = w.run.Folder
-	if err := w.waitExternalPush("external task branch", func() bool { return w.currentTask().Branch != "" }); err != nil {
-		return err
-	}
-	branch, err := m5GitOut(w.folder, "branch", "--show-current")
-	if err != nil {
-		return err
-	}
-	if branch != w.currentTask().Branch || !strings.Contains(w.run.Context, externalCriteria) {
-		return fmt.Errorf("wrong task branch or missing brief criteria: branch %q, handout %+v", branch, w.run)
-	}
-	_, err = m5GitCommitFiles(w.folder, map[string]string{"external.txt": "External result\n"}, "External task work")
-	return err
-}
-
-func (w *externalWorld) reviewBrief() error {
-	return s3Run(w.awaitBriefHandout,
-		func() error { return w.handout("review", "External work") }, w.submitExternalReview)
 }
 
 func (w *externalWorld) awaitBriefHandout() error {
@@ -371,15 +320,6 @@ func (w *externalWorld) awaitBriefHandout() error {
 		return err
 	}
 	return w.readHandout(got)
-}
-
-func (w *externalWorld) submitExternalReview() error {
-	w.folder = w.run.Folder
-	if _, err := os.Stat(filepath.Join(w.folder, ".solodawn-review.diff")); err != nil {
-		return err
-	}
-	return s3Run(func() error { return w.tool("submit_review", `{"score":100,"items":[]}`, "ok") },
-		func() error { return w.end(w.run.Run) })
 }
 
 func (w *externalWorld) waitForManagedNotice(reason string) error {

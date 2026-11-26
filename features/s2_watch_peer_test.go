@@ -219,7 +219,7 @@ func (p *s2TerminalPeer) nextCtl(what string, match func(json.RawMessage) bool) 
 }
 
 func (p *s2TerminalPeer) helloPerson(person *s2Person) error {
-	frame := map[string]any{"t": "hello", "v": 2, "kind": "browser", "name": person.Name + " browser", "addrs": []string{}}
+	frame := map[string]any{"t": "hello", "v": 3, "kind": "browser", "name": person.Name + " browser", "addrs": []string{}}
 	raw, err := p.request(frame)
 	if err != nil {
 		return err

@@ -35,6 +35,7 @@ type homeReviewWorld struct {
 	lastRes   home.Result
 	queuedOut []home.Item
 	seqNonce  int
+	reports   map[string]string // the name a scenario gives a report, by its message id
 }
 
 func (w *homeReviewWorld) Msg(id string) (proto.MsgRow, bool) {
@@ -48,6 +49,7 @@ func (w *homeReviewWorld) Thread(*string, int64, int) []proto.MsgRow { return ni
 func (w *homeReviewWorld) Pending() []proto.MsgRow                   { return nil }
 func (w *homeReviewWorld) Queued() []store.Item                      { return nil }
 func (w *homeReviewWorld) OtherMember(string) bool                   { return false }
+func (w *homeReviewWorld) DeviceLog(string) []proto.Envelope         { return nil }
 
 func (w *homeReviewWorld) Receipt(signer, nonce string) (store.Outcome, error) {
 	out, ok := w.receipts[signer+" "+nonce]
@@ -64,19 +66,14 @@ func (w *homeReviewWorld) PutReceipt(signer, nonce string, _ int64, result store
 
 func homeReviewSteps(sc *godog.ScenarioContext) {
 	w := &homeReviewWorld{now: time.UnixMilli(1763600000000)}
-	sc.Step(`^a review home without a remote$`, func() error { return w.setup("none") })
-	sc.Step(`^a review home with a GitHub remote$`, func() error { return w.setup("github") })
-	sc.Step(`^the assignee's host reports "(passing|failing)" local checks on commit "([^"]*)"$`, w.localChecks)
-	sc.Step(`^the assignee's host has reported passing local checks on commit "([^"]*)"$`, func(c string) error {
-		return w.localChecks("passing", c)
-	})
-	sc.Step(`^the assignee's host submits commit "([^"]*)"$`, func(c string) error {
-		return w.submit(c, 0, "")
-	})
-	sc.Step(`^the assignee's host submits commit "([^"]*)" on pull request (\d+)$`, func(c string, pr int) error {
-		return w.submit(c, pr, fmt.Sprintf("https://git.example/pull/%d", pr))
-	})
-	sc.Step(`^the assignee's host reports "(passing|failing)" hosted checks on commit "([^"]*)"$`, w.cloudChecks)
+	gone := rewritten("AC-3", "a task has no checks, remote or pull request: the assignee submits by a post of kind report (MODEL-1126 plan 1.6)")
+	sc.Step(`^a review home without a remote$`, w.setup)
+	sc.Step(`^a review home with a GitHub remote$`, gone)
+	sc.Step(`^the assignee's host reports "(passing|failing)" local checks on commit "([^"]*)"$`, gone)
+	sc.Step(`^the assignee's host has reported passing local checks on commit "([^"]*)"$`, gone)
+	sc.Step(`^the assignee's host submits commit "([^"]*)"$`, w.submit)
+	sc.Step(`^the assignee's host submits commit "([^"]*)" on pull request (\d+)$`, gone)
+	sc.Step(`^the assignee's host reports "(passing|failing)" hosted checks on commit "([^"]*)"$`, gone)
 	sc.Step(`^commit "([^"]*)" (?:has reached step "review"|is checked and submitted for review)$`, w.reachReview)
 	sc.Step(`^"([^"]*)" posts a review of commit "([^"]*)" with score (\d+)$`, func(who, c string, score int) error {
 		return w.postReview(who, c, score, false)
@@ -93,7 +90,7 @@ func homeReviewSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the review home has queued "([^"]*)"$`, w.checkQueued)
 }
 
-func (w *homeReviewWorld) setup(forge string) error {
+func (w *homeReviewWorld) setup() error {
 	browser, node, hostA, hostB := exampleKey("rev browser"), exampleKey("rev node"), exampleKey("rev hostA"), exampleKey("rev hostB")
 	w.ownerKey = browser
 	w.members = map[string]string{
@@ -116,7 +113,7 @@ func (w *homeReviewWorld) setup(forge string) error {
 	w.state.Logs[log.User] = log
 	w.state.Group = proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: group}, Home: node.ID(),
-		Forge: forge, Secretary: w.members["secretary"], Pass: 90, PassFoundation: 70,
+		Secretary: w.members["secretary"], Pass: 90, PassFoundation: 70,
 		Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5},
 	}
 	owner := w.members["owner"]
@@ -129,21 +126,22 @@ func (w *homeReviewWorld) setup(forge string) error {
 		host := w.hosts[role]
 		w.state.AIs[mid] = proto.AIMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: mid}, Group: group, Kind: "ai", User: browser.ID(), Name: role},
-			Host:      host.ID(), Secretary: role == "secretary",
+			Host:      host.ID(), Workspace: "/work/" + role, Secretary: role == "secretary",
 		}
 	}
 	w.taskID = string(exampleID("rev task"))
 	w.state.Tasks[w.taskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.taskID, Seq: 5},
-		Group:     group, Num: 1, Title: "Verify checks and review", Slug: "verify-checks-and-review",
-		Origin: "direct", State: "active", Step: "local_check",
+		Group:     group, Num: 1, Title: "Verify checks and review",
+		Origin: "direct", State: "active", Step: "work",
 		Assignee: w.members["assignee"], Reviewer: w.members["reviewer"],
-		Pass: 90, Depends: []string{}, Branch: "task/1-verify-checks-and-review",
+		Pass: 90, Depends: []string{},
 		Stats: proto.TaskStats{Started: w.now.UnixMilli() - 1000}, Created: w.now.UnixMilli() - 1000,
 	}
 	w.state.Seq, w.state.Num = 5, 1
 	w.msgs = map[string]proto.MsgRow{}
 	w.receipts = map[string]store.Outcome{}
+	w.reports = map[string]string{}
 	w.queuedOut = nil
 	return nil
 }
@@ -176,50 +174,24 @@ func (w *homeReviewWorld) apply(by identity.Key, payload any) error {
 	return nil
 }
 
-func (w *homeReviewWorld) localChecks(verdict, commit string) error {
+// submit posts the assignee's report, which the scenarios name as they named a commit.
+func (w *homeReviewWorld) submit(name string) error {
 	w.queuedOut = nil
-	p := proto.TaskChecked{
-		TaskCommand: proto.TaskCommand{
-			HomeCommand: proto.HomeCommand{Type: "task", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.state.ID)},
-			Op:          "checked", ID: proto.ID(w.taskID),
+	tid, id := proto.ID(w.taskID), w.reportID(name)
+	w.reports[string(id)] = name
+	p := proto.Post[proto.EmptyBody]{
+		HomeCommand: proto.HomeCommand{
+			Type: "post", Nonce: id, Timestamp: w.now.UnixMilli(),
+			Group: proto.ID(w.state.ID), As: proto.ID(w.members["assignee"]),
 		},
-		OK: verdict == "passing", Commit: commit,
-		Items: []proto.CheckItem{{Name: "go test ./...", OK: verdict == "passing"}},
+		Kind: "report", Thread: &tid, Text: "Ready for review.", Mentions: []proto.ID{}, Body: proto.EmptyBody{},
 	}
 	return w.apply(w.hosts["assignee"], p)
 }
 
-func (w *homeReviewWorld) cloudChecks(verdict, commit string) error {
-	w.queuedOut = nil
-	p := proto.TaskChecked{
-		TaskCommand: proto.TaskCommand{
-			HomeCommand: proto.HomeCommand{Type: "task", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.state.ID)},
-			Op:          "cloud", ID: proto.ID(w.taskID),
-		},
-		OK: verdict == "passing", Commit: commit,
-		Items: []proto.CheckItem{{Name: "ci / test", OK: verdict == "passing"}},
-	}
-	return w.apply(w.hosts["assignee"], p)
-}
+func (w *homeReviewWorld) reportID(name string) proto.ID { return exampleID("rev report " + name) }
 
-func (w *homeReviewWorld) submit(commit string, pr int, url string) error {
-	w.queuedOut = nil
-	p := proto.TaskSubmitted{
-		TaskCommand: proto.TaskCommand{
-			HomeCommand: proto.HomeCommand{Type: "task", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.state.ID)},
-			Op:          "submitted", ID: proto.ID(w.taskID),
-		},
-		Commit: commit, PR: pr, PRURL: url, Stats: proto.DiffStats{Added: 20, Removed: 4},
-	}
-	return w.apply(w.hosts["assignee"], p)
-}
-
-func (w *homeReviewWorld) reachReview(commit string) error {
-	if err := w.localChecks("passing", commit); err != nil {
-		return err
-	}
-	return w.submit(commit, 0, "")
-}
+func (w *homeReviewWorld) reachReview(name string) error { return w.submit(name) }
 
 func (w *homeReviewWorld) postReview(role, commit string, score int, veto bool) error {
 	w.queuedOut = nil
@@ -231,7 +203,7 @@ func (w *homeReviewWorld) postReview(role, commit string, score int, veto bool) 
 			Group: proto.ID(w.state.ID), As: proto.ID(w.members[role]),
 		},
 		Kind: "review", Thread: &tid, Mentions: []proto.ID{},
-		Body: proto.ReviewSigned{Task: tid, Commit: commit, Score: score, Items: items},
+		Body: proto.ReviewSigned{Task: tid, Report: w.reportID(commit), Score: score, Items: items},
 	}
 	return w.apply(w.hosts[role], p)
 }
@@ -271,8 +243,8 @@ func (w *homeReviewWorld) checkReviewAnswer(passedText string, round int) error 
 
 func (w *homeReviewWorld) checkTask(state, step, commit string) error {
 	t := w.state.Tasks[w.taskID]
-	if t.State != state || t.Step != step || t.Commit != commit {
-		return fmt.Errorf("task is state=%q step=%q commit=%q", t.State, t.Step, t.Commit)
+	if t.State != state || t.Step != step || t.Report != string(w.reportID(commit)) {
+		return fmt.Errorf("task is state=%q step=%q report=%q", t.State, t.Step, w.reports[t.Report])
 	}
 	return nil
 }
@@ -293,11 +265,8 @@ func (w *homeReviewWorld) checkQueued(spec string) error {
 	var got []string
 	for _, it := range w.queuedOut {
 		parts := []string{it.Why, w.roleName(it.AI)}
-		if it.Commit != "" {
-			parts = append(parts, it.Commit)
-		}
-		if it.PR != 0 {
-			parts = append(parts, fmt.Sprintf("pr=%d", it.PR))
+		if name := w.reports[it.Msg]; name != "" {
+			parts = append(parts, name)
 		}
 		if it.Code != "" {
 			parts = append(parts, it.Code)

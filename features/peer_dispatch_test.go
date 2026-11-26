@@ -333,7 +333,7 @@ func (w *dispatchWorld) streamOutput(out string) error {
 
 // hello sends the first message of a session on ctl; the node reads it as sent.
 func (w *dispatchWorld) hello() error {
-	const hello = `{"t":"hello","id":1,"v":1,"kind":"browser","name":"phone browser","addrs":[]}`
+	const hello = `{"t":"hello","id":1,"v":3,"kind":"browser","name":"phone browser","addrs":[]}`
 	if err := w.channels["ctl"].SendText(hello); err != nil {
 		return err
 	}

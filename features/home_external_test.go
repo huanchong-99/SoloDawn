@@ -35,7 +35,7 @@ func (w *homeExternalWorld) command(op string) proto.MemberCommand {
 }
 
 func (w *homeExternalWorld) join(tool string) error {
-	if err := w.setup("none"); err != nil {
+	if err := w.setup(); err != nil {
 		return err
 	}
 	w.other = exampleKey("external group member")
@@ -49,7 +49,7 @@ func (w *homeExternalWorld) join(tool string) error {
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id}, Group: w.state.ID, Kind: "human", User: log.User},
 		Role:      "member",
 	}
-	cmd := proto.MemberAddAI{MemberCommand: w.command("add_ai"), CLI: "external", Name: "Scout", Account: "api_key", Tool: &tool, Approvers: []string{}}
+	cmd := proto.MemberAddAI{MemberCommand: w.command("add_ai"), CLI: "external", Name: "Scout", Workspace: "/work/Scout", Account: "api_key", Tool: &tool, Approvers: []string{}}
 	return w.apply(w.hosts["assignee"], cmd)
 }
 

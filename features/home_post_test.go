@@ -129,9 +129,9 @@ func (w *homePostWorld) writeInitialRows(tx *store.Tx, b1, node, host, guest ide
 	ms := w.clock.Load()
 	rows := []home.Row{
 		home.RowOf(proto.GroupRow{
-			RowHeader: proto.RowHeader{Type: "group", ID: w.group}, Name: "Website", Kind: "project",
-			Home: node.ID(), Secretary: w.members["secretary"], Forge: "none", Pass: 90, PassFoundation: 70,
-			Checks: []string{}, Limits: proto.Limits{Rounds: 10}, Created: ms,
+			RowHeader: proto.RowHeader{Type: "group", ID: w.group}, Name: "Website",
+			Home: node.ID(), Secretary: w.members["secretary"], Pass: 90, PassFoundation: 70,
+			Limits: proto.Limits{Rounds: 10}, Created: ms,
 		}),
 		home.RowOf(proto.HumanMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members["owner"]}, Group: w.group, Kind: "human", User: b1.ID(), Name: "owner"},
@@ -150,12 +150,12 @@ func (w *homePostWorld) writeInitialRows(tx *store.Tx, b1, node, host, guest ide
 	for _, name := range []string{"secretary", "ai-one", "ai-two"} {
 		rows = append(rows, home.RowOf(proto.AIMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members[name]}, Group: w.group, Kind: "ai", User: b1.ID(), Name: name},
-			CLI:       "claude", Host: host.ID(), Account: "personal", Allow: []string{}, Approvers: []string{b1.ID()}, State: "waiting", Path: "direct",
+			CLI:       "claude", Host: host.ID(), Workspace: "/work/" + name, Account: "personal", Allow: []string{}, Approvers: []string{b1.ID()}, State: "waiting", Path: "direct",
 		}))
 	}
 	rows = append(rows, home.RowOf(proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.task}, Group: w.group, Num: 1, Title: "Show path",
-		Slug: proto.MakeSlug("Show path"), Origin: "brief", Brief: string(exampleID("post brief")),
+		Origin: "brief", Brief: string(exampleID("post brief")),
 		State: "active", Step: "local_check", Assignee: w.members["ai-one"], Reviewer: w.members["ai-two"],
 		Pass: 90, Depends: []string{}, Stats: proto.TaskStats{Started: ms}, Created: ms,
 	}))
@@ -271,12 +271,12 @@ func (w *homePostWorld) aiPostsProgress(ai, text, mentioned string) error {
 	return w.sendOK("host", cmd)
 }
 
-func (w *homePostWorld) aiPostsReport(ai, commit string) error {
+func (w *homePostWorld) aiPostsReport(ai, _ string) error {
 	id, thread := w.nextID(), proto.ID(w.task)
 	w.lastMsg = string(id)
-	cmd := proto.Post[proto.ReportBody]{
+	cmd := proto.Post[proto.EmptyBody]{
 		HomeCommand: proto.HomeCommand{Type: "post", Nonce: id, Timestamp: w.clock.Load(), Group: proto.ID(w.group), As: proto.ID(w.members[ai])},
-		Kind:        "report", Thread: &thread, Mentions: []proto.ID{}, Body: proto.ReportBody{Commit: commit, Files: 2, Added: 20, Removed: 4},
+		Kind:        "report", Thread: &thread, Mentions: []proto.ID{}, Body: proto.EmptyBody{},
 	}
 	return w.sendOK("host", cmd)
 }
@@ -480,9 +480,9 @@ func (w *homePostWorld) refusalCommand(attempt string) (string, any) {
 			Row:         "msg", ID: proto.ID(w.oldText),
 		}
 	case `"ai-two" tries to post a completion report in the thread of task 1`:
-		return "host", proto.Post[proto.ReportBody]{
+		return "host", proto.Post[proto.EmptyBody]{
 			HomeCommand: proto.HomeCommand{Type: "post", Nonce: w.nextID(), Timestamp: ts, Group: g, As: proto.ID(w.members["ai-two"])},
-			Kind:        "report", Thread: &thread, Mentions: []proto.ID{}, Body: proto.ReportBody{Commit: "c1", Files: 1},
+			Kind:        "report", Thread: &thread, Mentions: []proto.ID{}, Body: proto.EmptyBody{},
 		}
 	default:
 		return "host", proto.Post[proto.EmptyBody]{

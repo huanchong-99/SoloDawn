@@ -115,7 +115,7 @@ func (w *homeRunWorld) start(cleanup func(func())) error {
 		p := &homeRunPeer{frames: make(chan any, 64)}
 		p.conn = loop.Attach(key.ID(), p)
 		loop.Welcome(p.conn, func(groups []proto.GroupSummary) any {
-			return proto.Welcome{Type: "welcome", Success: proto.Success{Re: 1, OK: true}, V: 1, Device: node.ID(), Time: w.now.UnixMilli(), Addrs: []string{}, Groups: groups}
+			return proto.Welcome{Type: "welcome", Success: proto.Success{Re: 1, OK: true}, V: 3, Device: node.ID(), Time: w.now.UnixMilli(), Addrs: []string{}, Groups: groups}
 		})
 		if p.welcome, err = p.next(); err != nil {
 			return err
@@ -134,7 +134,7 @@ func homeRunCreate(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return home.Result{}, refusal
 	}
-	group := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: p.Name, Kind: "project", Home: s.Home, Checks: []string{}, Created: c.Now}
+	group := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: p.Name, Home: s.Home, Created: c.Now}
 	owner := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: string(c.Nonce)}, Group: s.ID, Kind: "human", User: c.Who.User, Name: "owner"}, Role: "owner"}
 	return home.Result{Rows: []home.Row{home.RowOf(group), home.RowOf(owner)}, GroupsChanged: true}, nil
 }

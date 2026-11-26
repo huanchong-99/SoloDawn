@@ -237,8 +237,8 @@ func (w *homeRoundsWorld) buildTables(assignee string, idleMin int) home.Tables 
 func (w *homeRoundsWorld) seedGroupCmd(assignee string, idleMin int) home.Func {
 	return func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 		grp := proto.GroupRow{
-			RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Rounds", Kind: "project",
-			Home: s.Home, Secretary: w.members["secretary"], Forge: "none", Pass: 90, PassFoundation: 70,
+			RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Rounds",
+			Home: s.Home, Secretary: w.members["secretary"], Pass: 90, PassFoundation: 70,
 			Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5, IdleNoticeMinutes: idleMin},
 		}
 		own := proto.HumanMemberRow{
@@ -265,13 +265,13 @@ func (w *homeRoundsWorld) seedGroupCmd(assignee string, idleMin int) home.Func {
 			id := w.members[role]
 			ai := proto.AIMemberRow{
 				MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id}, Group: s.ID, Kind: "ai", User: w.keys["owner"].ID(), Name: role},
-				Host:      w.keys["host"].ID(), Secretary: role == "secretary",
+				Host:      w.keys["host"].ID(), Workspace: "/work/" + role, Secretary: role == "secretary",
 			}
 			rows = append(rows, home.RowOf(ai))
 		}
 		task := proto.TaskRow{
 			RowHeader: proto.RowHeader{Type: "task", ID: w.taskID}, Group: s.ID, Num: 1,
-			Title: "Task 1", Slug: "task-1", Origin: "brief", State: "active", Step: "local_check",
+			Title: "Task 1", Origin: "brief", State: "active", Step: "local_check",
 			Assignee: w.members[assignee], Reviewer: w.members["ai-two"], Pass: 90, Depends: []string{},
 			Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
 		}

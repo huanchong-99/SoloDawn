@@ -48,11 +48,7 @@ func (w *s2ConfirmWorld) setup(f fixtures, cleanup func(func()), withQ bool) err
 		return err
 	}
 	w.cast = c
-	// The AIs are on different nodes, so the project has a remote (contracts/rows.md section 1).
-	if err := c.SetForgeReplies("watch-open", s2ForgeReply{Stdout: s2ForgeURL + "1\n"}); err != nil {
-		return err
-	}
-	w.gid, err = c.CreateProjectGroup(c.P, c.P1, "Confirmation", "custom")
+	w.gid, err = c.CreateGroup(c.P, c.P1, "Confirmation")
 	if err != nil {
 		return err
 	}
