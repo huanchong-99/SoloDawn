@@ -23,29 +23,36 @@ func agtModels(ctx context.Context, agent string) []proto.Model {
 }
 
 func probeModels(ctx context.Context, agent string, args []string, read func(*bufio.Reader, *json.Encoder) ([]proto.Model, error)) []proto.Model {
+	if models, ok := probeCLI(ctx, agent, args, read); ok {
+		return models
+	}
+	return []proto.Model{}
+}
+
+// probeCLI starts the CLI with args, has read talk to it over its standard
+// input and output for at most the probe time, and waits for it to exit.
+func probeCLI[T any](ctx context.Context, agent string, args []string, read func(*bufio.Reader, *json.Encoder) (T, error)) (T, bool) {
 	ctx, cancel := context.WithTimeout(ctx, agtProbeSeconds*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, agent, args...)
 	detachTerminal(cmd)
 	cmd.WaitDelay = commandWaitDelay
+	var got T
 	in, out, err := startCodexCmd(cmd)
 	if err != nil {
-		return []proto.Model{}
+		return got, false
 	}
 	defer treeKiller(cmd)()
 	stop := context.AfterFunc(ctx, func() { out.Close() })
 	defer stop()
-	models, err := read(bufio.NewReader(out), json.NewEncoder(in))
+	got, err = read(bufio.NewReader(out), json.NewEncoder(in))
 	if err != nil {
 		cancel()
 	}
 	in.Close()
 	waitErr := cmd.Wait()
 	out.Close()
-	if err != nil || waitErr != nil {
-		return []proto.Model{}
-	}
-	return models
+	return got, err == nil && waitErr == nil
 }
 
 type claudeModel struct {
@@ -117,15 +124,20 @@ type codexModel struct {
 }
 
 func readCodexModels(from *bufio.Reader, to *json.Encoder) ([]proto.Model, error) {
-	init := codexRPCRequest{ID: 1, Method: "initialize", Params: map[string]any{"clientInfo": map[string]string{"name": "solodawn", "version": "1"}}}
-	var initialized map[string]json.RawMessage
-	if err := modelRPC(from, to, init, &initialized); err != nil {
-		return nil, err
-	}
-	if err := to.Encode(map[string]string{"method": "initialized"}); err != nil {
+	if err := codexInitialize(from, to); err != nil {
 		return nil, err
 	}
 	return codexModelPages(from, to)
+}
+
+// codexInitialize opens a conversation with Codex's app server, as request 1.
+func codexInitialize(from *bufio.Reader, to *json.Encoder) error {
+	init := codexRPCRequest{ID: 1, Method: "initialize", Params: map[string]any{"clientInfo": map[string]string{"name": "solodawn", "version": "1"}}}
+	var initialized map[string]json.RawMessage
+	if err := modelRPC(from, to, init, &initialized); err != nil {
+		return err
+	}
+	return to.Encode(map[string]string{"method": "initialized"})
 }
 
 func codexModelPages(from *bufio.Reader, to *json.Encoder) ([]proto.Model, error) {

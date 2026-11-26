@@ -39,11 +39,13 @@ type (
 	}
 )
 
-// NewSurface constructs a Surface and registers host.info, pty.resize and takeover.start replay on cfg.Sessions.
+// NewSurface constructs a Surface and registers host.info, watch.start,
+// host.workspaces, pty.resize and takeover.start replay on cfg.Sessions.
 func NewSurface(cfg SurfaceConfig) *Surface {
 	sf := &Surface{cfg: srfDefaults(cfg)}
 	cfg.Sessions.Requests["host.info"] = RequestHandler{Type: "host.info", Run: sf.reqHostInfo}
 	cfg.Sessions.Requests["watch.start"] = RequestHandler{Run: sf.reqWatchStart}
+	cfg.Sessions.Requests["host.workspaces"] = RequestHandler{Run: sf.reqHostWorkspaces}
 	cfg.Sessions.Pushes["pty.resize"] = sf.pushPTYResize
 	cfg.Sessions.Replays["takeover.start"] = sf.replayTakeoverStart
 	return sf
@@ -51,6 +53,10 @@ func NewSurface(cfg SurfaceConfig) *Surface {
 
 func (sf *Surface) reqWatchStart(_ context.Context, _ *home.Conn, from Ctl, by string, _ int64, data json.RawMessage) (any, error) {
 	return sf.cfg.Host.WatchStart(from, by, data)
+}
+
+func (sf *Surface) reqHostWorkspaces(ctx context.Context, _ *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
+	return sf.cfg.Host.Workspaces(ctx, data)
 }
 
 func (sf *Surface) replayTakeoverStart(ctx context.Context, from Ctl, by string, data json.RawMessage) (any, error) {
@@ -196,8 +202,9 @@ func (sf *Surface) groupsForAgent(agent string, sessions []host.Session) []proto
 		}
 		seen[k] = true
 		state, task := sf.cfg.Host.MemberState(k.group, k.member)
+		joined, _ := sf.cfg.Host.Sessions.Get(host.SessionKey{Group: k.group, Member: k.member})
 		out = append(out, proto.AgentGroup{
-			Group: proto.ID(k.group), Member: proto.ID(k.member), Level: 3,
+			Group: proto.ID(k.group), Member: proto.ID(k.member), Workspace: joined.Folder, Level: 3,
 			State: state, Task: proto.ID(task), Queued: sf.cfg.Host.QueuedCount(k.group, k.member), Watchers: sf.cfg.Host.Watchers(k.group, k.member),
 		})
 	}

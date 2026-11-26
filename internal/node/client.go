@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/host"
@@ -53,19 +54,24 @@ func (s *Sessions) cliLeave(c *sesConn) {
 func (s *Sessions) cliHandshake(ctx context.Context, c *sesConn, raw clientCtl) bool {
 	helloCtx, cancel := context.WithTimeout(ctx, cliHelloTimeout)
 	defer cancel()
-	ans, err := s.cliHello(helloCtx, raw, wireVersion)
-	if err == nil && cliVersionRefusal(ans) {
-		ans, err = s.cliHello(helloCtx, raw, legacyVersion)
-	}
-	if err != nil || !cliWelcomeOK(ans) {
+	ans, err := s.cliHello(helloCtx, raw)
+	if err != nil || !s.cliWelcomeOK(c, ans) {
 		return false
 	}
 	return s.cliSendLogs(c)
 }
 
-func cliWelcomeOK(ans json.RawMessage) bool {
-	var refused proto.ErrorResponse
-	return proto.Decode(ans, &refused) != nil
+// cliWelcomeOK takes a welcome of wireVersion and nothing else (datachannel.md section 3).
+func (s *Sessions) cliWelcomeOK(c *sesConn, ans json.RawMessage) bool {
+	var w proto.Welcome
+	err := proto.Decode(ans, &w)
+	if err == nil && w.V == wireVersion {
+		return true
+	}
+	if err == nil || cliVersionRefusal(ans) {
+		s.cfg.Report(fmt.Errorf("the home %s speaks another protocol version: update this node and that computer together", c.device))
+	}
+	return false
 }
 
 func (s *Sessions) cliSendLogs(c *sesConn) bool {

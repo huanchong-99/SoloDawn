@@ -345,7 +345,7 @@ func startPairedSession(t *testing.T, homeNode, hostNode *clientNodeRig) *ctlPai
 func checkLiveDevlogBothWays(t *testing.T, owner identity.Key, homeNode, hostNode *clientNodeRig, e4 proto.Envelope) {
 	t.Helper()
 	browser := serveConn(t, hostNode.sessions, owner.ID(), false)
-	browser.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b", Addrs: []string{}})
+	browser.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 3, Kind: "browser", Name: "b", Addrs: []string{}})
 	browser.next(t)
 	browser.next(t)
 
@@ -503,7 +503,7 @@ func checkPreAttachPushHeldUntilAttachReturns(t *testing.T, hostNode *clientNode
 
 	pair := newCtlPair()
 	pair.client.intercept = func(id int64, _ json.RawMessage) ([]json.RawMessage, bool) {
-		w := fmt.Sprintf(`{"t":"welcome","re":%d,"ok":true,"v":1,"device":%q,"name":"h","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, id, homeID)
+		w := fmt.Sprintf(`{"t":"welcome","re":%d,"ok":true,"v":3,"device":%q,"name":"h","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, id, homeID)
 		return []json.RawMessage{dlRaw, json.RawMessage(w), json.RawMessage(`{"t":"inbox","g":"g1","items":[]}`)}, true
 	}
 	done := make(chan struct{}) // single reader: checkPreAttachPushHeldUntilAttachReturns
@@ -540,7 +540,7 @@ func checkClientInboundFraming(t *testing.T, hostNode *clientNodeRig, homeID str
 			return nil, false
 		}
 		proto.Decode(raw, &gotHello)
-		w := fmt.Sprintf(`{"t":"welcome","re":%d,"ok":true,"v":1,"device":%q,"name":"h","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, id, homeID)
+		w := fmt.Sprintf(`{"t":"welcome","re":%d,"ok":true,"v":3,"device":%q,"name":"h","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, id, homeID)
 		return []json.RawMessage{json.RawMessage(w)}, true
 	}
 	done := make(chan struct{}) // single reader: checkClientInboundFraming cleanup
@@ -607,7 +607,7 @@ func TestConnectHomeSelfIgnoreReconnectAndMemberStatus(t *testing.T) {
 
 	statuses := make(chan map[string]any, 8) // single reader: TestConnectHomeSelfIgnoreReconnectAndMemberStatus
 	seedCmd := func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-		grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "RC", Checks: []string{}, Created: c.Now}
+		grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "RC", Created: c.Now}
 		own := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-own"}, Group: s.ID, Kind: "human", Name: "O", User: s.Owner}, Role: "admin"}
 		ai := proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: aiID}, Group: s.ID, Kind: "ai", Name: "Claude"}, CLI: "claude", Host: hostKey.ID(), Allow: []string{}, Approvers: []string{s.Owner}, State: "offline"}
 		return home.Result{Rows: []home.Row{home.RowOf(grp), home.RowOf(own), home.RowOf(ai)}, GroupsChanged: true}, nil
@@ -737,6 +737,7 @@ func TestClientHandshakeErrorsAndTimeout(t *testing.T) {
 	hostNode := newClientNodeRig(t, "host", hostKey, owner, entries, nil)
 
 	checkWelcomeErrorResponseCase(t, hostNode, homeKey.ID())
+	checkWelcomeVersionCases(t, hostNode, homeKey.ID())
 	checkDevlogSendErrorCase(t, hostNode, homeKey.ID())
 	checkHelloTimeoutInBubble(t, hostNode, homeKey.ID())
 }
@@ -752,9 +753,15 @@ func checkWelcomeErrorResponseCase(t *testing.T, hostNode *clientNodeRig, homeID
 		reply := fmt.Sprintf(`{"re":%d,"err":{"code":"version","msg":"unsupported"}}`, id)
 		return []json.RawMessage{json.RawMessage(reply)}, true
 	}
+	var reported []string
+	hostNode.sessions.cfg.Report = func(err error) { reported = append(reported, err.Error()) }
+	t.Cleanup(func() { hostNode.sessions.cfg.Report = func(error) {} })
 	hostNode.sessions.serveClient(t.Context(), homeID, p.client)
-	if !slices.Equal(versions, []int{2, 1}) {
-		t.Fatalf("attempted hello versions = %v, want [2 1]", versions)
+	if !slices.Equal(versions, []int{3}) {
+		t.Fatalf("attempted hello versions = %v, want [3]", versions)
+	}
+	if want := "the home " + homeID + " speaks another protocol version: update this node and that computer together"; !slices.Equal(reported, []string{want}) {
+		t.Fatalf("reported %q, want %q", reported, want)
 	}
 	if _, ok := hostNode.host.Home(homeID); ok {
 		t.Fatal("refused handshake attached home")
@@ -763,6 +770,38 @@ func checkWelcomeErrorResponseCase(t *testing.T, hostNode *clientNodeRig, homeID
 		t.Fatal("refused handshake sent devlog")
 	}
 	<-p.Done()
+}
+
+// A welcome of another protocol version is refused and reported; another
+// error is refused without the version report.
+func checkWelcomeVersionCases(t *testing.T, hostNode *clientNodeRig, homeID string) {
+	t.Helper()
+	cases := []struct {
+		name, reply string
+		reported    bool
+	}{
+		{"welcome of version 2", `{"t":"welcome","re":%d,"ok":true,"v":2,"device":"d","name":"n","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, true},
+		{"another error", `{"re":%d,"err":{"code":"forbidden","msg":"no"}}`, false},
+	}
+	for _, tc := range cases {
+		p := newCtlPair()
+		p.client.intercept = func(id int64, _ json.RawMessage) ([]json.RawMessage, bool) {
+			return []json.RawMessage{json.RawMessage(fmt.Sprintf(tc.reply, id))}, true
+		}
+		var reported []string
+		hostNode.sessions.cfg.Report = func(err error) { reported = append(reported, err.Error()) }
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second) // a welcome that is taken keeps the session open
+		hostNode.sessions.serveClient(ctx, homeID, p.client)
+		cancel()
+		if got := len(reported) == 1; got != tc.reported {
+			t.Fatalf("%s: reported %q, want a report = %t", tc.name, reported, tc.reported)
+		}
+		if _, ok := hostNode.host.Home(homeID); ok {
+			t.Fatalf("%s: attached the home", tc.name)
+		}
+		<-p.Done()
+	}
+	hostNode.sessions.cfg.Report = func(error) {}
 }
 
 func checkDevlogSendErrorCase(t *testing.T, hostNode *clientNodeRig, homeID string) {
@@ -774,7 +813,7 @@ func checkDevlogSendErrorCase(t *testing.T, hostNode *clientNodeRig, homeID stri
 	p := newCtlPair()
 	p.client.failAt = 2
 	p.client.intercept = func(id int64, _ json.RawMessage) ([]json.RawMessage, bool) {
-		w := fmt.Sprintf(`{"t":"welcome","re":%d,"ok":true,"v":1,"device":"d","name":"n","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, id)
+		w := fmt.Sprintf(`{"t":"welcome","re":%d,"ok":true,"v":3,"device":"d","name":"n","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, id)
 		return []json.RawMessage{json.RawMessage(w), json.RawMessage(`{"t":"inbox","g":"g1","items":[]}`)}, true
 	}
 	hostNode.sessions.serveClient(t.Context(), homeID, p.client)

@@ -709,7 +709,7 @@ func dialTestRTC(t *testing.T, bPeer *peer.Peer, nodeID string) *peer.Connection
 func sendBrowserHello(t *testing.T, conn *peer.Connection, wantOwner bool) {
 	t.Helper()
 	raw, err := conn.Request(t.Context(), func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "b1", Addrs: []string{}}
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 3, Kind: "browser", Name: "b1", Addrs: []string{}}
 	})
 	mustNoErr(t, err)
 	var w proto.Welcome
@@ -722,7 +722,7 @@ func verifySurfaceAndGroupCreate(t *testing.T, conn *peer.Connection, browserKey
 	t.Helper()
 	checkNodeHostInfo(t, conn, nodeID, wantName)
 	gid := sesID("grp-adopted")
-	createEnv := browserKey.Sign(fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":"Main","kind":"project","forge":"none","repo":"/tmp/r","base":"main","checks":[],"member_name":"Owner"}`, gid, time.Now().UnixMilli(), gid))
+	createEnv := browserKey.Sign(fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":"Main","member_name":"Owner"}`, gid, time.Now().UnixMilli(), gid))
 	rawCreate, err := conn.Request(t.Context(), func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: createEnv}
 	})
@@ -1041,7 +1041,7 @@ func startAdoptedConn(t *testing.T, n *nodeRuntime, device string) *fakeCtl {
 	t.Helper()
 	fc := newFakeCtl()
 	n.spawn("test", func() { n.sessions.Serve(n.ctx, device, false, fc) })
-	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b1", Addrs: []string{}})
+	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 3, Kind: "browser", Name: "b1", Addrs: []string{}})
 	fc.next(t)
 	fc.next(t)
 	return fc
@@ -1237,7 +1237,7 @@ func TestNodeWatchGrantAdmission(t *testing.T) {
 func checkWatchWelcome(t *testing.T, conn *peer.Connection) {
 	t.Helper()
 	raw, err := conn.Request(t.Context(), func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "Watcher", Addrs: []string{}}
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 3, Kind: "browser", Name: "Watcher", Addrs: []string{}}
 	})
 	mustNoErr(t, err)
 	var welcome proto.Welcome

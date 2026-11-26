@@ -40,20 +40,28 @@ var openCodeCategories = map[string]string{"bash": "command", "edit": "file", "w
 type openCodeDriver struct{}
 
 func (openCodeDriver) Models(ctx context.Context) []proto.Model {
+	models := []proto.Model{}
+	openCodeServer(ctx, func(get func(path string) ([]byte, error)) {
+		if data, err := get("/api/model"); err == nil {
+			models = openCodeModels(data)
+		}
+	})
+	return models
+}
+
+// openCodeServer gives use the GET of a server of its own, started in no
+// folder, which the end of the probe time stops.
+func openCodeServer(ctx context.Context, use func(get func(path string) ([]byte, error))) {
 	ctx, cancel := context.WithTimeout(ctx, agtProbeSeconds*time.Second)
 	defer cancel()
 	p := &openCodeProcess{password: rand.Text()}
 	out, wait, err := serve(ctx, "", []string{"OPENCODE_SERVER_PASSWORD=" + p.password}, "opencode", "serve", "--hostname", "127.0.0.1", "--port", "0")
 	if err != nil {
-		return []proto.Model{}
+		return
 	}
 	defer func() { cancel(); wait() }()
 	p.base = serverAddress(out)
-	data, err := p.call(http.MethodGet, "/api/model", nil)
-	if err != nil {
-		return []proto.Model{}
-	}
-	return openCodeModels(data)
+	use(func(path string) ([]byte, error) { return p.call(http.MethodGet, path, nil) })
 }
 
 type openCodeModel struct {

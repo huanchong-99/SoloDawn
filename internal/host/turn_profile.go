@@ -25,7 +25,7 @@ func profileMembers(rows *Rows, group string) []proto.AIMemberRow {
 }
 
 func (c *turnCtx) profileRoster() string {
-	lines := []string{"AI members (CLI on computer · tier · state · skills):"}
+	lines := []string{"AI members (CLI on computer · folder · tier · state · skills):"}
 	for _, ai := range profileMembers(c.h.Rows, c.s.Group) {
 		lines = append(lines, c.profileMemberLine(ai))
 	}
@@ -37,7 +37,7 @@ func (c *turnCtx) profileMemberLine(ai proto.AIMemberRow) string {
 	if ai.Tool != "" {
 		cli += " (" + ai.Tool + ")"
 	}
-	line := fmt.Sprintf("- %q · %s on %s · %s · %s", ai.Name, cli, ai.HostName, profileTier(ai), ai.State)
+	line := fmt.Sprintf("- %q · %s on %s · %s · %s · %s", ai.Name, cli, ai.HostName, ai.Workspace, profileTier(ai), ai.State)
 	if ai.Task != "" {
 		line += " on " + c.taskRef(ai.Task)
 	}

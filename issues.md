@@ -52,7 +52,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `takeover.start` for a working AI without an unfinished task opens its group session and creates no task. For a CLI whose takeover is `resume` (Codex) and a group session that has never run, the start answers `cli` (`codex: interactive takeover requires an existing thread id`). `internal/host/instructions/*.md` and the hand-back sentence of `ownTurnBody` (`internal/host/turn.go`) still name `push_branch`, `run_checks`, the review diff and "run the checks".
 - Cause: unit HS-A removed the takeover task, its structured `assign` turn and the Git facts (`internal/host/takeover.go`) only as far as package `host` needed to compile. The structured first turn of a group session, the turn texts and the instructions are unit HS-B's.
-- Status: open until HS-B.
+- Status: resolved by unit HS-B: a session that has never run of a `resume` CLI gets one `TakeoverTurn` in structured mode before the terminal opens (`readyForTerminal`, `internal/host/takeover.go`), and the instructions and the hand-back sentence name no removed tool or check.
 
 ### 2026-11-26 · bug (test) · The owed-turn line of `delivery.forget` was covered by a race
 

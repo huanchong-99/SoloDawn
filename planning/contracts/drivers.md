@@ -417,17 +417,19 @@ Contents:
 - **Task session**:
   - Work only in this folder; it is your workspace in this group. Other
     members work in their own folders, some of them on other computers.
-  - Before you start, bring the folder up to date the way the project does
-    (with Git and a remote: pull). If the thread shows that another AI
-    worked on this task before you, find out first where its work is: read
-    the thread, ask it.
-  - The folder may hold changes you did not make: its owner's, or another
-    task's. Leave them. With Git that means: stage and commit only the
-    files you changed, never `git add -A` or `git commit -a`; while the
-    folder holds changes you did not make, never stash, reset, clean, check
-    out over files, rebase or switch branches, and say in the thread what
-    is in your way and ask; never force a push and never rewrite history
-    that was published.
+  - Before you start, look at the folder's state (with Git: `git status`)
+    and treat every change you did not make as someone else's, its
+    owner's or another task's. Leave them. If the thread shows that
+    another AI worked on this task before you, find out first where its
+    work is: read the thread, ask it.
+  - Then bring the folder up to date the way the project does; with Git,
+    `git pull --ff-only`. If it cannot fast-forward, or the folder is not
+    clean enough to update, stop and say so in the thread instead of
+    forcing it.
+  - In this folder never stash, reset, clean, `git add -A`, `git add .`,
+    `git commit -a`, check out over files, rebase, switch branches or
+    force push; stage and commit only your own files, by path. Never
+    rewrite history that was published.
   - Test the way the project does: its own test, build and lint commands,
     as its README, its contributor notes, its scripts and its CI describe
     them. SoloDawn runs no checks for you.

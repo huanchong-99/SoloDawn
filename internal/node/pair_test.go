@@ -356,7 +356,7 @@ func (sc *simCtl) nextPush(t *testing.T) json.RawMessage {
 func sendSimHello(t *testing.T, ctl *simCtl, name string) proto.Welcome {
 	t.Helper()
 	raw, err := ctl.conn.Request(t.Context(), func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: name, Addrs: []string{}}
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 3, Kind: "browser", Name: name, Addrs: []string{}}
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -485,7 +485,7 @@ func TestPairBrowserRoleAAndNonceReplay(t *testing.T) {
 	ph := newPairHarness(t, &ownerKey, true)
 
 	b1Ctl := serveConn(t, ph.sessions, ownerKey.ID(), false)
-	b1Ctl.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "Desktop", Addrs: []string{}})
+	b1Ctl.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 3, Kind: "browser", Name: "Desktop", Addrs: []string{}})
 	b1Ctl.next(t) // welcome
 	b1Ctl.next(t) // initial devlog
 
