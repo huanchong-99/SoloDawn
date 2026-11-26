@@ -36,6 +36,7 @@ const (
 	accCallID  = "EEEEEEEEEEEEEEEEEEEEEQ"
 	accTask2ID = "FFFFFFFFFFFFFFFFFFFFFQ"
 	accReport  = "GGGGGGGGGGGGGGGGGGGGGQ"
+	accMember2 = "HHHHHHHHHHHHHHHHHHHHHQ"
 	accNowMS   = int64(1763600000000)
 )
 
@@ -144,7 +145,8 @@ func (f *accHome) allAcks() int {
 type accRunner struct {
 	mu    sync.Mutex
 	turns map[string]int
-	log   []string // "close <task>" and "turn <task> in <folder>", in order
+	log   []string                 // "close <task>", "exit <task>" and "turn <task> in <folder>", in order
+	hold  map[string]chan struct{} // the tasks whose process exits only when the channel is closed
 }
 
 func (r *accRunner) Turn(_ context.Context, h *host.Host, key host.SessionKey, _ string, _ host.Turn) error {
@@ -162,13 +164,36 @@ func (r *accRunner) Turn(_ context.Context, h *host.Host, key host.SessionKey, _
 
 func (r *accRunner) Answer(*host.Host, host.SessionKey, string, bool) error { return nil }
 
+// Close waits, as the session runtime does, for the process to exit: for a
+// held task, until the scenario lets it.
 func (r *accRunner) Close(h *host.Host, key host.SessionKey) {
+	r.mu.Lock()
+	r.log = append(r.log, "close "+key.Task)
+	exited, held := r.hold[key.Task]
+	r.mu.Unlock()
+	if held {
+		<-exited
+		r.note("exit " + key.Task)
+	}
 	if s, ok := h.Sessions.Get(key); ok && s.State != host.Dormant {
 		h.Sessions.Move(key, s.State, host.Dormant)
 	}
+}
+
+func (r *accRunner) note(line string) {
 	r.mu.Lock()
-	r.log = append(r.log, "close "+key.Task)
+	r.log = append(r.log, line)
 	r.mu.Unlock()
+}
+
+// holdExit makes the process of a task exit only when the returned function
+// is called, which may be called more than once.
+func (r *accRunner) holdExit(task string) func() {
+	exited := make(chan struct{})
+	r.mu.Lock()
+	r.hold = map[string]chan struct{}{task: exited}
+	r.mu.Unlock()
+	return sync.OnceFunc(func() { close(exited) })
 }
 
 func (r *accRunner) logged() []string {
@@ -194,6 +219,7 @@ type accDeliverEnv struct {
 	runner  *accRunner
 	askCh   <-chan json.RawMessage
 	askDone func()
+	exit    func() // lets the held process exit
 }
 
 func makeAccKey(seed byte) identity.Key {
@@ -352,6 +378,7 @@ func hostDeliverSteps(sc *godog.ScenarioContext, f fixtures) {
 	registerDeliverWhenSteps(sc, env)
 	registerDeliverThenSteps(sc, env)
 	registerDeliverSessionSteps(sc, env)
+	registerSharedFolderSteps(sc, cleanup, env)
 }
 
 func registerDeliverGivenSteps(sc *godog.ScenarioContext, f fixtures, cleanup func(func()), env *accDeliverEnv, installHooks func()) {
@@ -580,20 +607,9 @@ func registerDeliverThenSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 	})
 }
 
-// registerDeliverSessionSteps covers the sessions that delivery makes: a task
-// session after the obsolete ones are closed, and a review session that keeps
-// the report it was given.
+// registerDeliverSessionSteps covers a review session that keeps the report it
+// was given.
 func registerDeliverSessionSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
-	sc.Step(`^"Claude Code" has a task session for task "T-1", which is done$`, func() error {
-		env.pushRows(accTaskRow(accTaskID, 1, "done", 4))
-		key := host.SessionKey{Group: accGroupID, Member: accMember1, Task: accTaskID}
-		return env.h.Sessions.Create(host.Session{SessionKey: key, Kind: host.TaskSession, Folder: handFolder, Agent: "claude", Home: env.homeKey.ID(), Name: "Claude Code"})
-	})
-	sc.Step(`^"home-1" pushes assign item (\d+) for "Claude Code" on its active task "T-2"$`, func(num int) {
-		env.pushRows(accTaskRow(accTask2ID, 2, "active", 5))
-		env.pushSignedItem(env.homeKey, env.homeKey.ID(), proto.Item{Item: int64(num), AI: accMember1, Why: "assign", Task: accTask2ID}, nil)
-	})
-	sc.Step(`^the host closed the session of "T-1" before the first turn of "T-2", which ran in the folder of the group session of "Claude Code"$`, env.checkClosedFirst)
 	sc.Step(`^"home-1" pushes review item (\d+) for "Claude Code" of report "R-1" on task "T-1"$`, func(num int) {
 		task := accTaskRow(accTaskID, 1, "active", 4)
 		task.Assignee, task.Reviewer, task.Step, task.Report = accSecID, accMember1, "review", accReport
@@ -615,21 +631,6 @@ func (e *accDeliverEnv) pushRows(rows ...proto.TaskRow) {
 		raw[i] = json.RawMessage(accJSON(row))
 	}
 	e.h.Push(e.homeKey.ID(), json.RawMessage(accJSON(proto.Rows{Type: "rows", Group: accGroupID, Rows: raw})))
-}
-
-func (e *accDeliverEnv) checkClosedFirst() error {
-	group, _ := e.h.Sessions.Get(host.SessionKey{Group: accGroupID, Member: accMember1})
-	want := []string{"close " + accTaskID, "turn " + accTask2ID + " in " + group.Folder}
-	err := waitUntil(2*time.Second, "the first turn of T-2", func() error {
-		if got := e.runner.logged(); !slices.Equal(got, want) {
-			return fmt.Errorf("the runner did %q, want %q", got, want)
-		}
-		return nil
-	})
-	if _, open := e.h.Sessions.Get(host.SessionKey{Group: accGroupID, Member: accMember1, Task: accTaskID}); err == nil && open {
-		err = errors.New("the session of T-1 is still there")
-	}
-	return err
 }
 
 // reviewAfterRestart opens a host on the same store, as after a restart of
@@ -673,4 +674,87 @@ func (f *accHome) posts() []proto.Post[proto.ReviewSigned] {
 		}
 	}
 	return posts
+}
+
+// registerSharedFolderSteps covers two AIs added with one folder: the first
+// turn of the next task waits for the process of the task before it to exit
+// (A5.24).
+func registerSharedFolderSteps(sc *godog.ScenarioContext, cleanup func(func()), env *accDeliverEnv) {
+	sc.Step(`^"Codex" was added to the group with the folder of "Claude Code"$`, env.addSecondAI)
+	sc.Step(`^"Claude Code" is still running the turn in which it submitted task "T-1"$`, func() error {
+		env.exit = env.runner.holdExit(accTaskID)
+		cleanup(env.exit)
+		return env.runSubmittedTurn()
+	})
+	sc.Step(`^the review of "T-1" passes and "home-1" pushes assign item (\d+) for "Codex" on task "T-2"$`, env.passAndAssign)
+	sc.Step(`^the host is closing the session of "T-1" and no turn of "T-2" has started$`, env.checkClosing)
+	sc.Step(`^the process of "Claude Code" exits$`, func() { env.exit() })
+	sc.Step(`^the first turn of "T-2" started after that exit, in the folder the two AIs share, and the session of "T-1" is gone$`, env.checkStartedAfterExit)
+}
+
+// addSecondAI writes the member row of a Codex AI and the group session that
+// host.join writes for it, in the folder of Claude Code's group session.
+func (e *accDeliverEnv) addSecondAI() error {
+	var row proto.AIMemberRow
+	proto.Decode([]byte(accMemberRowJSON(accMember2, "Codex", e.hostKey.ID(), false, 4)), &row)
+	row.CLI = "codex"
+	e.h.Rows.Put(accGroupID, "member", accMember2, json.RawMessage(accJSON(row)))
+	first, _ := e.h.Sessions.Get(host.SessionKey{Group: accGroupID, Member: accMember1})
+	key := host.SessionKey{Group: accGroupID, Member: accMember2}
+	return e.h.Sessions.Create(host.Session{SessionKey: key, Kind: host.GroupSession, Folder: first.Folder, Agent: "codex", Home: e.homeKey.ID(), Name: "Codex"})
+}
+
+// runSubmittedTurn leaves T-1 at step review, its report submitted, while the
+// turn of Claude Code's task session still runs.
+func (e *accDeliverEnv) runSubmittedTurn() error {
+	task := accTaskRow(accTaskID, 1, "active", 5)
+	task.Step, task.Reviewer, task.Report = "review", accSecID, accReport
+	e.h.Rows.Put(accGroupID, "task", accTaskID, json.RawMessage(accJSON(task)))
+	key := host.SessionKey{Group: accGroupID, Member: accMember1, Task: accTaskID}
+	if err := e.h.Sessions.Create(host.Session{SessionKey: key, Kind: host.TaskSession, Folder: handFolder, Agent: "claude", Home: e.homeKey.ID(), Name: "Claude Code"}); err != nil {
+		return err
+	}
+	return e.h.Sessions.Move(key, host.Dormant, host.Working)
+}
+
+// passAndAssign writes the rows of the passed review straight into the host's
+// copy, not as a rows push, which would close the session of T-1 by itself:
+// what is under test is the start of T-2. Then the home pushes T-2's assign
+// item for Codex.
+func (e *accDeliverEnv) passAndAssign(num int) {
+	done := accTaskRow(accTaskID, 1, "done", 6)
+	next := accTaskRow(accTask2ID, 2, "active", 7)
+	next.Assignee = accMember2
+	for _, row := range []proto.TaskRow{done, next} {
+		e.h.Rows.Put(accGroupID, "task", row.ID, json.RawMessage(accJSON(row)))
+	}
+	e.pushSignedItem(e.homeKey, e.homeKey.ID(), proto.Item{Item: int64(num), AI: accMember2, Why: "assign", Task: accTask2ID}, nil)
+}
+
+func (e *accDeliverEnv) checkClosing() error {
+	err := waitUntil(2*time.Second, "the host to act on T-2's assign item", func() error {
+		if len(e.runner.logged()) == 0 {
+			return errors.New("the runner did nothing")
+		}
+		return nil
+	})
+	if got, want := e.runner.logged(), []string{"close " + accTaskID}; err == nil && !slices.Equal(got, want) {
+		err = fmt.Errorf("before the process of T-1 exited the runner did %q, want %q", got, want)
+	}
+	return err
+}
+
+func (e *accDeliverEnv) checkStartedAfterExit() error {
+	shared, _ := e.h.Sessions.Get(host.SessionKey{Group: accGroupID, Member: accMember2})
+	want := []string{"close " + accTaskID, "exit " + accTaskID, "turn " + accTask2ID + " in " + shared.Folder}
+	err := waitUntil(2*time.Second, "the first turn of T-2", func() error {
+		if got := e.runner.logged(); !slices.Equal(got, want) || e.runner.count(accMember2) != 1 {
+			return fmt.Errorf("the runner did %q, Codex had %d turns; want %q", got, e.runner.count(accMember2), want)
+		}
+		return nil
+	})
+	if _, open := e.h.Sessions.Get(host.SessionKey{Group: accGroupID, Member: accMember1, Task: accTaskID}); err == nil && open {
+		err = errors.New("the session of T-1 is still there")
+	}
+	return err
 }

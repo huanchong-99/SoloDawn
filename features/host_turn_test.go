@@ -25,6 +25,7 @@ func init() {
 const (
 	turnGroupID = "rZNvy-1jH6Z-BcPqA5U5BQ"
 	turnTaskID  = "DrtCn6htSBwmMPrFPbHJHA"
+	turnTask2ID = "Pq7Lm2Nx4Rt6Vy8Zb1Cd3A"
 	turnBriefID = "KaiCW9JC8UOG7lKNduDo8Q"
 	turnCallID  = "Zk3m8vN2pQ5rT7wX9yB1cA"
 	turnSecID   = "qBSFMsr2hHYKOMblEA_kdA"
@@ -95,6 +96,8 @@ func hostTurnSteps(sc *godog.ScenarioContext, _ fixtures) {
 	sc.Step(`^the hand-back turn asks for a handback post and to continue the task$`, w.checkHandback)
 	sc.Step(`^"Claude Code" in "([^"]+)" on (this computer|"[^"]+") reported task 12 and "Codex" reviews it in "([^"]+)"$`, w.composeReview)
 	sc.Step(`^the review turn says where the work is:$`, w.checkWorkLines)
+	sc.Step(`^direct task 13 "([^"]+)" with plan "([^"]+)" waits behind task 12 for the folder of "Claude Code"$`, w.queueDirectTask)
+	sc.Step(`^task 12 is done, task 13 starts, and the host composes its first turn from its assign item with its task message$`, w.startQueuedTask)
 }
 
 func turnSeedKey(b byte) identity.Key {
@@ -345,4 +348,39 @@ func (w *turnStepWorld) checkWorkLines(doc *godog.DocString) error {
 		return fmt.Errorf("got:\n%s\nwant the lines after the pass score:\n%s", w.text, doc.Content)
 	}
 	return nil
+}
+
+// queueDirectTask writes the row of a direct task of Claude Code that is
+// queued behind task 12, the task in its folder.
+func (w *turnStepWorld) queueDirectTask(title, plan string) {
+	task := proto.TaskRow{
+		RowHeader: proto.RowHeader{Type: "task", ID: turnTask2ID, Seq: 6},
+		Group:     turnGroupID, Num: 13, Title: title, Origin: "direct", Plan: plan,
+		State: "queued", Step: "work", Assignee: turnAIID, Reviewer: turnPeerID,
+		Pass: 90, Depends: []string{}, Wait: &proto.TaskWait{Kind: "busy", Since: turnTimeMS}, Created: turnTimeMS,
+	}
+	w.h.Rows.Put(turnGroupID, "task", turnTask2ID, turnMustJSON(task))
+}
+
+// startQueuedTask writes the rows the home sends when task 12 is done and
+// task 13 starts, and composes task 13's first turn from the assign item the
+// home queues for it, which carries the task message of task 13.
+func (w *turnStepWorld) startQueuedTask() (err error) {
+	done := w.taskRow()
+	done.Seq, done.State = 7, "done"
+	raw, _ := w.h.Rows.Get(turnGroupID, "task", turnTask2ID)
+	var next proto.TaskRow
+	proto.Decode(raw, &next)
+	next.Seq, next.State, next.Wait, next.Stats.Started = 8, "active", nil, turnTimeMS
+	w.h.Rows.Put(turnGroupID, "task", turnTaskID, turnMustJSON(done))
+	w.h.Rows.Put(turnGroupID, "task", turnTask2ID, turnMustJSON(next))
+	msg := turnMustJSON(proto.MessageRow[proto.TaskBody, proto.NoCard]{
+		RowHeader: proto.RowHeader{Type: "msg", ID: turnTask2ID, Seq: 9}, Pos: 9, Group: turnGroupID, Main: true,
+		By: "system", Kind: "task", Timestamp: turnTimeMS, Mentions: []string{}, Body: proto.TaskBody{Task: turnTask2ID},
+	})
+	item := proto.Item{Item: 4, AI: proto.ID(turnAIID), Why: "assign", Task: proto.ID(turnTask2ID), Msg: proto.ID(turnTask2ID)}
+	s := w.sessionFor("task")
+	s.Task = turnTask2ID
+	w.text, w.turn, err = host.Compose(w.h, s, host.ItemsTurn, []json.RawMessage{turnMustJSON(proto.InboxItem{Item: item, Msg: msg})})
+	return err
 }

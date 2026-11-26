@@ -33,11 +33,14 @@ Feature: Host inbox delivery and group state sync
     When the running turn of "Claude Code" finishes and calls Deliver
     Then "Claude Code" has received 1 new turn and "home-1" has received 1 acknowledgement for item 32
 
-  Scenario: A task session starts in the AI's workspace only after the group's obsolete task sessions are closed (A5.24 host half)
+  Scenario: Two AIs share a folder: the next task's first turn starts only after the earlier assignee's process has exited (A5.24 host half)
     Given a paired host on disk with AI "Claude Code" in group "Website" homed on "home-1"
-    And "Claude Code" has a task session for task "T-1", which is done
-    When "home-1" pushes assign item 51 for "Claude Code" on its active task "T-2"
-    Then the host closed the session of "T-1" before the first turn of "T-2", which ran in the folder of the group session of "Claude Code"
+    And "Codex" was added to the group with the folder of "Claude Code"
+    And "Claude Code" is still running the turn in which it submitted task "T-1"
+    When the review of "T-1" passes and "home-1" pushes assign item 51 for "Codex" on task "T-2"
+    Then the host is closing the session of "T-1" and no turn of "T-2" has started
+    When the process of "Claude Code" exits
+    Then the first turn of "T-2" started after that exit, in the folder the two AIs share, and the session of "T-1" is gone
 
   Scenario: A review item writes its report into the review session, and submit_review names it after a restart (A5.19 host half)
     Given a paired host on disk with AI "Claude Code" in group "Website" homed on "home-1"

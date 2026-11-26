@@ -20,3 +20,14 @@ Feature: Node ctl session and device-log adoption
     Then both were answered "version"
     When the browser sends hello before any device log arrives
     Then welcome reports owner false
+
+  Scenario Outline: A node of this version that reaches a home of v3.0.0-rc.1 stops at version and does not retry with an older one (A8.7 node half)
+    Given a node of this version that remembers a home which answers its hello with <answer>
+    When the node has connected to that home twice
+    Then each connection carried one hello, of protocol version 3, and nothing after it
+    And the node's log says that the home speaks another protocol version
+
+    Examples:
+      | answer              |
+      | the error version   |
+      | a version-2 welcome |
