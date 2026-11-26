@@ -80,8 +80,8 @@ func TestAuditRowsWithoutAnItem(t *testing.T) {
 	if got := seamRecord(t, h); got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
-	whats := []string{AuditDelivered, AuditRefused, AuditMerge, AuditSetting, AuditKilled}
-	if got := strings.Join(whats, " "); got != "delivered refused merge setting killed" {
+	whats := []string{AuditDelivered, AuditRefused, AuditSetting, AuditKilled}
+	if got := strings.Join(whats, " "); got != "delivered refused setting killed" {
 		t.Fatalf("the constants spell %q, not the values of contracts/storage.md section 3", got)
 	}
 }
@@ -89,7 +89,7 @@ func TestAuditRowsWithoutAnItem(t *testing.T) {
 func TestAuditCommitsWithItsTransaction(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	failed := h.Store.Write(func(tx *store.Tx) error {
-		if written, err := h.Audit(tx, AuditRow{What: AuditMerge, Detail: "t12 9f2c1ab"}); err != nil || !written {
+		if written, err := h.Audit(tx, AuditRow{What: AuditSetting, Detail: "host.join Codex"}); err != nil || !written {
 			t.Errorf("got %v and %v", written, err)
 		}
 		_, err := tx.Exec("INSERT INTO no_such_table VALUES(1)")
@@ -100,7 +100,7 @@ func TestAuditCommitsWithItsTransaction(t *testing.T) {
 	}
 	seamSQL(t, h.Store, "DROP TABLE audit")
 	err := h.Store.Write(func(tx *store.Tx) error {
-		written, err := h.Audit(tx, AuditRow{What: AuditMerge})
+		written, err := h.Audit(tx, AuditRow{What: AuditSetting})
 		if written {
 			t.Error("a row that could not be stored counts as written")
 		}

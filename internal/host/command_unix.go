@@ -8,8 +8,8 @@ import (
 )
 
 // detachTerminal starts cmd in a new session, which has no controlling
-// terminal, so ssh cannot prompt on /dev/tty. A stop kills the whole session,
-// ssh included.
+// terminal, so nothing it starts can prompt on /dev/tty. A stop kills the
+// whole session.
 func detachTerminal(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Cancel = func() error {

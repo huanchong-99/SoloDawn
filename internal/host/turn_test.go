@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
-	"strconv"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,12 +28,16 @@ var (
 	tBriefID = turnID("brief-1")
 	tMsg1ID  = turnID("msg-1")
 	tMsg2ID  = turnID("msg-2")
+	tReport  = turnID("msg-report")
 	tSecID   = turnID("mem-secretary")
 	tAIID    = turnID("mem-claude")
 	tPeerID  = turnID("mem-codex")
 	tOwnerM  = turnID("mem-owner")
 	tAliceM  = turnID("mem-alice")
 )
+
+// tFolder is the workspace of every AI of the rig, on the rig's own host.
+const tFolder = "/home/dev/website"
 
 func testKey(seed byte) identity.Key {
 	return identity.Key(ed25519.NewKeyFromSeed(bytes.Repeat([]byte{seed}, ed25519.SeedSize)))
@@ -124,8 +128,7 @@ func (r *turnRig) seedOwnerStore(db *store.Store) {
 func (r *turnRig) seedGroupRows() {
 	r.h.Rows.Put(tGroupID, "group", tGroupID, mustJSON(r.t, proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: tGroupID, Seq: 1},
-		Name:      "Website", Kind: "project", Base: "main", Forge: "github", Home: r.homeKey.ID(),
-		Checks: []string{}, Pass: 90, PassFoundation: 70, Created: seamStart,
+		Name:      "Website", Home: r.homeKey.ID(), Pass: 90, PassFoundation: 70, Created: seamStart,
 	}))
 	r.putHuman(tOwnerM, r.ownerID, "owner", "owner")
 	r.putHuman(tAliceM, r.aliceID, "Alice", "admin")
@@ -145,7 +148,7 @@ func (r *turnRig) putHuman(id, user, name, role string) {
 func (r *turnRig) putAI(id, name, cli string, sec bool) {
 	r.h.Rows.Put(tGroupID, "member", id, mustJSON(r.t, proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: 3}, Group: tGroupID, Kind: "ai", User: r.ownerID, Name: name, LastSeen: seamStart},
-		CLI:       cli, Host: r.homeKey.ID(), HostName: "workstation", Secretary: sec, Account: "personal",
+		CLI:       cli, Host: r.homeKey.ID(), HostName: "workstation", Workspace: tFolder, Secretary: sec, Account: "personal",
 		Allow: []string{}, Approvers: []string{r.ownerID}, State: "waiting", Path: "local",
 	}))
 }
@@ -153,9 +156,8 @@ func (r *turnRig) putAI(id, name, cli string, sec bool) {
 func (r *turnRig) baseTask() proto.TaskRow {
 	return proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: tTaskID, Seq: 10},
-		Group:     tGroupID, Num: 12, Title: "Node: report connection path changes",
-		Slug: "node-report-connection-path-changes", Origin: "brief", Brief: tBriefID,
-		State: "active", Step: "branch", Commit: "9f2c1ab", Assignee: tAIID, Reviewer: tPeerID,
+		Group:     tGroupID, Num: 12, Title: "Node: report connection path changes", Origin: "brief", Brief: tBriefID,
+		State: "active", Step: "work", Assignee: tAIID, Reviewer: tPeerID,
 		Pass: 90, Depends: []string{}, Created: seamStart,
 	}
 }
@@ -165,6 +167,9 @@ func (r *turnRig) defaultHomeHandler(req any) (json.RawMessage, error) {
 	switch req := req.(type) {
 	case proto.FetchRow:
 		rows = []json.RawMessage{r.briefMsgJSON(tBriefID, &proto.CardState{Status: "pending"})}
+		if req.RowID == tReport {
+			rows = []json.RawMessage{r.reportMsg(tAIID)}
+		}
 	case proto.FetchKind:
 		rows = r.kindRows(req.Kind)
 	case proto.FetchThread:
@@ -197,13 +202,25 @@ func (r *turnRig) briefMsgJSON(id string, state *proto.CardState) json.RawMessag
 	})
 }
 
+// reportMsg is the report of the rig's task, as the AI by submitted it.
+func (r *turnRig) reportMsg(by string) json.RawMessage {
+	return mustJSON(r.t, proto.MessageRow[proto.EmptyBody, proto.NoCard]{
+		RowHeader: proto.RowHeader{Type: "msg", ID: tReport, Seq: 16},
+		Pos:       16, Group: tGroupID, Thread: &tTaskID, By: by, Kind: "report", Timestamp: seamStart, Mentions: []string{},
+		Text: "Path events are sent on every switch. Ran go test ./...: 42 passed. Commit 9f2c1ab on branch t12-path-events.",
+	})
+}
+
 func (r *turnRig) session(kind Kind, sec bool, cliSession string) Session {
 	s := Session{
 		SessionKey: SessionKey{Group: tGroupID, Member: tAIID},
-		Kind:       kind, Home: r.homeKey.ID(), Name: "Claude Code", CLISession: cliSession,
+		Kind:       kind, Folder: tFolder, Home: r.homeKey.ID(), Name: "Claude Code", CLISession: cliSession,
 	}
 	if kind == TaskSession || kind == ReviewSession {
 		s.Task = tTaskID
+	}
+	if kind == ReviewSession {
+		s.Report = tReport
 	}
 	if sec {
 		s.Secretary, s.Member, s.Name = true, tSecID, "Secretary"
@@ -340,7 +357,7 @@ func TestFirstTaskTurnFromBriefAndNotesLimit(t *testing.T) {
 		`[SoloDawn] group "Website" · you are "Claude Code" · task session T-12`,
 		`== 1 of 1 · assign · instruction`,
 		`Task T-12 "Node: report connection path changes"`,
-		`Branch: task/12-node-report-connection-path-changes (this folder is its worktree)`,
+		`Folder: /home/dev/website (your workspace in this group)`,
 		`Goal: Show the connection path and warn when relayed.`,
 		`Acceptance criteria:`,
 		`1. Indicator follows a path change within 1 s`,
@@ -398,7 +415,7 @@ func TestDirectAndNonFirstAssignTurns(t *testing.T) {
 	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, directTask))
 	reqMsg := r.textMsg(tMsg1ID, tOwnerM, "", "Please add the status badge.")
 	raw := r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, reqMsg, nil)
-	want := "[SoloDawn] group \"Website\" · you are \"Claude Code\" · task session T-12\n== 1 of 1 · assign · instruction\nTask T-12 \"Node: report connection path changes\"\nBranch: task/12-node-report-connection-path-changes (this folder is its worktree)\nPlan: Update status badge.\nReviewer: none   Pass score: 90\n-- from \"owner\" in main · instruction\nPlease add the status badge."
+	want := "[SoloDawn] group \"Website\" · you are \"Claude Code\" · task session T-12\n== 1 of 1 · assign · instruction\nTask T-12 \"Node: report connection path changes\"\nFolder: /home/dev/website (your workspace in this group)\nPlan: Update status badge.\nReviewer: none   Pass score: 90\n-- from \"owner\" in main · instruction\nPlease add the status badge."
 	assertComposed(t, r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{raw}, want, Turn{Kind: ItemsTurn, Thread: tTaskID})
 
 	directTask.Plan, directTask.Reviewer = "", turnID("gone-rev")
@@ -428,15 +445,15 @@ func checkNonFirstAssignVariants(t *testing.T, r *turnRig, rawNoMsg, rawTaskMsg 
 	assertSuffix(t, gotGroup, err, shortWant)
 	gotBatch, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{rawNoMsg, rawNoMsg})
 	assertSuffix(t, gotBatch, err, "== 2 of 2 · assign · instruction\n"+shortWant)
-	detail := "merge conflict on a.go"
-	checksMsg := mustJSON(t, proto.MessageRow[proto.ChecksBody, proto.NoCard]{
+	// A task given to another AI carries its latest review.
+	reviewMsg := mustJSON(t, proto.MessageRow[proto.ReviewBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg2ID, Seq: 18},
-		Pos:       18, Group: tGroupID, Thread: &tTaskID, By: "system", Kind: "checks", Timestamp: seamStart, Mentions: []string{},
-		Body: proto.ChecksBody{Stage: "merge", OK: false, Commit: "9f2c1ab", Items: []proto.CheckItem{{Name: "merge", OK: false, Detail: &detail}}},
+		Pos:       18, Group: tGroupID, Thread: &tTaskID, By: tPeerID, Kind: "review", Timestamp: seamStart, Mentions: []string{},
+		Body: proto.ReviewBody{Task: tTaskID, Num: 12, Title: "Paths", Report: tReport, Round: 2, Score: 70, Pass: 90, Items: []proto.ReviewItem{{Text: "No event after switching back"}}},
 	})
-	rawConflict := r.makeInboxItem(proto.Item{Item: 4, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg2ID)}, checksMsg, nil)
-	gotConflict, _, err := Compose(r.h, r.session(TaskSession, false, "existing-cli"), ItemsTurn, []json.RawMessage{rawConflict})
-	assertContains(t, gotConflict, err, "== 1 of 1 · assign · instruction\n-- from the home in T-12 · information\nChecks (merge) on commit 9f2c1ab: failed\n- merge: fail\nmerge conflict on a.go")
+	rawReviewed := r.makeInboxItem(proto.Item{Item: 4, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg2ID)}, reviewMsg, nil)
+	gotReviewed, _, err := Compose(r.h, r.session(TaskSession, false, "existing-cli"), ItemsTurn, []json.RawMessage{rawReviewed})
+	assertContains(t, gotReviewed, err, "== 1 of 1 · assign · instruction\n-- from \"Codex\" (AI) in T-12 · information\nReview round 2: score 70/90\n- No event after switching back")
 }
 
 func TestAuthorityAndSpeakerFromRows(t *testing.T) {
@@ -493,7 +510,7 @@ func checkStoreAndRowFallbacks(t *testing.T, r *turnRig) {
 	}
 }
 
-func TestMentionCallReplyReviewReviewedChecksAndResume(t *testing.T) {
+func TestMentionCallReplyReviewedAndResume(t *testing.T) {
 	r := newTurnRig(t)
 	callBody := proto.CallBody{To: tAIID, Depth: 3, Wait: true}
 	callMsg := mustJSON(t, proto.MessageRow[proto.CallBody, proto.NoCard]{
@@ -517,20 +534,14 @@ func TestMentionCallReplyReviewReviewedChecksAndResume(t *testing.T) {
 	if _, turn2, err := Compose(r.h, r.session(TaskSession, false, "c1"), ItemsTurn, []json.RawMessage{item2, item1}); err != nil || turn2 != (Turn{Kind: ItemsTurn, Thread: tTaskID, Depth: 3, Jump: true}) {
 		t.Fatalf("reverse jump batch failed: %+v (%v)", turn2, err)
 	}
-	checkReviewReviewedChecksResume(t, r)
+	checkReviewedAndResume(t, r)
 }
 
-func checkReviewReviewedChecksResume(t *testing.T, r *turnRig) {
+func checkReviewedAndResume(t *testing.T, r *turnRig) {
 	t.Helper()
-	revRaw := r.makeInboxItem(proto.Item{Item: 3, AI: proto.ID(tPeerID), Why: "review", Task: proto.ID(tTaskID), Commit: "9f2c1ab"}, nil, nil)
-	gotRev, _, err := Compose(r.h, r.session(ReviewSession, false, ""), ItemsTurn, []json.RawMessage{revRaw})
-	if err != nil || !strings.Contains(gotRev, "Commit: 9f2c1ab\nDiff: .solodawn-review.diff\nGoal: Show the connection path and warn when relayed.") || !strings.HasSuffix(gotRev, "\nIn scope: node\nOut of scope: relay\nPass score: 90") {
-		t.Fatalf("review turn failed: err=%v\n%s", err, gotRev)
-	}
-
 	file, line := "conn/switch.go", 88
 	revBody := proto.ReviewBody{
-		Task: tTaskID, Num: 12, Title: "Paths", Commit: "9f2c1ab", Round: 1, Score: 0, Pass: 90, OK: false,
+		Task: tTaskID, Num: 12, Title: "Paths", Report: tReport, Round: 1, Score: 0, Pass: 90, OK: false,
 		Items: []proto.ReviewItem{
 			{Text: "Missing test", Veto: true, File: &file, Line: &line},
 			{Text: "Doc Drift", Veto: false, File: &file},
@@ -543,30 +554,15 @@ func checkReviewReviewedChecksResume(t *testing.T, r *turnRig) {
 	})
 	reviewedRaw := r.makeInboxItem(proto.Item{Item: 4, Why: "reviewed", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, revMsg, nil)
 	gotReviewed, _, err := Compose(r.h, r.session(TaskSession, false, "c1"), ItemsTurn, []json.RawMessage{reviewedRaw})
-	wantReviewed := "Review round 1 on commit 9f2c1ab: score 0/90\n- [veto] conn/switch.go:88: Missing test\n- conn/switch.go: Doc Drift\n- Overall note\nPlease fix."
+	wantReviewed := "Review round 1: score 0/90\n- [veto] conn/switch.go:88: Missing test\n- conn/switch.go: Doc Drift\n- Overall note\nPlease fix."
 	if err != nil || !strings.Contains(gotReviewed, "== 1 of 1 · reviewed · instruction\n-- from \"Codex\" (AI) in T-12 · information\n"+wantReviewed) {
 		t.Fatalf("reviewed turn failed: err=%v\n%s", err, gotReviewed)
 	}
-	checkChecksResumeAndMissingMsgItems(t, r)
+	checkResumeAndMissingMsgItems(t, r)
 }
 
-func checkChecksResumeAndMissingMsgItems(t *testing.T, r *turnRig) {
+func checkResumeAndMissingMsgItems(t *testing.T, r *turnRig) {
 	t.Helper()
-	empty, detail := "", "race failed"
-	checksPass := mustJSON(t, proto.MessageRow[proto.ChecksBody, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 15},
-		Pos:       15, Group: tGroupID, Thread: &tTaskID, By: "system", Kind: "checks", Timestamp: seamStart, Mentions: []string{},
-		Body: proto.ChecksBody{Stage: "cloud", OK: true, Commit: "9f2c1ab", Items: []proto.CheckItem{
-			{Name: "lint", OK: true},
-			{Name: "vet", OK: true, Detail: &empty},
-			{Name: "test", OK: false, Detail: &detail},
-		}},
-	})
-	checksRaw := r.makeInboxItem(proto.Item{Item: 5, Why: "checks", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, checksPass, nil)
-	gotChecks, _, err := Compose(r.h, r.session(TaskSession, false, "c1"), ItemsTurn, []json.RawMessage{checksRaw})
-	if err != nil || !strings.Contains(gotChecks, "== 1 of 1 · checks · instruction\n-- from the home in T-12 · information\nChecks (cloud) on commit 9f2c1ab: passed\n- lint: pass\n- vet: pass\n- test: fail\nrace failed") {
-		t.Fatalf("checks turn failed: err=%v\n%s", err, gotChecks)
-	}
 	resumeRaw := r.makeInboxItem(proto.Item{Item: 6, Why: "resume", Task: proto.ID(tTaskID)}, nil, nil)
 	gotResume, _, err := Compose(r.h, r.session(TaskSession, false, "c1"), ItemsTurn, []json.RawMessage{resumeRaw})
 	if err != nil || !strings.HasSuffix(gotResume, "== 1 of 1 · resume · instruction\nTask T-12 resumed. Continue the task.") {
@@ -577,18 +573,16 @@ func checkChecksResumeAndMissingMsgItems(t *testing.T, r *turnRig) {
 		r.makeInboxItem(proto.Item{Item: 7, Why: "mention"}, nil, nil),
 		r.makeInboxItem(proto.Item{Item: 8, Why: "reply", Task: proto.ID(tTaskID)}, nil, nil),
 		r.makeInboxItem(proto.Item{Item: 9, Why: "reviewed", Task: proto.ID(tTaskID)}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 10, Why: "checks", Task: proto.ID(tTaskID)}, nil, nil),
 		r.makeInboxItem(proto.Item{Item: 11, Why: "decided"}, nil, nil),
 		r.makeInboxItem(proto.Item{Item: 12, Why: "confirmed"}, nil, nil),
 	}
 	wantNil := strings.Join([]string{
 		`[SoloDawn] group "Website" · you are "Claude Code" · group session`,
-		`== 1 of 6 · mention · in main · information`,
-		`== 2 of 6 · reply · in T-12 · information`,
-		`== 3 of 6 · reviewed · instruction`,
-		`== 4 of 6 · checks · instruction`,
-		`== 5 of 6 · decided · information`,
-		`== 6 of 6 · confirmed · information`,
+		`== 1 of 5 · mention · in main · information`,
+		`== 2 of 5 · reply · in T-12 · information`,
+		`== 3 of 5 · reviewed · instruction`,
+		`== 4 of 5 · decided · information`,
+		`== 5 of 5 · confirmed · information`,
 	}, "\n")
 	assertComposed(t, r.h, r.session(GroupSession, false, "c1"), ItemsTurn, batchNil, wantNil, Turn{Kind: ItemsTurn})
 }
@@ -756,28 +750,24 @@ func checkNoticeVariants(t *testing.T, r *turnRig) {
 
 func checkHandbackAndTaskStartedNotices(t *testing.T, r *turnRig, sec Session) {
 	t.Helper()
-	hbMsg := mustJSON(t, proto.MessageRow[proto.HandbackBody, proto.NoCard]{
+	hbMsg := mustJSON(t, proto.MessageRow[proto.EmptyBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 20},
 		Pos:       20, Group: tGroupID, Thread: &tTaskID, By: tAIID, Kind: "handback", Timestamp: seamStart, Text: "Fixed switch-back.", Mentions: []string{},
-		Body: proto.HandbackBody{Files: []string{"a.go", "b.go"}, Commits: []proto.CommitSubject{{SHA: "9f2c1ab", Subject: "Emit path"}}, Added: 40, Removed: 3},
 	})
 	gotHB, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 4, AI: proto.ID(tSecID), Why: "notice", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID), Code: "handback"}, hbMsg, nil),
 	})
-	wantHB := "== 1 of 1 · notice · information\nNotice (handback) on task T-12 \"Node: report connection path changes\"\n-- from \"Claude Code\" (AI) in T-12 · information\nChanges: +40 -3 (2 files, 1 commits)\n- 9f2c1ab Emit path\nFiles: a.go, b.go\nFixed switch-back."
+	wantHB := "== 1 of 1 · notice · information\nNotice (handback) on task T-12 \"Node: report connection path changes\"\n-- from \"Claude Code\" (AI) in T-12 · information\nFixed switch-back."
 	assertContains(t, gotHB, err, wantHB)
-	hbEmpty := mustJSON(t, proto.MessageRow[proto.HandbackBody, proto.NoCard]{
+	// The host posted the hand-back for an AI that did not: it has no text.
+	hbEmpty := mustJSON(t, proto.MessageRow[proto.EmptyBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg2ID, Seq: 21},
 		Pos:       21, Group: tGroupID, Main: true, By: tSecID, Kind: "handback", Timestamp: seamStart, Mentions: []string{},
-		Body: proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}, Added: 0, Removed: 0},
 	})
 	gotHBEmpty, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 5, AI: proto.ID(tSecID), Why: "notice", Msg: proto.ID(tMsg2ID), Code: "handback"}, hbEmpty, nil),
 	})
-	assertSuffix(t, gotHBEmpty, err, "Changes: +0 -0 (0 files, 0 commits)")
-	if strings.Contains(gotHBEmpty, "Files:") {
-		t.Fatalf("empty handback notice failed: err=%v\n%s", err, gotHBEmpty)
-	}
+	assertSuffix(t, gotHBEmpty, err, "-- from \"Secretary\" (AI) in main · information\n(handback)")
 	taskCard := mustJSON(t, proto.MessageRow[proto.TaskBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 22},
 		Pos:       22, Group: tGroupID, Main: true, By: "system", Kind: "task", Timestamp: seamStart, Mentions: []string{}, Body: proto.TaskBody{Task: tTaskID},
@@ -858,7 +848,8 @@ func checkReplacedReviewAndGroupSessions(t *testing.T, r *turnRig, wantHistory s
 	if turnRev != (Turn{Kind: ReplacedTurn, Thread: tTaskID}) {
 		t.Fatalf("replaced review session failed: err=%v turn=%+v\n%s", err, turnRev, gotRev)
 	}
-	assertContains(t, gotRev, err, "== context · instruction\nTask T-12 \"Node: report connection path changes\"\nCommit: 9f2c1ab\nDiff: .solodawn-review.diff")
+	assertContains(t, gotRev, err, "== context · instruction\nTask T-12 \"Node: report connection path changes\"\nGoal: ")
+	assertContains(t, gotRev, err, "\nPass score: 90\nWork: by \"Claude Code\" on workstation, in /home/dev/website\nThe work is in this folder.\nRecent messages:")
 	assertSuffix(t, gotRev, err, wantHistory)
 
 	gotGroupWithHist, turnGroupHist, err := Compose(r.h, r.session(GroupSession, false, ""), ReplacedTurn, nil)
@@ -901,16 +892,16 @@ func checkMalformedItemAndBodyInputs(t *testing.T, r *turnRig, s Session) {
 	cases := []json.RawMessage{
 		json.RawMessage(`{`),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "mention", Msg: proto.ID(tMsg1ID)}, json.RawMessage(`{}`), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "merge", Task: proto.ID(tTaskID), Commit: "c1"}, nil, nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "merge", Task: proto.ID(tTaskID)}, nil, nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "checks", Task: proto.ID(tTaskID)}, nil, nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "mention", Msg: proto.ID(tMsg1ID)}, badMsg("call", nil), nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(turnID("absent"))}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badMsg("checks", nil), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "review", Task: proto.ID(turnID("absent")), Commit: "c1"}, nil, nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badMsg("review", nil), nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "review", Task: proto.ID(turnID("absent")), Msg: proto.ID(tReport)}, r.reportMsg(tAIID), nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "review", Task: proto.ID(tTaskID), Msg: proto.ID(tReport)}, nil, nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "reviewed", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badMsg("review", nil), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "checks", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badMsg("checks", nil), nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg1ID)}, badMsg("decision", &proto.CardState{Status: "decided", Choice: strPtr("A")}), nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "confirmed", Msg: proto.ID(tMsg1ID)}, badMsg("brief", &proto.CardState{Status: "confirmed"}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "notice", Code: "handback", Msg: proto.ID(tMsg1ID)}, badMsg("handback", nil), nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "notice", Code: "login_invalid", Msg: proto.ID(tMsg1ID)}, badMsg("system", nil), nil),
 	}
 	for i, bad := range cases {
@@ -926,7 +917,7 @@ func checkMalformedItemAndBodyInputs(t *testing.T, r *turnRig, s Session) {
 func checkFetchFailurePaths(t *testing.T, r *turnRig) {
 	t.Helper()
 	assignFirst := r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID)}, nil, nil)
-	revRaw := r.makeInboxItem(proto.Item{Item: 2, Why: "review", Task: proto.ID(tTaskID), Commit: "c1"}, nil, nil)
+	revRaw := r.makeInboxItem(proto.Item{Item: 2, Why: "review", Task: proto.ID(tTaskID), Msg: proto.ID(tReport)}, r.reportMsg(tAIID), nil)
 
 	missingTaskSess := r.session(TaskSession, false, "")
 	missingTaskSess.Task = turnID("missing")
@@ -1041,16 +1032,82 @@ func TestFetchFromForwardsCallerContext(t *testing.T) {
 	}
 }
 
-func TestTakeoverTaskFirstTurnSaysOnlyThatTheOwnerIsComing(t *testing.T) {
+// The review turn says where the work is: by whom, on which computer and in
+// which folder, read from the row of the member who wrote the report, who
+// need not be the task's assignee any more, and how that folder lies for the
+// reviewer's own session (contracts/drivers.md section 3). The report follows
+// under a line of its own, as its author wrote it.
+func TestReviewTurnSaysWhereTheWorkIs(t *testing.T) {
 	r := newTurnRig(t)
+	other := turnID("mem-qwen")
+	r.h.Rows.Put(tGroupID, "member", other, mustJSON(t, proto.AIMemberRow{
+		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: other, Seq: 3}, Group: tGroupID, Kind: "ai", User: r.ownerID, Name: "Qwen Code"},
+		CLI:       "qwen", Host: r.homeKey.ID(), HostName: "workstation", Workspace: "/srv/other", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "waiting", Path: "local",
+	}))
 	task := r.baseTask()
-	task.Origin, task.Brief, task.Title, task.Slug = "takeover", "", "Owner takeover", "owner-takeover"
+	task.Step, task.Report, task.Assignee = "review", tReport, other
 	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, task))
-	item := mustJSON(t, proto.InboxItem{Item: proto.Item{AI: proto.ID(tAIID), Why: "assign", Task: proto.ID(tTaskID)}, Task: &task})
-	got, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{item})
-	num := strconv.Itoa(task.Num)
-	want := "Task T-" + num + " \"Owner takeover\"\nBranch: task/" + num + "-owner-takeover (this folder is its worktree)\nYour owner is about to work with you directly in the terminal."
-	if err != nil || !strings.HasSuffix(got, want) {
-		t.Fatalf("takeover first turn: err=%v\n%s", err, got)
+	reviewer := Session{SessionKey: SessionKey{Group: tGroupID, Member: tPeerID, Task: tTaskID}, Kind: ReviewSession, Folder: tFolder, Home: r.homeKey.ID(), Name: "Codex", Report: tReport}
+	item := r.makeInboxItem(proto.Item{Item: 3, AI: proto.ID(tPeerID), Why: "review", Task: proto.ID(tTaskID), Msg: proto.ID(tReport)}, r.reportMsg(tAIID), nil)
+	turn := func(work ...string) string {
+		return strings.Join(slices.Concat([]string{
+			`[SoloDawn] group "Website" · you are "Codex" · review session T-12`,
+			`== 1 of 1 · review · instruction`,
+			`Task T-12 "Node: report connection path changes"`,
+			`Goal: Show the connection path and warn when relayed.`,
+			`Acceptance criteria:`,
+			`1. Indicator follows a path change within 1 s`,
+			`2. No false notice on local link`,
+			`In scope: node`,
+			`Out of scope: relay`,
+			`Pass score: 90`,
+		}, work, []string{
+			`-- from "Claude Code" (AI) in T-12 · information`,
+			`Path events are sent on every switch. Ran go test ./...: 42 passed. Commit 9f2c1ab on branch t12-path-events.`,
+		}), "\n")
+	}
+	const here = `Work: by "Claude Code" on workstation, in /home/dev/website`
+	want := Turn{Kind: ItemsTurn, Thread: tTaskID}
+	assertComposed(t, r.h, reviewer, ItemsTurn, []json.RawMessage{item}, turn(here, `The work is in this folder.`), want)
+
+	reviewer.Folder = "/home/dev/review"
+	assertComposed(t, r.h, reviewer, ItemsTurn, []json.RawMessage{item}, turn(here, `The work is in another folder on this computer. Read it there; change nothing in it.`), want)
+
+	// A replaced review session is told the same, of the report its row names.
+	replaced, _, err := Compose(r.h, reviewer, ReplacedTurn, nil)
+	assertContains(t, replaced, err, "\nPass score: 90\n"+here+"\nThe work is in another folder on this computer. Read it there; change nothing in it.")
+	if got := r.home.asked[len(r.home.asked)-3]; got != any(proto.FetchRow{FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: int64(len(r.home.asked) - 2)}, Group: tGroupID, Limit: 1}, Row: "msg", RowID: tReport}) {
+		t.Fatalf("the report was not fetched by its id: %+v", r.home.asked)
+	}
+
+	// The same path on another computer is another folder.
+	var author proto.AIMemberRow
+	raw, _ := r.h.Rows.Get(tGroupID, "member", tAIID)
+	if err := proto.Decode(raw, &author); err != nil {
+		t.Fatal(err)
+	}
+	author.Host, author.HostName = testKey(31).ID(), "laptop"
+	r.h.Rows.Put(tGroupID, "member", tAIID, mustJSON(t, author))
+	reviewer.Folder = tFolder
+	assertComposed(t, r.h, reviewer, ItemsTurn, []json.RawMessage{item}, turn(
+		`Work: by "Claude Code" on laptop, in /home/dev/website`,
+		`The work is on another computer. Get it the way the report says it is shared (with Git and a remote: fetch the branch the report names), and read it without changing what this folder holds.`,
+	), want)
+
+	// The author has left the group: its row says nothing any more.
+	r.h.Rows.Put(tGroupID, "member", tAIID, mustJSON(t, proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: tAIID, Seq: 30}, Gone: true}))
+	got, _, err := Compose(r.h, reviewer, ItemsTurn, []json.RawMessage{item})
+	assertContains(t, got, err, "Pass score: 90\n-- from \""+tAIID+"\" in T-12 · information\nPath events")
+
+	// A report that cannot be fetched gives no replaced turn.
+	r.home.handler = func(req any) (json.RawMessage, error) {
+		if row, ok := req.(proto.FetchRow); ok && row.RowID == tReport {
+			return mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{}}), nil
+		}
+		return r.defaultHomeHandler(req)
+	}
+	_, _, err = Compose(r.h, reviewer, ReplacedTurn, nil)
+	if want := (&Error{"not_found", "report not found"}); err == nil || err.Error() != want.Error() {
+		t.Fatalf("replaced review turn without its report: %v", err)
 	}
 }

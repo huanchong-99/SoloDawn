@@ -205,31 +205,6 @@ func (f *fakeDeliverHome) recordReqLocked(req any) {
 	}
 }
 
-func (f *fakeDeliverHome) watchMerged() <-chan struct{} {
-	merged := make(chan struct{}, 1)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.onCmd = func(_ context.Context, cmd proto.Cmd) (json.RawMessage, error) {
-		if strings.Contains(cmd.Env.Payload, `"op":"merged"`) {
-			select {
-			case merged <- struct{}{}:
-			default:
-			}
-		}
-		return json.RawMessage(`{"re":1,"ok":true}`), nil
-	}
-	return merged
-}
-
-func waitMerged(t *testing.T, merged <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-merged:
-	case <-time.After(30 * time.Second):
-		t.Fatal(timedOut(30*time.Second, "the TaskMerged command", nil))
-	}
-}
-
 func (f *fakeDeliverHome) waitSyncAnswer(ctx context.Context, req proto.Sync) (json.RawMessage, error) {
 	f.started <- req
 	select {
@@ -291,6 +266,7 @@ type deliverRig struct {
 	extraKey  identity.Key
 	home      *fakeDeliverHome
 	runtime   *fakeDeliverRuntime
+	folder    string // the workspace of every AI the rig joins
 	composeMu sync.Mutex
 	composeE  error
 	onCompose func(s Session, items []json.RawMessage)
@@ -323,6 +299,7 @@ func newDeliverRigOnStore(t *testing.T, db *store.Store) *deliverRig {
 		extraKey: testSeedKey(15),
 		home:     newFakeDeliverHome(),
 		runtime:  &fakeDeliverRuntime{},
+		folder:   t.TempDir(),
 	}
 	rig.installHooks()
 	clock := func() time.Time { return time.UnixMilli(testStartMS) }
@@ -404,16 +381,6 @@ func (r *deliverRig) waitSyncStopped(group string) {
 	})
 }
 
-func (r *deliverRig) waitNoActiveMerges() {
-	r.t.Helper()
-	d := deliv(r.h)
-	r.waitUntil("merges unclaimed", func() bool {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		return len(d.merging) == 0
-	})
-}
-
 func (r *deliverRig) waitAIUnbusy(group, member string) {
 	r.t.Helper()
 	d := deliv(r.h)
@@ -439,8 +406,8 @@ func (r *deliverRig) seedGroupAndMembers() {
 	r.setSetting("homes", []proto.Home{{Group: testGroup1, Home: r.homeKey.ID(), Name: "Proj"}})
 	r.putGroup(proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1},
-		Name:      "Proj", Kind: "project", Base: "main", Forge: "none",
-		Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{},
+		Name:      "Proj",
+		Home:      r.homeKey.ID(), Secretary: testSec,
 	})
 	r.putAIMember(testAI1, "Claude", r.hostKey.ID(), false, 2)
 	r.putAIMember(testAI2, "Codex", r.hostKey.ID(), false, 3)
@@ -459,6 +426,15 @@ func (r *deliverRig) putAIMember(id, name, hostID string, sec bool, seq int64) {
 		CLI:       "claude", Host: hostID, HostName: "n", Secretary: sec, Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local",
 	}
 	r.h.Rows.Put(testGroup1, "member", id, json.RawMessage(marshalWire(m)))
+	if hostID == r.hostKey.ID() {
+		r.joined(id, name, sec)
+	}
+}
+
+// joined records the group session of a local AI in the rig's folder, as
+// host.join does.
+func (r *deliverRig) joined(member, name string, sec bool) {
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: member}, Kind: GroupSession, Folder: r.folder, Agent: "claude", Home: r.homeKey.ID(), Name: name, Secretary: sec})
 }
 
 func (r *deliverRig) putTask(task proto.TaskRow) {
@@ -611,6 +587,7 @@ func TestAttachGroupsCancelsCleanupAndUnsyncedPush(t *testing.T) {
 func verifyUnsyncedInboxTriggersSyncAndDelivers(t *testing.T, r *deliverRig) {
 	t.Helper()
 	r.home.syncMode = true
+	r.joined(testAI1, "C", false)
 	// Push inbox for unsynced testGroup1 on an open connection whose d.cancels entry is nil.
 	it := proto.Item{Item: 10, AI: testAI1, Why: "assign", Task: testTask1}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, it, nil)
@@ -619,9 +596,9 @@ func verifyUnsyncedInboxTriggersSyncAndDelivers(t *testing.T, r *deliverRig) {
 	if req != wantSync || len(r.home.ackList()) != 0 || len(r.audits()) != 0 {
 		t.Fatalf("unexpected pre-sync state: req=%+v acks=%v audits=%v", req, r.home.ackList(), r.audits())
 	}
-	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "P1", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
+	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "P1", Home: r.homeKey.ID()}))
 	aiRaw := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
-	tRaw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "T", Slug: "t", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1, Depends: []string{}}))
+	tRaw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "T", Origin: "brief", State: "active", Step: "work", Assignee: testAI1, Depends: []string{}}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw, aiRaw, tRaw}})))
 	r.home.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 5}))}
 	r.waitUntil("item 10 delivered", func() bool { return r.home.ackCountFor(10) == 1 && len(r.runtime.recorded()) == 1 })
@@ -688,6 +665,8 @@ func verifySecondUnsyncedGroupAndCancelCleanup(t *testing.T, r *deliverRig) {
 func TestSyncCursorResetDeltaAndOvertakenRows(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.setSetting("homes", []proto.Home{{Group: testGroup1, Home: r.homeKey.ID(), Name: "One"}})
+	r.joined(testAI1, "C1", false)
+	r.joined(testAI2, "C2", false)
 	first := newFakeDeliverHome()
 	first.syncMode = true
 	r.h.Attach(r.homeKey.ID(), first)
@@ -702,7 +681,7 @@ func TestSyncCursorResetDeltaAndOvertakenRows(t *testing.T) {
 	first.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 99}))}
 
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Reset{Type: "reset", Group: testGroup1})))
-	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 4}, Name: "P", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
+	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 4}, Name: "P", Home: r.homeKey.ID()}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw}})))
 	second.answers <- syncAnswer{err: errors.New("broken")}
 	r.waitSyncStopped(testGroup1)
@@ -722,9 +701,9 @@ func verifyOvertakenSyncedAndMonotonicCursor(t *testing.T, r *deliverRig) {
 		t.Fatalf("after interrupted reset got since=%d, want 0", req3.Since)
 	}
 	assignIt := proto.Item{Item: 30, AI: testAI1, Why: "assign", Task: testTask1}
-	mergeIt := proto.Item{Item: 31, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c1"}
+	resumeIt := proto.Item{Item: 31, AI: testAI2, Why: "resume", Task: testTask2}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, assignIt, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mergeIt, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, resumeIt, nil)
 	third.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 10}))}
 	r.waitGroupLive(testGroup1)
 	Deliver(r.h, testGroup1, testAI1)
@@ -740,12 +719,12 @@ func verifyOvertakenSyncedAndMonotonicCursor(t *testing.T, r *deliverRig) {
 		t.Fatalf("absent task rows caused refusal or ack: audits=%+v", r.audits())
 	}
 	// Push task rows with seq 8, 9 (< 10): items now process, and cursor remains at 10.
-	t1Raw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 8}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1, Depends: []string{}}))
-	t2Raw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 9}, Group: testGroup1, Num: 2, Title: "T2", Slug: "t2", Origin: "brief", State: "active", Step: "merge", Commit: "c1", Assignee: testAI2, Depends: []string{}}))
+	t1Raw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 8}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "active", Step: "work", Assignee: testAI1, Depends: []string{}}))
+	t2Raw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 9}, Group: testGroup1, Num: 2, Title: "T2", Origin: "brief", State: "active", Step: "work", Assignee: testAI2, Depends: []string{}}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{t1Raw, t2Raw}})))
-	r.waitUntil("both delayed items acknowledged", func() bool { return len(third.ackList()) == 2 && len(r.runtime.recorded()) == 1 })
+	r.waitUntil("both delayed items acknowledged", func() bool { return len(third.ackList()) == 2 && len(r.runtime.recorded()) == 2 })
 	r.waitAIUnbusy(testGroup1, testAI1)
-	r.waitNoActiveMerges()
+	r.waitAIUnbusy(testGroup1, testAI2)
 	assertLiveCursorAndFailedDelta(t, r)
 }
 
@@ -798,7 +777,7 @@ func assertMalformedSynced(t *testing.T, r *deliverRig) {
 	d.mu.Lock()
 	cur, live := d.groups[testGroup1].cursor, d.groups[testGroup1].live
 	d.mu.Unlock()
-	if cur != 12 || live || len(r.runtime.recorded()) != 1 {
+	if cur != 12 || live || len(r.runtime.recorded()) != 2 {
 		t.Fatalf("invalid synced frame accepted: cursor=%d live=%v turns=%d", cur, live, len(r.runtime.recorded()))
 	}
 }
@@ -807,6 +786,7 @@ func TestGroupResyncAfterPostSyncedResetAndFailedSync(t *testing.T) {
 	// 1) A reset handled after synced, followed by group + member rows and a mention, starts a new sync and delivers the turn.
 	r := newDeliverRig(t, false)
 	r.setSetting("homes", []proto.Home{{Group: testGroup1, Home: r.homeKey.ID(), Name: "Proj"}})
+	r.joined(testAI1, "C1", false)
 	r.home.syncMode = true
 	r.h.Attach(r.homeKey.ID(), r.home)
 	req1 := <-r.home.started
@@ -814,7 +794,7 @@ func TestGroupResyncAfterPostSyncedResetAndFailedSync(t *testing.T) {
 	r.waitGroupLive(testGroup1)
 
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Reset{Type: "reset", Group: testGroup1})))
-	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
+	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Home: r.homeKey.ID()}))
 	aiRaw := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C1"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw, aiRaw}})))
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 401, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "after-reset"))
@@ -889,8 +869,8 @@ func TestSweepRechecksAnAIWhoseBatchIsInFlight(t *testing.T) {
 	r.waitAIUnbusy(testGroup1, testSec)
 }
 
-func TestDuplicateWhileTakingSessionAndMergeItems(t *testing.T) {
-	// (a) Duplicate mention arriving while the first copy is inside Compose -> 1 turn, 1 delivered row, 2 acks.
+func TestDuplicateWhileTakingSessionItems(t *testing.T) {
+	// Duplicate mention arriving while the first copy is inside Compose -> 1 turn, 1 delivered row, 2 acks.
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
 	msg := r.makeTextMsg(testMsg1, nil, "once")
@@ -908,118 +888,58 @@ func TestDuplicateWhileTakingSessionAndMergeItems(t *testing.T) {
 	if len(r.audits()) != 1 || r.audits()[0].what != AuditDelivered || len(deliv(r.h).heldKeys()) != 0 {
 		t.Fatalf("duplicate session item result: turns=%d audits=%+v held=%d", len(r.runtime.recorded()), r.audits(), len(deliv(r.h).heldKeys()))
 	}
-	r.h.Settle()
-	verifyDuplicateMergeWhileApplyingAndPreAudit(t)
-}
-
-func verifyDuplicateMergeWhileApplyingAndPreAudit(t *testing.T) {
-	t.Helper()
-	r := newDeliverRig(t, true)
-	originDir, pDir, _ := initTestOriginAndGroupRepo(t, r, "none")
-	ctx := t.Context()
-	if _, err := EnsureGroupWorkspace(ctx, pDir, originDir, "main"); err != nil {
-		t.Fatal(err)
-	}
-	wt, err := CreateTaskWorkspace(ctx, pDir, 1, "dup-merge", testAI1, "main", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mustGit(t, ctx, wt, "config", "user.name", "AI")
-	mustGit(t, ctx, wt, "config", "user.email", "ai@example.invalid")
-	os.WriteFile(filepath.Join(wt, "f1.txt"), []byte("one\n"), 0o600)
-	mustGit(t, ctx, wt, "add", "f1.txt")
-	mustGit(t, ctx, wt, "commit", "-m", "c1")
-	c1 := strings.TrimSpace(mustGit(t, ctx, wt, "rev-parse", "HEAD"))
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "M1", Slug: "dup-merge", Origin: "brief", State: "active", Step: "merge", Commit: c1, Assignee: testAI1, Stats: proto.TaskStats{Added: 1}})
-
-	// 1) Block ReviewedMerge.Apply on cloneLock while pushing duplicate merge item 905 -> 1 Apply, 2 acks.
-	repoLock := cloneLock(filepath.Join(pDir, "repo"))
-	repoLock.Lock()
-	mIt1 := proto.Item{Item: 905, AI: testAI1, Why: "merge", Task: testTask1, Commit: c1}
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mIt1, nil)
-	r.waitUntil("first ack while Apply is blocked", func() bool { return r.home.ackCountFor(905) == 1 })
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mIt1, nil)
-	r.waitUntil("second ack while Apply is still blocked", func() bool { return r.home.ackCountFor(905) == 2 })
-	repoLock.Unlock()
-	r.waitUntil("single TaskMerged command", func() bool { return len(r.home.cmdPayloads()) == 1 })
-	r.waitNoActiveMerges()
-
-	// 2) Duplicate merge item 906 arriving in the pre-audit window so recordMergeTaken returns written == false -> 1 Apply, 2 acks.
-	verifyMergePreAuditWrittenFalse(t, r, pDir)
-}
-
-func verifyMergePreAuditWrittenFalse(t *testing.T, r *deliverRig, pDir string) {
-	t.Helper()
-	ctx := t.Context()
-	wt2, err := CreateTaskWorkspace(ctx, pDir, 2, "pre-audit", testAI1, "main", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mustGit(t, ctx, wt2, "config", "user.name", "AI")
-	mustGit(t, ctx, wt2, "config", "user.email", "ai@example.invalid")
-	os.WriteFile(filepath.Join(wt2, "f2.txt"), []byte("two\n"), 0o600)
-	mustGit(t, ctx, wt2, "add", "f2.txt")
-	mustGit(t, ctx, wt2, "commit", "-m", "c2")
-	c2 := strings.TrimSpace(mustGit(t, ctx, wt2, "rev-parse", "HEAD"))
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 11}, Group: testGroup1, Num: 2, Title: "M2", Slug: "pre-audit", Origin: "brief", State: "active", Step: "merge", Commit: c2, Assignee: testAI1, Stats: proto.TaskStats{Added: 1}})
-
-	mIt2 := proto.Item{Item: 906, AI: testAI1, Why: "merge", Task: testTask2, Commit: c2}
-	var first atomic.Bool
-	r.setHold(func(*Host, SessionKey) (string, bool) {
-		if first.CompareAndSwap(false, true) {
-			r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mIt2, nil)
-			r.waitUntil("inner merge 906 completed", func() bool { return len(r.home.cmdPayloads()) == 2 })
-		}
-		return "", false
-	})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mIt2, nil)
-	r.waitUntil("inner merge 906 acked", func() bool { return r.home.ackCountFor(906) == 1 && len(r.home.cmdPayloads()) == 2 })
-	r.waitNoActiveMerges()
-	r.hold.Store(nil)
-	// Also exercise recordMergeTaken returning written == false when an already-audited merge entry reaches takeOneMerge: acked again, 0 extra Apply.
-	d := deliv(r.h)
-	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: mIt2}, item: mIt2})
-	Deliver(r.h, "", "")
-	r.waitUntil("second ack for already-audited merge 906", func() bool {
-		return r.home.ackCountFor(906) == 2 && len(d.mergeGroups()) == 0
-	})
-	r.waitNoActiveMerges()
-	if len(r.home.cmdPayloads()) != 2 {
-		t.Fatalf("expected 2 total merge commands, got %d", len(r.home.cmdPayloads()))
-	}
 }
 
 func TestNonBlockingPushHandlersAndLockOrder(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "branch", Assignee: testAI1})
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "active", Step: "work", Assignee: testAI1})
 
-	cmdEntered := make(chan struct{}, 1) // single reader: main test goroutine
-	pushDone := make(chan struct{})      // closed by main test goroutine once later pushes finish
-	var hasDeadline bool
-	var remaining time.Duration
-	r.home.onCmd = func(ctx context.Context, _ proto.Cmd) (json.RawMessage, error) {
-		dl, ok := ctx.Deadline()
-		hasDeadline = ok
-		remaining = time.Until(dl)
-		cmdEntered <- struct{}{}
-		<-pushDone
-		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	composing := make(chan struct{}, 1) // single reader: main test goroutine
+	pushDone := make(chan struct{})     // closed by main test goroutine once later pushes finish
+	r.composeMu.Lock()
+	r.onCompose = func(s Session, _ []json.RawMessage) {
+		if s.Kind == TaskSession {
+			composing <- struct{}{}
+			<-pushDone
+		}
 	}
-	// Push assign (triggers TaskBranch Request on background goroutine); Push must return immediately.
+	r.composeMu.Unlock()
+	// Push assign (Compose, which asks the home, blocks on a background goroutine); Push must return immediately.
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 40, AI: testAI1, Why: "assign", Task: testTask1}, nil)
-	<-cmdEntered
-	// While Request is blocked, pushing rows and another inbox item must return without deadlocking.
+	<-composing
+	// While it is blocked, pushing rows and another inbox item must return without deadlocking.
 	noteRaw := json.RawMessage(`{"r":"note","id":"n1","seq":11}`)
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{noteRaw}})))
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 41, AI: testSec, Why: "notice", Code: "ping"}, nil)
 	close(pushDone)
 
 	r.waitUntil("both turns completed", func() bool { return len(r.runtime.recorded()) == 2 })
-	if !hasDeadline || remaining <= 30*time.Second || remaining > time.Minute {
-		t.Fatalf("expected 1m bounded context on h.Command, got ok=%v remaining=%v", hasDeadline, remaining)
-	}
+	verifyHostCommandIsBounded(t, r)
 	verifyHoldLockNotUnderDeliveryMutex(t, r)
+}
+
+// A command the host sends by itself waits for its home one minute at most.
+func verifyHostCommandIsBounded(t *testing.T, r *deliverRig) {
+	t.Helper()
+	var hasDeadline bool
+	var remaining time.Duration
+	r.home.mu.Lock()
+	r.home.onCmd = func(ctx context.Context, cmd proto.Cmd) (json.RawMessage, error) {
+		if strings.HasPrefix(cmd.Env.Payload, `{"t":"task"`) {
+			dl, ok := ctx.Deadline()
+			hasDeadline, remaining = ok, time.Until(dl)
+		}
+		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	}
+	r.home.mu.Unlock()
+	err := sendHostCommand(context.Background(), r.h, r.homeKey.ID(), marshalWire(hostTaskCommand(r.h, testGroup1, "resume", testTask1)))
+	if err != nil || !hasDeadline || remaining <= 30*time.Second || remaining > time.Minute {
+		t.Fatalf("expected 1m bounded context on h.Command, got %v ok=%v remaining=%v", err, hasDeadline, remaining)
+	}
+	r.home.mu.Lock()
+	r.home.onCmd = nil
+	r.home.mu.Unlock()
 }
 
 func verifyHoldLockNotUnderDeliveryMutex(t *testing.T, r *deliverRig) {
@@ -1069,7 +989,7 @@ func TestArrivalRefusalsNotHostedAndOpenWaitsWithoutCause(t *testing.T) {
 	r.h.Rows.Put(testGroup1, "member", string(goneID), json.RawMessage(marshalWire(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: string(goneID), Seq: 12}, Gone: true})))
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 101, AI: testAI2, Why: "mention", Msg: testMsg1}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 102, AI: testHuman, Why: "mention", Msg: testMsg1}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 103, AI: goneID, Why: "merge", Task: testTask1, Commit: "c1"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 103, AI: goneID, Why: "assign", Task: testTask1}, nil)
 	r.waitUntil("3 refused acks", func() bool { return len(r.home.ackList()) == 3 })
 	r.waitAIUnbusy(testGroup1, testAI2)
 	r.waitAIUnbusy(testGroup1, testHuman)
@@ -1121,7 +1041,6 @@ func verifyOpenWaitsAndCauselessDecisions(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
 	gKey := SessionKey{Group: testGroup1, Member: testAI1}
-	r.h.Sessions.Create(Session{SessionKey: gKey, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "C"})
 	r.h.Sessions.Move(gKey, Dormant, Working)
 
 	askCh, doneAsk := r.h.Await(testCall1, nil)
@@ -1198,6 +1117,7 @@ func verifyColdStartDrainOpenWait(t *testing.T) {
 	// Decided item arriving before member row is cached is drained to open wait at take time even when group is paused.
 	r := newDeliverRig(t, false)
 	r.setSetting("homes", []proto.Home{{Group: testGroup1, Home: r.homeKey.ID(), Name: "W"}})
+	r.joined(testAI1, "C", false)
 	r.home.syncMode = true
 	r.h.Attach(r.homeKey.ID(), r.home)
 	<-r.home.started
@@ -1206,7 +1126,7 @@ func verifyColdStartDrainOpenWait(t *testing.T) {
 	defer doneWait()
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 330, AI: testAI1, Why: "decided", Msg: testCard1}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 331, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "held"))
-	grpPaused := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Paused: &proto.GroupPause{By: testHuman, At: testStartMS}, Checks: []string{}}))
+	grpPaused := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "W", Home: r.homeKey.ID(), Paused: &proto.GroupPause{By: testHuman, At: testStartMS}}))
 	aiRow := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpPaused, aiRow}})))
 	r.home.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 2}))}
@@ -1214,7 +1134,7 @@ func verifyColdStartDrainOpenWait(t *testing.T) {
 	if len(r.runtime.recorded()) != 0 || len(r.audits()) != 1 || r.audits()[0].agent != "claude" {
 		t.Fatalf("unexpected cold-start drain state: turns=%d audits=%+v", len(r.runtime.recorded()), r.audits())
 	}
-	grpUnpaused := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 3}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
+	grpUnpaused := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 3}, Name: "W", Home: r.homeKey.ID()}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpUnpaused}})))
 	r.waitUntil("mention delivered after unpause", func() bool { return len(r.runtime.recorded()) == 1 })
 }
@@ -1222,14 +1142,14 @@ func verifyColdStartDrainOpenWait(t *testing.T) {
 func TestRoutingHoldsJumpAndBatchSelection(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "review", Commit: "c1", Assignee: testAI1, Reviewer: testAI2})
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "active", Step: "review", Report: testMsg2, Assignee: testAI1, Reviewer: testAI2})
 
 	// Causeless confirmed to secretary -> GroupSession; assign -> TaskSession; review -> ReviewSession; causeless decided -> GroupSession/TaskSession.
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 501, AI: testSec, Why: "confirmed", Msg: testMsg1}, nil)
 	r.waitUntil("sec turn", func() bool { return len(r.runtime.recorded()) == 1 })
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 502, AI: testAI1, Why: "assign", Task: testTask1}, nil)
 	r.waitUntil("assign turn", func() bool { return len(r.runtime.recorded()) == 2 })
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 503, AI: testAI2, Why: "review", Task: testTask1, Commit: "c1"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 503, AI: testAI2, Why: "review", Task: testTask1, Msg: testMsg2}, nil)
 	r.waitUntil("review turn", func() bool { return len(r.runtime.recorded()) == 3 })
 
 	tid := testTask1
@@ -1255,7 +1175,7 @@ func TestRoutingHoldsJumpAndBatchSelection(t *testing.T) {
 	// Dormant TaskSession still receives decided for its task; task without a session falls back to GroupSession.
 	r.h.Sessions.Move(SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}, Waiting, Dormant)
 	r.h.Rows.Reset(testGroup1)
-	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 16}, Name: "Proj", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
+	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 16}, Name: "Proj", Home: r.homeKey.ID(), Secretary: testSec})
 	r.putAIMember(testAI1, "Claude", r.hostKey.ID(), false, 17)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 509, AI: testAI1, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
 	r.waitUntil("ai1 dormant task decided turn", func() bool { return len(r.runtime.recorded()) == 9 })
@@ -1298,14 +1218,14 @@ func verifyHoldsBatchingAndJump(t *testing.T) {
 	t.Helper()
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "paused", Step: "local_check", Assignee: testAI1})
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "paused", Step: "work", Assignee: testAI1})
 
 	// Paused/failed task holds work items while notice delivers immediately.
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 601, AI: testAI1, Why: "checks", Task: testTask1, Msg: testMsg1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 601, AI: testAI1, Why: "resume", Task: testTask1}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 602, AI: testAI1, Why: "reviewed", Task: testTask1, Msg: testMsg2}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 603, AI: testSec, Why: "notice", Task: testTask1, Code: "quiet"}, nil)
 	r.waitUntil("sec notice turn", func() bool { return len(r.runtime.recorded()) == 1 })
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "failed", Step: "local_check", Assignee: testAI1})
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "failed", Step: "work", Assignee: testAI1})
 	Deliver(r.h, testGroup1, testAI1)
 	if len(r.runtime.recorded()) != 1 {
 		t.Fatal("failed task delivered")
@@ -1319,14 +1239,13 @@ func verifyHoldsBatchingAndJump(t *testing.T) {
 		holdChecks.Add(1)
 		return "cap", heldFlag.Load()
 	})
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 12}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1})
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 12}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "active", Step: "work", Assignee: testAI1})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 604, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "grp"))
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 605, AI: testAI2, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, nil, "ai2"))
 	r.waitUntil("held items checked", func() bool { return holdChecks.Load() >= 2 })
 	r.waitAIUnbusy(testGroup1, testAI1)
 	r.waitAIUnbusy(testGroup1, testAI2)
 	gKey := SessionKey{Group: testGroup1, Member: testAI1}
-	r.h.Sessions.Create(Session{SessionKey: gKey, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "C"})
 	r.h.Sessions.Move(gKey, Dormant, Takeover)
 	heldFlag.Store(false)
 	Deliver(r.h, testGroup1, testAI1)
@@ -1417,7 +1336,7 @@ func verifyEnqueueHeldOrdering(t *testing.T) {
 	}
 }
 
-func TestStillCurrentTaskRoleStepCommitMismatches(t *testing.T) {
+func TestStillCurrentTaskRoleStepReportMismatches(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
 	var held atomic.Bool
@@ -1427,15 +1346,15 @@ func TestStillCurrentTaskRoleStepCommitMismatches(t *testing.T) {
 		holdChecks.Add(1)
 		return "offline", held.Load()
 	})
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "review", Commit: "c1", Assignee: testAI1, Reviewer: testAI2})
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "active", Step: "review", Report: testMsg1, Assignee: testAI1, Reviewer: testAI2})
 
 	// Mixed batch on TaskSession: stale assign + valid thread mention on existing TaskSession, plus GroupSession decided queued behind an all-stale batch.
-	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}, Kind: TaskSession, Folder: "wt/1-t1", Agent: "claude", Home: r.homeKey.ID(), Name: "C"})
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}, Kind: TaskSession, Folder: r.folder, Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 701, AI: testAI1, Why: "assign", Task: testTask1}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 702, AI: testAI1, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "still valid"))
 	r.waitUntil("held task items checked", func() bool { return holdChecks.Load() >= 2 })
 	r.waitAIUnbusy(testGroup1, testAI1)
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "review", Commit: "c1", Assignee: testAI2, Reviewer: testSec})
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "active", Step: "review", Report: testMsg1, Assignee: testAI2, Reviewer: testSec})
 	held.Store(false)
 	Deliver(r.h, testGroup1, testAI1)
 	r.waitUntil("mixed batch turn", func() bool { return len(r.runtime.recorded()) == 1 })
@@ -1443,319 +1362,41 @@ func TestStillCurrentTaskRoleStepCommitMismatches(t *testing.T) {
 		t.Fatalf("expected mixed batch to deliver 1 valid item, got %+v", r.runtime.recorded())
 	}
 
-	// Check every role/step/commit mismatch and merged-task refusal.
-	activeTask := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 20}, Group: testGroup1, Num: 2, Title: "T2", Slug: "t2", Origin: "brief", State: "active", Step: "review", Commit: "c-good", Assignee: testAI1, Reviewer: testAI2}
+	// Check every role, step and report mismatch, and the refusal for a task that is done.
+	activeTask := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 20}, Group: testGroup1, Num: 2, Title: "T2", Origin: "brief", State: "active", Step: "review", Report: testMsg2, Assignee: testAI1, Reviewer: testAI2}
 	r.putTask(activeTask)
 	staleItems := []proto.Item{
 		{Why: "assign", AI: testAI2, Task: testTask2},
-		{Why: "review", AI: testAI1, Task: testTask2, Commit: "c-good"},
-		{Why: "review", AI: testAI2, Task: testTask2, Commit: "c-old"},
-		{Why: "merge", AI: testAI1, Task: testTask2, Commit: "c-good"},
+		{Why: "review", AI: testAI1, Task: testTask2, Msg: testMsg2},
+		{Why: "review", AI: testAI2, Task: testTask2, Msg: testMsg1},
 	}
 	for i, it := range staleItems {
 		it.Item = int64(710 + i)
 		r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, it, nil)
 	}
-	r.waitUntil("6 acks after first stale wave", func() bool { return len(r.home.ackList()) == 6 })
-	activeTask.Step = "merge"
+	r.waitUntil("5 acks after first stale wave", func() bool { return len(r.home.ackList()) == 5 })
+	activeTask.Step = "work"
 	r.putTask(activeTask)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 720, AI: testAI2, Why: "review", Task: testTask2, Commit: "c-good"}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 721, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c-good"}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 722, AI: testAI1, Why: "merge", Task: testTask2, Commit: "c-wrong"}, nil)
-	activeTask.State = "merged"
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 720, AI: testAI2, Why: "review", Task: testTask2, Msg: testMsg2}, nil)
+	r.waitUntil("6 acks after the review of a task at step work", func() bool { return len(r.home.ackList()) == 6 })
+	activeTask.State = "done"
 	r.putTask(activeTask)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 723, AI: testAI1, Why: "resume", Task: testTask2}, nil)
-	r.waitUntil("10 acks after second stale wave", func() bool { return len(r.home.ackList()) == 10 })
+	r.waitUntil("7 acks after second stale wave", func() bool { return len(r.home.ackList()) == 7 })
 	if len(r.runtime.recorded()) != 1 {
 		t.Fatalf("stale items ran turns: %d", len(r.runtime.recorded()))
 	}
-}
-
-func initTestOriginAndGroupRepo(t *testing.T, r *deliverRig, forge string) (originDir, pDir, baseCommit string) {
-	t.Helper()
-	ctx := t.Context()
-	originDir = filepath.Join(t.TempDir(), "team", "website.git")
-	seed := t.TempDir()
-	bareRepo(t, originDir, "main")
-	mustGit(t, ctx, "", "init", "--initial-branch=main", seed)
-	mustGit(t, ctx, seed, "config", "user.name", "Test")
-	mustGit(t, ctx, seed, "config", "user.email", "test@example.invalid")
-	os.WriteFile(filepath.Join(seed, "README.md"), []byte("hello\nline2\n"), 0o600)
-	mustGit(t, ctx, seed, "add", "README.md")
-	mustGit(t, ctx, seed, "commit", "-m", "initial")
-	mustGit(t, ctx, seed, "push", originDir, "refs/heads/main:refs/heads/main")
-	baseCommit = strings.TrimSpace(mustGit(t, ctx, seed, "rev-parse", "HEAD"))
-	pDir = projectDir(r.h, testGroup1)
-	r.setSetting("homes", []proto.Home{{Group: testGroup1, Home: r.homeKey.ID(), Name: "Website"}})
-	r.putGroup(proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1},
-		Name:      "Website", Kind: "project", Repo: originDir, Base: "main", Forge: forge,
-		Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{},
-	})
-	r.putAIMember(testAI1, "Claude", r.hostKey.ID(), false, 2)
-	r.putAIMember(testAI2, "Codex", r.hostKey.ID(), false, 3)
-	r.putAIMember(testSec, "Sec", r.hostKey.ID(), true, 4)
-	r.h.Attach(r.homeKey.ID(), r.home)
-	r.waitGroupLive(testGroup1)
-	return originDir, pDir, baseCommit
-}
-
-func mustGit(t *testing.T, ctx context.Context, dir string, args ...string) string {
-	t.Helper()
-	out, err := workspaceGit(ctx, dir, args...)
-	if err != nil {
-		t.Fatalf("git %v: %v", args, err)
-	}
-	return out
-}
-
-func TestWorkspacesBranchRetryMergeStatsAndRestartInspect(t *testing.T) {
-	logs := captureLogs(t)
-	r := newDeliverRig(t, true)
-	_, pDir, _ := initTestOriginAndGroupRepo(t, r, "none")
-	ctx := t.Context()
-
-	// 1) First TaskBranch fails -> error logged, session row exists, item held; retry sends TaskBranch again and delivers turn.
-	r.home.mu.Lock()
-	r.home.cmdErr = errors.New("temp_down")
-	r.home.mu.Unlock()
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "branch", Assignee: testAI1, Reviewer: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 801, AI: testAI1, Why: "assign", Task: testTask1}, nil)
-	r.waitUntil("first failed TaskBranch logged", func() bool {
-		return len(r.home.cmdPayloads()) >= 1 && strings.Contains(logs.String(), "host: command to")
-	})
-	r.waitAIUnbusy(testGroup1, testAI1)
-	if len(r.runtime.recorded()) != 0 {
-		t.Fatalf("failed TaskBranch should hold turn: turns=%d", len(r.runtime.recorded()))
-	}
-	r.home.mu.Lock()
-	failed := len(r.home.cmds)
-	r.home.cmdErr = nil
-	r.home.mu.Unlock()
-	Deliver(r.h, testGroup1, testAI1)
-	r.waitUntil("retried TaskBranch and turn", func() bool {
-		return len(r.runtime.recorded()) == 1 && len(r.home.cmdPayloads()) == failed+1
-	})
-	if !strings.Contains(r.home.cmdPayloads()[failed], `"branch":"task/1-add-feature"`) {
-		t.Fatalf("expected retried TaskBranch and turn, got cmds=%v", r.home.cmdPayloads())
-	}
-	// Second item at local_check does not resend TaskBranch.
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 6}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1, Reviewer: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 802, AI: testAI1, Why: "resume", Task: testTask1}, nil)
-	r.waitUntil("second turn", func() bool { return len(r.runtime.recorded()) == 2 })
-	if len(r.home.cmdPayloads()) != failed+1 {
-		t.Fatal("sent duplicate TaskBranch after local_check")
-	}
-	wt := filepath.Join(pDir, "wt", "1-add-feature")
-	mustGit(t, ctx, wt, "config", "user.name", "AI")
-	mustGit(t, ctx, wt, "config", "user.email", "ai@example.invalid")
-	os.WriteFile(filepath.Join(wt, "README.md"), []byte("hello\nchanged\nadded\n"), 0o600)
-	mustGit(t, ctx, wt, "add", "README.md")
-	mustGit(t, ctx, wt, "commit", "-m", "c1")
-	c1 := strings.TrimSpace(mustGit(t, ctx, wt, "rev-parse", "HEAD"))
-	verifyReviewRoundsAndMergeStats(t, r, pDir, wt, c1, failed+1)
-	r.h.Settle()
-	verifyConflictRestartInspectAndRemoteForge(t)
-}
-
-func verifyReviewRoundsAndMergeStats(t *testing.T, r *deliverRig, pDir, wt, c1 string, baseCmds int) {
-	t.Helper()
-	ctx := t.Context()
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 7}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "review", Commit: c1, Assignee: testAI1, Reviewer: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 803, AI: testAI2, Why: "review", Task: testTask1, Commit: c1}, nil)
-	r.waitUntil("review 1", func() bool { return len(r.runtime.recorded()) == 3 })
-	if _, err := os.Stat(filepath.Join(pDir, "review", "1", reviewDiff)); err != nil {
-		t.Fatalf("review diff missing: %v", err)
-	}
-	// Mention in existing ReviewSession (commit == "" in batch) reuses review/1 without PrepareReviewWorkspace.
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 804, AI: testAI2, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "note"))
-	r.waitUntil("review mention", func() bool { return len(r.runtime.recorded()) == 4 })
-
-	os.WriteFile(filepath.Join(wt, "extra.txt"), []byte("more\n"), 0o600)
-	mustGit(t, ctx, wt, "add", "extra.txt")
-	mustGit(t, ctx, wt, "commit", "-m", "c2")
-	c2 := strings.TrimSpace(mustGit(t, ctx, wt, "rev-parse", "HEAD"))
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 8}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "review", Commit: c2, Assignee: testAI1, Reviewer: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 805, AI: testAI2, Why: "review", Task: testTask1, Commit: c2}, nil)
-	r.waitUntil("review 2", func() bool { return len(r.runtime.recorded()) == 5 })
-
-	// Merge held while Holds reports "offline"; lifted when Holds reports "cap"; TaskMerged uses TaskRow.Stats directly.
-	var holdReason atomic.Value
-	var offChecks atomic.Int32
-	holdReason.Store("offline")
-	r.setHold(func(*Host, SessionKey) (string, bool) {
-		offChecks.Add(1)
-		return holdReason.Load().(string), true
-	})
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 9}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "merge", Commit: c2, Assignee: testAI1, Reviewer: testAI2, Stats: proto.TaskStats{Added: 17, Removed: 5}})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 806, AI: testAI1, Why: "merge", Task: testTask1, Commit: c2}, nil)
-	r.waitUntil("offline merge hold checked", func() bool { return offChecks.Load() >= 1 })
-	Deliver(r.h, "", "")
-	if len(r.home.cmdPayloads()) != baseCmds {
-		t.Fatal("merge ran while offline")
-	}
-	holdReason.Store("cap")
-	merged := r.home.watchMerged()
-	Deliver(r.h, "", "")
-	waitMerged(t, merged)
-	cmds := r.home.cmdPayloads()
-	assertEqual(t, len(cmds), baseCmds+1)
-	if !strings.Contains(cmds[baseCmds], `"op":"merged"`) || !strings.Contains(cmds[baseCmds], `"added":17`) || !strings.Contains(cmds[baseCmds], `"removed":5`) {
-		t.Fatalf("expected TaskMerged with TaskRow.Stats 17/5, got %v", cmds)
-	}
-}
-
-func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
-	t.Helper()
-	r := newDeliverRig(t, true)
-	originDir, pDir, baseCommit := initTestOriginAndGroupRepo(t, r, "none")
-	if _, err := EnsureGroupWorkspace(t.Context(), pDir, originDir, "main"); err != nil {
-		t.Fatal(err)
-	}
-	CreateTaskWorkspace(t.Context(), pDir, 1, "conflict", testAI1, "main", false)
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "C", Slug: "conflict", Origin: "brief", State: "active", Step: "merge", Commit: "0000000000000000000000000000000000000000", Branch: "task/1-conflict", Assignee: testAI1})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 820, AI: testAI1, Why: "merge", Task: testTask1, Commit: "0000000000000000000000000000000000000000"}, nil)
-	r.waitUntil("TaskConflict command", func() bool { return len(r.home.cmdPayloads()) == 1 })
-	if !strings.Contains(r.home.cmdPayloads()[0], `"op":"conflict"`) {
-		t.Fatalf("expected TaskConflict, got %v", r.home.cmdPayloads())
-	}
-
-	// Simulate restart with AuditMerge written; resumeGroupMerges inspects via d.groups[group].home and claimMerge.
-	write := func(tx *store.Tx) error {
-		_, err := r.h.Audit(tx, AuditRow{Group: testGroup1, Agent: "claude", What: AuditMerge, Detail: testTask2 + " " + baseCommit})
-		return err
-	}
-	r.h.Settle()
-	r.db.Write(write)
-	r2 := newDeliverRigOnStore(t, r.db)
-	r2.h.Attach(r2.homeKey.ID(), r2.home)
-	r2.waitGroupLive(testGroup1)
-	grpPaused := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 10}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Paused: &proto.GroupPause{By: testHuman, At: testStartMS}, Checks: []string{}}))
-	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 11}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Checks: []string{}}))
-	aiRaw := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 12}, Group: testGroup1, Kind: "ai", User: r2.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r2.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
-	t2Raw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 13}, Group: testGroup1, Num: 2, Title: "Restart", Slug: "restart", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1, Depends: []string{}}))
-	noAuditRaw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(testCanonicalID(98)), Seq: 14}, Group: testGroup1, Num: 3, Title: "N", Slug: "no-audit", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1, Depends: []string{}}))
-	remoteAIRaw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(testCanonicalID(97)), Seq: 15}, Group: testGroup1, Num: 4, Title: "R", Slug: "remote-ai", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI2, Depends: []string{}}))
-	r2.h.Push(r2.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpPaused, aiRaw, t2Raw, noAuditRaw, remoteAIRaw}})))
-	afterGroupState(r2.h, deliv(r2.h), testGroup1)
-	if len(r2.home.taskPayloads()) != 0 {
-		t.Fatal("restart inspect ran while group paused")
-	}
-	d2 := deliv(r2.h)
-	mKey2 := testGroup1 + "\x00" + testTask2 + "\x00" + baseCommit
-	d2.claimMerge(mKey2)
-	r2.h.Rows.Put(testGroup1, "group", testGroup1, grpRaw)
-	resumeOneMerge(r2.h, d2, r2.homeKey.ID(), testGroup1, proto.TaskRow{RowHeader: proto.RowHeader{ID: testTask2}, Num: 2, Slug: "restart", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1})
-	if len(r2.home.taskPayloads()) != 0 {
-		t.Fatal("restart inspect ran while merge already claimed")
-	}
-	d2.unclaimMerge(mKey2)
-	r2.h.Push(r2.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw}})))
-	r2.waitUntil("restart inspect reported", func() bool { return len(r2.home.taskPayloads()) == 1 })
-	r2.waitNoActiveMerges()
-	r2.h.Settle()
-	verifyRemoteForgeAndGitHubRepo(t)
-}
-
-func verifyRemoteForgeAndGitHubRepo(t *testing.T) {
-	t.Helper()
-	cases := map[string]string{
-		"https://github.com/team/website.git": "team/website",
-		"git@github.com:team/website.git/":    "team/website",
-		`C:\repos\team\website.git`:           "team/website",
-		"team/website":                        "team/website",
-		"onlyone":                             "",
-		"":                                    "",
-	}
-	for in, want := range cases {
-		if got := githubRepo(in); got != want {
-			t.Fatalf("githubRepo(%q)=%q, want %q", in, got, want)
+	for _, a := range r.audits()[2:] {
+		if a.what != AuditRefused || a.detail != "stale_task" {
+			t.Fatalf("a stale item was not refused: %+v", a)
 		}
 	}
-	r := newDeliverRig(t, true)
-	initTestOriginAndGroupRepo(t, r, "github")
-	// GroupSession wake with forge=github runs RefreshGroupWorkspace on create and when Dormant, and skips when Waiting.
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 850, AI: testSec, Why: "notice", Code: "ping"}, nil)
-	r.waitUntil("sec turn 1", func() bool { return len(r.runtime.recorded()) == 1 })
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 851, AI: testSec, Why: "notice", Code: "pong"}, nil)
-	r.waitUntil("sec turn 2", func() bool { return len(r.runtime.recorded()) == 2 })
-	r.h.Sessions.Move(SessionKey{Group: testGroup1, Member: testSec}, Waiting, Dormant)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 852, AI: testSec, Why: "notice", Code: "dormant-wake"}, nil)
-	r.waitUntil("sec turn 3", func() bool { return len(r.runtime.recorded()) == 3 })
-
-	mergedJSON := `{"state":"MERGED","headRefOid":"deadbeef","mergeCommit":{"oid":"merged-oid"}}` + "\n"
-	fakeForgeGH(t,
-		forgeAnswer{},
-		forgeAnswer{Stdout: mergedJSON},
-		forgeAnswer{Stderr: "down", Code: 1},
-		forgeAnswer{Stderr: "down", Code: 1},
-	)
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 20}, Group: testGroup1, Num: 1, Title: "Remote", Slug: "remote", Origin: "brief", State: "active", Step: "merge", Commit: "deadbeef", PR: 42, Assignee: testAI1, Stats: proto.TaskStats{Added: 9, Removed: 4}})
-	merged := r.home.watchMerged()
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 853, AI: testAI1, Why: "merge", Task: testTask1, Commit: "deadbeef", PR: 42}, nil)
-	waitMerged(t, merged)
-	if !strings.Contains(r.home.cmdPayloads()[0], `"merge_commit":"merged-oid"`) || !strings.Contains(r.home.cmdPayloads()[0], `"added":9`) {
-		t.Fatalf("unexpected remote TaskMerged: %v", r.home.cmdPayloads())
-	}
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 21}, Group: testGroup1, Num: 2, Title: "FailGH", Slug: "failgh", Origin: "brief", State: "active", Step: "merge", Commit: "fail-gh", PR: 99, Assignee: testAI1})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 854, AI: testAI1, Why: "merge", Task: testTask2, Commit: "fail-gh", PR: 99}, nil)
-	r.waitUntil("item 854 acked", func() bool { return r.home.ackCountFor(854) == 1 })
-	r.waitNoActiveMerges()
-	if len(r.home.cmdPayloads()) != 1 {
-		t.Fatal("failed gh inspection reported outcome")
-	}
 }
 
-func TestGroupSessionGitFailureKeepsItemsHeld(t *testing.T) {
-	r := newDeliverRig(t, true)
-	originDir, pDir, _ := initTestOriginAndGroupRepo(t, r, "github")
-	var attempts atomic.Int32
-	r.setHold(func(*Host, SessionKey) (string, bool) {
-		attempts.Add(1)
-		return "", false
-	})
-
-	// 1) Initial clone failure for a group session keeps the item held with 0 acks and 0 audit rows, then delivers once Repo is reachable.
-	missingOrigin := filepath.Join(t.TempDir(), "unreachable.git")
-	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 10}, Name: "Website", Kind: "project", Repo: missingOrigin, Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 860, AI: testSec, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wake-clone"))
-	r.waitUntil("clone failure attempt started", func() bool { return attempts.Load() >= 1 })
-	r.waitAIUnbusy(testGroup1, testSec)
-	if r.home.ackCountFor(860) != 0 || len(r.audits()) != 0 || len(r.home.cmdPayloads()) != 0 || len(r.runtime.recorded()) != 0 {
-		t.Fatalf("group clone failure consumed item: acks=%d audits=%+v cmds=%v", r.home.ackCountFor(860), r.audits(), r.home.cmdPayloads())
-	}
-	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 11}, Name: "Website", Kind: "project", Repo: originDir, Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
-	Deliver(r.h, testGroup1, testSec)
-	r.waitUntil("held clone item delivered", func() bool { return r.home.ackCountFor(860) == 1 && len(r.runtime.recorded()) == 1 })
-	r.waitAIUnbusy(testGroup1, testSec)
-
-	verifyGroupRefreshFailureHoldsAndRecovers(t, r, originDir, pDir, &attempts)
-}
-
-func verifyGroupRefreshFailureHoldsAndRecovers(t *testing.T, r *deliverRig, originDir, pDir string, attempts *atomic.Int32) {
-	t.Helper()
-	// 2) RefreshGroupWorkspace failure when waking a Dormant group session keeps the item held and delivers on the next wake once origin recovers.
-	secKey := SessionKey{Group: testGroup1, Member: testSec}
-	r.h.Sessions.Move(secKey, Waiting, Dormant)
-	mustGit(t, t.Context(), filepath.Join(pDir, "repo"), "remote", "set-url", "origin", filepath.Join(t.TempDir(), "dropped.git"))
-	attempts.Store(0)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 861, AI: testSec, Why: "notice", Code: "ping"}, nil)
-	r.waitUntil("refresh failure attempt started", func() bool { return attempts.Load() >= 1 })
-	r.waitAIUnbusy(testGroup1, testSec)
-	if r.home.ackCountFor(861) != 0 || len(r.audits()) != 1 || len(r.home.cmdPayloads()) != 0 || len(r.runtime.recorded()) != 1 {
-		t.Fatalf("group refresh failure consumed item: acks=%d audits=%+v cmds=%v", r.home.ackCountFor(861), r.audits(), r.home.cmdPayloads())
-	}
-	mustGit(t, t.Context(), filepath.Join(pDir, "repo"), "remote", "set-url", "origin", originDir)
-	Deliver(r.h, testGroup1, testSec)
-	r.waitUntil("held refresh item delivered", func() bool { return r.home.ackCountFor(861) == 1 && len(r.runtime.recorded()) == 2 })
-	r.waitAIUnbusy(testGroup1, testSec)
-}
-
-func TestWorkspaceFailureReportingConfigUnmarshalAndStoreErrors(t *testing.T) {
+func TestTurnComposeAuditAndStoreErrors(t *testing.T) {
 	logs := captureLogs(t)
 	r := newDeliverRig(t, true)
 	r.seedGroupAndMembers()
-	pDir := projectDir(r.h, testGroup1)
 
 	// 1) Runner.Turn error is logged; Compose error logs and re-queues without acking.
 	r.runtime.mu.Lock()
@@ -1787,15 +1428,15 @@ func TestWorkspaceFailureReportingConfigUnmarshalAndStoreErrors(t *testing.T) {
 	if r.home.ackCountFor(901) != 0 {
 		t.Fatal("audit write failure still acked")
 	}
-	checkMergeAndHandAuditFailure(t, r)
+	checkHandAndRefusalAuditFailure(t, r)
 	dropAuditBlockTrigger(t, r.db)
 	Deliver(r.h, testGroup1, testAI1)
 	r.waitUntil("re-queued 901 acked", func() bool { return r.home.ackCountFor(901) == 1 })
-	checkWorkspaceFailuresReportedOnce(t, r, pDir, logs)
+	r.waitAIUnbusy(testGroup1, testAI1)
 	checkConfigUnmarshalAndDroppedTables(t, r)
 }
 
-func checkMergeAndHandAuditFailure(t *testing.T, r *deliverRig) {
+func checkHandAndRefusalAuditFailure(t *testing.T, r *deliverRig) {
 	t.Helper()
 	ch, done := r.h.Await(testCall1, nil)
 	defer done()
@@ -1805,142 +1446,30 @@ func checkMergeAndHandAuditFailure(t *testing.T, r *deliverRig) {
 	if len(ch) != 1 || r.home.ackCountFor(902) != 0 {
 		t.Fatal("expected handed item without ack on audit failure")
 	}
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 41}, Group: testGroup1, Num: 1, Title: "M", Slug: "m", Origin: "brief", State: "active", Step: "merge", Commit: "c1", Assignee: testAI1})
-	mIt := proto.Item{Item: 903, AI: testAI1, Why: "merge", Task: testTask1, Commit: "c1"}
-	d := deliv(r.h)
-	v := verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: mIt}, item: mIt}
-	d.enqueueMerge(v)
-	d.enqueueMerge(v)
-	mKey := testGroup1 + "\x00" + testTask1 + "\x00c1"
-	d.claimMerge(mKey)
-	if d.claimMerge(mKey) || d.takeQueuedMerge(testGroup1, 99999) {
-		t.Fatal("expected duplicate claimMerge and absent takeQueuedMerge to fail")
-	}
-	stepMerges(r.h, d, testGroup1)
-	d.unclaimMerge(mKey)
-	// With audit trigger active, refuseItem skips ack and recordMergeTaken fails and re-queues item 903.
-	humanID := testCanonicalID(89)
-	r.h.Rows.Put(testGroup1, "member", string(humanID), json.RawMessage(marshalWire(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: string(humanID), Seq: 42}, Gone: true})))
+	// With the audit trigger active, refuseItem skips the ack.
 	refuseItem(r.h, verifiedItem{home: r.homeKey.ID(), group: testGroup1, item: proto.Item{Item: 904}}, "", "not_hosted_here")
 	if r.home.ackCountFor(904) != 0 {
 		t.Fatal("refusal ack sent when audit write failed")
 	}
-	d.enqueueMerge(v)
-	stepMerges(r.h, d, testGroup1)
-	d.mu.Lock()
-	delete(d.merges, testGroup1)
-	d.mu.Unlock()
-}
-
-func checkWorkspaceFailuresReportedOnce(t *testing.T, r *deliverRig, pDir string, logs *safeLogBuffer) {
-	t.Helper()
-	// Put an open Waiting session on AI1 so idleMemberState returns "waiting" on AI1's TaskSession failure, while AI2 has none ("dormant").
-	secretRepo := "https://ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD@github.com/team/bad.git"
-	os.MkdirAll(filepath.Join(pDir, "repo"), 0o700)
-	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 50}, Name: "W", Kind: "project", Repo: secretRepo, Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 51}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "branch", Assignee: testAI1})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 910, AI: testAI1, Why: "assign", Task: testTask1}, nil)
-	r.waitUntil("member status and task fail commands", func() bool { return len(r.home.cmdPayloads()) == 2 })
-	cmds := r.home.cmdPayloads()
-	if !strings.Contains(cmds[0], `"code":"turn_interrupted"`) || !strings.Contains(cmds[0], `"state":"waiting"`) || !strings.Contains(cmds[1], `"op":"fail"`) {
-		t.Fatalf("unexpected workspace failure commands: %v", cmds)
-	}
-	// Delivering again must not retry the failed item.
-	r.waitAIUnbusy(testGroup1, testAI1)
-	Deliver(r.h, testGroup1, testAI1)
-	if len(r.home.cmdPayloads()) != 2 {
-		t.Fatalf("failed workspace item retried on later push: cmds=%d", len(r.home.cmdPayloads()))
-	}
-	checkRemainingWorkspaceAndMergeEdges(t, r, pDir, logs)
-}
-
-func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir string, logs *safeLogBuffer) {
-	t.Helper()
-	// Merge clone failure logs and returns; RefreshGroupWorkspace, CreateTaskWorkspace, PrepareReviewWorkspace, invalid task Num==0, disconnected homePath, and failTargetSession audit failure.
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 52}, Group: testGroup1, Num: 2, Title: "M", Slug: "m", Origin: "brief", State: "active", Step: "merge", Commit: "c1", Assignee: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 911, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c1"}, nil)
-	r.waitUntil("merge 911 clone failure logged", func() bool {
-		return r.home.ackCountFor(911) == 1 && strings.Contains(logs.String(), "host: ensure merge clone")
-	})
-	r.waitNoActiveMerges()
-
-	os.RemoveAll(filepath.Join(pDir, "repo"))
-	// Clone a valid repo without remote "origin": Waiting session skips RefreshGroupWorkspace and runs a turn, while Dormant session runs RefreshGroupWorkspace and holds the item.
-	mustGit(t, t.Context(), "", "init", "--initial-branch=main", filepath.Join(pDir, "repo"))
-	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 53}, Name: "W", Kind: "project", Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
-	secKey := SessionKey{Group: testGroup1, Member: testSec}
-	r.h.Sessions.Move(secKey, Dormant, Working)
-	r.h.Sessions.Move(secKey, Working, Waiting)
-	beforeTurns := len(r.runtime.recorded())
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 916, AI: testSec, Why: "notice", Code: "c"}, nil)
-	r.waitUntil("sec waiting turn without refresh", func() bool { return len(r.runtime.recorded()) == beforeTurns+1 })
-	r.waitAIUnbusy(testGroup1, testSec)
-	var secChecks atomic.Int32
-	r.setHold(func(*Host, SessionKey) (string, bool) {
-		secChecks.Add(1)
-		return "", false
-	})
-	r.h.Sessions.Move(secKey, Waiting, Dormant)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 912, AI: testSec, Why: "notice", Code: "c"}, nil)
-	r.waitUntil("sec refresh attempt started", func() bool { return secChecks.Load() >= 1 })
-	r.waitAIUnbusy(testGroup1, testSec)
-	r.hold.Store(nil)
-	if r.home.ackCountFor(912) != 0 {
-		t.Fatal("dormant group refresh failure acked item 912")
-	}
-
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 54}, Group: testGroup1, Num: 2, Title: "Bad", Slug: "bad", Origin: "brief", State: "active", Step: "review", Commit: "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD", Assignee: testAI1, Reviewer: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 913, AI: testAI1, Why: "assign", Task: testTask2}, nil)
-	r.waitUntil("913 failure commands", func() bool { return r.home.ackCountFor(913) == 1 && len(r.home.cmdPayloads()) == 4 })
-	r.waitAIUnbusy(testGroup1, testAI1)
-	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 55}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 914, AI: testAI2, Why: "review", Task: testTask2, Commit: "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD"}, nil)
-	r.waitUntil("914 review failure and 912 group recovery", func() bool {
-		return r.home.ackCountFor(912) == 1 && r.home.ackCountFor(914) == 1 && len(r.home.cmdPayloads()) == 5
-	})
-	r.waitAIUnbusy(testGroup1, testSec)
-	r.waitAIUnbusy(testGroup1, testAI2)
-	cmds := r.home.cmdPayloads()
-	allCmds := strings.Join(cmds, "\n")
-	if strings.Contains(allCmds, "ghp_") || !strings.Contains(allCmds, "[redacted]") || !strings.Contains(cmds[4], `"state":"dormant"`) || strings.Contains(cmds[4], `"op":"fail"`) {
-		t.Fatalf("unexpected redaction or review failure report: %s", allCmds)
-	}
-	os.RemoveAll(filepath.Join(pDir, "repo"))
-
-	// Invalid Num == 0 with closed home (homePath == "") and audit trigger blocking failTargetSession commit.
-	r.home.closeConn()
-	tZero := testCanonicalID(220)
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(tZero), Seq: 56}, Group: testGroup1, Num: 0, Title: "Z", Slug: "z", Origin: "brief", State: "active", Step: "branch", Assignee: testAI2})
-	addAuditBlockTrigger(t, r.db)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 915, AI: testAI2, Why: "assign", Task: tZero}, nil)
-	r.waitUntil("915 blocked audit logged", func() bool { return strings.Contains(logs.String(), "host: commit failed-workspace items") })
-	r.waitAIUnbusy(testGroup1, testAI2)
-	dropAuditBlockTrigger(t, r.db)
-	Deliver(r.h, testGroup1, testAI2)
-	r.waitAIUnbusy(testGroup1, testAI2)
 }
 
 func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 	t.Helper()
 	logs := captureLogs(t)
-	r.h.Settle()
-	mem := newDeliverRig(t, false)
-	runReviewedMerge(mem.h, mem.homeKey.ID(), testGroup1, proto.TaskRow{RowHeader: proto.RowHeader{ID: testTask1}, Num: 1, Slug: "m"}, "c1", 0, false, time.Time{})
-	resumeGroupMerges(mem.h, deliv(mem.h), "unknown-group")
-	mem.h.Settle()
 
-	// Session INSERT trigger fails ensureSessionRow; non-array 'homes' JSON logs and aborts attachHome.
+	// Session INSERT trigger fails createSession; non-array 'homes' JSON logs and aborts attachHome.
 	writeTrigger := func(tx *store.Tx) error {
 		_, err := tx.Exec(`CREATE TRIGGER block_session BEFORE INSERT ON session BEGIN SELECT RAISE(ABORT, 'blocked'); END`)
 		return err
 	}
 	r.db.Write(writeTrigger)
-	r.home = newFakeDeliverHome()
-	r.h.Attach(r.homeKey.ID(), r.home)
-	r.waitGroupLive(testGroup1)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 949, AI: testAI2, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "hi"))
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 60}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "active", Step: "work", Assignee: testAI2})
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 949, AI: testAI2, Why: "assign", Task: testTask1}, nil)
 	r.waitUntil("session create failure logged", func() bool { return strings.Contains(logs.String(), "host: create session") })
 	r.waitAIUnbusy(testGroup1, testAI2)
+	if r.home.ackCountFor(949) != 0 || r.h.QueuedCount(testGroup1, testAI2) != 1 {
+		t.Fatal("an item whose session could not be recorded was not held")
+	}
 
 	r.setSetting("homes", 123)
 	r.h.Attach(r.homeKey.ID(), r.home)
@@ -1977,320 +1506,6 @@ func dropAuditBlockTrigger(t *testing.T, db *store.Store) {
 	}
 }
 
-func TestResumeHostedChecksAfterRestart(t *testing.T) {
-	r1 := newDeliverRig(t, true)
-	tskStopAllCloud(t, r1.h)
-	originDir, pDir, head := initTestOriginAndGroupRepo(t, r1, "github")
-	_, err := EnsureGroupWorkspace(t.Context(), pDir, originDir, "main")
-	tskNoErr(t, err)
-	_, err = CreateTaskWorkspace(t.Context(), pDir, 1, "cloud", testAI1, "main", true)
-	tskNoErr(t, err)
-	rowsAt := func(seq int64) json.RawMessage { return cloudCheckRows(r1, head, seq) }
-
-	// Group with no home entry skips hosted-check resume; an already-running check is left alone.
-	r1.h.Rows.Put("unknown-group", "member", testAI1, json.RawMessage(marshalWire(cloudCheckAI(r1, testAI1, r1.hostKey.ID()))))
-	r1.h.Rows.Put("unknown-group", "task", testTask1, json.RawMessage(marshalWire(cloudCheckTask("unknown-group", testTask1, 1, testAI1, head, 2))))
-	noCalls := fakeForgeGH(t)
-	afterGroupState(r1.h, deliv(r1.h), "unknown-group")
-
-	key := tskCloudKey{group: testGroup1, task: testTask1}
-	ctx1, _ := tskBeginCloud(Part[tskPart](r1.h), key, head)
-	r1.h.Push(r1.homeKey.ID(), rowsAt(10))
-	afterGroupState(r1.h, deliv(r1.h), testGroup1)
-	startHostedCheck(r1.h, r1.homeKey.ID(), testGroup1, HostedCheck{Task: testTask1, Branch: "task/1-cloud", Commit: head, PR: 31})
-	tskRequire(t, ctx1.Err() == nil && len(r1.home.cmdPayloads()) == 0, "running check disturbed")
-	noCalls()
-
-	r1.h.Settle()
-	verifyRestartCloudPollOnce(t, r1.db, head, rowsAt)
-}
-
-func verifyRestartCloudPollOnce(t *testing.T, db *store.Store, head string, rowsAt func(int64) json.RawMessage) {
-	t.Helper()
-	r2 := newDeliverRigOnStore(t, db)
-	tskStopAllCloud(t, r2.h)
-	calls := fakeForgeGH(t, hostedView(head, passedRun), hostedView(head, passedRun))
-
-	// First resume loses task cloud to home_unreachable; reconnect retries it once.
-	r2.home.cmdErr = errors.New("unreachable")
-	r2.h.Attach(r2.homeKey.ID(), r2.home)
-	r2.waitGroupLive(testGroup1)
-	r2.h.Push(r2.homeKey.ID(), rowsAt(20))
-	r2.waitUntil("failed cloud command", func() bool { return len(r2.home.cmdPayloads()) == 1 })
-	waitCloudIdle(r2)
-
-	var secondRowsChecks atomic.Int32
-	r2.setHold(func(*Host, SessionKey) (string, bool) {
-		secondRowsChecks.Add(1)
-		return "cap", true
-	})
-	r2.pushItem(r2.homeKey, r2.homeKey.ID(), testGroup1, proto.Item{Item: 980, AI: testAI1, Why: "notice", Code: "c"}, nil)
-	r2.waitAIUnbusy(testGroup1, testAI1)
-
-	inFlight := make(chan struct{}, 1) // single reader: verifyRestartCloudPollOnce
-	release := make(chan struct{})     // single reader: r3.onCmd
-	r3 := newFakeDeliverHome()
-	t.Cleanup(r3.closeConn)
-	r3.onCmd = func(ctx context.Context, _ proto.Cmd) (json.RawMessage, error) {
-		inFlight <- struct{}{}
-		<-release
-		done := cloudCheckTask(testGroup1, testTask1, 1, testAI1, head, 30)
-		done.Step = "review"
-		r2.putTask(done)
-		return json.RawMessage(`{"re":1,"ok":true}`), ctx.Err()
-	}
-	r2.h.Attach(r2.homeKey.ID(), r3)
-	<-inFlight
-	secondRowsChecks.Store(0)
-	r2.h.Push(r2.homeKey.ID(), rowsAt(25))
-	r2.waitUntil("second rows push evaluated", func() bool { return secondRowsChecks.Load() >= 1 })
-	close(release)
-	waitCloudIdle(r2)
-
-	view := []string{"pr", "view", "31", "--json", "headRefOid,statusCheckRollup"}
-	calls(view, view)
-	tskEqual(t, len(r3.cmdPayloads()), 1)
-	var cloud proto.TaskChecked
-	tskNoErr(t, proto.Decode([]byte(r3.cmdPayloads()[0]), &cloud))
-	tskEqual(t, cloud.Op, "cloud")
-	tskEqual(t, cloud.OK, true)
-	tskEqual(t, cloud.Commit, head)
-}
-
-func waitCloudIdle(r *deliverRig) {
-	r.t.Helper()
-	p := Part[tskPart](r.h)
-	r.waitUntil("cloud polls idle", func() bool {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		return len(p.cancels) == 0
-	})
-}
-
-func cloudCheckAI(r *deliverRig, id, hostID string) proto.AIMemberRow {
-	return proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: 7}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "AI"}, CLI: "claude", Host: hostID, HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}
-}
-
-func cloudCheckTask(group, id string, num int, assignee, commit string, seq int64) proto.TaskRow {
-	return proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id, Seq: seq}, Group: group, Num: num, Title: "Cloud", Slug: "cloud", Origin: "brief", State: "active", Step: "cloud_check", Assignee: assignee, Commit: commit, PR: 31, Depends: []string{}, Checks: proto.TaskChecks{Local: &proto.Check{OK: true, At: time.Now().UnixMilli(), Commit: commit}}}
-}
-
-func cloudCheckRows(r *deliverRig, head string, seq int64) json.RawMessage {
-	raw := func(v any) json.RawMessage { return json.RawMessage(marshalWire(v)) }
-	human := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testHuman, Seq: 5}, Group: testGroup1, Kind: "human", User: r.ownerKey.ID(), Name: "Owner"}, Role: "owner"}
-	gone := proto.GoneRow{RowHeader: proto.RowHeader{Type: "task", ID: string(testCanonicalID(99)), Seq: 6}, Gone: true}
-	return raw(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{
-		raw(cloudCheckAI(r, testAI1, r.hostKey.ID())), raw(cloudCheckAI(r, testAI2, r.extraKey.ID())),
-		raw(human), raw(gone), raw(cloudCheckTask(testGroup1, testTask2, 2, testAI2, head, 9)),
-		raw(cloudCheckTask(testGroup1, testTask1, 1, testAI1, head, seq)),
-	}})
-}
-
-func TestStep17CleanupLifecycleAndRestartIdempotence(t *testing.T) {
-	r, pDir, remoteRepo, c1 := setupStep17Rig(t)
-	checkStep17GuardsAndRoleChanges(t, r, pDir, remoteRepo, c1)
-	checkStep17CancelMergeGoneAndRestart(t, r, pDir, c1)
-}
-
-func setupStep17Rig(t *testing.T) (*deliverRig, string, string, string) {
-	t.Helper()
-	r := newDeliverRig(t, true)
-	r.seedGroupAndMembers()
-	remoteDir := filepath.Join(t.TempDir(), "origin.git")
-	bareRepo(t, remoteDir, "main")
-	seed := filepath.Join(t.TempDir(), "seed")
-	runTestGit(t, "", "clone", remoteDir, seed)
-	os.WriteFile(filepath.Join(seed, "README.md"), []byte("base\n"), 0o600)
-	runTestGit(t, seed, "add", "README.md")
-	runTestGit(t, seed, "commit", "-m", "base")
-	runTestGit(t, seed, "push", "origin", "main")
-	c1 := strings.TrimSpace(runTestGit(t, seed, "rev-parse", "HEAD"))
-
-	pDir := projectDir(r.h, testGroup1)
-	_, err := EnsureGroupWorkspace(t.Context(), pDir, remoteDir, "main")
-	assertStep17NoErr(t, err)
-	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 5}, Name: "W", Kind: "project", Repo: remoteDir, Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
-	return r, pDir, remoteDir, c1
-}
-
-func runTestGit(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	out, stderr, err := runIn(t.Context(), dir, "git", append([]string{"-c", "user.name=T", "-c", "user.email=t@e"}, args...)...)
-	if err != nil {
-		t.Fatalf("git %v: %v (%s)", args, err, stderr)
-	}
-	return out
-}
-
-func checkStep17GuardsAndRoleChanges(t *testing.T, r *deliverRig, pDir, remoteDir, c1 string) {
-	t.Helper()
-	wt1, rev1, kT1, kR1, kNoRow, alphaHead := seedStep17InitialTask(t, r, pDir, c1)
-	d := deliv(r.h)
-	d.mu.Lock()
-	d.groupLocked(testGroup1, r.homeKey.ID()).live = false
-	d.mu.Unlock()
-	cleanupGroupState(r.h, d, testGroup1)
-	d.mu.Lock()
-	d.groupLocked(testGroup1, r.homeKey.ID()).live = true
-	d.mu.Unlock()
-
-	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: testAI1, Reviewer: testAI2, Commit: alphaHead})
-	settleDelivery(r.h)
-	assertStep17True(t, hasSession(r.h, kT1) && hasSession(r.h, kR1) && hasSession(r.h, kNoRow), "active sessions kept")
-	assertStep17True(t, pathExists(wt1) && pathExists(rev1), "active folders kept")
-
-	remoteAI := string(testCanonicalID(77))
-	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: remoteAI, Reviewer: testAI2, Commit: alphaHead})
-	settleDelivery(r.h)
-	assertStep17True(t, !hasSession(r.h, kT1) && !pathExists(wt1), "reassigned task session and wt removed")
-	assertStep17True(t, strings.TrimSpace(runTestGit(t, remoteDir, "rev-parse", "refs/heads/task/1-alpha")) == alphaHead, "github handoff pushed branch")
-	assertStep17True(t, hasSession(r.h, kR1) && pathExists(rev1) && slices.Contains(r.runtime.closedKeys(), kT1), "reviewer kept and kT1 closed")
-	checkStep17ReviewerChange(t, r, pDir, remoteAI, alphaHead, kR1, kNoRow, rev1)
-}
-
-func checkStep17ReviewerChange(t *testing.T, r *deliverRig, pDir, remoteAI, alphaHead string, kR1, kNoRow SessionKey, rev1 string) {
-	t.Helper()
-	kGrpKeep := SessionKey{Group: testGroup1, Member: testAI1}
-	kOtherGroup := SessionKey{Group: testGroup2, Member: testAI1, Task: testTask1}
-	r.h.Sessions.Create(Session{SessionKey: kGrpKeep, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
-	r.h.Sessions.Create(Session{SessionKey: kOtherGroup, Kind: TaskSession, Folder: "wt/1-alpha", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
-
-	unrecordedWT := filepath.Join(pDir, "wt", "1-alpha")
-	os.MkdirAll(unrecordedWT, 0o700)
-	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 12}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: remoteAI, Reviewer: remoteAI, Commit: alphaHead})
-	settleDelivery(r.h)
-	assertStep17True(t, !hasSession(r.h, kR1) && !pathExists(rev1) && !pathExists(unrecordedWT), "changed reviewer session and folders removed")
-	assertStep17True(t, hasSession(r.h, kGrpKeep) && hasSession(r.h, kOtherGroup), "group session and other-group session kept")
-	r.h.Sessions.End(kGrpKeep)
-	r.h.Sessions.End(kOtherGroup)
-	r.h.Sessions.End(kNoRow)
-}
-
-func seedStep17InitialTask(t *testing.T, r *deliverRig, pDir, c1 string) (string, string, SessionKey, SessionKey, SessionKey, string) {
-	t.Helper()
-	kNoRow := SessionKey{Group: testGroup1, Member: testAI1, Task: "task-unseen"}
-	r.h.Sessions.Create(Session{SessionKey: kNoRow, Kind: TaskSession, Folder: "wt/99-unseen", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
-	wt1, err := CreateTaskWorkspace(t.Context(), pDir, 1, "alpha", testAI1, "main", true)
-	assertStep17NoErr(t, err)
-	os.WriteFile(filepath.Join(wt1, "a.txt"), []byte("v1\n"), 0o600)
-	runTestGit(t, wt1, "add", "a.txt")
-	runTestGit(t, wt1, "commit", "-m", "c-alpha")
-	alphaHead := strings.TrimSpace(runTestGit(t, wt1, "rev-parse", "HEAD"))
-	os.WriteFile(filepath.Join(wt1, "dirty.txt"), []byte("discard\n"), 0o600)
-	rev1, err := PrepareReviewWorkspace(t.Context(), pDir, 1, testAI2, c1, "main", true)
-	assertStep17NoErr(t, err)
-	kT1 := SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}
-	kR1 := SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}
-	r.h.Sessions.Create(Session{SessionKey: kT1, Kind: TaskSession, Folder: "wt/1-alpha", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
-	r.h.Sessions.Create(Session{SessionKey: kR1, Kind: ReviewSession, Folder: "review/1", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
-	return wt1, rev1, kT1, kR1, kNoRow, alphaHead
-}
-
-func assertStep17True(t *testing.T, cond bool, msg string) {
-	t.Helper()
-	if !cond {
-		t.Fatal(msg)
-	}
-}
-
-func assertStep17NoErr(t *testing.T, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func checkStep17CancelMergeGoneAndRestart(t *testing.T, r *deliverRig, pDir, c1 string) {
-	t.Helper()
-	// Cancelled task removes dirty wt/2-beta and review/2 while keeping local branch task/2-beta.
-	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 20}, Name: "W", Kind: "project", Repo: filepath.Join(pDir, "repo"), Base: "main", Forge: "none", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
-	wt2, kT2, rev2, kR2, head2 := seedTaskAndReview(t, r, pDir, testTask2, 2, "beta", c1)
-	os.WriteFile(filepath.Join(wt2, "dirty2.txt"), []byte("dirty\n"), 0o600)
-	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 21}, Group: testGroup1, Num: 2, Title: "Beta", Slug: "beta", Origin: "brief", State: "cancelled", Step: "local_check", Assignee: testAI1, Reviewer: testAI2, Commit: head2})
-	r.waitUntil("cancelled task cleaned", func() bool {
-		return !hasSession(r.h, kT2) && !hasSession(r.h, kR2) && !pathExists(wt2) && !pathExists(rev2)
-	})
-	if strings.TrimSpace(runTestGit(t, filepath.Join(pDir, "repo"), "rev-parse", "refs/heads/task/2-beta")) != head2 {
-		t.Fatal("cancelled task should keep its local branch")
-	}
-
-	// Merged task removes wt/3-gamma, review/3, both sessions, and deletes local branch task/3-gamma; repeated push is idempotent.
-	task3 := string(testCanonicalID(63))
-	wt3, kT3, rev3, kR3, head3 := seedTaskAndReview(t, r, pDir, task3, 3, "gamma", c1)
-	mergedRow := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: task3, Seq: 30}, Group: testGroup1, Num: 3, Title: "Gamma", Slug: "gamma", Origin: "brief", State: "merged", Step: "merge", Assignee: testAI1, Reviewer: testAI2, Commit: head3}
-	pushTaskState(r, mergedRow)
-	r.waitUntil("merged task cleaned", func() bool {
-		return !hasSession(r.h, kT3) && !hasSession(r.h, kR3) && !pathExists(wt3) && !pathExists(rev3)
-	})
-	if _, _, err := runIn(t.Context(), filepath.Join(pDir, "repo"), "git", "rev-parse", "--verify", "refs/heads/task/3-gamma"); err == nil {
-		t.Fatal("expected merged local branch task/3-gamma to be deleted")
-	}
-	closedBefore := len(r.runtime.closedKeys())
-	mergedRow.Seq = 31
-	pushTaskState(r, mergedRow)
-	cleanupGroupState(r.h, deliv(r.h), testGroup1)
-	if len(r.runtime.closedKeys()) != closedBefore {
-		t.Fatal("repeated merged push was not idempotent")
-	}
-
-	checkGoneMemberAndRestartCleanup(t, r, pDir, c1)
-}
-
-func checkGoneMemberAndRestartCleanup(t *testing.T, r *deliverRig, pDir, c1 string) {
-	t.Helper()
-	// Gone member closes GroupSession + TaskSession + ReviewSession and ends their session rows.
-	task4 := string(testCanonicalID(64))
-	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI1}, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
-	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI2}, Kind: GroupSession, Folder: "repo", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
-	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI1, Task: task4}, Kind: TaskSession, Folder: "wt/4-delta", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
-	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI2, Task: task4}, Kind: ReviewSession, Folder: "review/4", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
-
-	gone1 := proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 41}, Gone: true}
-	gone2 := proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI2, Seq: 42}, Gone: true}
-	frame := proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{json.RawMessage(marshalWire(gone1)), json.RawMessage(marshalWire(gone2))}}
-	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(frame)))
-	r.waitUntil("gone members cleaned", func() bool {
-		return len(r.h.Sessions.All()) == 0
-	})
-
-	// Restart over existing store with an orphan Session row and orphan wt/review folders cleans all of them on sync completion.
-	r.putAIMember(testAI1, "Claude", r.hostKey.ID(), false, 45)
-	r.putAIMember(testAI2, "Codex", r.hostKey.ID(), false, 46)
-	task5 := string(testCanonicalID(65))
-	wt5, kT5, rev5, _, head5 := seedTaskAndReview(t, r, pDir, task5, 5, "orphan", c1)
-	r.h.Sessions.End(SessionKey{Group: testGroup1, Member: testAI2, Task: task5})
-	r.setSetting("homes", []proto.Home{{Group: testGroup1, Home: r.homeKey.ID(), Name: "W"}})
-
-	r.h.Settle()
-	r2 := newDeliverRigOnStore(t, r.db)
-	merged5 := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: task5, Seq: 50}, Group: testGroup1, Num: 5, Title: "Orphan", Slug: "orphan", Origin: "brief", State: "merged", Step: "merge", Assignee: testAI1, Reviewer: testAI2, Commit: head5}
-	r2.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 49}, Name: "W", Kind: "project", Repo: filepath.Join(pDir, "repo"), Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Checks: []string{}})
-	r2.putTask(merged5)
-	r2.h.Attach(r2.homeKey.ID(), r2.home)
-	r2.waitUntil("restart cleaned orphan session and folders", func() bool {
-		return !hasSession(r2.h, kT5) && !pathExists(wt5) && !pathExists(rev5)
-	})
-}
-
-func seedTaskAndReview(t *testing.T, r *deliverRig, pDir, taskID string, num int, slug, baseCommit string) (string, SessionKey, string, SessionKey, string) {
-	t.Helper()
-	numText := strconv.Itoa(num)
-	wt, err := CreateTaskWorkspace(t.Context(), pDir, num, slug, testAI1, "main", false)
-	assertStep17NoErr(t, err)
-	file := "f-" + numText + ".txt"
-	os.WriteFile(filepath.Join(wt, file), []byte("ok\n"), 0o600)
-	runTestGit(t, wt, "add", file)
-	runTestGit(t, wt, "commit", "-m", "work")
-	head := strings.TrimSpace(runTestGit(t, wt, "rev-parse", "HEAD"))
-	rev, err := PrepareReviewWorkspace(t.Context(), pDir, num, testAI2, baseCommit, "main", false)
-	assertStep17NoErr(t, err)
-	kT := SessionKey{Group: testGroup1, Member: testAI1, Task: taskID}
-	kR := SessionKey{Group: testGroup1, Member: testAI2, Task: taskID}
-	r.h.Sessions.Create(Session{SessionKey: kT, Kind: TaskSession, Folder: "wt/" + numText + "-" + slug, Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
-	r.h.Sessions.Create(Session{SessionKey: kR, Kind: ReviewSession, Folder: "review/" + numText, Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
-	return wt, kT, rev, kR, head
-}
-
 func pushTaskState(r *deliverRig, row proto.TaskRow) {
 	if row.Depends == nil {
 		row.Depends = []string{}
@@ -2309,14 +1524,14 @@ func TestRouteThreadReplyAndNonThreadItems(t *testing.T) {
 	r.seedGroupAndMembers()
 	r.putTask(proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10},
-		Group:     testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief",
-		State: "active", Step: "review", Commit: "c1", Assignee: testAI1, Reviewer: testAI2,
+		Group:     testGroup1, Num: 1, Title: "T1", Origin: "brief",
+		State: "active", Step: "review", Report: testMsg2, Assignee: testAI1, Reviewer: testAI2,
 	})
 	taskKey := SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}
 	revKey := SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}
 	grpKey := SessionKey{Group: testGroup1, Member: testAI1}
-	assertStep17NoErr(t, r.h.Sessions.Create(Session{SessionKey: taskKey, Kind: TaskSession, Folder: "wt/1-t1", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"}))
-	assertStep17NoErr(t, r.h.Sessions.Create(Session{SessionKey: revKey, Kind: ReviewSession, Folder: "review/1", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"}))
+	tskNoErr(t, r.h.Sessions.Create(Session{SessionKey: taskKey, Kind: TaskSession, Folder: r.folder, Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"}))
+	tskNoErr(t, r.h.Sessions.Create(Session{SessionKey: revKey, Kind: ReviewSession, Folder: r.folder, Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"}))
 
 	tid := testTask1
 	deliverSingleAndWait(r, 951, proto.Item{Item: 951, AI: testAI1, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, &tid, "mention"), 1)
@@ -2350,13 +1565,7 @@ func assertTurnTargets(t *testing.T, turns []recordedTurn, wantKeys []SessionKey
 	}
 }
 
-func TestRecordAuditLogAndMergeHoldReasons(t *testing.T) {
-	verifyRecordAuditLogging(t)
-	verifyMergeHoldReasons(t)
-}
-
-func verifyRecordAuditLogging(t *testing.T) {
-	t.Helper()
+func TestRecordAuditLogging(t *testing.T) {
 	logs := captureLogs(t)
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
@@ -2372,167 +1581,205 @@ func verifyRecordAuditLogging(t *testing.T) {
 		t.Fatalf("missing audit failure log or unexpected ack: acks=%d logs=%q", r.home.ackCountFor(971), logs.String())
 	}
 	dropAuditBlockTrigger(t, r.db)
-	r.h.Settle()
 }
 
-func verifyMergeHoldReasons(t *testing.T) {
-	t.Helper()
+// Every session of an AI runs in the folder of its group session. A review
+// item writes the report it carries into the row of its session, a later one
+// in place of the one before, and the row keeps it over a restart.
+func TestSessionsCopyTheWorkspaceAndReviewsNoteTheirReport(t *testing.T) {
 	r := newDeliverRig(t, true)
-	originDir, pDir, _ := initTestOriginAndGroupRepo(t, r, "none")
-	_, err := EnsureGroupWorkspace(t.Context(), pDir, originDir, "main")
-	assertStep17NoErr(t, err)
-	c1 := commitNewMergeTask(t, r, pDir, testTask1, 1, "m-rate", "f1.txt")
-	c2 := commitNewMergeTask(t, r, pDir, testTask2, 2, "m-unheld", "f2.txt")
-	d := deliv(r.h)
+	r.seedGroupAndMembers()
+	task := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "active", Step: "review", Report: testMsg1, Assignee: testAI1, Reviewer: testAI2}
+	r.putTask(task)
+	deliverSingleAndWait(r, 1001, proto.Item{Item: 1001, AI: testAI1, Why: "assign", Task: testTask1}, nil, 1)
+	deliverSingleAndWait(r, 1002, proto.Item{Item: 1002, AI: testAI2, Why: "review", Task: testTask1, Msg: testMsg1}, nil, 2)
+	kT := SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}
+	kR := SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}
+	sT, _ := r.h.Sessions.Get(kT)
+	sR, _ := r.h.Sessions.Get(kR)
+	if sT.Kind != TaskSession || sT.Folder != r.folder || sT.Report != "" || sR.Kind != ReviewSession || sR.Folder != r.folder || sR.Report != testMsg1 {
+		t.Fatalf("task session %+v, review session %+v, want both in %s and the report on the review session", sT, sR, r.folder)
+	}
 
-	r.setHold(func(*Host, SessionKey) (string, bool) { return "offline", true })
-	m1 := proto.Item{Item: 972, AI: testAI1, Why: "merge", Task: testTask1, Commit: c1}
-	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: m1}, item: m1})
-	stepMerges(r.h, d, testGroup1)
-	joinAssertEqual(t, "offline mergeHeldNow", mergeHeldNow(r.h, d, testGroup1, testAI1), true)
-	joinAssertEqual(t, "offline merge acks", r.home.ackCountFor(972), 0)
-	joinAssertEqual(t, "offline merge cmds", len(r.home.cmdPayloads()), 0)
-
-	r.setHold(func(*Host, SessionKey) (string, bool) { return "rate_limit", true })
-	stepMerges(r.h, d, testGroup1)
-	joinAssertEqual(t, "rate_limit mergeHeldNow", mergeHeldNow(r.h, d, testGroup1, testAI1), false)
-	joinAssertEqual(t, "rate_limit merge acks", r.home.ackCountFor(972), 1)
-	joinAssertEqual(t, "rate_limit merge cmds", len(r.home.cmdPayloads()), 1)
-
-	r.hold.Store(nil)
-	m2 := proto.Item{Item: 973, AI: testAI1, Why: "merge", Task: testTask2, Commit: c2}
-	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: m2}, item: m2})
-	stepMerges(r.h, d, testGroup1)
-	joinAssertEqual(t, "unheld mergeHeldNow", mergeHeldNow(r.h, d, testGroup1, testAI1), false)
-	joinAssertEqual(t, "unheld merge acks", r.home.ackCountFor(973), 1)
-	joinAssertEqual(t, "unheld merge cmds", len(r.home.cmdPayloads()), 2)
+	task.Seq, task.Report = 11, testMsg2
+	r.putTask(task)
+	deliverSingleAndWait(r, 1003, proto.Item{Item: 1003, AI: testAI2, Why: "review", Task: testTask1, Msg: testMsg2}, nil, 3)
+	deliverSingleAndWait(r, 1004, proto.Item{Item: 1004, AI: testAI2, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "a question"), 4)
 	r.h.Settle()
+	_, saved, err := loadSessions(r.db, time.Now)
+	tskNoErr(t, err)
+	for _, s := range saved {
+		if want := map[SessionKey]string{kR: testMsg2}[s.SessionKey]; s.Report != want || s.Folder != r.folder {
+			t.Fatalf("saved session %+v, want report %q in %s", s, want, r.folder)
+		}
+	}
+	tskEqual(t, len(saved), 5)
 }
 
-func commitNewMergeTask(t *testing.T, r *deliverRig, pDir, taskID string, num int, slug, file string) string {
-	t.Helper()
-	ctx := t.Context()
-	wt, err := CreateTaskWorkspace(ctx, pDir, num, slug, testAI1, "main", false)
-	assertStep17NoErr(t, err)
-	mustGit(t, ctx, wt, "config", "user.name", "AI")
-	mustGit(t, ctx, wt, "config", "user.email", "ai@example.invalid")
-	assertStep17NoErr(t, os.WriteFile(filepath.Join(wt, file), []byte(file+"\n"), 0o600))
-	mustGit(t, ctx, wt, "add", file)
-	mustGit(t, ctx, wt, "commit", "-m", slug)
-	commit := strings.TrimSpace(mustGit(t, ctx, wt, "rev-parse", "HEAD"))
-	r.putTask(proto.TaskRow{
-		RowHeader: proto.RowHeader{Type: "task", ID: taskID, Seq: int64(20 + num)},
-		Group:     testGroup1, Num: num, Title: slug, Slug: proto.Slug(slug), Origin: "brief",
-		State: "active", Step: "merge", Commit: commit, Assignee: testAI1,
-	})
-	return commit
-}
-
-func TestRecordMergeTakenAndResumeAuditMergeTS(t *testing.T) {
-	verifyRecordMergeTakenConditions(t)
-	verifyResumeGroupMergesRequiresAuditTS(t)
-}
-
-func verifyRecordMergeTakenConditions(t *testing.T) {
-	t.Helper()
+// The record of a delivery and the report of a review are written together or
+// not at all: a review item whose session has ended meanwhile is not recorded.
+func TestReviewItemOfAnEndedSessionIsNotRecorded(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
-	v := verifiedItem{
-		home:  r.homeKey.ID(),
-		group: testGroup1,
-		item:  proto.Item{Item: 980, AI: testAI1, Why: "merge", Task: testTask1, Commit: "c-merge"},
+	review := proto.Item{Item: 1040, AI: testAI2, Why: "review", Task: testTask1, Msg: testMsg1}
+	batch := []verifiedItem{
+		{home: r.homeKey.ID(), group: testGroup1, item: proto.Item{Item: 1039, AI: testAI2, Why: "mention", Msg: testMsg2}},
+		{home: r.homeKey.ID(), group: testGroup1, item: review},
 	}
-
-	execDeliveredTrigger(t, r.db, true)
-	written, err := recordMergeTaken(r.h, "claude", v, testTask1)
-	joinAssertEqual(t, "delivered trigger err", err != nil, true)
-	joinAssertEqual(t, "delivered trigger written", written, false)
-	joinAssertEqual(t, "delivered trigger audits", len(r.audits()), 0)
-	execDeliveredTrigger(t, r.db, false)
-
-	written, err = recordMergeTaken(r.h, "claude", v, testTask1)
-	audits := r.audits()
-	joinAssertEqual(t, "first merge err", err, nil)
-	joinAssertEqual(t, "first merge written", written, true)
-	joinAssertEqual(t, "first merge audit count", len(audits), 2)
-	joinAssertEqual(t, "first merge AuditMerge what", audits[1].what, AuditMerge)
-	joinAssertEqual(t, "first merge AuditMerge detail", audits[1].detail, testTask1+" c-merge")
-
-	written, err = recordMergeTaken(r.h, "claude", v, testTask1)
-	joinAssertEqual(t, "duplicate merge err", err, nil)
-	joinAssertEqual(t, "duplicate merge written", written, false)
-	joinAssertEqual(t, "duplicate merge audit count", len(r.audits()), 2)
-	r.h.Settle()
+	err := commitTurnItems(r.h, "claude", SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}, batch)
+	if seamCode(t, err, "not_found"); len(r.audits()) != 0 {
+		t.Fatalf("items of an ended session were recorded: %+v", r.audits())
+	}
 }
 
-func execDeliveredTrigger(t *testing.T, db *store.Store, create bool) {
-	t.Helper()
-	stmt := "DROP TRIGGER block_delivered_only"
-	if create {
-		stmt = "CREATE TRIGGER block_delivered_only BEFORE INSERT ON audit WHEN NEW.what = 'delivered' BEGIN SELECT RAISE(ABORT, 'blocked'); END"
-	}
-	run := func(tx *store.Tx) error {
-		_, err := tx.Exec(stmt)
-		return err
-	}
-	assertStep17NoErr(t, db.Write(run))
-}
-
-func verifyResumeGroupMergesRequiresAuditTS(t *testing.T) {
-	t.Helper()
-	r := newDeliverRig(t, true)
-	originDir, pDir, baseCommit := initTestOriginAndGroupRepo(t, r, "none")
-	_, err := EnsureGroupWorkspace(t.Context(), pDir, originDir, "main")
-	assertStep17NoErr(t, err)
-
-	r.putTask(proto.TaskRow{
-		RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10},
-		Group:     testGroup1, Num: 1, Title: "NoAudit", Slug: "no-audit", Origin: "brief",
-		State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1,
+// An AI that has no group session on this node has no folder: nothing is
+// recorded for it, and its items wait.
+func TestItemsWaitForTheGroupSession(t *testing.T) {
+	r := newDeliverRig(t, false)
+	r.seedGroupAndMembers()
+	tskNoErr(t, r.h.Sessions.End(SessionKey{Group: testGroup1, Member: testAI1}))
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "active", Step: "work", Assignee: testAI1})
+	var looks atomic.Int32
+	r.setHold(func(*Host, SessionKey) (string, bool) {
+		looks.Add(1)
+		return "", false
 	})
-	ts0, found0 := findAuditMergeTS(r.db, testGroup1, testTask1+" "+baseCommit)
-	resumeGroupMerges(r.h, deliv(r.h), testGroup1)
-	joinAssertEqual(t, "unaudited ts", ts0, int64(0))
-	joinAssertEqual(t, "unaudited found", found0, false)
-	joinAssertEqual(t, "unaudited resume cmds", len(r.home.cmdPayloads()), 0)
-
-	writeAudit := func(tx *store.Tx) error {
-		_, err := r.h.Audit(tx, AuditRow{Group: testGroup1, Agent: "claude", What: AuditMerge, Detail: testTask2 + " " + baseCommit})
-		return err
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 1010, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "hello"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 1011, AI: testAI1, Why: "assign", Task: testTask1}, nil)
+	r.waitUntil("both items looked at", func() bool { return looks.Load() >= 2 && r.h.QueuedCount(testGroup1, testAI1) == 2 })
+	r.waitAIUnbusy(testGroup1, testAI1)
+	if len(r.home.ackList()) != 0 || len(r.audits()) != 0 || len(memberSessions(r.h, testGroup1, testAI1)) != 0 || len(r.runtime.recorded()) != 0 {
+		t.Fatalf("an AI without a group session got something: acks=%v audits=%+v sessions=%s", r.home.ackList(), r.audits(), sessionStates(r.h))
 	}
-	assertStep17NoErr(t, r.db.Write(writeAudit))
-	r.putTask(proto.TaskRow{
-		RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 11},
-		Group:     testGroup1, Num: 2, Title: "Audited", Slug: "audited", Origin: "brief",
-		State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1,
-	})
-	ts2, found2 := findAuditMergeTS(r.db, testGroup1, testTask2+" "+baseCommit)
-	resumeGroupMerges(r.h, deliv(r.h), testGroup1)
-	cmds := r.home.cmdPayloads()
-	joinAssertEqual(t, "audited ts", ts2, testStartMS)
-	joinAssertEqual(t, "audited found", found2, true)
-	joinAssertEqual(t, "audited resume cmds", len(cmds), 1)
-	joinAssertEqual(t, "audited resume task id", strings.Contains(cmds[0], `"id":"`+testTask2+`"`), true)
-	r.h.Settle()
+	r.joined(testAI1, "Claude", false)
+	Deliver(r.h, testGroup1, testAI1)
+	r.waitUntil("both items delivered", func() bool { return len(r.runtime.recorded()) == 2 && len(r.home.ackList()) == 2 })
 }
 
-// A task of a group with a remote branches from the freshly fetched origin/<base>,
-// not from the clone's own <base> (local.md section 7, "task session created").
-func TestRemoteTaskBranchesFromFetchedBase(t *testing.T) {
-	r := newDeliverRig(t, true)
-	originDir, pDir, _ := initTestOriginAndGroupRepo(t, r, "github")
-	ctx := t.Context()
-	_, err := EnsureGroupWorkspace(ctx, pDir, originDir, "main")
-	tskNoErr(t, err)
-	seed := filepath.Join(t.TempDir(), "seed")
-	mustGit(t, ctx, "", "clone", originDir, seed)
-	mustGit(t, ctx, seed, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "--allow-empty", "-m", "later")
-	mustGit(t, ctx, seed, "push", "origin", "refs/heads/main:refs/heads/main")
-	later := strings.TrimSpace(mustGit(t, ctx, seed, "rev-parse", "HEAD"))
+// The first turn of a task session starts only after the host has closed the
+// group's task sessions whose task is final or has another assignee: a folder
+// never runs the last turn of one task beside the first turn of the next
+// (contracts/task-machine.md section 4). The rows are put without a push, so
+// that only the step that records the new session can close the old one.
+func TestTaskSessionStartsAfterObsoleteSessionsAreClosed(t *testing.T) {
+	r := newDeliverRig(t, false)
+	r.seedGroupAndMembers()
+	first := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Origin: "brief", State: "active", Step: "work", Assignee: testAI1, Reviewer: testAI2}
+	r.putTask(first)
+	r.runtime.mu.Lock()
+	r.runtime.keepRun = true
+	r.runtime.mu.Unlock()
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 1030, AI: testAI1, Why: "assign", Task: testTask1}, nil)
+	kFirst := SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}
+	r.waitUntil("the first task's turn running", func() bool {
+		s, _ := r.h.Sessions.Get(kFirst)
+		return s.State == Working
+	})
+	r.waitAIUnbusy(testGroup1, testAI1)
 
-	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "Remote", Slug: "remote", Origin: "brief", State: "active", Step: "branch", Assignee: testAI1})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 870, AI: testAI1, Why: "assign", Task: testTask1}, nil)
-	r.waitUntil("task turn", func() bool { return len(r.runtime.recorded()) == 1 })
-	got := strings.TrimSpace(mustGit(t, ctx, filepath.Join(pDir, "wt", "1-remote"), "rev-parse", "HEAD"))
-	assertEqual(t, got, later)
+	// The review passed while that turn still runs; the task that waited for the folder starts.
+	first.Seq, first.State = 11, "done"
+	r.putTask(first)
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 12}, Group: testGroup1, Num: 2, Title: "T2", Origin: "brief", State: "active", Step: "work", Assignee: testAI2})
+	var beside atomic.Bool
+	r.runtime.mu.Lock()
+	r.runtime.onTurn = func(h *Host, _ SessionKey) { beside.Store(hasSession(h, kFirst)) }
+	r.runtime.mu.Unlock()
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 1031, AI: testAI2, Why: "assign", Task: testTask2}, nil)
+	r.waitUntil("the second task's turn", func() bool { return len(r.runtime.recorded()) == 2 })
+	if beside.Load() || hasSession(r.h, kFirst) || !slices.Contains(r.runtime.closedKeys(), kFirst) {
+		t.Fatalf("the second task started beside the first: closed=%v sessions=%s", r.runtime.closedKeys(), sessionStates(r.h))
+	}
+}
+
+// A task session ends when its task is done or cancelled or has another
+// assignee, a review session when its task is done or cancelled or has
+// another reviewer, and every session of a member that is gone
+// (flows/agent-turn.md step 17). Nothing in the folder is touched.
+func TestSessionsEndWithTheirTaskRoleAndMember(t *testing.T) {
+	r := newDeliverRig(t, true)
+	r.seedGroupAndMembers()
+	marker := filepath.Join(r.folder, "work.txt")
+	tskNoErr(t, os.WriteFile(marker, []byte("uncommitted\n"), 0o600))
+	seed := func(task string) (SessionKey, SessionKey) {
+		kT := SessionKey{Group: testGroup1, Member: testAI1, Task: task}
+		kR := SessionKey{Group: testGroup1, Member: testAI2, Task: task}
+		tskNoErr(t, r.h.Sessions.Create(Session{SessionKey: kT, Kind: TaskSession, Folder: r.folder, Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"}))
+		tskNoErr(t, r.h.Sessions.Create(Session{SessionKey: kR, Kind: ReviewSession, Folder: r.folder, Agent: "claude", Home: r.homeKey.ID(), Name: "Codex"}))
+		return kT, kR
+	}
+	push := func(row proto.TaskRow) {
+		pushTaskState(r, row)
+		settleDelivery(r.h)
+	}
+	kT1, kR1 := seed(testTask1)
+	kUnseen := SessionKey{Group: testGroup1, Member: testAI1, Task: "task-unseen"}
+	kOther := SessionKey{Group: testGroup2, Member: testAI1, Task: testTask1}
+	for _, key := range []SessionKey{kUnseen, kOther} {
+		tskNoErr(t, r.h.Sessions.Create(Session{SessionKey: key, Kind: TaskSession, Folder: r.folder, Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"}))
+	}
+	remoteAI := string(testCanonicalID(77))
+	row := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "Alpha", Origin: "brief", State: "active", Step: "review", Assignee: remoteAI, Reviewer: testAI2}
+
+	// While the group's state is being read, nothing ends.
+	d := deliv(r.h)
+	d.mu.Lock()
+	d.groupLocked(testGroup1, r.homeKey.ID()).live = false
+	d.mu.Unlock()
+	r.putTask(row)
+	cleanupGroupState(r.h, d, testGroup1)
+	d.mu.Lock()
+	d.groupLocked(testGroup1, r.homeKey.ID()).live = true
+	d.mu.Unlock()
+	tskRequire(t, hasSession(r.h, kT1) && len(r.runtime.closedKeys()) == 0, "a session ended while the group's state was read")
+
+	row.Seq, row.Assignee = 11, testAI1
+	push(row)
+	tskRequire(t, hasSession(r.h, kT1) && hasSession(r.h, kR1), "sessions of an active task ended")
+	row.Seq, row.Assignee = 12, remoteAI
+	push(row)
+	tskRequire(t, !hasSession(r.h, kT1) && hasSession(r.h, kR1) && slices.Equal(r.runtime.closedKeys(), []SessionKey{kT1}), "another assignee: the task session alone ends")
+	row.Seq, row.Reviewer = 13, remoteAI
+	push(row)
+	tskRequire(t, !hasSession(r.h, kR1) && hasSession(r.h, kUnseen) && hasSession(r.h, kOther), "another reviewer: the review session alone ends")
+	tskRequire(t, hasSession(r.h, SessionKey{Group: testGroup1, Member: testAI1}), "a group session ended with a task")
+
+	kT2, kR2 := seed(testTask2)
+	push(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 20}, Group: testGroup1, Num: 2, Title: "Beta", Origin: "brief", State: "cancelled", Step: "work", Assignee: testAI1, Reviewer: testAI2})
+	tskRequire(t, !hasSession(r.h, kT2) && !hasSession(r.h, kR2), "a cancelled task kept its sessions")
+
+	task3 := string(testCanonicalID(63))
+	kT3, kR3 := seed(task3)
+	tskNoErr(t, r.h.Sessions.Move(kT3, Dormant, Takeover))
+	done := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: task3, Seq: 30}, Group: testGroup1, Num: 3, Title: "Gamma", Origin: "brief", State: "done", Step: "review", Assignee: testAI1, Reviewer: testAI2}
+	push(done)
+	tskRequire(t, !hasSession(r.h, kT3) && !hasSession(r.h, kR3), "a task that is done kept its sessions")
+	closedBefore := len(r.runtime.closedKeys())
+	done.Seq = 31
+	push(done)
+	tskEqual(t, len(r.runtime.closedKeys()), closedBefore)
+
+	gone1 := proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 41}, Gone: true}
+	gone2 := proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI2, Seq: 42}, Gone: true}
+	frame := proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{json.RawMessage(marshalWire(gone1)), json.RawMessage(marshalWire(gone2))}}
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(frame)))
+	settleDelivery(r.h)
+	var left []SessionKey
+	for _, s := range r.h.Sessions.All() {
+		left = append(left, s.SessionKey)
+	}
+	tskRequire(t, slices.Equal(left, []SessionKey{{Group: testGroup1, Member: testSec}, kOther}), "a gone member's sessions: "+sessionStates(r.h))
+	if text, err := os.ReadFile(marker); err != nil || string(text) != "uncommitted\n" {
+		t.Fatalf("the folder was touched: %q, %v", text, err)
+	}
+
+	// A session whose task ended while the node was down ends when the node has read the group's state again.
+	task5 := string(testCanonicalID(65))
+	kT5 := SessionKey{Group: testGroup1, Member: testSec, Task: task5}
+	tskNoErr(t, r.h.Sessions.Create(Session{SessionKey: kT5, Kind: TaskSession, Folder: r.folder, Agent: "claude", Home: r.homeKey.ID(), Name: "Sec"}))
+	r.h.Settle()
+	r2 := newDeliverRigOnStore(t, r.db)
+	r2.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: task5, Seq: 50}, Group: testGroup1, Num: 5, Title: "Orphan", Origin: "brief", State: "done", Step: "review", Assignee: testSec})
+	r2.h.Attach(r2.homeKey.ID(), r2.home)
+	r2.waitUntil("the orphan session ended after the restart", func() bool { return !hasSession(r2.h, kT5) })
 }

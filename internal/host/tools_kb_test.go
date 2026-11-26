@@ -11,7 +11,7 @@ import (
 
 func TestKBToolsSchemasVisibilityAndInstructions(t *testing.T) {
 	lists := loadGoldenToolLists(t)
-	allLists := []proto.ToolList{lists.Secretary, lists.Group, lists.Review, lists.TaskLevel1, lists.TaskLevel23}
+	allLists := []proto.ToolList{lists.Secretary, lists.Group, lists.Review, lists.Task}
 	for _, name := range []string{"kb_put", "kb_search"} {
 		checkRegisteredTalkTool(t, lists.Secretary, name)
 		for _, list := range allLists {

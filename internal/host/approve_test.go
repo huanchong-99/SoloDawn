@@ -313,7 +313,7 @@ func newApproveFixture(t *testing.T) *approveFixture {
 	mustApproveNoErr(t, fx.h.Sessions.Create(Session{
 		SessionKey: fx.sessKey,
 		Kind:       TaskSession,
-		Folder:     "wt/12-approve",
+		Folder:     runFolder("wt/12-approve"),
 		Agent:      "claude",
 		Home:       fx.homeKey.ID(),
 		Name:       "Claude Worker",
@@ -324,8 +324,8 @@ func newApproveFixture(t *testing.T) *approveFixture {
 func (fx *approveFixture) seedDefaultRows() {
 	grp := proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: fx.groupID, Seq: 1},
-		Name:      "SoloDawn", Kind: "project", Base: "main", Forge: "none",
-		Home: fx.homeKey.ID(), Checks: []string{}, Limits: proto.Limits{ApprovalWaitS: 20},
+		Name:      "SoloDawn",
+		Home:      fx.homeKey.ID(), Limits: proto.Limits{ApprovalWaitS: 20},
 	}
 	h1 := proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: fx.human1ID, Seq: 2}, Group: fx.groupID, Kind: "human", User: fx.owner1.ID(), Name: "Alice"},
@@ -553,10 +553,10 @@ func TestCardsAcrossTaskReviewAndGroupSessions(t *testing.T) {
 	reviewKey := SessionKey{Group: fx.groupID, Member: fx.memberID, Task: reviewTask}
 	groupKey := SessionKey{Group: fx.groupID, Member: fx.memberID}
 	mustApproveNoErr(t, fx.h.Sessions.Create(Session{
-		SessionKey: reviewKey, Kind: ReviewSession, Folder: "review/45", Agent: "claude", Home: fx.homeKey.ID(), Name: "Reviewer",
+		SessionKey: reviewKey, Kind: ReviewSession, Folder: runFolder("review/45"), Agent: "claude", Home: fx.homeKey.ID(), Name: "Reviewer",
 	}))
 	mustApproveNoErr(t, fx.h.Sessions.Create(Session{
-		SessionKey: groupKey, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: fx.homeKey.ID(), Name: "Secretary", Secretary: true,
+		SessionKey: groupKey, Kind: GroupSession, Folder: runFolder("repo"), Agent: "claude", Home: fx.homeKey.ID(), Name: "Secretary", Secretary: true,
 	}))
 
 	assertSessionKindApproval(t, fx, fx.sessKey, fx.taskID)
@@ -816,7 +816,7 @@ func assertWaitDurationAndSelectBranches(t *testing.T, fx *approveFixture) proto
 	fx.seedDefaultRows()
 	grpZero := proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: fx.groupID, Seq: 10},
-		Name:      "SoloDawn", Kind: "project", Base: "main", Forge: "none", Home: fx.homeKey.ID(), Checks: []string{},
+		Name:      "SoloDawn", Home: fx.homeKey.ID(),
 		Limits: proto.Limits{ApprovalWaitS: 0},
 	}
 	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(marshalWire(grpZero)))
@@ -1153,9 +1153,9 @@ func seedCodexSessions(t *testing.T, fx *approveFixture) (SessionKey, SessionKey
 	groupKey := SessionKey{Group: fx.groupID, Member: fx.memberID}
 	reviewKey := SessionKey{Group: fx.groupID, Member: fx.memberID, Task: string(approveTestID(51))}
 	for _, s := range []Session{
-		{SessionKey: codexKey, Kind: TaskSession, Folder: "wt/50-codex", Agent: "codex", Home: fx.homeKey.ID(), Name: "Codex"},
-		{SessionKey: groupKey, Kind: GroupSession, Folder: "repo", Agent: "codex", Home: fx.homeKey.ID(), Name: "Codex", Secretary: true},
-		{SessionKey: reviewKey, Kind: ReviewSession, Folder: "review/51", Agent: "codex", Home: fx.homeKey.ID(), Name: "Codex"},
+		{SessionKey: codexKey, Kind: TaskSession, Folder: runFolder("wt/50-codex"), Agent: "codex", Home: fx.homeKey.ID(), Name: "Codex"},
+		{SessionKey: groupKey, Kind: GroupSession, Folder: runFolder("repo"), Agent: "codex", Home: fx.homeKey.ID(), Name: "Codex", Secretary: true},
+		{SessionKey: reviewKey, Kind: ReviewSession, Folder: runFolder("review/51"), Agent: "codex", Home: fx.homeKey.ID(), Name: "Codex"},
 	} {
 		mustApproveNoErr(t, fx.h.Sessions.Create(s))
 	}
@@ -1419,7 +1419,7 @@ func TestLevelOneRequestOfAConnectionIsDeniedWithoutACard(t *testing.T) {
 				return json.RawMessage(`{"re":1,"ok":true}`), nil
 			}
 			key := SessionKey{Group: runGroup1, Member: runAI1}
-			mustApproveNoErr(t, h.Sessions.Create(makeRunSession(key, GroupSession, "repo")))
+			mustApproveNoErr(t, h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo"))))
 			mustApproveNoErr(t, Runner.Turn(t.Context(), h, key, "turn", Turn{Kind: ItemsTurn}))
 			p := drv.proc(0)
 			p.emit(Event{Kind: Asked, Ask: &Ask{ID: "a1", Tool: "commandExecution", Category: "command", Command: "make a"}})

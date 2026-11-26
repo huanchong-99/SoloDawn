@@ -105,14 +105,14 @@ func seedTalkGroup(t *testing.T, h *Host) {
 	})
 	talkPutRow(t, h, "task", talkTask2ID, proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: talkTask2ID, Seq: 5},
-		Group:     talkGroupID, Num: 12, Title: "Show path", Slug: "show-path", Origin: "brief", Brief: "KaiCW9JC8UOG7lKNduDo8Q",
+		Group:     talkGroupID, Num: 12, Title: "Show path", Origin: "brief", Brief: "KaiCW9JC8UOG7lKNduDo8Q",
 		State: "active", Step: "review", Assignee: talkAI1ID, Reviewer: talkAI2ID, Pass: 90, Depends: []string{},
 		Stats: proto.TaskStats{Started: seamStart - 120_000}, Created: seamStart - 180_000,
 	})
 	talkPutRow(t, h, "task", talkTask1ID, proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: talkTask1ID, Seq: 6},
-		Group:     talkGroupID, Num: 1, Title: "First task", Slug: "first-task", Origin: "direct",
-		State: "queued", Step: "branch", Assignee: talkAI2ID, Pass: 90, Depends: []string{},
+		Group:     talkGroupID, Num: 1, Title: "First task", Origin: "direct",
+		State: "queued", Step: "work", Assignee: talkAI2ID, Pass: 90, Depends: []string{},
 		Wait:  &proto.TaskWait{Kind: "depends", Since: seamStart - 60_000},
 		Stats: proto.TaskStats{Started: seamStart - 60_000}, Created: seamStart - 60_000,
 	})
@@ -215,7 +215,7 @@ func checkRegisteredTalkTool(t *testing.T, sec proto.ToolList, name string) {
 
 func checkInvariantSchemas(t *testing.T, lists proto.ToolLists) {
 	t.Helper()
-	allLists := []proto.ToolList{lists.Secretary, lists.Group, lists.Review, lists.TaskLevel1, lists.TaskLevel23}
+	allLists := []proto.ToolList{lists.Secretary, lists.Group, lists.Review, lists.Task}
 	for _, list := range allLists {
 		for _, name := range []string{"list_members", "list_tasks", "note_put", "note_list"} {
 			goldenRaw, _ := json.Marshal(findGoldenTool(t, list, name).InputSchema)
@@ -494,8 +494,7 @@ func TestReadThreadShowsWhatABodyHolds(t *testing.T) {
 		}, "Decision (id m): Where?\n- A (Top): Visible.\n- B (Foot): Quiet."},
 		{"approval", "approved", proto.ApprovalBody{Tool: "Bash", Command: "pnpm install", Category: "command", Approvers: []string{"u1"}}, "Approval (approved) of Bash:\npnpm install"},
 		{"approval", "pending", proto.EmptyBody{}, ""},
-		{"checks", "", proto.ChecksBody{Stage: "local", Commit: "9f2c1ab", Items: []proto.CheckItem{{Name: "go test"}}}, "Checks (local) on commit 9f2c1ab: failed\n- go test: fail"},
-		{"review", "", proto.ReviewBody{Commit: "9f2c1ab", Round: 1, Score: 86, Pass: 90, Items: []proto.ReviewItem{{Text: "No test", Veto: true}}}, "Review round 1 on commit 9f2c1ab: score 86/90\n- [veto] No test"},
+		{"review", "", proto.ReviewBody{Report: "Zk3JiT9mQ0C1x8yq2uVb7A", Round: 1, Score: 86, Pass: 90, Items: []proto.ReviewItem{{Text: "No test", Veto: true}}}, "Review round 1: score 86/90\n- [veto] No test"},
 		{"review", "", proto.EmptyBody{}, ""},
 		{"brief", "pending", proto.EmptyBody{}, ""},
 	}
@@ -576,16 +575,16 @@ func TestListTasksToolAndIdleMinutesBoundaries(t *testing.T) {
 	endedAt := fixedNow - 600_000
 	talkPutRow(t, h, "task", "t3____________________A", proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: "t3____________________A", Seq: 10},
-		Group:     talkGroupID, Num: 3, Title: "Thread timed", Slug: "thread-timed", Origin: "direct",
-		State: "paused", Step: "local_check", Assignee: "unknownAssignee0000000A", Reviewer: "unknownReviewer0000000A", Pass: 90, Depends: []string{},
+		Group:     talkGroupID, Num: 3, Title: "Thread timed", Origin: "direct",
+		State: "paused", Step: "work", Assignee: "unknownAssignee0000000A", Reviewer: "unknownReviewer0000000A", Pass: 90, Depends: []string{},
 		Wait:   &proto.TaskWait{Kind: "manual", Since: fixedNow - 60_000},
 		Thread: proto.ThreadSummary{Count: 1, Last: &proto.ThreadMessage{By: talkAI1ID, Kind: "progress", Text: "wip", Timestamp: fixedNow - 60_000}},
 		Stats:  proto.TaskStats{Started: fixedNow - 600_000}, Created: fixedNow - 600_000,
 	})
 	talkPutRow(t, h, "task", "t4____________________A", proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: "t4____________________A", Seq: 11},
-		Group:     talkGroupID, Num: 4, Title: "Merged task", Slug: "merged-task", Origin: "direct",
-		State: "merged", Step: "merge", Assignee: talkAI1ID, Pass: 90, Depends: []string{},
+		Group:     talkGroupID, Num: 4, Title: "Finished task", Origin: "direct",
+		State: "done", Step: "review", Assignee: talkAI1ID, Pass: 90, Depends: []string{},
 		Stats: proto.TaskStats{Started: fixedNow - 600_000, Ended: &endedAt}, Created: fixedNow - 600_000,
 	})
 	talkPutRow(t, h, "task", "goneTask______________A", proto.GoneRow{
@@ -597,9 +596,9 @@ func TestListTasksToolAndIdleMinutesBoundaries(t *testing.T) {
 	dependsKind := "depends"
 	manualKind := "manual"
 	assertEqual(t, outAll.Tasks, []taskListItem{
-		{Task: "T-1", Title: "First task", State: "queued", Step: "branch", Assignee: "Codex", Wait: &dependsKind, IdleMinutes: 4},
-		{Task: "T-3", Title: "Thread timed", State: "paused", Step: "local_check", Assignee: "unknownAssignee0000000A", Reviewer: "unknownReviewer0000000A", Wait: &manualKind, IdleMinutes: 1},
-		{Task: "T-4", Title: "Merged task", State: "merged", Step: "merge", Assignee: "Claude Code", Wait: nil, IdleMinutes: 0},
+		{Task: "T-1", Title: "First task", State: "queued", Step: "work", Assignee: "Codex", Wait: &dependsKind, IdleMinutes: 4},
+		{Task: "T-3", Title: "Thread timed", State: "paused", Step: "work", Assignee: "unknownAssignee0000000A", Reviewer: "unknownReviewer0000000A", Wait: &manualKind, IdleMinutes: 1},
+		{Task: "T-4", Title: "Finished task", State: "done", Step: "review", Assignee: "Claude Code", Wait: nil, IdleMinutes: 0},
 		{Task: "T-12", Title: "Show path", State: "active", Step: "review", Assignee: "Claude Code", Reviewer: "Codex", Wait: nil, IdleMinutes: 5},
 	})
 	encoded, _ := json.Marshal(outAll)
@@ -623,7 +622,7 @@ func TestListTasksToolAndIdleMinutesBoundaries(t *testing.T) {
 		want int
 	}{
 		{proto.TaskRow{State: "active", Stats: proto.TaskStats{Started: 0, Ended: &ended}}, 300_000, 0},
-		{proto.TaskRow{State: "merged", Stats: proto.TaskStats{Started: 0}}, 300_000, 0},
+		{proto.TaskRow{State: "done", Stats: proto.TaskStats{Started: 0}}, 300_000, 0},
 		{proto.TaskRow{State: "cancelled", Stats: proto.TaskStats{Started: 0}}, 300_000, 0},
 		{proto.TaskRow{State: "active", Stats: proto.TaskStats{Started: 100_000}}, 159_999, 0},
 		{proto.TaskRow{State: "active", Stats: proto.TaskStats{Started: 100_000}}, 160_000, 1},
@@ -753,26 +752,26 @@ func TestNoteListTool(t *testing.T) {
 	assertErrorCode(t, err, "home_unreachable")
 }
 
-func TestPostToolHandbackCarriesTheFacts(t *testing.T) {
+// A hand-back is the AI's own account: its body is {}, and the takeover is
+// told that the AI posted it.
+func TestPostToolHandbackIsTheAIsOwnAccount(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	seedTalkGroup(t, h)
 	home := newTalkHomeStub()
 	h.Attach("home-device", home)
 	tid2 := proto.ID(talkTask2ID)
-	facts := proto.HandbackBody{Files: []string{"a.go"}, Commits: []proto.CommitSubject{{SHA: "9f2c1ab", Subject: "Fix"}}, Added: 4, Removed: 1}
-	t2 := &takeover{facts: facts}
+	t2 := &takeover{}
 	takeoverState(h).claim(h, aiSlot{group: talkGroupID, member: talkAI1ID}, t2, true)
 
 	taskCaller := talkCaller(TaskSession, talkAI1ID, talkTask2ID, false, Turn{Kind: HandbackTurn, Thread: talkTask2ID})
 	mustCallTalk[idResult](t, h, taskCaller, "post", `{"text":"Owner asked for X.","kind":"handback"}`)
-	sent := mustDecodeCmd[proto.Post[proto.HandbackBody]](t, home.asked[0], "/re")
+	sent := mustDecodeCmd[proto.Post[proto.EmptyBody]](t, home.asked[0], "/re")
 	assertEqual(t, [4]any{sent.Kind, sent.Thread, sent.Main, sent.Text}, [4]any{"handback", &tid2, false, "Owner asked for X."})
-	assertEqual(t, sent.Body, facts)
 	assertEqual(t, t2.posted, true)
 
+	// No takeover is open for the secretary: the post is sent all the same.
 	secCaller := talkCaller(GroupSession, talkSecID, "", true, Turn{Kind: HandbackTurn})
 	mustCallTalk[idResult](t, h, secCaller, "post", `{"text":"Read the logs.","kind":"handback"}`)
-	sentSec := mustDecodeCmd[proto.Post[proto.HandbackBody]](t, home.asked[1], "/thread", "/re")
+	sentSec := mustDecodeCmd[proto.Post[proto.EmptyBody]](t, home.asked[1], "/thread", "/re")
 	assertEqual(t, sentSec.Thread, (*proto.ID)(nil))
-	assertEqual(t, sentSec.Body, proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}})
 }

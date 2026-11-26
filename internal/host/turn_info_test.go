@@ -84,7 +84,7 @@ func checkAssignReference(t *testing.T, r *teamLabelRig, msg proto.MsgRow, label
 	c.s.CLISession = ""
 	r.notes = nil
 	got, err = c.assignBody(task, &msg, true)
-	want = "Task T-12 \"Node: report connection path changes\"\nBranch: task/12-node-report-connection-path-changes (this folder is its worktree)\nPlan: Plan\nReviewer: Codex   Pass score: 90\n" + want
+	want = "Task T-12 \"Node: report connection path changes\"\nFolder: /home/dev/website (your workspace in this group)\nPlan: Plan\nReviewer: Codex   Pass score: 90\n" + want
 	if err != nil || got != want {
 		t.Fatalf("first assign = %q, %v; want %q", got, err, want)
 	}
@@ -262,7 +262,7 @@ func (r *teamLabelRig) putTeamAI(id, user, name, account string, allow []string,
 }
 
 func (r *teamLabelRig) sess(ai, name string, kind Kind, sec bool) Session {
-	s := Session{SessionKey: SessionKey{Group: tGroupID, Member: ai}, Kind: kind, Home: r.homeKey.ID(), Name: name, Secretary: sec, CLISession: "c1"}
+	s := Session{SessionKey: SessionKey{Group: tGroupID, Member: ai}, Kind: kind, Folder: tFolder, Home: r.homeKey.ID(), Name: name, Secretary: sec, CLISession: "c1"}
 	if kind == TaskSession || kind == ReviewSession {
 		s.Task = tTaskID
 	}
@@ -347,19 +347,19 @@ func checkDirectAssignAuthorKinds(t *testing.T, r *teamLabelRig) {
 	assertContains(t, gotAI, err, "-- from \"P-worker\" (AI) in main · information\nAI requested badge.")
 }
 
-func TestTwoLabelsOnReviewedChecksAndDecidedCards(t *testing.T) {
+func TestTwoLabelsOnReviewedAndDecidedCards(t *testing.T) {
 	r := newTeamLabelRig(t, "Q")
 	qTeamTask := r.sess(r.qTeam, "Q-team", TaskSession, false)
 
 	revMsg := mustJSON(t, proto.MessageRow[proto.ReviewBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 12},
 		Pos:       12, Group: tGroupID, Thread: &tTaskID, By: r.pAI, Kind: "review", Timestamp: seamStart, Mentions: []string{},
-		Body: proto.ReviewBody{Task: tTaskID, Num: 12, Title: "Paths", Commit: "9f2c1ab", Round: 1, Score: 80, Pass: 90, OK: false, Items: []proto.ReviewItem{{Text: "Missing test"}}},
+		Body: proto.ReviewBody{Task: tTaskID, Num: 12, Title: "Paths", Report: tReport, Round: 1, Score: 80, Pass: 90, OK: false, Items: []proto.ReviewItem{{Text: "Missing test"}}},
 	})
 	gotRev, _, err := Compose(r.h, qTeamTask, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 1, AI: proto.ID(r.qTeam), Why: "reviewed", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, revMsg, nil),
 	})
-	assertContains(t, gotRev, err, "== 1 of 1 · reviewed · instruction\n-- from \"P-worker\" (AI) in T-12 · information\nReview round 1 on commit 9f2c1ab: score 80/90")
+	assertContains(t, gotRev, err, "== 1 of 1 · reviewed · instruction\n-- from \"P-worker\" (AI) in T-12 · information\nReview round 1: score 80/90")
 
 	makeDec := func(asker string, thread *string, to []string, by string) json.RawMessage {
 		return mustJSON(t, proto.MessageRow[proto.DecisionBody, *proto.CardState]{

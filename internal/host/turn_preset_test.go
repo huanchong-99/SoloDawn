@@ -68,12 +68,12 @@ func TestTurnPresetFirstAssignReviewAndReplaced(t *testing.T) {
 
 	// Review turn carries only the preset name after Pass score, without fetching presets.
 	r.home.asked = nil
-	revRaw := r.makeInboxItem(proto.Item{Item: 2, AI: proto.ID(tPeerID), Why: "review", Task: proto.ID(tTaskID), Commit: "9f2c1ab"}, nil, nil)
+	revRaw := r.makeInboxItem(proto.Item{Item: 2, AI: proto.ID(tPeerID), Why: "review", Task: proto.ID(tTaskID), Msg: proto.ID(tReport)}, r.reportMsg(tAIID), nil)
 	gotRev, _, err := Compose(r.h, r.session(ReviewSession, false, ""), ItemsTurn, []json.RawMessage{revRaw})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(gotRev, "Pass score: 90\nStyle preset: \"Calm dashboard\"") || len(r.home.asked) != 1 {
+	if !strings.Contains(gotRev, "Pass score: 90\nStyle preset: \"Calm dashboard\"\nWork: by ") || len(r.home.asked) != 1 {
 		t.Fatalf("review turn mismatch (asked=%d):\n%s", len(r.home.asked), gotRev)
 	}
 

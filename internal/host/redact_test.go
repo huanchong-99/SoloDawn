@@ -1,13 +1,9 @@
 package host
 
 import (
-	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 // keyBegin and keyEnd split key lines in test literals, so that this file
@@ -42,20 +38,8 @@ func TestRedactSecrets(t *testing.T) {
 	}
 }
 
-func TestCheckOutputIsRedacted(t *testing.T) {
-	command := "echo key ghp_" + strings.Repeat("a", 36)
-	line := "key [redacted]\n"
-	if runtime.GOOS == "windows" {
-		line = "key [redacted]\r\n"
-	}
-	want := proto.CheckItem{Name: command, OK: true, Detail: &line}
-	if got := runProjectCheck(t.Context(), t.TempDir(), command); !reflect.DeepEqual(got, want) {
-		t.Fatalf("check item %q %v %q, want detail %q", got.Name, got.OK, *got.Detail, line)
-	}
-}
-
 // The check scans by hand what redaction finds with regular expressions;
-// both must agree, and a diff's '>' lines must count as plain lines.
+// both must agree.
 func TestCheckAndRedactionAgree(t *testing.T) {
 	for _, text := range []string{
 		"", "A=1\nB=2\nC=3", "A=1\nB=2\nmy_key=3", "KEY=1\nB=2", "A=1\n\nTOKEN=2\nC=3",
@@ -66,12 +50,8 @@ func TestCheckAndRedactionAgree(t *testing.T) {
 		keyBegin + "PRIVATE KEY-----", "ghr_" + strings.Repeat("z", 29) + ".",
 	} {
 		redacted := RedactSecrets(text) != text
-		if found := containsSecret(text, ""); found != redacted {
+		if found := containsSecret(text); found != redacted {
 			t.Errorf("%q: check %v, redaction %v", text, found, redacted)
-		}
-		diff := ">" + strings.ReplaceAll(text, "\n", "\n>")
-		if found := containsSecret(diff, ">"); found != redacted {
-			t.Errorf("%q as added lines: check %v, redaction %v", text, found, redacted)
 		}
 	}
 }

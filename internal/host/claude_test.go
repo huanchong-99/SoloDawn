@@ -536,11 +536,10 @@ func TestClaudeWithoutItsToolsIsACrash(t *testing.T) {
 	script, err := filepath.Abs(filepath.Join("fakecli", "testdata", "claude-mcp-failed.json"))
 	claudeNoErr(t, err)
 	t.Setenv("SOLODAWN_FAKE_CLAUDE_SCRIPT", script)
-	h, rh, _, dataDir := setupRunEnv(t)
+	h, rh, _, _ := setupRunEnv(t)
 	Drivers["claude"] = claudeDriver{}
 	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	claudeNoErr(t, os.MkdirAll(filepath.Join(dataDir, "projects", runGroup1, "wt", "1-tools"), 0o700))
-	claudeNoErr(t, h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1-tools")))
+	claudeNoErr(t, h.Sessions.Create(makeRunSession(key, TaskSession, t.TempDir())))
 	claudeNoErr(t, Runner.Turn(t.Context(), h, key, "go", Turn{Kind: ItemsTurn, Thread: runTask1}))
 	rh.waitCmd(t)
 	crash, fail := rh.waitCmd(t), rh.waitCmd(t)

@@ -16,13 +16,13 @@ import (
 // Tools holds the superset schema (secretary for post, group for read_thread)
 // while the MCP server projects caller-specific schemas.
 var (
-	postSchema = json.RawMessage(`{"type":"object","properties":{"group":{"type":"string"},"kind":{"type":"string","enum":["text","progress","question","handback","summary"],"default":"text"},"mentions":{"type":"array","items":{"type":"string"}},"task":{"type":"string"},"text":{"type":"string"},"where":{"type":"string","enum":["thread","main"]}},"required":["text"],"additionalProperties":false}`)
+	postSchema = json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["text","progress","question","handback","summary"],"default":"text"},"mentions":{"type":"array","items":{"type":"string"}},"task":{"type":"string"},"text":{"type":"string"},"where":{"type":"string","enum":["thread","main"]}},"required":["text"],"additionalProperties":false}`)
 
 	readThreadSchema = json.RawMessage(`{"type":"object","properties":{"before":{"type":"integer","minimum":1},"limit":{"type":"integer","default":30,"minimum":1,"maximum":100},"task":{"type":"string"}},"required":["task"],"additionalProperties":false}`)
 
 	listMembersSchema = json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 
-	listTasksSchema = json.RawMessage(`{"type":"object","properties":{"state":{"type":"string","enum":["queued","active","paused","failed","merged","cancelled"]}},"additionalProperties":false}`)
+	listTasksSchema = json.RawMessage(`{"type":"object","properties":{"state":{"type":"string","enum":["queued","active","paused","failed","done","cancelled"]}},"additionalProperties":false}`)
 
 	notePutSchema = json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"},"text":{"type":"string"}},"required":["text"],"additionalProperties":false}`)
 
@@ -41,7 +41,7 @@ func init() {
 		Call:        callReadThread,
 	})
 	Register(Tools, "list_members", Tool{
-		Description: "List the current members of the group.",
+		Description: "List the current members of the group. An AI has host, its computer, and workspace, the folder it works in there.",
 		Schema:      listMembersSchema,
 		Call:        callListMembers,
 	})
@@ -63,10 +63,11 @@ func init() {
 }
 
 type postArgs struct {
-	bulletinArgs
-	Kind  *string `json:"kind,omitempty"`
-	Where *string `json:"where,omitempty"`
-	Task  *string `json:"task,omitempty"`
+	Text     string   `json:"text"`
+	Mentions []string `json:"mentions,omitempty"`
+	Kind     *string  `json:"kind,omitempty"`
+	Where    *string  `json:"where,omitempty"`
+	Task     *string  `json:"task,omitempty"`
 }
 
 type readThreadArgs struct {
@@ -107,14 +108,17 @@ type readThreadResult struct {
 	More     bool            `json:"more"`
 }
 
+// memberListItem has name and kind for a person. Workspace is an AI's
+// folder on its host (contracts/mcp-tools.md section 1).
 type memberListItem struct {
-	Name    string       `json:"name"`
-	Kind    string       `json:"kind"`
-	State   string       `json:"state,omitempty"`
-	Host    string       `json:"host,omitempty"`
-	Account string       `json:"account,omitempty"`
-	Task    string       `json:"task,omitempty"`
-	Usage   *proto.Usage `json:"usage,omitempty"`
+	Name      string       `json:"name"`
+	Kind      string       `json:"kind"`
+	State     string       `json:"state,omitempty"`
+	Host      string       `json:"host,omitempty"`
+	Workspace string       `json:"workspace,omitempty"`
+	Account   string       `json:"account,omitempty"`
+	Task      string       `json:"task,omitempty"`
+	Usage     *proto.Usage `json:"usage,omitempty"`
 }
 
 type listMembersResult struct {
@@ -171,33 +175,16 @@ func decodeTalkArgs(raw json.RawMessage, dst any) error {
 func callPost(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
 	var a postArgs
 	if err := decodeTalkArgs(raw, &a); err != nil {
-		return callPostIgnoringPlacement(ctx, h, c, raw)
+		return nil, err
 	}
 	if err := CheckOutboundSecret(a.Text); err != nil {
 		return nil, err
-	}
-	if a.Group != nil {
-		return callBulletin(ctx, h, c, a.bulletinArgs)
 	}
 	p, err := preparePost(h, c, a)
 	if err != nil {
 		return nil, err
 	}
 	return sendPreparedPost(ctx, h, c, p)
-}
-
-func callPostIgnoringPlacement(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
-	var a bulletinArgs
-	if err := decodeTalkArgs(raw, &a); err != nil {
-		return nil, err
-	}
-	if err := CheckOutboundSecret(a.Text); err != nil {
-		return nil, err
-	}
-	if a.Group == nil {
-		return nil, badTalkRequest("invalid tool arguments")
-	}
-	return callBulletin(ctx, h, c, a)
 }
 
 func preparePost(h *Host, c Caller, a postArgs) (preparedPost, error) {
@@ -288,11 +275,10 @@ func turnThreadPlace(c Caller, where string) (*proto.ID, error) {
 
 func sendPreparedPost(ctx context.Context, h *Host, c Caller, p preparedPost) (any, error) {
 	hdr := secHomeHeader(h, c, "post")
-	var body any = proto.EmptyBody{}
 	if p.kind == "handback" {
-		body = takeoverFacts(h, c.SessionKey)
+		handbackPosted(h, c.SessionKey)
 	}
-	payload := marshalWire(proto.Post[any]{
+	payload := marshalWire(proto.Post[proto.EmptyBody]{
 		HomeCommand: hdr,
 		Kind:        p.kind,
 		Thread:      p.thread,
@@ -300,7 +286,6 @@ func sendPreparedPost(ctx context.Context, h *Host, c Caller, p preparedPost) (a
 		Text:        p.text,
 		Mentions:    p.mentions,
 		Re:          nil,
-		Body:        body,
 	})
 	if _, err := h.Command(ctx, c.Home, payload); err != nil {
 		return nil, err
@@ -431,13 +416,14 @@ func decodeAIMemberItem(raw json.RawMessage, tasks map[string]string) (memberLis
 	}
 	usage := ai.Usage
 	return memberListItem{
-		Name:    ai.Name,
-		Kind:    ai.Kind,
-		State:   ai.State,
-		Host:    cmp.Or(ai.HostName, ai.Host),
-		Account: ai.Account,
-		Task:    cmp.Or(tasks[ai.Task], ai.Task),
-		Usage:   &usage,
+		Name:      ai.Name,
+		Kind:      ai.Kind,
+		State:     ai.State,
+		Host:      cmp.Or(ai.HostName, ai.Host),
+		Workspace: ai.Workspace,
+		Account:   ai.Account,
+		Task:      cmp.Or(tasks[ai.Task], ai.Task),
+		Usage:     &usage,
 	}, true
 }
 
@@ -480,7 +466,7 @@ func buildTaskListItem(row proto.TaskRow, names map[string]string, nowMS int64) 
 }
 
 func taskIdleMinutes(row proto.TaskRow, nowMS int64) int {
-	if row.Stats.Ended != nil || row.State == "merged" || row.State == "cancelled" {
+	if row.Stats.Ended != nil || row.State == "done" || row.State == "cancelled" {
 		return 0
 	}
 	last := cmp.Or(row.Stats.Started, row.Created)

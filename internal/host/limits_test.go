@@ -159,8 +159,8 @@ func limSurface(t *testing.T, h *Host, kind string) error {
 func putLimGroupRow(h *Host, group string, turnMinutes int, paused *proto.GroupPause) {
 	grp := proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: group, Seq: 1},
-		Name:      "Proj", Kind: "project", Base: "main", Forge: "none",
-		Home: "home-dev", Secretary: runAI1, Checks: []string{},
+		Name:      "Proj",
+		Home:      "home-dev", Secretary: runAI1,
 		Limits: proto.Limits{TurnMinutes: turnMinutes},
 		Paused: paused,
 	}
@@ -224,7 +224,7 @@ func TestOfflineClosesEverySessionAndOnlineReleasesTheHold(t *testing.T) {
 	taskKey := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
 	grpKey := SessionKey{Group: runGroup1, Member: runAI2}
 	dormKey := SessionKey{Group: runGroup2, Member: runAI1}
-	for _, s := range []Session{makeRunSession(taskKey, TaskSession, "wt/1"), makeRunSession(grpKey, GroupSession, "repo"), makeRunSession(dormKey, GroupSession, "repo")} {
+	for _, s := range []Session{makeRunSession(taskKey, TaskSession, runFolder("wt/1")), makeRunSession(grpKey, GroupSession, runFolder("repo")), makeRunSession(dormKey, GroupSession, runFolder("repo"))} {
 		h.Sessions.Create(s)
 	}
 	mustLimTurn(t, h, taskKey, Turn{Kind: ItemsTurn, Thread: runTask1})
@@ -308,7 +308,7 @@ func TestTurnLimitsInterruptTheTurn(t *testing.T) {
 		drv.endOnInterrupt = true
 		putLimGroupRow(h, runGroup1, 1, nil)
 		key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-		h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1"))
+		h.Sessions.Create(makeRunSession(key, TaskSession, runFolder("wt/1")))
 		mustLimTurn(t, h, key, Turn{Kind: ItemsTurn, Thread: runTask1})
 		synctest.Wait()
 
@@ -342,7 +342,7 @@ func TestAStopThatEndsInAKillDoesNotFailTheTask(t *testing.T) {
 		defer shutdown()
 		drv.ignoreInterrupt = true
 		key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-		h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1"))
+		h.Sessions.Create(makeRunSession(key, TaskSession, runFolder("wt/1")))
 		mustLimTurn(t, h, key, Turn{Kind: ItemsTurn, Thread: runTask1})
 		synctest.Wait()
 
@@ -372,7 +372,7 @@ func TestCodexSilentLimitWaitsForActivityAndOpenCalls(t *testing.T) {
 		defer shutdown()
 		drv.endOnInterrupt = true
 		key := SessionKey{Group: runGroup1, Member: runAI2}
-		s := makeRunSession(key, GroupSession, "repo")
+		s := makeRunSession(key, GroupSession, runFolder("repo"))
 		s.Agent = "codex"
 		h.Sessions.Create(s)
 		mustLimTurn(t, h, key, Turn{Kind: ItemsTurn})
@@ -412,8 +412,8 @@ func TestAStaleTurnTimerDoesNothingAndSettleStopsTheTimers(t *testing.T) {
 	h, _, drv, _ := setupLimEnv(t)
 	claudeKey := SessionKey{Group: runGroup1, Member: runAI1}
 	codexKey := SessionKey{Group: runGroup1, Member: runAI2}
-	h.Sessions.Create(makeRunSession(claudeKey, GroupSession, "repo"))
-	cdx := makeRunSession(codexKey, GroupSession, "repo")
+	h.Sessions.Create(makeRunSession(claudeKey, GroupSession, runFolder("repo")))
+	cdx := makeRunSession(codexKey, GroupSession, runFolder("repo"))
 	cdx.Agent = "codex"
 	h.Sessions.Create(cdx)
 	mustLimTurn(t, h, claudeKey, Turn{Kind: ItemsTurn})
@@ -453,7 +453,7 @@ func TestRateLimitsHoldUntilTheReset(t *testing.T) {
 		delivered := make(chan aiSlot, 8)
 		Deliver = func(_ *Host, g, m string) { delivered <- aiSlot{g, m} }
 		key := SessionKey{Group: runGroup1, Member: runAI1}
-		h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+		h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo")))
 		mustLimTurn(t, h, key, Turn{Kind: ItemsTurn})
 		synctest.Wait()
 
@@ -512,7 +512,7 @@ func TestMemberUsageComesFromMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := SessionKey{Group: runGroup1, Member: runAI1}
-	h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo")))
 	putLimLocalAI(h, runGroup2, runAI2, "claude")
 
 	if u := memberUsage(h, runGroup1, runAI1); u.TurnsToday == nil || *u.TurnsToday != 4 {
@@ -551,7 +551,7 @@ func TestMemberUsageComesFromMemory(t *testing.T) {
 func TestMemberStateOverlays(t *testing.T) {
 	h, _, _, _ := setupLimEnv(t)
 	key := SessionKey{Group: runGroup1, Member: runAI1}
-	h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo")))
 	putLimGroupRow(h, runGroup1, 0, &proto.GroupPause{By: "owner", At: 1})
 	if st, _ := h.MemberState(runGroup1, runAI1); st != "paused" {
 		t.Fatalf("paused group: %s", st)
@@ -581,7 +581,7 @@ func TestPausingInterruptsTheTurnsOfThePausedGroupOrTask(t *testing.T) {
 		grpKey := SessionKey{Group: runGroup1, Member: runAI1}
 		taskKey := SessionKey{Group: runGroup1, Member: runAI2, Task: runTask1}
 		otherKey := SessionKey{Group: runGroup2, Member: runAI1}
-		for _, s := range []Session{makeRunSession(grpKey, GroupSession, "repo"), makeRunSession(taskKey, TaskSession, "wt/1"), makeRunSession(otherKey, GroupSession, "repo")} {
+		for _, s := range []Session{makeRunSession(grpKey, GroupSession, runFolder("repo")), makeRunSession(taskKey, TaskSession, runFolder("wt/1")), makeRunSession(otherKey, GroupSession, runFolder("repo"))} {
 			h.Sessions.Create(s)
 		}
 		mustLimTurn(t, h, grpKey, Turn{Kind: ItemsTurn})
@@ -594,8 +594,8 @@ func TestPausingInterruptsTheTurnsOfThePausedGroupOrTask(t *testing.T) {
 
 		task := proto.TaskRow{
 			RowHeader: proto.RowHeader{Type: "task", ID: runTask1, Seq: 1},
-			Group:     runGroup1, Num: 1, Title: "T", Slug: "t", Origin: "brief",
-			State: "active", Step: "branch", Assignee: runAI2, Depends: []string{},
+			Group:     runGroup1, Num: 1, Title: "T", Origin: "brief",
+			State: "active", Step: "work", Assignee: runAI2, Depends: []string{},
 		}
 		pushLimRows(h, runGroup1, task)
 		synctest.Wait()
@@ -619,8 +619,8 @@ func TestPausingInterruptsTheTurnsOfThePausedGroupOrTask(t *testing.T) {
 
 		grp := proto.GroupRow{
 			RowHeader: proto.RowHeader{Type: "group", ID: runGroup1, Seq: 3},
-			Name:      "Proj", Kind: "project", Base: "main", Forge: "none",
-			Home: "home-dev", Secretary: runAI1, Checks: []string{},
+			Name:      "Proj",
+			Home:      "home-dev", Secretary: runAI1,
 			Paused: &proto.GroupPause{By: "owner", At: 1},
 		}
 		pushLimRows(h, runGroup1, grp)
@@ -668,7 +668,7 @@ func TestPauseAndOfflineAreReportedOfEveryHostedAI(t *testing.T) {
 			CLI:       "claude", Host: "another", Allow: []string{}, Approvers: []string{},
 		})))
 		key := SessionKey{Group: runGroup1, Member: runAI1}
-		h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+		h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo")))
 		mustLimTurn(t, h, key, Turn{Kind: ItemsTurn})
 		check := func(what string, act func(), want map[string]string) {
 			t.Helper()
@@ -682,8 +682,7 @@ func TestPauseAndOfflineAreReportedOfEveryHostedAI(t *testing.T) {
 		push := func(seq int64, paused *proto.GroupPause) func() {
 			return func() {
 				pushLimRows(h, runGroup1, proto.GroupRow{
-					RowHeader: proto.RowHeader{Type: "group", ID: runGroup1, Seq: seq}, Name: "Proj", Kind: "project",
-					Base: "main", Forge: "none", Home: "home-dev", Checks: []string{}, Paused: paused,
+					RowHeader: proto.RowHeader{Type: "group", ID: runGroup1, Seq: seq}, Name: "Proj", Home: "home-dev", Paused: paused,
 				})
 			}
 		}
@@ -703,7 +702,7 @@ func TestPauseAndOfflineAreReportedOfEveryHostedAI(t *testing.T) {
 func TestStateThatChangesWhileItIsReportedIsReportedAgain(t *testing.T) {
 	h, rh, _, _ := setupRunEnv(t)
 	key := SessionKey{Group: runGroup1, Member: runAI1}
-	h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(key, GroupSession, runFolder("repo")))
 	rh.cmdFn = func(map[string]any) (json.RawMessage, error) {
 		h.Sessions.Move(key, Dormant, Working)
 		return json.RawMessage(`{"re":1,"ok":true}`), nil

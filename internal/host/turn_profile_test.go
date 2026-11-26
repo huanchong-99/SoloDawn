@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
-	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
 func setTurnProfile(t *testing.T, r *turnRig, id string, edit func(*proto.AIMemberRow)) {
@@ -42,38 +41,6 @@ AI members (CLI on computer · tier · state · skills):
 	assertComposed(t, r.h, r.session(GroupSession, true, ""), ReplacedTurn, nil, want, Turn{Kind: ReplacedTurn})
 }
 
-func TestSecretaryHeaderNamesTheTeamGroups(t *testing.T) {
-	r := newTurnRig(t)
-	put := func(cached bool, id, name, kind string) {
-		row := makeGroupRow(proto.ID(id), r.homeKey.ID(), name, "", "")
-		row.Kind = kind
-		if cached {
-			r.h.Rows.Put(id, "group", id, mustJSON(t, row))
-			return
-		}
-		if err := r.h.Store.Write(func(tx *store.Tx) error { return store.Put(tx, id, seamStart, row) }); err != nil {
-			t.Fatal(err)
-		}
-	}
-	put(false, string(joinTestGroup3), "Local", "team") // homed here, no AI in it
-	put(false, turnID("project"), "Project", "project")
-	put(true, bulletinGroup, "Team, renamed", "team")
-	homes := marshalWire([]proto.Home{
-		{Group: bulletinGroup, Home: "team-home", Name: "Team"},
-		{Group: bulletinGroup, Home: "team-home", Name: "Team"},
-		{Group: proto.ID(turnID("unread")), Home: "far", Name: "Unread"},
-	})
-	seamSQL(t, r.h.Store, `INSERT INTO setting(key,value) VALUES('homes','`+homes+`')`)
-	teams := `Team groups (name and id): "Local" (` + string(joinTestGroup3) + `), "Team, renamed" (` + bulletinGroup + ")\n"
-	assertComposed(t, r.h, r.session(GroupSession, true, ""), ReplacedTurn, nil, secretaryTurnHeader+teams+"== context · instruction", Turn{Kind: ReplacedTurn})
-	want := "[SoloDawn] group \"Website\" · you are \"Claude Code\" · group session\n== context · instruction"
-	assertComposed(t, r.h, r.session(GroupSession, false, ""), ReplacedTurn, nil, want, Turn{Kind: ReplacedTurn})
-	seamSQL(t, r.h.Store, "DROP TABLE row")
-	if _, _, err := Compose(r.h, r.session(GroupSession, true, ""), ReplacedTurn, nil); err == nil {
-		t.Fatal("a store that cannot be read gave a turn")
-	}
-}
-
 func TestProfileEscalationUsesLatestTaskAndAppendsToItem(t *testing.T) {
 	r := newTurnRig(t)
 	setTurnProfile(t, r, tPeerID, func(ai *proto.AIMemberRow) { ai.Tier = "light" })
@@ -96,11 +63,11 @@ func TestProfileEscalationWithoutCarriedMessage(t *testing.T) {
 	setTurnProfile(t, r, tAIID, func(ai *proto.AIMemberRow) { ai.Tier = "light" })
 	setTurnProfile(t, r, tSecID, func(ai *proto.AIMemberRow) { ai.Tier = "strong" })
 	task := r.baseTask()
-	task.Stuck = &proto.Stuck{Kind: "checks", N: 2, Ask: true}
+	task.Stuck = &proto.Stuck{Kind: "review", N: 2, Ask: true}
 	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, task))
-	item := r.makeInboxItem(proto.Item{Item: 1, Why: "checks", Task: proto.ID(tTaskID)}, nil, nil)
+	item := r.makeInboxItem(proto.Item{Item: 1, Why: "reviewed", Task: proto.ID(tTaskID)}, nil, nil)
 	got, _, err := Compose(r.h, r.session(TaskSession, false, "c1"), ItemsTurn, []json.RawMessage{item})
-	assertSuffix(t, got, err, "== 1 of 1 · checks · instruction\nThis is failure 2 in a row of the same kind (checks). Before you submit again, call ask to one of: \"Codex\" (standard), \"Secretary\" (strong). Then continue with the answer.")
+	assertSuffix(t, got, err, "== 1 of 1 · reviewed · instruction\nThis is failure 2 in a row of the same kind (review). Before you submit again, call ask to one of: \"Codex\" (standard), \"Secretary\" (strong). Then continue with the answer.")
 }
 
 func TestProfileEscalationStillBlocksWithoutCurrentCandidates(t *testing.T) {

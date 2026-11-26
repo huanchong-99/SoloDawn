@@ -4,9 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"maps"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -46,16 +44,14 @@ type takeovers struct {
 // A takeover of one AI in one group, from takeover.start to the end of its
 // hand-back.
 type takeover struct {
-	key     SessionKey
-	from    Owner
-	nonce   string
-	created bool // the takeover started the session's task
-	assign  bool // a new task runs its assign turn structured first
-	pty     *PTY
-	closed  bool // the terminal has closed
-	facts   proto.HandbackBody
-	posted  bool // the AI posted its hand-back
-	free    bool // the hand-back has started: the takeover holds nothing
+	key    SessionKey
+	from   Owner
+	nonce  string
+	assign bool // the CLI cannot start a new session in a terminal
+	pty    *PTY
+	closed bool // the terminal has closed
+	posted bool // the AI posted its hand-back
+	free   bool // the hand-back has started: the takeover holds nothing
 }
 
 func takeoverState(h *Host) *takeovers {
@@ -132,8 +128,8 @@ func takeoverStart(ctx context.Context, h *Host, from Owner, _ string, data json
 	slot := aiSlot{group: string(req.Group), member: string(req.Member)}
 	p := takeoverState(h)
 	t := &takeover{from: from, nonce: string(req.Nonce), assign: assignFirst}
-	if mergeRunning(h, slot) || !p.claim(h, slot, t, true) {
-		return nil, &Error{"busy", "the AI is taken over, is being given a turn, or one of its tasks is merging"}
+	if !p.claim(h, slot, t, true) {
+		return nil, &Error{"busy", "the AI is taken over or is being given a turn"}
 	}
 	if err := openTerminal(ctx, h, p, slot, ai, t, string(req.Task)); err != nil {
 		p.release(h, slot, t)
@@ -158,42 +154,20 @@ func checkTakeoverStart(h *Host, from Owner, data json.RawMessage) (proto.Takeov
 	return req, ai, assignFirst, err
 }
 
-// mergeRunning reports whether the host is merging a task of the AI.
-func mergeRunning(h *Host, slot aiSlot) bool {
-	d := deliv(h)
-	d.mu.Lock()
-	keys := slices.Collect(maps.Keys(d.merging))
-	d.mu.Unlock()
-	for _, k := range keys {
-		group, rest, _ := strings.Cut(k, "\x00")
-		taskID, _, _ := strings.Cut(rest, "\x00")
-		task, _ := lookupTaskRow(h, group, taskID)
-		if group == slot.group && task.Assignee == slot.member {
-			return true
-		}
-	}
-	return false
-}
-
 func openTerminal(ctx context.Context, h *Host, p *takeovers, slot aiSlot, ai aiInfo, t *takeover, taskID string) error {
 	interruptTurn(ctx, h, slot)
 	grp, _ := lookupRow[proto.GroupRow](h, slot.group, "group", slot.group)
-	target, err := takeoverTarget(ctx, h, slot, ai, grp.Home, taskID, t)
+	target, err := takeoverTarget(h, slot, ai, taskID)
 	if err != nil {
 		return err
 	}
-	if err = openSession(ctx, h, p, ai, target, grp.Home, t); err != nil && t.created {
-		sendHostCommand(ctx, h, grp.Home, marshalWire(hostTaskCommand(h, slot.group, "cancel", target.key.Task)))
-		h.Sessions.End(target.key)
-	}
-	return err
+	return openSession(ctx, h, p, ai, target, grp.Home, t)
 }
 
 func openSession(ctx context.Context, h *Host, p *takeovers, ai aiInfo, target routedTarget, home string, t *takeover) error {
-	s, gitErr, err := prepareTargetSession(h, ai, target, home, nil)
-	err = cmp.Or(gitErr, err)
-	if err == nil && t.created && t.assign {
-		err = warmUp(ctx, h, s)
+	s, err := prepareTargetSession(h, ai, target, home)
+	if gone := missingFolder(s); err == nil && gone != "" {
+		err = &Error{"cli", gone}
 	}
 	if err == nil {
 		err = startTerminal(ctx, h, p, s.SessionKey, t)
@@ -201,9 +175,9 @@ func openSession(ctx context.Context, h *Host, p *takeovers, ai aiInfo, target r
 	return err
 }
 
-// takeoverTarget picks the session of flows/takeover.md section A, and starts
-// a task for a working AI that has none.
-func takeoverTarget(ctx context.Context, h *Host, slot aiSlot, ai aiInfo, home, taskID string, t *takeover) (routedTarget, error) {
+// takeoverTarget picks the session of flows/takeover.md section A: the group
+// session for a working AI without an unfinished task. No task is created.
+func takeoverTarget(h *Host, slot aiSlot, ai aiInfo, taskID string) (routedTarget, error) {
 	target := routedTarget{key: SessionKey{Group: slot.group, Member: slot.member, Task: taskID}, kind: TaskSession}
 	if ai.secretary {
 		target.key.Task, target.kind = "", GroupSession
@@ -212,12 +186,10 @@ func takeoverTarget(ctx context.Context, h *Host, slot aiSlot, ai aiInfo, home, 
 	if taskID != "" {
 		return namedTarget(h, target)
 	}
-	if target.key.Task = lastTask(h, slot); target.key.Task != "" {
-		return target, nil
+	if target.key.Task = lastTask(h, slot); target.key.Task == "" {
+		target.kind = GroupSession
 	}
-	id, err := startTakeoverTask(ctx, h, slot, home)
-	target.key.Task, t.created = id, true
-	return target, err
+	return target, nil
 }
 
 func namedTarget(h *Host, target routedTarget) (routedTarget, error) {
@@ -255,47 +227,8 @@ func lastTask(h *Host, slot aiSlot) string {
 	return slices.MaxFunc(open, func(a, b Session) int { return cmp.Compare(a.LastActive, b.LastActive) }).Task
 }
 
-// startTakeoverTask sends task start for a task of origin takeover and keeps
-// its row until the home's own arrives.
-func startTakeoverTask(ctx context.Context, h *Host, slot aiSlot, home string) (string, error) {
-	const title = "Owner takeover"
-	id := proto.NewNonce()
-	cmd := proto.TaskStart{TaskCommand: tskCommand(h, slot.group, slot.member, "start", id), Title: title, Origin: "takeover"}
-	ans, err := h.Command(ctx, home, marshalWire(cmd))
-	if err != nil {
-		return "", err
-	}
-	var res proto.CmdResult
-	proto.Decode(ans, &res)
-	if _, ok := lookupTaskRow(h, slot.group, string(id)); !ok {
-		row := proto.TaskRow{
-			RowHeader: proto.RowHeader{Type: "task", ID: string(id)}, Group: slot.group, Num: res.Num,
-			Title: title, Slug: proto.MakeSlug(title), Origin: "takeover", State: "active", Step: "branch",
-			Assignee: slot.member, Depends: []string{},
-		}
-		h.Rows.Put(slot.group, "task", string(id), json.RawMessage(marshalWire(row)))
-	}
-	return string(id), nil
-}
-
-// warmUp gives a new task session its assign turn in structured mode first,
-// for a CLI whose takeover is resume (flows/takeover.md section A).
-func warmUp(ctx context.Context, h *Host, s Session) error {
-	task, _ := lookupTaskRow(h, s.Group, s.Task)
-	item, _ := json.Marshal(proto.InboxItem{Item: proto.Item{AI: proto.ID(s.Member), Why: "assign", Task: proto.ID(s.Task)}, Task: &task})
-	text, turn, err := Compose(h, s, ItemsTurn, []json.RawMessage{item})
-	if err == nil {
-		err = Runner.Turn(ctx, h, s.SessionKey, text, turn)
-	}
-	if err == nil {
-		err = waitTurnOver(ctx, h, s.SessionKey)
-	}
-	return err
-}
-
-// startTerminal closes the session's structured CLI, notes its commit, and
-// opens the interactive CLI in a pseudo-terminal (flows/takeover.md steps 4
-// to 7).
+// startTerminal closes the session's structured CLI and opens the
+// interactive CLI in a pseudo-terminal (flows/takeover.md steps 4 to 7).
 func startTerminal(ctx context.Context, h *Host, p *takeovers, key SessionKey, t *takeover) error {
 	Runner.Close(h, key)
 	s, _ := h.Sessions.Get(key)
@@ -306,11 +239,9 @@ func startTerminal(ctx context.Context, h *Host, p *takeovers, key SessionKey, t
 	if err != nil {
 		return err
 	}
-	head := gitHead(ctx, h, s)
-	h.Sessions.Update(key, func(r *Session) { r.TakeoverAt = head })
 	token := h.Sessions.Admit(key, cfg.level, true)
 	launch := Launch{
-		Folder: sessionDir(h, s), Session: s.CLISession, Level: cfg.level,
+		Folder: s.Folder, Session: s.CLISession, Level: cfg.level,
 		Shim: append(slices.Clone(h.Shim), "--token", token), Instructions: Instructions(s),
 		RepoConfig: s.Kind != GroupSession, ToolTimeout: groupToolTimeout(h, s.Group),
 	}
@@ -340,14 +271,6 @@ func closeUnattached(pt *PTY) {
 	if !pt.Attached() {
 		pt.Close()
 	}
-}
-
-func gitHead(ctx context.Context, h *Host, s Session) string {
-	if s.Kind != TaskSession || !hasGitClone(projectDir(h, s.Group)) {
-		return ""
-	}
-	out, _ := workspaceGit(ctx, sessionDir(h, s), "rev-parse", "HEAD")
-	return strings.TrimSpace(out)
 }
 
 // watch closes the terminals opened over from once its path is no longer
@@ -442,7 +365,7 @@ func handBackSaved(h *Host, group string) {
 	}
 }
 
-// handBack runs flows/takeover.md steps 14 to 18.
+// handBack runs flows/takeover.md steps 14 to 16.
 func handBack(h *Host, p *takeovers, t *takeover) {
 	ctx := p.ctx
 	defer p.release(h, aiSlot{group: t.key.Group, member: t.key.Member}, t)
@@ -451,22 +374,15 @@ func handBack(h *Host, p *takeovers, t *takeover) {
 		reportEnded(ctx, h, t.key)
 		return
 	}
-	facts, changed := handbackFacts(ctx, h, s)
 	p.mu.Lock()
-	t.facts, t.free = facts, true
+	t.free = true
 	p.mu.Unlock()
-	if t.created && !changed {
-		sendHostCommand(ctx, h, s.Home, marshalWire(hostTaskCommand(h, s.Group, "cancel", s.Task)))
-		h.Sessions.End(s.SessionKey)
-		reportEnded(ctx, h, t.key)
-		return
-	}
 	handBackTurn(ctx, h, s)
 	p.mu.Lock()
 	posted := t.posted
 	p.mu.Unlock()
 	if !posted {
-		postFacts(ctx, h, s, facts)
+		postHandback(ctx, h, s)
 	}
 }
 
@@ -480,7 +396,6 @@ func reportEnded(ctx context.Context, h *Host, key SessionKey) {
 // handBackTurn gives the session its hand-back turn and waits for its end.
 // A held AI gets none: the session goes dormant.
 func handBackTurn(ctx context.Context, h *Host, s Session) {
-	h.Sessions.Update(s.SessionKey, func(r *Session) { r.TakeoverAt = "" })
 	text, turn, err := Compose(h, s, HandbackTurn, nil)
 	if _, held := h.Held(s.SessionKey); held && err == nil {
 		err = &Error{"busy", "the AI is held"}
@@ -495,61 +410,23 @@ func handBackTurn(ctx context.Context, h *Host, s Session) {
 	}
 }
 
-// postFacts posts the hand-back for an AI that did not: the facts, signed
-// for the AI, with an empty text (flows/takeover.md step 17).
-func postFacts(ctx context.Context, h *Host, s Session, facts proto.HandbackBody) {
+// postHandback posts the hand-back for an AI that did not, signed for the AI,
+// with an empty text (flows/takeover.md step 15).
+func postHandback(ctx context.Context, h *Host, s Session) {
 	var thread *proto.ID
 	if s.Task != "" {
 		thread = new(proto.ID(s.Task))
 	}
-	post := proto.Post[proto.HandbackBody]{HomeCommand: homeHeader(h, s.Group, s.Member, "post"), Kind: "handback", Thread: thread, Mentions: []proto.ID{}, Body: facts}
+	post := proto.Post[proto.EmptyBody]{HomeCommand: homeHeader(h, s.Group, s.Member, "post"), Kind: "handback", Thread: thread, Mentions: []proto.ID{}}
 	sendHostCommand(ctx, h, s.Home, marshalWire(post))
 }
 
-// handbackFacts reads the hand-back facts of a task session (contracts/
-// local.md section 7) and whether anything changed since the takeover
-// started. Other sessions are read only and report none.
-func handbackFacts(ctx context.Context, h *Host, s Session) (proto.HandbackBody, bool) {
-	facts := proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}}
-	if s.TakeoverAt == "" {
-		return facts, false
-	}
-	git := func(args ...string) string {
-		out, _ := workspaceGit(ctx, sessionDir(h, s), args...)
-		return strings.TrimSpace(out)
-	}
-	head, status := git("rev-parse", "HEAD"), git("status", "--porcelain", "--untracked-files=all")
-	for line := range strings.Lines(git("log", s.TakeoverAt+"..HEAD", "--format=%h %s")) {
-		sha, subject, _ := strings.Cut(strings.TrimSpace(line), " ")
-		facts.Commits = append(facts.Commits, proto.CommitSubject{SHA: sha, Subject: subject})
-	}
-	_, facts.Added, facts.Removed = tskParseShortstat(git("diff", "--shortstat", s.TakeoverAt))
-	facts.Files = append(gitFiles(git("diff", "--name-only", s.TakeoverAt), ""), gitFiles(status, "?? ")...)
-	return facts, head != s.TakeoverAt || status != ""
-}
-
-// gitFiles returns the paths of the lines of a Git listing that start with
-// prefix.
-func gitFiles(out, prefix string) []string {
-	files := []string{}
-	for line := range strings.Lines(out) {
-		if name, ok := strings.CutPrefix(line, prefix); ok {
-			files = append(files, strings.TrimSpace(name))
-		}
-	}
-	return files
-}
-
-// takeoverFacts returns the facts the hand-back post of a session carries,
-// and notes that the AI posted it.
-func takeoverFacts(h *Host, key SessionKey) proto.HandbackBody {
+// handbackPosted notes that the AI of a session posted its hand-back.
+func handbackPosted(h *Host, key SessionKey) {
 	p := takeoverState(h)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	t := p.open[aiSlot{group: key.Group, member: key.Member}]
-	if t == nil {
-		return proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}}
+	if t := p.open[aiSlot{group: key.Group, member: key.Member}]; t != nil {
+		t.posted = true
 	}
-	t.posted = true
-	return t.facts
 }

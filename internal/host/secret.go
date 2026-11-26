@@ -74,13 +74,12 @@ var (
 
 var sensitiveWords = []string{"KEY", "SECRET", "TOKEN", "PASSWORD"}
 
-// envSecretIn reports environment-file content in text, whose lines start
-// with prefix: "" for plain text, ">" for the added lines of a diff. It
-// reads the text once and builds no copy of it.
-func envSecretIn(text, prefix string) bool {
+// envSecretIn reports environment-file content in text. It reads the text
+// once and builds no copy of it.
+func envSecretIn(text string) bool {
 	run, sensitive := 0, false
 	for line := range strings.SplitSeq(text, "\n") {
-		name, ok := envLineName(line, prefix)
+		name, ok := envLineName(line)
 		if !ok {
 			run, sensitive = 0, false
 			continue
@@ -98,10 +97,9 @@ func envSecretIn(text, prefix string) bool {
 var envNameSyntax = regexp.MustCompile(`^[A-Za-z_]\w*$`)
 
 // envLineName is the NAME of a NAME=value line, the text up to its first '='.
-func envLineName(line, prefix string) (string, bool) {
-	rest, ok := strings.CutPrefix(line, prefix)
-	name, _, found := strings.Cut(rest, "=")
-	return name, ok && found && envNameSyntax.MatchString(name)
+func envLineName(line string) (string, bool) {
+	name, _, found := strings.Cut(line, "=")
+	return name, found && envNameSyntax.MatchString(name)
 }
 
 func hasSensitiveWord(name string) bool {
@@ -125,26 +123,26 @@ const (
 // CheckOutboundSecret checks text an AI sends for the fixed secret patterns
 // in local.md §8.
 func CheckOutboundSecret(text string) error {
-	if containsSecret(text, "") {
+	if containsSecret(text) {
 		return errSecret
 	}
 	return nil
 }
 
-// containsSecret reports a match of the patterns of local.md §8 in text,
-// whose lines start with linePrefix. It builds no copy of the text.
-func containsSecret(text, linePrefix string) bool {
+// containsSecret reports a match of the patterns of local.md §8 in text. It
+// builds no copy of the text.
+func containsSecret(text string) bool {
 	for _, p := range secretPatterns {
 		if p.mayMatch(text) && p.find.MatchString(text) {
 			return true
 		}
 	}
-	return envSecretIn(text, linePrefix)
+	return envSecretIn(text)
 }
 
 // RedactSecrets replaces each match of the patterns in local.md §8 with
 // "[redacted]", for free text the host or the node writes and sends to the
-// group (local.md §7, "Text the host writes"). An environment-file run is
+// group (local.md §8, "Text the host writes"). An environment-file run is
 // replaced as a whole.
 func RedactSecrets(text string) string {
 	for _, p := range redactPatterns {

@@ -52,7 +52,7 @@ type SessionKey struct {
 type Session struct {
 	SessionKey
 	Kind       Kind   `json:"kind"`
-	Folder     string `json:"folder"`      // relative to projects/<group>/
+	Folder     string `json:"folder"`      // the member's workspace: an absolute path, symbolic links resolved
 	Agent      string `json:"agent"`       // the key of its driver in Drivers
 	Home       string `json:"home"`        // device id of the group home
 	Name       string `json:"name"`        // the AI's display name
@@ -60,7 +60,7 @@ type Session struct {
 	CLISession string `json:"cli_session"` // "" until the CLI's first start
 	State      State  `json:"state"`
 	LastActive int64  `json:"last_active"` // the last change of state, in Unix milliseconds
-	TakeoverAt string `json:"takeover_at"` // the commit noted when a takeover started; "" otherwise
+	Report     string `json:"report"`      // review session: the id of the report its review is about
 }
 
 // A TurnKind says what a turn is made of. Every kind has the same header
@@ -126,7 +126,7 @@ type Sessions struct {
 const readSessions = `SELECT json_group_array(json_object('g', g, 'member', member, 'task', task, 'kind', kind,
 	'folder', folder, 'agent', agent, 'home', home, 'name', name, 'secretary', json(iif(secretary, 'true', 'false')),
 	'cli_session', coalesce(cli_session, ''), 'state', state, 'last_active', last_active,
-	'takeover_at', coalesce(takeover_at, ''))) FROM session`
+	'report', coalesce(report, ''))) FROM session`
 
 // loadSessions reads the table as the node starts. No process survived the
 // last run, so a session saved as working or waiting becomes dormant. One
@@ -200,9 +200,9 @@ func (t *Sessions) Write(run func(tx *Tx) error) error {
 // table's lock.
 func (tx *Tx) set(s Session) error {
 	_, err := tx.Exec(`INSERT OR REPLACE INTO session(g, member, task, kind, folder, agent, home, name, secretary,
-		cli_session, state, last_active, takeover_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, nullif(?, ''), ?, ?, nullif(?, ''))`,
+		cli_session, state, last_active, report) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, nullif(?, ''), ?, ?, nullif(?, ''))`,
 		s.Group, s.Member, s.Task, s.Kind, s.Folder, s.Agent, s.Home, s.Name, s.Secretary,
-		s.CLISession, s.State, s.LastActive, s.TakeoverAt)
+		s.CLISession, s.State, s.LastActive, s.Report)
 	if err == nil {
 		tx.t.rows[s.SessionKey] = s
 	}
@@ -237,7 +237,7 @@ func (tx *Tx) Create(s Session) error {
 }
 
 // Update changes what a session records beside its state: the CLI's session
-// id, the commit of a takeover. The state is Move's to change.
+// id, the report of a review. The state is Move's to change.
 func (tx *Tx) Update(key SessionKey, edit func(*Session)) error {
 	return tx.change(key, func(s *Session) error {
 		edit(s)

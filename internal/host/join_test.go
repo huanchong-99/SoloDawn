@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -28,7 +27,6 @@ const (
 	joinTestNonce1 = proto.ID("eS_j3OiWABlRuJAcS_RR5w")
 	joinTestNonce2 = proto.ID("HzE87sj3_L_tiVTdhfybwQ")
 	joinTestByDev  = "owner-browser-device"
-	joinTestSecret = "ghp_1234567890abcdefghijklmnopqrstuvwxyz"
 )
 
 type joinDialRecord struct {
@@ -48,6 +46,8 @@ type joinFakeHome struct {
 	addAIs  []proto.MemberAddAI
 	removes []proto.MemberCommand
 	states  []string
+	// onStatus runs for each member status the host reports.
+	onStatus func()
 }
 
 func newJoinFakeHome(h *Host, device string) *joinFakeHome {
@@ -112,7 +112,11 @@ func (f *joinFakeHome) handleCmd(req proto.Cmd) (json.RawMessage, error) {
 		json.Unmarshal([]byte(req.Env.Payload), &st)
 		f.mu.Lock()
 		f.states = append(f.states, st.State)
+		onStatus := f.onStatus
 		f.mu.Unlock()
+		if onStatus != nil {
+			onStatus()
+		}
 		return ok, nil
 	}
 	f.mu.Lock()
@@ -264,36 +268,22 @@ func (r *joinRig) setSetting(key string, val any) {
 	joinExecSQL(r.t, r.db, "INSERT OR REPLACE INTO setting(key, value) VALUES(?, ?)", key, marshalWire(val))
 }
 
-func (r *joinRig) makeRepo(name, branch string) string {
+// folder makes a folder of that name under the rig's root and returns its
+// path, which has no symbolic link.
+func (r *joinRig) folder(name string) string {
 	r.t.Helper()
-	repo := filepath.Join(r.root, "upstreams", name)
-	joinGit(r.t, r.root, "init", "-b", branch, repo)
-	joinGit(r.t, repo, "commit", "--allow-empty", "-m", "initial")
-	return repo
-}
-
-func joinGit(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	full := append([]string{"-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"}, args...)
-	cmd := exec.Command("git", full...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
+	dir := filepath.Join(r.root, "work", name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		r.t.Fatal(err)
 	}
-	return strings.TrimSpace(string(out))
+	return dir
 }
 
-func makeGroupRow(id proto.ID, home, name, repo, base string) proto.GroupRow {
+func makeGroupRow(id proto.ID, home, name string) proto.GroupRow {
 	return proto.GroupRow{
 		RowHeader:      proto.RowHeader{Type: "group", ID: string(id), Seq: 3},
 		Name:           name,
-		Kind:           "project",
-		Repo:           repo,
-		Base:           base,
-		Forge:          "none",
 		Home:           home,
-		Checks:         []string{},
 		Pass:           90,
 		PassFoundation: 70,
 		Limits: proto.Limits{
@@ -304,7 +294,11 @@ func makeGroupRow(id proto.ID, home, name, repo, base string) proto.GroupRow {
 	}
 }
 
+// callJoin joins with a folder of the group's own when the payload names none.
 func (r *joinRig) callJoin(ctx context.Context, p proto.HostJoin) error {
+	if p.Workspace == "" {
+		p.Workspace = r.folder(string(p.Group))
+	}
 	fillJoinDefaults(&p, r.h)
 	_, err := Surface["host.join"](ctx, r.h, nil, joinTestByDev, json.RawMessage(marshalWire(p)))
 	return err
@@ -413,7 +407,7 @@ func TestHostJoinPayloadValidation(t *testing.T) {
 func TestHostJoinExternal(t *testing.T) {
 	rig := newJoinRig(t)
 	fh := rig.addHome("home-1")
-	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("web", "main"), "main"))
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
 	for _, bad := range []proto.HostJoin{
 		{Group: joinTestGroup1, Home: "home-1", Agent: "external", Name: "Z"},
 		{Group: joinTestGroup1, Home: "home-1", Agent: "external", Name: "Z", Account: "free"},
@@ -432,16 +426,141 @@ func TestHostJoinExternal(t *testing.T) {
 	joinAssertEqual(t, "add_ai account", add.Account, "team")
 	joinAssertEqual(t, "second add_ai tool", fh.addAIs[1].Tool, (*string)(nil))
 	s, _ := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: string(add.ID)})
-	joinAssertEqual(t, "session", s, Session{SessionKey: s.SessionKey, Kind: GroupSession, Folder: "repo", Agent: "external", Home: "home-1", Name: "Z", State: Dormant, LastActive: s.LastActive})
+	joinAssertEqual(t, "session", s, Session{SessionKey: s.SessionKey, Kind: GroupSession, Folder: rig.folder(string(joinTestGroup1)), Agent: "external", Home: "home-1", Name: "Z", State: Dormant, LastActive: s.LastActive})
 	seamCode(t, rig.callLeave(t.Context(), joinTestGroup1, "external"), "bad_request")
+}
+
+// host.join judges the folder first: bad_request for a path that is not
+// absolute, not_found where no folder is now. It keeps the folder with its
+// symbolic links resolved, in member add_ai and in the group session's row
+// (contracts/commands.md section 2).
+func TestHostJoinResolvesTheWorkspace(t *testing.T) {
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	fh := rig.addHome("home-1")
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
+	real := rig.folder("website")
+	file := filepath.Join(rig.root, "notes.txt")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	join := func(workspace string) error {
+		return rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude", Workspace: workspace})
+	}
+	for workspace, code := range map[string]string{
+		"website":                            "bad_request",
+		filepath.Join("work", "website"):     "bad_request",
+		filepath.Join(rig.root, "missing"):   "not_found",
+		filepath.Join(file, "below-a-file"):  "not_found",
+		file:                                 "not_found",
+		filepath.Join(real, "..", "missing"): "not_found",
+	} {
+		err := join(workspace)
+		seamCode(t, err, code)
+		joinAssertEqual(t, "the answer names "+workspace, strings.Contains(err.Error(), workspace), true)
+	}
+	joinAssertEqual(t, "a refused folder dials", rig.dialCount("home-1"), 0)
+	joinAssertEqual(t, "a refused folder leaves a session", len(rig.h.Sessions.All()), 0)
+
+	joinAssertEqual(t, "join by another spelling", join(filepath.Join(real, "..", "website")+string(filepath.Separator)), nil)
+	fh.mu.Lock()
+	add := fh.addAIs[0]
+	fh.mu.Unlock()
+	s, _ := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: string(add.ID)})
+	joinAssertEqual(t, "add_ai workspace", add.Workspace, real)
+	joinAssertEqual(t, "session folder", s.Folder, real)
+}
+
+// A folder is the workspace of AIs of one group only: host.join answers
+// conflict, naming the group, for the folder of an AI of another group on
+// this node, whichever home that group has. Inside a group the folder is
+// shared, and it is free again once its AIs have left.
+func TestHostJoinRefusesTheFolderOfAnotherGroup(t *testing.T) {
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	rig.setAgent("codex", "0.164.0", joinStr("personal"))
+	fhA, fhB := rig.addHome("home-a"), rig.addHome("home-b")
+	fhA.putGroup(makeGroupRow(joinTestGroup1, "home-a", "Website"))
+	fhB.putGroup(makeGroupRow(joinTestGroup2, "home-b", "Backend"))
+	shared := rig.folder("shared")
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-a", Agent: "claude", Name: "Claude", Workspace: shared})
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-a", Agent: "codex", Name: "Codex", Workspace: shared})
+
+	other := proto.HostJoin{Group: joinTestGroup2, Home: "home-b", Agent: "claude", Name: "Claude", Workspace: shared}
+	err := rig.callJoin(t.Context(), other)
+	joinAssertEqual(t, "another group", err.Error(), `conflict: the folder is the workspace of an AI of the group "Website"`)
+	rig.h.Rows.Reset(string(joinTestGroup1))
+	err = rig.callJoin(t.Context(), other)
+	joinAssertEqual(t, "another group whose rows are not read", err.Error(), `conflict: the folder is the workspace of an AI of the group "`+string(joinTestGroup1)+`"`)
+	joinAssertEqual(t, "add_ai for a refused folder", len(fhB.addAIs), 0)
+	joinAssertEqual(t, "sessions in the other group", joinGroupHasSession(rig.h, string(joinTestGroup2)), false)
+
+	rig.mustLeave(joinTestGroup1, "claude")
+	seamCode(t, rig.callJoin(t.Context(), other), "conflict")
+	rig.mustLeave(joinTestGroup1, "codex")
+	rig.mustJoin(other)
+	joinAssertEqual(t, "the folder after its group left", fhB.addAIs[0].Workspace, shared)
+}
+
+// The check of the folder and the writing of the group session's row are
+// under one lock, held across member add_ai, so two joins for one folder and
+// two groups cannot both pass.
+func TestHostJoinsRunOneAtATime(t *testing.T) {
+	rig := newJoinRig(t)
+	fh := rig.addHome("home-1")
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
+	fh.putGroup(makeGroupRow(joinTestGroup2, "home-1", "Backend"))
+	jp := joinStateOf(rig.h)
+	free := func() bool {
+		if !jp.joining.TryLock() {
+			return false
+		}
+		jp.joining.Unlock()
+		return true
+	}
+	var duringAdd, afterRow, rowWritten bool
+	fh.cmdFn = func(env proto.Envelope) (json.RawMessage, error) {
+		duringAdd = !free()
+		return json.RawMessage(marshalWire(proto.CmdResult{Success: proto.Success{Re: 7, OK: true}})), fh.recordMemberCmd(env.Payload)
+	}
+	// An external AI reports its state once its row is written.
+	fh.onStatus = func() {
+		rowWritten = len(rig.h.Sessions.All()) == 1
+		afterRow = !free()
+	}
+	shared := rig.folder("shared")
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "external", Name: "Z", Account: "team", Workspace: shared})
+	if !duringAdd || !rowWritten || !afterRow || !free() {
+		t.Fatalf("the lock: held during add_ai %v, row written %v and still held %v, free after the join %v", duringAdd, rowWritten, afterRow, free())
+	}
+
+	// Two joins at once for one folder and two groups: one succeeds.
+	fh.mu.Lock()
+	fh.cmdFn, fh.onStatus, fh.addAIs = nil, nil, nil
+	fh.mu.Unlock()
+	both := rig.folder("both")
+	results := make(chan error, 2)
+	for _, group := range []proto.ID{joinTestGroup1, joinTestGroup2} {
+		go func() {
+			results <- rig.callJoin(t.Context(), proto.HostJoin{Group: group, Home: "home-1", Agent: "external", Name: "Y", Account: "team", Workspace: both})
+		}()
+	}
+	first, second := <-results, <-results
+	if first != nil {
+		first, second = second, first
+	}
+	joinAssertEqual(t, "one of two joins", first, nil)
+	seamCode(t, second, "conflict")
+	fh.mu.Lock()
+	joinAssertEqual(t, "add_ai of two joins at once", len(fh.addAIs), 1)
+	fh.mu.Unlock()
 }
 
 func TestHostJoinPreconditions(t *testing.T) {
 	rig := newJoinRig(t)
 	fh := rig.addHome("home-1")
-	repo := rig.makeRepo("web", "main")
-	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", repo, "main"))
-	fh.putGroup(makeGroupRow(joinTestGroup2, "home-1", "Backend", repo, "main"))
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
+	fh.putGroup(makeGroupRow(joinTestGroup2, "home-1", "Backend"))
 
 	// Agent missing from agent table and agent with NULL account are refused without dialling.
 	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"}), "conflict")
@@ -458,19 +577,18 @@ func TestHostJoinPreconditions(t *testing.T) {
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup2, Home: "home-1", Agent: "claude", Name: "Claude Backend"})
 }
 
-func TestHostJoinOneConnectionPerHomeAndCloneReuse(t *testing.T) {
+func TestHostJoinOneConnectionPerHomeAndNoProjectFolder(t *testing.T) {
 	rig := newJoinRig(t)
 	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	rig.setAgent("codex", "0.164.0", joinStr("api_key"))
-	fhA, repo1 := setupMultiHomeGroups(t, rig)
+	fhA := setupMultiHomeGroups(t, rig)
 
 	// First join on home-a: claude joins group 1 as secretary with default empty approvers.
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-a", Agent: "claude", Name: "Claude Sec", Secretary: true})
-	assertRepoClonedAndRemoveUpstream(t, rig, repo1)
 
 	// Configure approvers, rename cached group 1 row, and join codex to group 1 as the new secretary.
 	rig.setSetting("approvers", []string{"u-del-1", "u-del-2"})
-	renamed := makeGroupRow(joinTestGroup1, "home-a", "Website v2", repo1, "main")
+	renamed := makeGroupRow(joinTestGroup1, "home-a", "Website v2")
 	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(marshalWire(renamed)))
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-a", Agent: "codex", Name: "Codex Sec", Secretary: true})
 
@@ -481,25 +599,14 @@ func TestHostJoinOneConnectionPerHomeAndCloneReuse(t *testing.T) {
 	assertMultiJoinOutcomes(t, rig, fhA)
 }
 
-func setupMultiHomeGroups(t *testing.T, rig *joinRig) (*joinFakeHome, string) {
+func setupMultiHomeGroups(t *testing.T, rig *joinRig) *joinFakeHome {
 	t.Helper()
 	fhA := rig.addHome("home-a")
 	fhB := rig.addHome("home-b")
-	repo1 := rig.makeRepo("repo1", "main")
-	fhA.putGroup(makeGroupRow(joinTestGroup1, "home-a", "Website", repo1, "main"))
-	fhA.putGroup(makeGroupRow(joinTestGroup2, "home-a", "Backend", rig.makeRepo("repo2", "trunk"), "trunk"))
-	fhB.putGroup(makeGroupRow(joinTestGroup3, "home-b", "Docs", rig.makeRepo("repo3", "main"), "main"))
-	return fhA, repo1
-}
-
-func assertRepoClonedAndRemoveUpstream(t *testing.T, rig *joinRig, repo1 string) {
-	t.Helper()
-	if _, err := os.Stat(filepath.Join(rig.root, "projects", string(joinTestGroup1), "repo", ".git")); err != nil {
-		t.Fatalf("expected clone in store projects directory: %v", err)
-	}
-	if err := os.RemoveAll(repo1); err != nil {
-		t.Fatal(err)
-	}
+	fhA.putGroup(makeGroupRow(joinTestGroup1, "home-a", "Website"))
+	fhA.putGroup(makeGroupRow(joinTestGroup2, "home-a", "Backend"))
+	fhB.putGroup(makeGroupRow(joinTestGroup3, "home-b", "Docs"))
+	return fhA
 }
 
 func assertMultiJoinOutcomes(t *testing.T, rig *joinRig, fhA *joinFakeHome) {
@@ -511,6 +618,9 @@ func assertMultiJoinOutcomes(t *testing.T, rig *joinRig, fhA *joinFakeHome) {
 	joinAssertEqual(t, "sync since", fhA.syncs[0].Since, int64(0))
 	assertAddAICommands(t, fhA.addAIs)
 	assertJoinedSessions(t, rig.h, string(fhA.addAIs[0].ID), string(fhA.addAIs[1].ID))
+	if _, err := os.Stat(filepath.Join(rig.root, "projects")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the data directory holds a project folder: %v", err)
+	}
 	joinAssertHomes(t, rig.db, []proto.Home{
 		{Group: joinTestGroup1, Home: "home-a", Name: "Website v2"},
 		{Group: joinTestGroup2, Home: "home-a", Name: "Backend"},
@@ -534,6 +644,7 @@ func assertAddAICommands(t *testing.T, adds []proto.MemberAddAI) {
 	joinAssertEqual(t, "add_ai name", first.Name, "Claude Sec")
 	joinAssertEqual(t, "add_ai account", first.Account, "personal")
 	joinAssertEqual(t, "add_ai secretary", first.Secretary, true)
+	joinAssertEqual(t, "add_ai workspace", filepath.Base(first.Workspace), string(joinTestGroup1))
 	joinAssertSlice(t, "default approvers", first.Approvers, []string{})
 	joinAssertSlice(t, "configured approvers", adds[1].Approvers, []string{"u-del-1", "u-del-2"})
 }
@@ -543,7 +654,7 @@ func assertJoinedSessions(t *testing.T, h *Host, claudeID, codexID string) {
 	sClaudeG1, ok := h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: claudeID})
 	joinAssertEqual(t, "claude g1 exists", ok, true)
 	joinAssertEqual(t, "claude g1 kind", sClaudeG1.Kind, GroupSession)
-	joinAssertEqual(t, "claude g1 folder", sClaudeG1.Folder, "repo")
+	joinAssertEqual(t, "claude g1 folder", filepath.Base(sClaudeG1.Folder), string(joinTestGroup1))
 	joinAssertEqual(t, "claude g1 state", sClaudeG1.State, Dormant)
 
 	sCodexG1, ok := h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: codexID})
@@ -565,7 +676,7 @@ func checkNilConnectModes(t *testing.T) {
 	}), "home_unreachable")
 
 	fhPre := newJoinFakeHome(rigNil.h, "pre-attached")
-	fhPre.putGroup(makeGroupRow(joinTestGroup1, "pre-attached", "Pre", rigNil.makeRepo("pre", "main"), "main"))
+	fhPre.putGroup(makeGroupRow(joinTestGroup1, "pre-attached", "Pre"))
 	rigNil.h.Attach("pre-attached", fhPre)
 	rigNil.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "pre-attached", Agent: "claude", Name: "Claude"})
 
@@ -579,7 +690,7 @@ func checkConcurrentAsyncWaiters(t *testing.T) {
 	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	rig.setAgent("codex", "0.164.0", joinStr("personal"))
 	fhLive := newJoinFakeHome(rig.h, "home-async")
-	fhLive.putGroup(makeGroupRow(joinTestGroup1, "home-async", "Async", rig.makeRepo("async", "main"), "main"))
+	fhLive.putGroup(makeGroupRow(joinTestGroup1, "home-async", "Async"))
 
 	dialed := make(chan context.Context, 2)
 	rig.h.Connect = func(ctx context.Context, device string) {
@@ -646,7 +757,7 @@ func TestHostJoinAttachTimeout15Seconds(t *testing.T) {
 		h.Connect = func(ctx context.Context, _ string) {
 			dialedCtx = ctx
 		}
-		payload := proto.HostJoin{Group: joinTestGroup1, Home: "home-off", Agent: "claude", Name: "Claude"}
+		payload := proto.HostJoin{Group: joinTestGroup1, Home: "home-off", Agent: "claude", Name: "Claude", Workspace: root}
 		fillJoinDefaults(&payload, h)
 		raw := json.RawMessage(marshalWire(payload))
 
@@ -700,24 +811,14 @@ func assertJoinPending(t *testing.T, errCh <-chan error) {
 	}
 }
 
-func TestHostJoinSyncWorkspaceAndAddAIFailures(t *testing.T) {
+func TestHostJoinSyncAndAddAIFailures(t *testing.T) {
 	rig := newJoinRig(t)
 	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	fh := rig.addHome("home-1")
-	repo := rig.makeRepo("web", "main")
 	checkSyncFailureModes(t, rig, fh)
 
-	// Clone failure with secret in path is answered cli with secret redacted.
-	secretRepo := filepath.Join(rig.root, joinTestSecret, "missing.git")
-	badClone := makeGroupRow(joinTestGroup1, "home-1", "SecretFail", secretRepo, "main")
-	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(marshalWire(badClone)))
-	cloneErr := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
-	seamCode(t, cloneErr, "cli")
-	joinAssertEqual(t, "secret stripped", strings.Contains(cloneErr.Error(), joinTestSecret), false)
-	joinAssertEqual(t, "redacted marker present", strings.Contains(cloneErr.Error(), "[redacted]"), true)
-
 	// Home refuses member add_ai -> error propagated, no session created.
-	webGrp := makeGroupRow(joinTestGroup1, "home-1", "Web", repo, "main")
+	webGrp := makeGroupRow(joinTestGroup1, "home-1", "Web")
 	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(marshalWire(webGrp)))
 	fh.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
 		ref := proto.ErrorResponse{Re: 7, Err: proto.WireError{Code: "conflict", Message: "name taken"}}
@@ -768,7 +869,7 @@ func TestHostEnsureHomeConnections(t *testing.T) {
 	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	fh1 := rig.addHome("home-1")
 	rig.addHome("home-2")
-	fh1.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r1", "main"), "main"))
+	fh1.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
 
 	// Store a second home in setting 'homes' alongside home-1.
@@ -817,7 +918,6 @@ func TestRecordHomeKeepsAddressesAndMovesOnlyHostedGroup(t *testing.T) {
 	stale := verifiedItem{home: old.Home, group: key.Group, item: proto.Item{Item: 1}}
 	unrelated := verifiedItem{home: old.Home, group: other.Group, item: proto.Item{Item: 2}}
 	d.held[heldKey], d.held[otherKey] = []verifiedItem{stale}, []verifiedItem{unrelated}
-	d.merges[key.Group], d.merges[other.Group] = []verifiedItem{stale}, []verifiedItem{unrelated}
 
 	joinAssertEqual(t, "move hosted group", h.RecordHome(next, []string{addr}), nil)
 	joinAssertEqual(t, "replacement dials", rig.dialCount(next.Home), 1)
@@ -829,11 +929,8 @@ func TestRecordHomeKeepsAddressesAndMovesOnlyHostedGroup(t *testing.T) {
 	}
 	fresh := verifiedItem{home: next.Home, group: key.Group, item: stale.item}
 	d.held[heldKey] = enqueueHeld(d.held[heldKey], fresh)
-	d.enqueueMerge(fresh)
 	joinAssertEqual(t, "replacement held home", d.held[heldKey][0].home, next.Home)
-	joinAssertEqual(t, "replacement merge home", d.merges[key.Group][0].home, next.Home)
 	joinAssertEqual(t, "unrelated held home", d.held[otherKey][0].home, old.Home)
-	joinAssertEqual(t, "unrelated merge home", d.merges[other.Group][0].home, old.Home)
 	moved, _ := h.Sessions.Get(key)
 	left, _ := h.Sessions.Get(other)
 	joinAssertEqual(t, "moved session", moved.Home, next.Home)
@@ -881,7 +978,7 @@ func TestRecordHomeClearsCachedUnhostedGroupOnlyOnReplacement(t *testing.T) {
 	gs := d.groupLocked(group, old.Home)
 	gs.live = true
 	applyGroupRow(h, d, old.Home, group, json.RawMessage(marshalWire(proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: group, Seq: 4}, Home: old.Home, Base: "old-base",
+		RowHeader: proto.RowHeader{Type: "group", ID: group, Seq: 4}, Home: old.Home,
 	})))
 	joinAssertEqual(t, "update same home", h.RecordHome(old, nil), nil)
 	_, cached := h.Rows.Get(group, "group", group)
@@ -939,9 +1036,9 @@ func setupLeaveRig(t *testing.T) (*joinRig, *joinFakeHome) {
 	rig.setAgent("codex", "0.164.0", joinStr("personal"))
 	fhA := rig.addHome("home-a")
 	fhB := rig.addHome("home-b")
-	fhA.putGroup(makeGroupRow(joinTestGroup1, "home-a", "Website", rig.makeRepo("w1", "main"), "main"))
-	fhA.putGroup(makeGroupRow(joinTestGroup2, "home-a", "Backend", rig.makeRepo("w2", "main"), "main"))
-	fhB.putGroup(makeGroupRow(joinTestGroup3, "home-b", "Docs", rig.makeRepo("w3", "main"), "main"))
+	fhA.putGroup(makeGroupRow(joinTestGroup1, "home-a", "Website"))
+	fhA.putGroup(makeGroupRow(joinTestGroup2, "home-a", "Backend"))
+	fhB.putGroup(makeGroupRow(joinTestGroup3, "home-b", "Docs"))
 	return rig, fhA
 }
 
@@ -1096,7 +1193,7 @@ func runJoinRollbackCase(t *testing.T, mutateDB func(*testing.T, *store.Store)) 
 	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	rig.setAgent("codex", "0.164.0", joinStr("personal"))
 	fh := rig.addHome("home-1")
-	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
 	fh.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
 		mutateDB(t, rig.db)
 		ok := proto.CmdResult{Success: proto.Success{Re: 7, OK: true}}
@@ -1142,7 +1239,7 @@ func runLeaveRollbackCase(t *testing.T, mutateDB func(*testing.T, *store.Store))
 	rig := newJoinRig(t)
 	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	fh := rig.addHome("home-1")
-	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
 	fh.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
 		mutateDB(t, rig.db)
@@ -1158,7 +1255,7 @@ func TestHostJoinSignedEnvelopeVerifiesAsNodeCommand(t *testing.T) {
 	rig := newJoinRig(t)
 	rig.setAgent("codex", "0.164.0", joinStr("personal"))
 	fh := rig.addHome("home-1")
-	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
 
 	var captured proto.Envelope
 	fh.cmdFn = func(env proto.Envelope) (json.RawMessage, error) {
@@ -1178,7 +1275,7 @@ func TestLeaveGoneMemberClosesAndPrunesIdempotently(t *testing.T) {
 	rig := newJoinRig(t)
 	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	fh := rig.addHome("home-1")
-	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
 	member := string(fh.addAIs[0].ID)
 	rig.setSetting("homes", []proto.Home{
@@ -1214,7 +1311,7 @@ func checkJoinPushResetAndRowsWithoutDuplicateSync(t *testing.T) {
 	rig := newJoinRig(t)
 	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	fh := rig.addHome("home-local")
-	grp := makeGroupRow(joinTestGroup1, "home-local", "Website", rig.makeRepo("local", "main"), "main")
+	grp := makeGroupRow(joinTestGroup1, "home-local", "Website")
 	gid := string(joinTestGroup1)
 
 	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
@@ -1249,9 +1346,8 @@ func checkJoinWaitsOnInflightGroupSync(t *testing.T) {
 	rig.setAgent("codex", "0.164.0", joinStr("personal"))
 	fh := rig.addHome("home-1")
 	rig.h.Attach("home-1", fh)
-	repo := rig.makeRepo("inflight", "main")
-	grp1 := makeGroupRow(joinTestGroup1, "home-1", "Website", repo, "main")
-	grp2 := makeGroupRow(joinTestGroup2, "home-1", "Backend", repo, "main")
+	grp1 := makeGroupRow(joinTestGroup1, "home-1", "Website")
+	grp2 := makeGroupRow(joinTestGroup2, "home-1", "Backend")
 	fh.putGroup(grp1)
 	fh.putGroup(grp2)
 

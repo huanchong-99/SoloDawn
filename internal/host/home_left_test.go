@@ -10,8 +10,8 @@ import (
 
 const leftMember = "owner-member"
 
-// newLeftRig makes a host that reads a team group and a project group, with a
-// session of its own AI in the latter, at one home.
+// newLeftRig makes a host that reads two groups at one home, with a session of
+// its own AI in the first.
 func newLeftRig(t *testing.T) *deliverRig {
 	r := newDeliverRig(t, false)
 	home := r.homeKey.ID()
@@ -27,8 +27,7 @@ func newLeftRig(t *testing.T) *deliverRig {
 		CLI:       "claude", Host: r.hostKey.ID(), Allow: []string{}, Approvers: []string{},
 	})
 	key := SessionKey{Group: testGroup1, Member: testAI1}
-	r.h.Sessions.Create(Session{SessionKey: key, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: home, Name: "C"})
-	r.waitTeams(1)
+	r.h.Sessions.Create(Session{SessionKey: key, Kind: GroupSession, Folder: t.TempDir(), Agent: "claude", Home: home, Name: "C"})
 	return r
 }
 
@@ -38,22 +37,12 @@ func leftHuman(group, user string) proto.HumanMemberRow {
 
 func (r *deliverRig) leftPush(group string, rows ...any) {
 	raws := []json.RawMessage{json.RawMessage(marshalWire(proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: group, Seq: 9}, Name: "G", Kind: map[string]string{testGroup1: "project", testGroup2: "team"}[group],
-		Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{},
+		RowHeader: proto.RowHeader{Type: "group", ID: group, Seq: 9}, Name: "G", Home: r.homeKey.ID(),
 	}))}
 	for _, row := range rows {
 		raws = append(raws, json.RawMessage(marshalWire(row)))
 	}
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: group, Rows: raws})))
-}
-
-// waitTeams waits until the secretary's line would name n team groups.
-func (r *deliverRig) waitTeams(n int) {
-	r.t.Helper()
-	r.waitUntil("team groups", func() bool {
-		known, err := bulletinHomes(r.h.Store)
-		return err == nil && len(teamGroups(r.h, known)) == n
-	})
 }
 
 func (r *deliverRig) waitHomes(n int) {
@@ -119,14 +108,14 @@ func TestGroupItsOwnerWasRemovedFromWhileItSyncedIsLeft(t *testing.T) {
 	r.wantKnown(testGroup2, true)
 }
 
-// A team group has no AI here: its line and its home go all the same.
-func TestTeamGroupItsOwnerLeftIsNoLongerNamed(t *testing.T) {
+// A group without an AI here goes all the same: its rows and its home.
+func TestGroupWithoutAnAIItsOwnerLeftIsForgotten(t *testing.T) {
 	r := newLeftRig(t)
 	r.leftPush(testGroup2, leftGone)
 	r.h.Push(r.homeKey.ID(), json.RawMessage(`{"t":"groups","groups":[{"g":"`+testGroup1+`","name":"G","seq":10}]}`))
 	r.waitHomes(1)
-	r.waitTeams(0)
 	r.h.Settle()
+	r.wantKnown(testGroup2, false)
 	r.wantKnown(testGroup1, true)
 }
 
@@ -186,9 +175,14 @@ func TestGroupWhoseHomeRefusesItIsLeft(t *testing.T) {
 	r.wantKnown(testGroup1, false)
 	waiter, _ := d.claimOrWaitGroupSync(r.homeKey.ID(), testGroup1)
 	_, wait := d.claimOrWaitGroupSync(r.homeKey.ID(), testGroup1)
+	// A turn owed in the group is forgotten with it, one owed in another group is not.
+	gone, kept := aiGroupKey{group: testGroup1, member: testAI1}, aiGroupKey{group: testGroup2, member: testAI1}
+	d.openPreemption(gone, &preemption{session: SessionKey{Group: testGroup1, Member: testAI1}})
+	d.openPreemption(kept, &preemption{session: SessionKey{Group: testGroup2, Member: testAI1}})
 	d.forget(testGroup1)
 	if _, open := <-wait; open || waiter.group != testGroup1 {
 		t.Fatal("a waiting sync was not woken")
 	}
+	joinAssertEqual(t, "owed turns after the group is forgotten", d.lastPreemption(gone) == nil && d.lastPreemption(kept) != nil, true)
 	joinAssertEqual(t, "unreachable", settleRefusedSync(r.h, d, r.homeKey.ID(), testGroup2, nil), false)
 }

@@ -11,12 +11,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"testing/synctest"
-	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
-	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
 const (
@@ -37,12 +34,13 @@ type tskScriptHome struct {
 	done  chan struct{}
 	steps []tskReplyStep
 	asked []any
-	// Single reader: waitAsked in TestSubmitTaskRemoteAndHostedChecks.
-	askedCh chan struct{}
+	// before runs for each request before its answer, as a home pushes the
+	// rows a command changed before it answers.
+	before func(req any)
 }
 
 func newTskScriptHome(steps ...tskReplyStep) *tskScriptHome {
-	return &tskScriptHome{done: make(chan struct{}), steps: steps, askedCh: make(chan struct{}, 16)}
+	return &tskScriptHome{done: make(chan struct{}), steps: steps}
 }
 
 func (f *tskScriptHome) Send(any) error               { return nil }
@@ -55,11 +53,10 @@ func (f *tskScriptHome) Request(_ context.Context, build func(int64) any) (json.
 	id := int64(len(f.asked) + 1)
 	req := build(id)
 	f.asked = append(f.asked, req)
-	step := f.popStepLocked(id)
+	step, before := f.popStepLocked(id), f.before
 	f.mu.Unlock()
-	select {
-	case f.askedCh <- struct{}{}:
-	default:
+	if before != nil {
+		before(req)
 	}
 	return json.RawMessage(step.answer), step.err
 }
@@ -77,20 +74,6 @@ func (f *tskScriptHome) snapshotAsked() []any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.asked)
-}
-
-func (f *tskScriptHome) waitAsked(t *testing.T, want int) []any {
-	t.Helper()
-	for {
-		if got := f.snapshotAsked(); len(got) >= want {
-			return got
-		}
-		select {
-		case <-f.askedCh:
-		case <-time.After(10 * time.Second):
-			t.Fatal(timedOut(10*time.Second, fmt.Sprintf("%d requests", want), []string{fmt.Sprint(len(f.snapshotAsked()))}))
-		}
-	}
 }
 
 func tskEqual(t *testing.T, got, want any) {
@@ -114,67 +97,11 @@ func tskNoErr(t *testing.T, err error) {
 	}
 }
 
-func tskStopAllCloud(t *testing.T, h *Host) {
-	t.Helper()
-	t.Cleanup(func() { settleHostedChecks(h) })
-}
-
-func tskDiskHost(t *testing.T) (*Host, string) {
-	t.Helper()
-	dataDir := t.TempDir()
-	db, err := store.Open(filepath.Join(dataDir, "node.db"))
-	tskNoErr(t, err)
-	t.Cleanup(func() { db.Close() })
-	h, _ := seamHost(t, db)
-	tskStopAllCloud(t, h)
-	return h, dataDir
-}
-
 func tskPutRow(t *testing.T, h *Host, kind, id string, v any) {
 	t.Helper()
 	raw, err := json.Marshal(v)
 	tskNoErr(t, err)
 	h.Rows.Put(tskTestGroupID, kind, id, raw)
-}
-
-func tskGroupFixture(forge string, checks ...string) proto.GroupRow {
-	if checks == nil {
-		checks = []string{}
-	}
-	return proto.GroupRow{
-		RowHeader:      proto.RowHeader{Type: "group", ID: tskTestGroupID, Seq: 1},
-		Name:           "Website",
-		Kind:           "project",
-		Base:           "base",
-		Forge:          forge,
-		Home:           "home-device",
-		Checks:         checks,
-		Pass:           90,
-		PassFoundation: 70,
-		Limits:         proto.Limits{TurnMinutes: 1},
-		Created:        seamStart,
-	}
-}
-
-func tskTaskFixture(num int, slug proto.Slug, branch string, local *proto.Check) proto.TaskRow {
-	return proto.TaskRow{
-		RowHeader: proto.RowHeader{Type: "task", ID: tskTestTaskID, Seq: 2},
-		Group:     tskTestGroupID,
-		Num:       num,
-		Title:     "Fix path check",
-		Slug:      slug,
-		Origin:    "brief",
-		State:     "active",
-		Step:      "local_check",
-		Assignee:  tskTestWorkerID,
-		Reviewer:  tskTestReviewID,
-		Pass:      90,
-		Depends:   []string{},
-		Branch:    branch,
-		Checks:    proto.TaskChecks{Local: local},
-		Stats:     proto.TaskStats{Started: seamStart},
-		Created:   seamStart,
-	}
 }
 
 func tskOpenSignedCmd[T any](t *testing.T, h *Host, raw any) T {
@@ -189,54 +116,14 @@ func tskOpenSignedCmd[T any](t *testing.T, h *Host, raw any) T {
 	return decoded
 }
 
-func tskInitWorktree(t *testing.T, dataDir string, remote bool) (projectDir, remoteDir, wtDir, baseSHA string) {
-	t.Helper()
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	t.Setenv("LC_ALL", "C")
-	src := t.TempDir()
-	forgeGit(t, src, "init", "-b", "base")
-	tskNoErr(t, os.WriteFile(filepath.Join(src, "readme.md"), []byte("line1\nline2\n"), 0o600))
-	forgeGit(t, src, "add", "readme.md")
-	forgeGit(t, src, "-c", "user.name=test", "-c", "user.email=test@invalid", "commit", "-m", "base")
-	baseSHA = forgeGit(t, src, "rev-parse", "HEAD")
-	source := src
-	if remote {
-		remoteDir = t.TempDir()
-		bareRepo(t, remoteDir, "base")
-		forgeGit(t, src, "remote", "add", "origin", remoteDir)
-		forgeGit(t, src, "push", "origin", "base")
-		source = remoteDir
-	}
-	projectDir = filepath.Join(dataDir, "projects", tskTestGroupID)
-	_, err := EnsureGroupWorkspace(t.Context(), projectDir, source, "base")
-	tskNoErr(t, err)
-	wtDir, err = CreateTaskWorkspace(t.Context(), projectDir, 12, "fix-path", tskTestWorkerID, "base", remote)
-	tskNoErr(t, err)
-	return projectDir, remoteDir, wtDir, baseSHA
-}
-
-func tskCommitFiles(t *testing.T, dir string, files map[string]string, message string) string {
-	t.Helper()
-	for name, content := range files {
-		full := filepath.Join(dir, name)
-		tskNoErr(t, os.MkdirAll(filepath.Dir(full), 0o700))
-		tskNoErr(t, os.WriteFile(full, []byte(content), 0o600))
-		forgeGit(t, dir, "add", name)
-	}
-	forgeGit(t, dir, "-c", "user.name=test", "-c", "user.email=test@invalid", "commit", "-m", message)
-	return forgeGit(t, dir, "rev-parse", "HEAD")
-}
-
-func tskTaskCaller(folder string, level int) Caller {
+func tskTaskCaller() Caller {
 	return Caller{
 		Session: Session{
 			SessionKey: SessionKey{Group: tskTestGroupID, Member: tskTestWorkerID, Task: tskTestTaskID},
 			Kind:       TaskSession,
-			Folder:     folder,
 			Home:       "home-device",
 		},
-		Level: level,
+		Level: 3,
 	}
 }
 
@@ -280,7 +167,7 @@ func TestTaskToolsMatchContractLists(t *testing.T) {
 	tskNoErr(t, err)
 	var lists proto.ToolLists
 	tskNoErr(t, json.Unmarshal(data, &lists))
-	owned := []string{"start_task", "push_branch", "run_checks", "submit_task", "submit_review"}
+	owned := []string{"start_task", "submit_task", "submit_review"}
 	cases := []struct {
 		caller Caller
 		golden proto.ToolList
@@ -288,9 +175,9 @@ func TestTaskToolsMatchContractLists(t *testing.T) {
 		{Caller{Session: Session{Kind: GroupSession, Secretary: true}, Level: 1}, lists.Secretary},
 		{Caller{Session: Session{Kind: GroupSession, Secretary: false}, Level: 1}, lists.Group},
 		{Caller{Session: Session{Kind: ReviewSession}, Level: 1}, lists.Review},
-		{Caller{Session: Session{Kind: TaskSession}, Level: 1}, lists.TaskLevel1},
-		{Caller{Session: Session{Kind: TaskSession}, Level: 2}, lists.TaskLevel23},
-		{Caller{Session: Session{Kind: TaskSession}, Level: 3}, lists.TaskLevel23},
+		{Caller{Session: Session{Kind: TaskSession}, Level: 1}, lists.Task},
+		{Caller{Session: Session{Kind: TaskSession}, Level: 3}, lists.Task},
+		{Caller{Session: Session{Kind: GroupSession}, Level: 3, External: true}, lists.External},
 	}
 	for _, tc := range cases {
 		tskAssertGoldenSubset(t, ToolsFor(tc.caller), tc.golden, owned)
@@ -301,10 +188,8 @@ func TestTaskToolForPredicates(t *testing.T) {
 	tskEqual(t, tskForWorkingGroup(Caller{Session: Session{Kind: GroupSession, Secretary: false}}), true)
 	tskEqual(t, tskForWorkingGroup(Caller{Session: Session{Kind: GroupSession, Secretary: true}}), false)
 	tskEqual(t, tskForWorkingGroup(Caller{Session: Session{Kind: TaskSession, Secretary: false}}), false)
-	tskEqual(t, tskForTaskAboveLevel1(Caller{Session: Session{Kind: TaskSession}, Level: 2}), true)
-	tskEqual(t, tskForTaskAboveLevel1(Caller{Session: Session{Kind: TaskSession}, Level: 1}), false)
-	tskEqual(t, tskForTaskAboveLevel1(Caller{Session: Session{Kind: TaskSession}, Level: 0}), false)
-	tskEqual(t, tskForTaskAboveLevel1(Caller{Session: Session{Kind: ReviewSession}, Level: 2}), false)
+	tskEqual(t, tskForTask(Caller{Session: Session{Kind: TaskSession}, Level: 1}), true)
+	tskEqual(t, tskForTask(Caller{Session: Session{Kind: ReviewSession}, Level: 3}), false)
 	tskEqual(t, tskForReview(Caller{Session: Session{Kind: ReviewSession}}), true)
 	tskEqual(t, tskForReview(Caller{Session: Session{Kind: TaskSession}}), false)
 }
@@ -314,7 +199,6 @@ func tskGroupCaller(turn Turn) Caller {
 		Session: Session{
 			SessionKey: SessionKey{Group: tskTestGroupID, Member: tskTestWorkerID},
 			Kind:       GroupSession,
-			Folder:     "repo",
 			Home:       "home-device",
 		},
 		Level: 1,
@@ -324,12 +208,11 @@ func tskGroupCaller(turn Turn) Caller {
 
 func TestStartTaskWithoutTurn(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
-	tskStopAllCloud(t, h)
 	home := newTskScriptHome(tskReplyStep{answer: `{"re":1,"ok":true,"num":14}`})
 	h.Attach("home-device", home)
 	res, err := Tools["start_task"].Call(t.Context(), h, tskGroupCaller(Turn{Kind: ItemsTurn}), json.RawMessage(`{"title":"Add badge","plan":"Update TaskCard."}`))
 	tskNoErr(t, err)
-	tskEqual(t, res, tskStartResult{Task: "T-14", Moved: true})
+	tskEqual(t, marshalWire(res), `{"task":"T-14","moved":true}`)
 	asked := home.snapshotAsked()
 	tskEqual(t, len(asked), 1)
 	tskRequire(t, !strings.HasSuffix(asked[0].(proto.Cmd).Env.Payload, "\n"), "payload has trailing newline")
@@ -345,7 +228,6 @@ func TestStartTaskWithoutTurn(t *testing.T) {
 
 func TestStartTaskErrorsAndBoundaries(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
-	tskStopAllCloud(t, h)
 	call := Tools["start_task"].Call
 	caller := tskGroupCaller(Turn{Kind: ItemsTurn})
 
@@ -375,509 +257,112 @@ func TestStartTaskErrorsAndBoundaries(t *testing.T) {
 	tskEqual(t, len(home.snapshotAsked()), 0)
 }
 
-func TestPushBranchRefusals(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	tskInitWorktree(t, dataDir, true)
-	call := Tools["push_branch"].Call
-	caller := tskTaskCaller("wt/12-fix-path", 2)
-
-	_, err := call(t.Context(), h, caller, json.RawMessage(`[]`))
-	seamCode(t, err, "bad_request")
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "not_found")
-
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("none"))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "conflict")
-
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("github"))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "not_found")
-
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(1, "fix-path", "refs/heads/main", nil))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "cli")
-}
-
-func TestPushBranchSuccessAndSecretRedaction(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	_, remoteDir, wtDir, _ := tskInitWorktree(t, dataDir, true)
-	head := tskCommitFiles(t, wtDir, map[string]string{"a.go": "package a\n"}, "work")
-	call := Tools["push_branch"].Call
-	caller := tskTaskCaller("wt/12-fix-path", 2)
-
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("github"))
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "wrong/ignored-branch", nil))
-
-	res, err := call(t.Context(), h, caller, json.RawMessage(`{}`))
-	tskNoErr(t, err)
-	tskEqual(t, res, tskPushResult{OK: true, Commit: head})
-	gotRefs := forgeGit(t, remoteDir, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/task")
-	tskEqual(t, gotRefs, "refs/heads/task/12-fix-path "+head)
-
-	secretToken := "ghp_" + strings.Repeat("A", 36)
-	forgeGit(t, wtDir, "remote", "set-url", "origin", filepath.Join(t.TempDir(), secretToken+".git"))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "cli")
-	tskRequire(t, !strings.Contains(err.Error(), secretToken) && strings.Contains(err.Error(), "[redacted]"), "expected redacted cli error")
-}
-
-// A push that the remote refuses because its branch has commits the worktree
-// lacks, such as the last commits of the task's assignee before, fetches them
-// under the clone's lock and says how to go on. A fetch that fails is told.
-func TestPushBranchBehindTheRemoteFetchesAndSaysHowToGoOn(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	projectDir, remoteDir, wtDir, _ := tskInitWorktree(t, dataDir, true)
-	tskCommitFiles(t, wtDir, map[string]string{"a.go": "package a\n"}, "work")
-	before := t.TempDir()
-	forgeGit(t, before, "clone", "-q", "-b", "base", remoteDir, ".")
-	earlier := tskCommitFiles(t, before, map[string]string{"b.go": "package b\n"}, "earlier work")
-	forgeGit(t, before, "push", "-q", "origin", "HEAD:refs/heads/task/12-fix-path")
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("github"))
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "", nil))
-	push := func() error {
-		_, err := Tools["push_branch"].Call(t.Context(), h, tskTaskCaller("wt/12-fix-path", 2), json.RawMessage(`{}`))
-		return err
+// The home pushes the row a task start made before it answers. A task that is
+// queued behind another one in its folder is told as queued, not as moved.
+func TestStartTaskQueuedBehindTheFolder(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	home := newTskScriptHome(tskReplyStep{answer: `{"re":1,"ok":true,"num":15}`})
+	home.before = func(req any) {
+		started := tskOpenSignedCmd[proto.TaskStart](t, h, req)
+		tskPutRow(t, h, "task", string(started.ID), proto.TaskRow{
+			RowHeader: proto.RowHeader{Type: "task", ID: string(started.ID), Seq: 9}, Group: tskTestGroupID, Num: 15, Title: started.Title,
+			Origin: "direct", Plan: started.Plan, State: "queued", Step: "work", Assignee: tskTestWorkerID, Depends: []string{},
+			Wait: &proto.TaskWait{Kind: "busy", Since: seamStart},
+		})
 	}
-
-	hook := filepath.Join(projectDir, "repo", ".git", "hooks", "reference-transaction")
-	tskNoErr(t, os.WriteFile(hook, []byte("#!/bin/sh\necho no refs today >&2\nexit 1\n"), 0o700))
-	err := push()
-	seamCode(t, err, "cli")
-	tskRequire(t, strings.Contains(err.Error(), "no refs today"), "expected the fetch's output")
-	tskNoErr(t, os.Remove(hook))
-
-	err = push()
-	seamCode(t, err, "conflict")
-	tskEqual(t, err.Error(), "conflict: origin has commits on task/12-fix-path that this worktree lacks, now fetched: "+
-		"run git merge origin/task/12-fix-path, run_checks, and call this tool again")
-	tskEqual(t, forgeGit(t, wtDir, "rev-parse", "origin/task/12-fix-path"), earlier)
-}
-
-func TestRunChecksRefusals(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	_, _, wtDir, _ := tskInitWorktree(t, dataDir, false)
-	home := newTskScriptHome()
 	h.Attach("home-device", home)
-	call := Tools["run_checks"].Call
-	caller := tskTaskCaller("wt/12-fix-path", 2)
-
-	_, err := call(t.Context(), h, caller, json.RawMessage(`[]`))
-	seamCode(t, err, "bad_request")
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "not_found")
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("none", "echo checked"))
-	_, err = call(t.Context(), h, tskTaskCaller("wt/99-absent", 2), json.RawMessage(`{}`))
-	seamCode(t, err, "cli")
-
-	tskNoErr(t, os.WriteFile(filepath.Join(wtDir, "dirty.txt"), []byte("wip"), 0o600))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "conflict")
-	tskRequire(t, !strings.HasPrefix(err.Error(), "conflict: conflict:"), "duplicate conflict prefix")
-	os.Remove(filepath.Join(wtDir, "dirty.txt"))
-
-	forgeGit(t, wtDir, "update-index", "--skip-worktree", "readme.md")
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "conflict")
-	tskRequire(t, strings.Contains(err.Error(), "readme.md"), "expected skip-worktree path in error")
-	forgeGit(t, wtDir, "update-index", "--no-skip-worktree", "readme.md")
-	tskEqual(t, len(home.snapshotAsked()), 0)
-}
-
-func TestRunChecksSuccessAndUnreachable(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	_, _, wtDir, _ := tskInitWorktree(t, dataDir, false)
-	home := newTskScriptHome()
-	h.Attach("home-device", home)
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("none", "echo checked"))
-	call := Tools["run_checks"].Call
-	caller := tskTaskCaller("wt/12-fix-path", 2)
-
-	head := tskCommitFiles(t, wtDir, map[string]string{
-		"pkg.go":      "package p\n",
-		"pkg_test.go": "package p\n",
-	}, "add pkg and test")
-	res, err := call(t.Context(), h, caller, json.RawMessage(`{}`))
+	res, err := Tools["start_task"].Call(t.Context(), h, tskGroupCaller(Turn{Kind: ItemsTurn}), json.RawMessage(`{"title":"Add badge","plan":"Update TaskCard."}`))
 	tskNoErr(t, err)
-	gotRes := res.(tskChecksResult)
-	tskEqual(t, gotRes.OK, true)
-	tskEqual(t, gotRes.Commit, head)
-	tskEqual(t, len(gotRes.Items), 3)
-
-	checked := tskOpenSignedCmd[proto.TaskChecked](t, h, home.snapshotAsked()[0])
-	tskEqual(t, string(checked.As), "")
-	tskEqual(t, checked.Op, "checked")
-	tskEqual(t, string(checked.ID), tskTestTaskID)
-	tskEqual(t, checked.OK, true)
-	tskEqual(t, checked.Commit, head)
-
-	close(home.done)
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "home_unreachable")
-
-	// Remote group compares against origin/<base> rather than local <base>.
-	tskEqual(t, tskBaseRef(tskGroupFixture("github")), "origin/base")
-	tskEqual(t, tskBaseRef(tskGroupFixture("none")), "base")
-	rh, rDataDir := tskDiskHost(t)
-	rProjectDir, _, rWtDir, rBaseSHA := tskInitWorktree(t, rDataDir, true)
-	rHome := newTskScriptHome()
-	rh.Attach("home-device", rHome)
-	tskPutRow(t, rh, "group", tskTestGroupID, tskGroupFixture("github"))
-	tskCommitFiles(t, rWtDir, map[string]string{"legacy.go": "package p\n"}, "advance origin base")
-	forgeGit(t, rWtDir, "push", "origin", "HEAD:base")
-	forgeGit(t, filepath.Join(rProjectDir, "repo"), "fetch", "origin", "base")
-	forgeGit(t, filepath.Join(rProjectDir, "repo"), "update-ref", "refs/heads/base", rBaseSHA)
-	rHead := tskCommitFiles(t, rWtDir, map[string]string{"docs.md": "# docs\n"}, "docs relative to origin/base")
-	rRes, err := call(t.Context(), rh, caller, json.RawMessage(`{}`))
-	tskNoErr(t, err)
-	tskEqual(t, rRes.(tskChecksResult).OK, true)
-	tskEqual(t, rRes.(tskChecksResult).Commit, rHead)
-
-	tskPutRow(t, rh, "group", tskTestGroupID, tskGroupFixture("none"))
-	nRes, err := call(t.Context(), rh, caller, json.RawMessage(`{}`))
-	tskNoErr(t, err)
-	tskEqual(t, nRes.(tskChecksResult).OK, false)
+	tskEqual(t, marshalWire(res), `{"task":"T-15","queued":true}`)
 }
 
-func TestSubmitTaskPreconditions(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	_, _, wtDir, _ := tskInitWorktree(t, dataDir, false)
-	home := newTskScriptHome()
-	h.Attach("home-device", home)
-	call := Tools["submit_task"].Call
-	caller := tskTaskCaller("wt/12-fix-path", 2)
-
-	_, err := call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "bad_request")
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"sk-proj-EXAMPLEexampleEXAMPLEexample_EXAMPLE-00"}`))
-	seamCode(t, err, "secret")
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
-	seamCode(t, err, "not_found")
-
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("none"))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
-	seamCode(t, err, "not_found")
-	head := tskCommitFiles(t, wtDir, map[string]string{"f_test.go": "package p\n"}, "add test")
-
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "ignored", nil))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
-	seamCode(t, err, "conflict")
-
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "ignored", &proto.Check{OK: false, At: seamStart, Commit: head}))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
-	seamCode(t, err, "conflict")
-
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "ignored", &proto.Check{OK: true, At: seamStart, Commit: head}))
-	tskNoErr(t, os.WriteFile(filepath.Join(wtDir, "untracked"), []byte("x"), 0o600))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
-	seamCode(t, err, "conflict")
-	os.Remove(filepath.Join(wtDir, "untracked"))
-
-	// Detached HEAD at a newer commit while refs/heads/task/12-fix-path stays at head.
-	forgeGit(t, wtDir, "checkout", "--detach", head)
-	detachedNew := tskCommitFiles(t, wtDir, map[string]string{"det.txt": "1\n"}, "detached")
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
-	seamCode(t, err, "conflict")
-
-	// Detached HEAD at checked commit while refs/heads/task/12-fix-path moved to detachedNew.
-	forgeGit(t, wtDir, "checkout", "--detach", head)
-	forgeGit(t, wtDir, "update-ref", "refs/heads/task/12-fix-path", detachedNew)
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
-	seamCode(t, err, "conflict")
-	tskEqual(t, len(home.snapshotAsked()), 0)
-}
-
-func TestSubmitTaskLocalSuccessAndAddedCommit(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	_, _, wtDir, _ := tskInitWorktree(t, dataDir, false)
-	home := newTskScriptHome()
-	h.Attach("home-device", home)
-	call := Tools["submit_task"].Call
-	caller := tskTaskCaller("wt/12-fix-path", 2)
-
-	head := tskCommitFiles(t, wtDir, map[string]string{
-		"readme.md": "line1\nupdated\nextra\n",
-		"f_test.go": "package p\n",
-	}, "implement feature")
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("none"))
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "ignored", &proto.Check{OK: true, At: seamStart, Commit: head}))
-
-	res, err := call(t.Context(), h, caller, json.RawMessage(`{"summary":"Implemented feature."}`))
-	tskNoErr(t, err)
-	tskEqual(t, res, tskSubmitResult{OK: true, Commit: head})
-	rawJSON, _ := json.Marshal(res)
-	tskRequire(t, !strings.Contains(string(rawJSON), `"pr"`), "local submit must omit pr")
-
-	asked := home.snapshotAsked()
-	tskEqual(t, len(asked), 2)
-	report := tskOpenSignedCmd[proto.Post[proto.ReportBody]](t, h, asked[0])
-	tskEqual(t, report.Kind, "report")
-	tskEqual(t, string(report.As), tskTestWorkerID)
-	wantTaskID := proto.ID(tskTestTaskID)
-	tskEqual(t, report.Thread, &wantTaskID)
-	tskEqual(t, report.Main, false)
-	tskEqual(t, report.Text, "Implemented feature.")
-	tskEqual(t, report.Body, proto.ReportBody{Commit: head, Files: 2, Added: 3, Removed: 1})
-
-	submitted := tskOpenSignedCmd[proto.TaskSubmitted](t, h, asked[1])
-	tskEqual(t, string(submitted.As), "")
-	tskEqual(t, submitted.Op, "submitted")
-	tskEqual(t, string(submitted.ID), tskTestTaskID)
-	tskEqual(t, submitted.Commit, head)
-	tskEqual(t, submitted.PR, 0)
-	tskEqual(t, submitted.PRURL, "")
-	tskEqual(t, submitted.Stats, proto.DiffStats{Added: 3, Removed: 1})
-
-	tskCommitFiles(t, wtDir, map[string]string{"later.txt": "more\n"}, "after checks")
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Again."}`))
-	seamCode(t, err, "conflict")
-}
-
-func TestSubmitTaskErrorPaths(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	_, _, _, baseSHA := tskInitWorktree(t, dataDir, false)
-	call := Tools["submit_task"].Call
-	caller := tskTaskCaller("wt/12-fix-path", 3)
-
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("none"))
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(99, "other", "", &proto.Check{OK: true, At: seamStart, Commit: baseSHA}))
-	_, err := call(t.Context(), h, caller, json.RawMessage(`{"summary":"s"}`))
-	seamCode(t, err, "cli")
-
-	badBase := tskGroupFixture("none")
-	badBase.Base = "nonexistent-base"
-	tskPutRow(t, h, "group", tskTestGroupID, badBase)
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "", &proto.Check{OK: true, At: seamStart, Commit: baseSHA}))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"s"}`))
-	seamCode(t, err, "cli")
-
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("none"))
-	home := newTskScriptHome(
-		tskReplyStep{err: os.ErrClosed},
-		tskReplyStep{answer: `{"re":2,"ok":true}`},
-		tskReplyStep{err: os.ErrClosed},
-	)
-	h.Attach("home-device", home)
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"empty diff"}`))
-	seamCode(t, err, "home_unreachable")
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"empty diff"}`))
-	seamCode(t, err, "home_unreachable")
-
-	_, err = call(t.Context(), h, tskTaskCaller("wt/99-missing", 3), json.RawMessage(`{"summary":"s"}`))
-	seamCode(t, err, "cli")
-}
-
-func TestSubmitTaskRemoteAndHostedChecks(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	_, remoteDir, wtDir, _ := tskInitWorktree(t, dataDir, true)
-	head := tskCommitFiles(t, wtDir, map[string]string{"feature_test.go": "package p\n"}, "add test")
-	nowMS := time.Now().UnixMilli()
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("github"))
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "wrong/branch", &proto.Check{OK: true, At: nowMS, Commit: head}))
-
-	caller := tskTaskCaller("wt/12-fix-path", 2)
-	call := Tools["submit_task"].Call
-	home := newTskScriptHome()
-	h.Attach("home-device", home)
-
-	fakeForgeGH(t, forgeAnswer{Stderr: "gh auth required\n", Code: 1})
-	_, err := call(t.Context(), h, caller, json.RawMessage(`{"summary":"PR body"}`))
-	seamCode(t, err, "cli")
-	tskEqual(t, len(home.snapshotAsked()), 0)
-
-	prURL := "https://example.invalid/org/repo/pull/31"
-	fakeForgeGH(t,
-		forgeAnswer{Stdout: "[]\n"},
-		forgeAnswer{Stdout: prURL + "\n"},
-		hostedView(head, passedRun),
-	)
-	res, err := call(t.Context(), h, caller, json.RawMessage(`{"summary":"PR body"}`))
-	tskNoErr(t, err)
-	tskEqual(t, res, tskSubmitResult{OK: true, Commit: head, PR: 31})
-
-	asked := home.waitAsked(t, 3)
-	gotRefs := forgeGit(t, remoteDir, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/task")
-	tskEqual(t, gotRefs, "refs/heads/task/12-fix-path "+head)
-
-	tskEqual(t, len(asked), 3)
-	report := tskOpenSignedCmd[proto.Post[proto.ReportBody]](t, h, asked[0])
-	wantPR := 31
-	tskEqual(t, report.Body, proto.ReportBody{Commit: head, Files: 1, Added: 1, Removed: 0, PR: &wantPR})
-
-	submitted := tskOpenSignedCmd[proto.TaskSubmitted](t, h, asked[1])
-	tskEqual(t, submitted.PR, 31)
-	tskEqual(t, submitted.PRURL, prURL)
-
-	cloud := tskOpenSignedCmd[proto.TaskChecked](t, h, asked[2])
-	tskEqual(t, string(cloud.As), "")
-	tskEqual(t, cloud.Op, "cloud")
-	tskEqual(t, cloud.OK, true)
-	tskEqual(t, cloud.Commit, head)
-	tskEqual(t, len(cloud.Items), 1)
-	tskEqual(t, cloud.Items[0].Name, "build")
-}
-
-func TestSubmitTaskRepollsSameCommitAfterFailedHostedCheck(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	_, _, wtDir, head := tskInitWorktree(t, dataDir, true)
-	tskStopAllCloud(t, h)
-	since := time.Now()
-	task := tskTaskFixture(12, "fix-path", "task/12-fix-path", &proto.Check{OK: true, At: since.UnixMilli(), Commit: head})
-	task.Commit, task.PR, task.PRURL = head, 31, "https://example.invalid/org/repo/pull/31"
-	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("github"))
-	home := newTskScriptHome()
-	h.Attach("home-device", home)
-	calls := fakeForgeGH(t, hostedView(head, failedRun), forgeAnswer{Stdout: `[{"url":"` + task.PRURL + `"}]`}, hostedView(head, passedRun))
-	key := tskCloudKey{group: tskTestGroupID, task: tskTestTaskID}
-	p := Part[tskPart](h)
-	ctx, run := tskBeginCloud(p, key, head)
-	tskPollHostedChecks(ctx, p, h, "home-device", key, run, TaskForge{Worktree: wtDir}, task.PR, head, since)
-	failed := tskOpenSignedCmd[proto.TaskChecked](t, h, home.snapshotAsked()[0])
-	tskEqual(t, failed.Op, "cloud")
-	tskEqual(t, failed.Commit, head)
-	tskEqual(t, failed.OK, false)
-	task.Checks.Cloud = &proto.Check{At: time.Now().UnixMilli(), Commit: head}
-	tskPutRow(t, h, "task", tskTestTaskID, task)
-
-	caller := tskTaskCaller("wt/12-fix-path", 2)
-	res, err := Tools["submit_task"].Call(t.Context(), h, caller, json.RawMessage(`{"summary":"Retry checks"}`))
-	tskNoErr(t, err)
-	tskEqual(t, res, tskSubmitResult{OK: true, Commit: head, PR: 31})
-	passed := tskOpenSignedCmd[proto.TaskChecked](t, h, home.waitAsked(t, 4)[3])
-	tskEqual(t, passed.Op, "cloud")
-	tskEqual(t, passed.Commit, head)
-	tskEqual(t, passed.OK, true)
-	view := []string{"pr", "view", "31", "--json", "headRefOid,statusCheckRollup"}
-	calls(view, []string{"pr", "list", "--head", task.Branch, "--base", "base", "--state", "open", "--json", "number,headRefOid,url,state,baseRefName,isCrossRepository"}, view)
-}
-
-func TestStaleCloudCheckRowDoesNotRestartCompletedPoll(t *testing.T) {
-	r := newDeliverRig(t, true)
-	tskStopAllCloud(t, r.h)
-	r.seedGroupAndMembers()
-	settleDelivery(r.h)
-	const head = "old-head"
-	r.putTask(cloudCheckTask(testGroup1, testTask1, 1, testAI1, head, 10))
-	calls := fakeForgeGH(t, hostedView(head, passedRun), hostedView(head, passedRun))
-	worktree := sessionDir(r.h, Session{SessionKey: SessionKey{Group: testGroup1}, Folder: "wt/1-cloud"})
-	tskNoErr(t, os.MkdirAll(worktree, 0700))
-
-	p := Part[tskPart](r.h)
-	key := tskCloudKey{group: testGroup1, task: testTask1}
-	ctx, run := tskBeginCloud(p, key, head)
-	forge := TaskForge{Worktree: worktree}
-	tskPollHostedChecks(ctx, p, r.h, r.homeKey.ID(), key, run, forge, 31, head, time.Now())
-	tskEqual(t, len(r.home.cmdPayloads()), 1)
-
-	afterGroupState(r.h, deliv(r.h), testGroup1)
-	waitCloudIdle(r)
-	calls([]string{"pr", "view", "31", "--json", "headRefOid,statusCheckRollup"})
-}
-
-func TestSettleEndsTheHostedChecksPoll(t *testing.T) {
-	d := captureDiag(t)
-	h, home, _ := customForgeHost(t)
-	fakeForgeGH(t, forgeAnswer{Code: 8})
-	startHostedCheck(h, "home-device", tskTestGroupID, HostedCheck{Task: testTask1, Branch: "task/1-poll", Commit: "head", PR: 7, Since: time.Now()})
-	h.Settle()
-	d.ran(t, 1, "node="+h.Key.ID()[:8], "cloud_poll g="+tskTestGroupID+" task="+testTask1)
-	tskEqual(t, len(home.snapshotAsked()), 0)
-	p := Part[tskPart](h)
-	p.spawn(func() { t.Error("a poll started after Settle") })
-	p.wg.Wait()
-}
-
-func TestSubmitTaskDoesNotRestartRunningHostedCheckForSameCommit(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		p := &tskPart{}
-		key := tskCloudKey{group: tskTestGroupID, task: tskTestTaskID}
-		const commit = "c1"
-		ctx, run := tskBeginCloud(p, key, commit)
-		p.mu.Lock()
-		delete(p.claimed, tskCloudHead{key, commit})
-		p.mu.Unlock()
-
-		dupCtx, dupRun := tskBeginCloud(p, key, commit)
-		tskEqual(t, dupCtx, context.Context(nil))
-		tskEqual(t, dupRun, (*tskCloudRun)(nil))
-		tskEqual(t, ctx.Err(), nil)
-
-		tskFinishCloud(p, key, run, true)
-		_, staleRun := tskBeginCloud(p, key, commit)
-		tskEqual(t, staleRun, (*tskCloudRun)(nil))
-	})
-}
-
-func TestSubmitTaskSupersedesPreviousHostedChecks(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		p := &tskPart{}
-		key := tskCloudKey{group: tskTestGroupID, task: tskTestTaskID}
-		ctx1, run1 := tskBeginCloud(p, key, "c1")
-		dupCtx, dupRun := tskBeginCloud(p, key, "c1")
-		tskEqual(t, dupCtx, context.Context(nil))
-		tskEqual(t, dupRun, (*tskCloudRun)(nil))
-		tskRequire(t, ctx1.Err() == nil, "same-commit claim must leave running check alone")
-
-		ctx2, run2 := tskBeginCloud(p, key, "c2")
-		tskRequire(t, ctx1.Err() != nil, "first cloud context must be cancelled")
-		tskRequire(t, ctx2.Err() == nil, "second cloud context must stay active")
-
-		tskFinishCloud(p, key, run1, false)
-		tskEqual(t, p.cancels[key] == run2, true)
-		_, staleRun := tskBeginCloud(p, key, "c1")
-		tskEqual(t, staleRun, (*tskCloudRun)(nil))
-		tskRequire(t, ctx2.Err() == nil, "stale claim must leave new check alone")
-
-		tskFinishCloud(p, key, run2, true)
-		tskEqual(t, len(p.cancels), 0)
-		_, staleRun = tskBeginCloud(p, key, "c1")
-		tskEqual(t, staleRun, (*tskCloudRun)(nil))
-	})
-}
-
-func TestSubmitTaskCancelledHostedCheckDoesNotReportCloud(t *testing.T) {
+// submit_task is one command: the summary, as the AI wrote it, posted as a
+// report in the task's thread. The node adds nothing and reads no folder.
+func TestSubmitTaskPostsTheReport(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	home := newTskScriptHome()
 	h.Attach("home-device", home)
-	p := Part[tskPart](h)
-	key := tskCloudKey{group: tskTestGroupID, task: tskTestTaskID}
-	ctx, run := tskBeginCloud(p, key, "c1")
-	run.cancel()
-	fakeForgeGH(t, hostedView("c1", queuedRun))
-	tskPollHostedChecks(ctx, p, h, "home-device", key, run, TaskForge{Worktree: t.TempDir()}, 7, "c1", time.Now())
-	tskEqual(t, len(home.snapshotAsked()), 0)
-}
-
-func tskReviewCaller(folder string) Caller {
-	return Caller{
-		Session: Session{
-			SessionKey: SessionKey{Group: tskTestGroupID, Member: tskTestReviewID, Task: tskTestTaskID},
-			Kind:       ReviewSession,
-			Folder:     folder,
-			Home:       "home-device",
-		},
-		Level: 1,
-	}
-}
-
-func TestSubmitReviewScoresAndItems(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	projectDir, _, wtDir, _ := tskInitWorktree(t, dataDir, false)
-	head := tskCommitFiles(t, wtDir, map[string]string{"x.go": "package x\n"}, "change")
-	_, err := PrepareReviewWorkspace(t.Context(), projectDir, 12, tskTestReviewID, head, "base", false)
+	const summary = "Path events are sent on every switch.\nRan go test ./...: 42 passed. Commit 9f2c1ab on branch t12-path-events."
+	res, err := Tools["submit_task"].Call(t.Context(), h, tskTaskCaller(), json.RawMessage(marshalWire(tskSubmitArgs{Summary: summary})))
 	tskNoErr(t, err)
+	tskEqual(t, marshalWire(res), `{"ok":true}`)
+
+	asked := home.snapshotAsked()
+	tskEqual(t, len(asked), 1)
+	tskRequire(t, strings.HasSuffix(asked[0].(proto.Cmd).Env.Payload, `"body":{}}`), "the report's body is not {}")
+	report := tskOpenSignedCmd[proto.Post[proto.EmptyBody]](t, h, asked[0])
+	wantTaskID := proto.ID(tskTestTaskID)
+	report.HomeCommand = proto.HomeCommand{Type: report.Type, Group: report.Group, As: report.As}
+	tskEqual(t, report, proto.Post[proto.EmptyBody]{
+		HomeCommand: proto.HomeCommand{Type: "post", Group: tskTestGroupID, As: tskTestWorkerID},
+		Kind:        "report", Thread: &wantTaskID, Text: summary, Mentions: []proto.ID{},
+	})
+}
+
+func TestSubmitTaskRefusals(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	call := Tools["submit_task"].Call
+	caller := tskTaskCaller()
+	_, err := call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
+	seamCode(t, err, "home_unreachable")
+
+	home := newTskScriptHome()
+	h.Attach("home-device", home)
+	for _, bad := range []string{`{}`, `[]`, `{"summary":1}`} {
+		_, err = call(t.Context(), h, caller, json.RawMessage(bad))
+		seamCode(t, err, "bad_request")
+	}
+	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"sk-proj-EXAMPLEexampleEXAMPLEexample_EXAMPLE-00"}`))
+	seamCode(t, err, "secret")
+
+	// A task whose last failures say to ask a stronger AI is not submitted before that.
+	tskPutRow(t, h, "member", tskTestWorkerID, proto.AIMemberRow{
+		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: tskTestWorkerID, Seq: 2}, Group: tskTestGroupID, Kind: "ai", User: "u", Name: "Claude Code"},
+		CLI:       "claude", Host: h.Key.ID(), HostName: "workstation", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "working", Path: "local",
+	})
+	stuck := proto.TaskRow{
+		RowHeader: proto.RowHeader{Type: "task", ID: tskTestTaskID, Seq: 3}, Group: tskTestGroupID, Num: 12, Title: "Fix path check", Origin: "brief",
+		State: "active", Step: "work", Assignee: tskTestWorkerID, Reviewer: tskTestReviewID, Depends: []string{}, Stuck: &proto.Stuck{Kind: "review", N: 2, Ask: true},
+	}
+	tskPutRow(t, h, "task", tskTestTaskID, stuck)
+	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
+	tskEqual(t, err, error(&Error{Code: "conflict", Message: "Ask a stronger AI before submitting again. Candidates: none currently listed."}))
+	tskEqual(t, len(home.snapshotAsked()), 0)
+
+	// What the home answers to the post is the tool's answer.
+	stuck.Stuck = nil
+	tskPutRow(t, h, "task", tskTestTaskID, stuck)
+	home.mu.Lock()
+	home.steps = []tskReplyStep{{answer: `{"re":1,"err":{"code":"conflict","msg":"the task is not yours to submit now"}}`}}
+	home.mu.Unlock()
+	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
+	tskEqual(t, err, error(&Error{Code: "conflict", Message: "the task is not yours to submit now"}))
+}
+
+// submit_review names the report its session was given when the review item
+// was delivered, as the session's row holds it now.
+func TestSubmitReviewNamesTheReportOfItsSession(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
 	home := newTskScriptHome(
 		tskReplyStep{answer: `{"re":1,"ok":true,"passed":false,"round":1}`},
 		tskReplyStep{answer: `{"re":2,"ok":true,"passed":true,"round":2}`},
 	)
 	h.Attach("home-device", home)
-	call := Tools["submit_review"].Call
-	caller := tskReviewCaller("review/12")
+	key := SessionKey{Group: tskTestGroupID, Member: tskTestReviewID, Task: tskTestTaskID}
+	tskNoErr(t, h.Sessions.Create(Session{SessionKey: key, Kind: ReviewSession, Folder: t.TempDir(), Agent: "codex", Home: "home-device", Name: "Codex"}))
+	token := h.Sessions.Admit(key, 3, false)
+	review := func(report proto.ID, args string) any {
+		t.Helper()
+		tskNoErr(t, h.Sessions.Update(key, func(s *Session) { s.Report = string(report) }))
+		caller, _ := h.Sessions.Caller(token)
+		res, err := Tools["submit_review"].Call(t.Context(), h, caller, json.RawMessage(args))
+		tskNoErr(t, err)
+		return res
+	}
 
-	res, err := call(t.Context(), h, caller, json.RawMessage(`{"score":0,"items":[{"text":"Missing test"},{"text":"Check line","file":"x.go","line":1,"veto":true}]}`))
-	tskNoErr(t, err)
+	first, second := proto.ID(testMsg1), proto.ID(testMsg2)
+	res := review(first, `{"score":0,"items":[{"text":"Missing test"},{"text":"Check line","file":"x.go","line":1,"veto":true}]}`)
 	tskEqual(t, res, tskReviewResult{Passed: false, Round: 1})
-
 	rev0 := tskOpenSignedCmd[proto.Post[proto.ReviewSigned]](t, h, home.snapshotAsked()[0])
 	tskEqual(t, rev0.Kind, "review")
 	tskEqual(t, string(rev0.As), tskTestReviewID)
@@ -889,7 +374,7 @@ func TestSubmitReviewScoresAndItems(t *testing.T) {
 	wantLine := 1
 	tskEqual(t, rev0.Body, proto.ReviewSigned{
 		Task:   wantTaskID,
-		Commit: head,
+		Report: first,
 		Score:  0,
 		Items: []proto.ReviewItem{
 			{Text: "Missing test", Veto: false},
@@ -897,24 +382,24 @@ func TestSubmitReviewScoresAndItems(t *testing.T) {
 		},
 	})
 
-	res, err = call(t.Context(), h, caller, json.RawMessage(`{"score":100,"items":[{"text":"Clean","veto":false}]}`))
-	tskNoErr(t, err)
+	// The task was submitted again, and the session was given the new report.
+	res = review(second, `{"score":100,"items":[{"text":"Clean","veto":false}]}`)
 	tskEqual(t, res, tskReviewResult{Passed: true, Round: 2})
 	rev100 := tskOpenSignedCmd[proto.Post[proto.ReviewSigned]](t, h, home.snapshotAsked()[1])
+	tskEqual(t, rev100.Body.Report, second)
 	tskEqual(t, rev100.Body.Score, 100)
 	tskEqual(t, rev100.Body.Items[0].Veto, false)
 }
 
 func TestSubmitReviewRefusalsAndSecrets(t *testing.T) {
-	h, dataDir := tskDiskHost(t)
-	projectDir, _, wtDir, _ := tskInitWorktree(t, dataDir, false)
-	head := tskCommitFiles(t, wtDir, map[string]string{"x.go": "package x\n"}, "change")
-	_, err := PrepareReviewWorkspace(t.Context(), projectDir, 12, tskTestReviewID, head, "base", false)
-	tskNoErr(t, err)
+	h, _ := seamHost(t, seamStore(t))
 	home := newTskScriptHome(tskReplyStep{err: os.ErrClosed})
 	h.Attach("home-device", home)
 	call := Tools["submit_review"].Call
-	caller := tskReviewCaller("review/12")
+	caller := Caller{Session: Session{
+		SessionKey: SessionKey{Group: tskTestGroupID, Member: tskTestReviewID, Task: tskTestTaskID},
+		Kind:       ReviewSession, Home: "home-device", Report: testMsg1,
+	}, Level: 3}
 
 	for _, bad := range []string{
 		`[]`,
@@ -925,14 +410,11 @@ func TestSubmitReviewRefusalsAndSecrets(t *testing.T) {
 	}
 
 	secretTok := "AKIA" + strings.Repeat("B", 16)
-	_, err = call(t.Context(), h, caller, json.RawMessage(fmt.Sprintf(`{"score":80,"items":[{"text":%q}]}`, secretTok)))
+	_, err := call(t.Context(), h, caller, json.RawMessage(fmt.Sprintf(`{"score":80,"items":[{"text":%q}]}`, secretTok)))
 	seamCode(t, err, "secret")
 	_, err = call(t.Context(), h, caller, json.RawMessage(fmt.Sprintf(`{"score":80,"items":[{"text":"clean","file":%q}]}`, secretTok)))
 	seamCode(t, err, "secret")
 	tskEqual(t, len(home.snapshotAsked()), 0)
-
-	_, err = call(t.Context(), h, tskReviewCaller("review/99"), json.RawMessage(`{"score":90,"items":[]}`))
-	seamCode(t, err, "cli")
 
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{"score":90,"items":[]}`))
 	seamCode(t, err, "home_unreachable")

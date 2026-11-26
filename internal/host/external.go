@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -278,16 +279,29 @@ func extRunOpen(ep *extPart, key aiGroupKey) bool {
 }
 
 func extPrepare(h *Host, ep *extPart, d *delivery, key aiGroupKey, ai aiInfo, target routedTarget, batch []verifiedItem) (proto.Handout, bool, error) {
-	session, gitErr, err := prepareTargetSession(h, ai, target, batch[0].home, batch)
-	if gitErr != nil && target.kind != GroupSession {
-		failTargetSession(h, d, key, ai.agent, target, batch, gitErr)
-		return proto.Handout{}, false, nil
-	}
-	if err = errors.Join(gitErr, err); err != nil {
+	session, err := prepareTargetSession(h, ai, target, batch[0].home)
+	if err != nil {
 		d.prependHeld(key, batch)
 		return proto.Handout{}, false, err
 	}
+	if gone := missingFolder(session); gone != "" {
+		extFailStart(h, d, key, session, batch, gone)
+		return proto.Handout{}, false, nil
+	}
 	return extHandOut(h, ep, d, key, session, batch)
+}
+
+// extFailStart ends a batch whose folder is gone: the items are recorded as
+// delivered and acknowledged, and the start fails as a CLI's start does.
+// Nothing is retried.
+func extFailStart(h *Host, d *delivery, key aiGroupKey, s Session, batch []verifiedItem, gone string) {
+	if err := commitTurnItems(h, externalAgent, s.SessionKey, batch); err != nil {
+		log.Printf("host: commit items of a missing folder %v: %v", s.SessionKey, err)
+		d.prependHeld(key, batch)
+		return
+	}
+	ackBatch(h, batch)
+	failStart(h, stateOf(h), s, gone)
 }
 
 func extHandOut(h *Host, ep *extPart, d *delivery, key aiGroupKey, s Session, batch []verifiedItem) (proto.Handout, bool, error) {
@@ -296,7 +310,7 @@ func extHandOut(h *Host, ep *extPart, d *delivery, key aiGroupKey, s Session, ba
 	replaced, _, replErr := Compose(h, s, ReplacedTurn, nil)
 	err := errors.Join(textErr, replErr)
 	if err == nil {
-		err = commitTurnItems(h, externalAgent, batch)
+		err = commitTurnItems(h, externalAgent, s.SessionKey, batch)
 	}
 	if err != nil {
 		d.prependHeld(key, batch)
@@ -306,7 +320,7 @@ func extHandOut(h *Host, ep *extPart, d *delivery, key aiGroupKey, s Session, ba
 	run := batch[0].item.Item
 	extOpenRun(h, ep, key, s, run, turn)
 	return proto.Handout{
-		Run: run, Kind: string(s.Kind), Task: (&turnCtx{h: h, s: s}).taskRef(s.Task), Folder: sessionDir(h, s),
+		Run: run, Kind: string(s.Kind), Task: (&turnCtx{h: h, s: s}).taskRef(s.Task), Folder: s.Folder,
 		Context: Instructions(s) + "\n" + externalInstructions + "\n" + replaced, Text: text,
 	}, true, nil
 }
