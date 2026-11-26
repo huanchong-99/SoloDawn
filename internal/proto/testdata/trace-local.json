@@ -30,16 +30,8 @@
     "id": "rlWx7Fla0KH2Uz8R8dFO8Q",
     "seq": 796,
     "name": "Website",
-    "kind": "project",
-    "repo": "/srv/repos/website",
-    "base": "main",
-    "forge": "none",
     "home": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
     "secretary": "DPCZ39OiwZepCQEMDC04ow",
-    "checks": [
-      "go vet ./...",
-      "go test ./..."
-    ],
     "pass": 90,
     "pass_foundation": 70,
     "limits": {
@@ -81,6 +73,7 @@
       "cli": "claude",
       "host": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
       "host_name": "workstation",
+      "workspace": "/home/dev/website",
       "secretary": true,
       "account": "personal",
       "allow": [],
@@ -108,6 +101,7 @@
       "cli": "claude",
       "host": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
       "host_name": "workstation",
+      "workspace": "/home/dev/website",
       "secretary": false,
       "account": "personal",
       "allow": [],
@@ -135,6 +129,7 @@
       "cli": "codex",
       "host": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
       "host_name": "workstation",
+      "workspace": "/home/dev/website",
       "secretary": false,
       "account": "personal",
       "allow": [],
@@ -489,7 +484,6 @@
                   "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
                   "num": 12,
                   "title": "Node: report path changes",
-                  "slug": "node-report-path-changes",
                   "origin": "brief",
                   "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
                   "state": "active",
@@ -499,7 +493,6 @@
                   "foundation": false,
                   "pass": 90,
                   "depends": [],
-                  "checks": {},
                   "wait": null,
                   "failures": 0,
                   "thread": {
@@ -507,8 +500,6 @@
                     "rounds": 0
                   },
                   "stats": {
-                    "added": 0,
-                    "removed": 0,
                     "started": 1763600030000,
                     "ended": null
                   },
@@ -1012,7 +1003,7 @@
                   "ai": "eidbAPCqbEQST1SNYbMP3w",
                   "why": "review",
                   "task": "m9rr_hiiT8n2dHNSTlYVKQ",
-                  "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
+                  "msg": "PDqIOgE7mSm24_PdskpvVg"
                 },
                 "task": {
                   "r": "task",
@@ -1021,25 +1012,15 @@
                   "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
                   "num": 12,
                   "title": "Node: report path changes",
-                  "slug": "node-report-path-changes",
                   "origin": "brief",
                   "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
                   "state": "active",
                   "step": "review",
-                  "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
                   "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
                   "reviewer": "eidbAPCqbEQST1SNYbMP3w",
                   "foundation": false,
                   "pass": 90,
                   "depends": [],
-                  "branch": "task/12-node-report-path-changes",
-                  "checks": {
-                    "local": {
-                      "ok": true,
-                      "at": 1763600140000,
-                      "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-                    }
-                  },
                   "wait": null,
                   "failures": 0,
                   "thread": {
@@ -1053,8 +1034,6 @@
                     }
                   },
                   "stats": {
-                    "added": 84,
-                    "removed": 12,
                     "started": 1763600030000,
                     "ended": null
                   },
@@ -1202,8 +1181,7 @@
                   "item": 5,
                   "ai": "amN_vvO5mnzm6dn1FWj0-Q",
                   "why": "merge",
-                  "task": "m9rr_hiiT8n2dHNSTlYVKQ",
-                  "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
+                  "task": "m9rr_hiiT8n2dHNSTlYVKQ"
                 },
                 "task": {
                   "r": "task",
@@ -1212,32 +1190,22 @@
                   "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
                   "num": 12,
                   "title": "Node: report path changes",
-                  "slug": "node-report-path-changes",
                   "origin": "brief",
                   "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
                   "state": "active",
                   "step": "merge",
-                  "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
                   "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
                   "reviewer": "eidbAPCqbEQST1SNYbMP3w",
                   "foundation": false,
                   "pass": 90,
                   "depends": [],
-                  "branch": "task/12-node-report-path-changes",
-                  "checks": {
-                    "local": {
-                      "ok": true,
-                      "at": 1763600140000,
-                      "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-                    }
-                  },
                   "review": {
                     "round": 1,
                     "failed": 0,
                     "score": 93,
                     "ok": true,
                     "by": "eidbAPCqbEQST1SNYbMP3w",
-                    "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
+                    "report": "PDqIOgE7mSm24_PdskpvVg",
                     "at": 1763600230000
                   },
                   "wait": null,
@@ -1253,8 +1221,6 @@
                     }
                   },
                   "stats": {
-                    "added": 84,
-                    "removed": 12,
                     "started": 1763600030000,
                     "ended": null
                   },
@@ -1416,32 +1382,22 @@
                   "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
                   "num": 12,
                   "title": "Node: report path changes",
-                  "slug": "node-report-path-changes",
                   "origin": "brief",
                   "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
                   "state": "merged",
                   "step": "merge",
-                  "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
                   "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
                   "reviewer": "eidbAPCqbEQST1SNYbMP3w",
                   "foundation": false,
                   "pass": 90,
                   "depends": [],
-                  "branch": "task/12-node-report-path-changes",
-                  "checks": {
-                    "local": {
-                      "ok": true,
-                      "at": 1763600140000,
-                      "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-                    }
-                  },
                   "review": {
                     "round": 1,
                     "failed": 0,
                     "score": 93,
                     "ok": true,
                     "by": "eidbAPCqbEQST1SNYbMP3w",
-                    "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
+                    "report": "PDqIOgE7mSm24_PdskpvVg",
                     "at": 1763600230000
                   },
                   "wait": null,
@@ -1457,8 +1413,6 @@
                     }
                   },
                   "stats": {
-                    "added": 84,
-                    "removed": 12,
                     "started": 1763600030000,
                     "ended": 1763600270000
                   },

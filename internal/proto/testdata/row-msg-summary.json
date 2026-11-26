@@ -16,10 +16,7 @@
     "task": "DrtCn6htSBwmMPrFPbHJHA",
     "score": 94,
     "rounds": 2,
-    "minutes": 72,
-    "added": 318,
-    "removed": 42,
-    "pr": 28
+    "minutes": 72
   },
   "state": null,
   "env": {

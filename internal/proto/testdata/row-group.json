@@ -3,16 +3,8 @@
   "id": "rZNvy-1jH6Z-BcPqA5U5BQ",
   "seq": 1,
   "name": "Website",
-  "kind": "project",
-  "repo": "https://git.example/team/website.git",
-  "base": "main",
-  "forge": "github",
   "home": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
   "secretary": "qBSFMsr2hHYKOMblEA_kdA",
-  "checks": [
-    "go vet ./...",
-    "go test ./..."
-  ],
   "pass": 90,
   "pass_foundation": 70,
   "limits": {

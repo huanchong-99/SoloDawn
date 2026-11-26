@@ -116,16 +116,37 @@ type Cap struct {
 	Max  float64 `json:"max"`
 }
 
-// AgentGroup is the agent in one group: its member, the level of its task
-// sessions, its derived state and task, how many items are held for it, and watchers.
+// AgentGroup is the agent in one group: its member, the folder of its
+// sessions, the level of its task sessions, its derived state and task, how
+// many items are held for it, and watchers.
 type AgentGroup struct {
-	Group    ID       `json:"g"`
-	Member   ID       `json:"member"`
-	Level    int      `json:"level"`
-	State    string   `json:"state"`
-	Task     ID       `json:"task,omitempty"`
-	Queued   int      `json:"queued"`
-	Watchers []string `json:"watchers"`
+	Group     ID       `json:"g"`
+	Member    ID       `json:"member"`
+	Workspace string   `json:"workspace"`
+	Level     int      `json:"level"`
+	State     string   `json:"state"`
+	Task      ID       `json:"task,omitempty"`
+	Queued    int      `json:"queued"`
+	Watchers  []string `json:"watchers"`
+}
+
+// HostWorkspacesRequest asks which folders the CLI Agent was used in on this
+// node (contracts/datachannel.md section 7).
+type HostWorkspacesRequest struct {
+	Request
+	Agent string `json:"agent"`
+}
+
+// HostWorkspaces answers it, newest use first.
+type HostWorkspaces struct {
+	Success
+	Workspaces []Workspace `json:"workspaces"`
+}
+
+// Workspace is a folder and the time of the newest session there.
+type Workspace struct {
+	Path string `json:"path"`
+	Used int64  `json:"used"`
 }
 
 // WatchStart opens a terminal watch for a granted person.

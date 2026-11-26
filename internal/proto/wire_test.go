@@ -27,8 +27,6 @@ type wireFacts struct {
 	Shapes map[string]shapeFacts `json:"shapes"`
 	// Cases are examples with one value replaced.
 	Cases []wireCase `json:"cases"`
-	// Slugs are task titles with the slug the home makes of each.
-	Slugs []slugCase `json:"slugs"`
 }
 
 type shapeFacts struct {
@@ -45,11 +43,6 @@ type wireCase struct {
 	At    []string        `json:"at"`
 	Value json.RawMessage `json:"value"`
 	OK    bool            `json:"ok"`
-}
-
-type slugCase struct {
-	Title string `json:"title"`
-	Slug  string `json:"slug"`
 }
 
 const notAnID = "system"
@@ -116,7 +109,8 @@ func describe(value any, t reflect.Type, path string, found map[string][]string)
 	}
 }
 
-// The cases that are not about one member of every example.
+// The cases that are not about one member of every example: which booleans
+// may be false.
 func wireCases() []wireCase {
 	cases := []wireCase{}
 	add := func(name, file string, ok bool, value any, at ...string) {
@@ -126,44 +120,6 @@ func wireCases() []wireCase {
 		}
 		cases = append(cases, wireCase{name, file, at, encoded, ok})
 	}
-	long := strings.Repeat("a", 40)
-	for _, slug := range []string{"a", "0", "task", "show-connection-path", "a-b", "a1-2b-c3", "x-9", long, long[:38] + "-b"} {
-		add("a slug the home can make: "+slug, "row-task", true, slug, "slug")
-	}
-	for _, bad := range []struct {
-		what string
-		slug any
-	}{
-		{"an empty text", ""},
-		{"a hyphen first", "-a"},
-		{"a hyphen last", "a-"},
-		{"two hyphens in a row", "a--b"},
-		{"only a hyphen", "-"},
-		{"an upper-case letter", "aB"},
-		{"only upper-case letters", "ABC"},
-		{"a space", "a b"},
-		{"an underscore", "a_b"},
-		{"a dot", "a.b"},
-		{"a slash", "a/b"},
-		{"a parent folder", "../x"},
-		{"a backslash", `a\b`},
-		{"a line break after it", "abc\n"},
-		{"a line break before it", "\nabc"},
-		{"a NUL", "a\x00b"},
-		{"a letter outside ASCII", "caf\u00e9"},
-		{"a full-width letter", "\uff41bc"},
-		{"a Kelvin sign", "\u212aelvin"},
-		{"41 characters", long + "a"},
-		{"41 characters with a hyphen", long[:39] + "-b"},
-		{"a branch name", "task/12-path"},
-		{"a number", 12},
-		{"a list", []string{"a"}},
-		{"an object", map[string]any{}},
-	} {
-		add("a slug that is "+bad.what, "row-task", false, bad.slug, "slug")
-	}
-	add("a slug the home cannot make, in the task beside an inbox item", "inbox", false, "../x", "items", "0", "task", "slug")
-	add("a slug the home can make, in the task beside an inbox item", "inbox", true, "path", "items", "0", "task", "slug")
 	add("fast that is false", "host-info-answer", false, false, "agents", "0", "models", "0", "fast")
 	add("refresh that is false", "host-info-request", true, false, "refresh")
 	add("ask that is false", "row-task-stuck", true, false, "stuck", "ask")
@@ -178,22 +134,11 @@ func wireCases() []wireCase {
 	return cases
 }
 
-var slugTitles = []string{
-	"Node: report connection path changes", "Show connection path", "Choose a label", "Fix: the relay notice!",
-	"  --Hello,   World!!  ", "ABC xyz 0189", "From A to Z", "a@b[c`d{e/f:g", "README.md v2", "fix\n\tthe bug", "a--b", "-a-", "2026", "task",
-	"", "!!!", "-", "任务", "Größe ändern", "Kelvin", "ſtop", "İstanbul", "café",
-	strings.Repeat("a", 40), strings.Repeat("a", 41), strings.Repeat("a", 39) + " b", strings.Repeat("a", 38) + " bcd",
-	strings.Repeat("a", 39) + "--" + strings.Repeat("b", 9), strings.Repeat("ab ", 30),
-}
-
 func generated(t *testing.T) wireFacts {
 	t.Helper()
-	facts := wireFacts{map[string]shapeFacts{}, wireCases(), []slugCase{}}
+	facts := wireFacts{map[string]shapeFacts{}, wireCases()}
 	for _, name := range exampleNames(t) {
 		facts.Shapes[name] = factsOf(parsed(t, example(t, name)), shapes[name])
-	}
-	for _, title := range slugTitles {
-		facts.Slugs = append(facts.Slugs, slugCase{title, string(MakeSlug(title))})
 	}
 	return facts
 }
@@ -216,7 +161,7 @@ func wireFile(t *testing.T) wireFacts {
 	return facts
 }
 
-// written lays the facts out with one shape, one case and one slug to a line,
+// written lays the facts out with one shape and one case to a line,
 // in ASCII: a character outside it is written as its escape, so that a letter
 // that only looks like an ASCII one can be told from it.
 func written(facts wireFacts) []byte {
@@ -243,17 +188,14 @@ func written(facts wireFacts) []byte {
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	shapes, cases, slugs := []string{}, []string{}, []string{}
+	shapes, cases := []string{}, []string{}
 	for _, name := range names {
 		shapes = append(shapes, line(name)+": "+line(facts.Shapes[name]))
 	}
 	for _, c := range facts.Cases {
 		cases = append(cases, line(c))
 	}
-	for _, s := range facts.Slugs {
-		slugs = append(slugs, line(s))
-	}
-	return []byte("{\n \"shapes\": {" + lines(shapes) + "},\n \"cases\": [" + lines(cases) + "],\n \"slugs\": [" + lines(slugs) + "]\n}\n")
+	return []byte("{\n \"shapes\": {" + lines(shapes) + "},\n \"cases\": [" + lines(cases) + "]\n}\n")
 }
 
 // The file is what the types and the cases above say, so that a change of a

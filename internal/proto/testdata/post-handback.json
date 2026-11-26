@@ -7,20 +7,8 @@
   "kind": "handback",
   "thread": "DrtCn6htSBwmMPrFPbHJHA",
   "main": false,
-  "text": "",
+  "text": "Renamed the indicator in the terminal, as its owner asked.",
   "mentions": [],
   "re": null,
-  "body": {
-    "files": [
-      "path.go"
-    ],
-    "commits": [
-      {
-        "sha": "9f2c1ab",
-        "subject": "Emit path changes"
-      }
-    ],
-    "added": 40,
-    "removed": 3
-  }
+  "body": {}
 }

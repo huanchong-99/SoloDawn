@@ -21,29 +21,21 @@ type GroupCommand struct {
 }
 
 // GroupCreate makes the receiving node the home of a new group, whose id is
-// both g and n.
+// both g and n. People and AIs are added by later commands.
 type GroupCreate struct {
 	GroupCommand
-	Name       string          `json:"name"`
-	Kind       string          `json:"kind"`
-	Repo       string          `json:"repo,omitempty"`
-	Base       string          `json:"base"`
-	Forge      string          `json:"forge"`
-	Checks     []string        `json:"checks"`
-	MemberName string          `json:"member_name"`
-	Templates  *ForgeTemplates `json:"templates,omitempty"`
+	Name       string `json:"name"`
+	MemberName string `json:"member_name"`
 }
 
 // GroupSet carries only the fields being changed; limits, when sent, is whole.
 type GroupSet struct {
 	GroupCommand
-	Name           *string         `json:"name,omitempty"`
-	Checks         *[]string       `json:"checks,omitempty"`
-	Pass           *int            `json:"pass,omitempty"`
-	PassFoundation *int            `json:"pass_foundation,omitempty"`
-	Limits         *Limits         `json:"limits,omitempty"`
-	Secretary      ID              `json:"secretary,omitempty"`
-	Templates      *ForgeTemplates `json:"templates,omitempty"`
+	Name           *string `json:"name,omitempty"`
+	Pass           *int    `json:"pass,omitempty"`
+	PassFoundation *int    `json:"pass_foundation,omitempty"`
+	Limits         *Limits `json:"limits,omitempty"`
+	Secretary      ID      `json:"secretary,omitempty"`
 }
 
 // MemberCommand names the member a member command is about; alone it is
@@ -54,15 +46,28 @@ type MemberCommand struct {
 	ID ID     `json:"id"`
 }
 
+// MemberAddAI adds an AI whose host resolved Workspace, the absolute path of
+// its folder there.
 type MemberAddAI struct {
 	MemberCommand
 	CLI       string   `json:"cli"`
 	Tool      *string  `json:"tool,omitempty"`
 	Name      string   `json:"name"`
+	Workspace string   `json:"workspace"`
 	Account   string   `json:"account"`
 	Secretary bool     `json:"secretary"`
 	Approvers []string `json:"approvers"`
 	ProfileSet
+}
+
+// MemberAddPerson adds a person whose device log the home holds, as a member
+// of another group homed there, without an invitation
+// (contracts/step-2/people.md section 2.5). The new member's id is n.
+type MemberAddPerson struct {
+	HomeCommand
+	Op   string `json:"op"`
+	User string `json:"user"`
+	Name string `json:"name"`
 }
 
 // MemberStatus carries the fact its host reports as E, one of the events
@@ -133,6 +138,7 @@ type SessionReplacedEvent struct {
 // Post is the message a person or an AI sends; its id is Nonce. B is what the
 // author signs of the body of its kind (contracts/messages.md section 2): the
 // body type of the row, EmptyBody for a summary, ReviewSigned for a review.
+// A report's and a hand-back's body is EmptyBody: their text is the account.
 type Post[B any] struct {
 	HomeCommand
 	Kind     string `json:"kind"`
@@ -144,11 +150,12 @@ type Post[B any] struct {
 	Body     B      `json:"body"`
 }
 
-// ReviewSigned is the part of a review body that its reviewer signs. The home
-// adds the rest and answers with the outcome: passed and round of CmdResult.
+// ReviewSigned is the part of a review body that its reviewer signs: Report is
+// the report message under review. The home adds the rest and answers with
+// the outcome: passed and round of CmdResult.
 type ReviewSigned struct {
 	Task   ID           `json:"task"`
-	Commit string       `json:"commit"`
+	Report ID           `json:"report"`
 	Score  int          `json:"score"`
 	Items  []ReviewItem `json:"items"`
 }
@@ -176,7 +183,8 @@ type Jump struct {
 }
 
 // TaskCommand names the task a task command is about; alone it is pause,
-// resume and cancel.
+// resume and cancel. A host reports no branch, check or merge: a submission
+// is a post of kind report.
 type TaskCommand struct {
 	HomeCommand
 	Op string `json:"op"`
@@ -189,47 +197,6 @@ type TaskStart struct {
 	Plan   string `json:"plan"`
 	Re     *ID    `json:"re"`
 	Origin string `json:"origin"`
-}
-
-type TaskBranch struct {
-	TaskCommand
-	Branch string `json:"branch"`
-}
-
-// TaskChecked is the result of the local checks (checked) and of the hosted
-// ones (cloud).
-type TaskChecked struct {
-	TaskCommand
-	OK     bool        `json:"ok"`
-	Items  []CheckItem `json:"items"`
-	Commit string      `json:"commit"`
-}
-
-type TaskSubmitted struct {
-	TaskCommand
-	Commit string    `json:"commit"`
-	PR     int       `json:"pr,omitempty"`
-	PRURL  string    `json:"pr_url,omitempty"`
-	Stats  DiffStats `json:"stats"`
-}
-
-type TaskMerged struct {
-	TaskCommand
-	Commit      string    `json:"commit"`
-	MergeCommit string    `json:"merge_commit"`
-	Stats       DiffStats `json:"stats"`
-}
-
-// DiffStats are the line counts of a commit against the base.
-type DiffStats struct {
-	Added   int `json:"added"`
-	Removed int `json:"removed"`
-}
-
-type TaskConflict struct {
-	TaskCommand
-	Commit string `json:"commit"`
-	Detail string `json:"detail"`
 }
 
 type TaskFail struct {
@@ -312,6 +279,8 @@ type HostCommand struct {
 	To        string `json:"to"`
 }
 
+// HostJoin adds an agent to a group with Workspace as its folder, a path on
+// the receiving node that it checks and resolves.
 type HostJoin struct {
 	HostCommand
 	Group     ID      `json:"g"`
@@ -319,6 +288,7 @@ type HostJoin struct {
 	Agent     string  `json:"agent"`
 	Name      string  `json:"name"`
 	Secretary bool    `json:"secretary"`
+	Workspace string  `json:"workspace"`
 	Account   string  `json:"account,omitempty"`
 	Tool      *string `json:"tool,omitempty"`
 	ProfileSet

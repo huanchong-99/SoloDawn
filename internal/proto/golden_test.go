@@ -116,8 +116,10 @@ var (
 	user    = device(browser)
 	host    = device(node)
 	group   = id("group")
-	genesis = DeviceEntry{PayloadHeader{Type: "device", Nonce: ID(id("genesis")), Timestamp: ts - 2}, DeviceChange{user, 1, "add", user, "browser", "phone browser"}}
-	addNode = DeviceEntry{PayloadHeader{Type: "device", Nonce: ID(id("add")), Timestamp: ts - 1}, DeviceChange{user, 2, "add", host, "node", "workstation"}}
+	// workspace is the folder of the example AIs on their host.
+	workspace = "/home/dev/website"
+	genesis   = DeviceEntry{PayloadHeader{Type: "device", Nonce: ID(id("genesis")), Timestamp: ts - 2}, DeviceChange{user, 1, "add", user, "browser", "phone browser"}}
+	addNode   = DeviceEntry{PayloadHeader{Type: "device", Nonce: ID(id("add")), Timestamp: ts - 1}, DeviceChange{user, 2, "add", host, "node", "workstation"}}
 )
 
 func TestPairingAndSessionGoldens(t *testing.T) {
@@ -144,8 +146,8 @@ func TestPairingAndSessionGoldens(t *testing.T) {
 		signed(browser, string(wireJSON(t, genesis))),
 		signed(browser, " "+string(wireJSON(t, addNode))),
 	}})
-	golden(t, "hello", Hello{Request{"hello", 1}, 2, "browser", "phone browser", []string{}})
+	golden(t, "hello", Hello{Request{"hello", 1}, 3, "browser", "phone browser", []string{}})
 	// What reaches the node without the rendezvous comes first, then its rendezvous (datachannel.md section 3).
 	addrs := []string{"ws://192.0.2.10:47800/rv", "wss://rv.example/rv"}
-	golden(t, "welcome", Welcome{"welcome", Success{1, true}, 2, host, "workstation", "v0.3.1", ts, addrs, []GroupSummary{{group, "Website", 812}}, true})
+	golden(t, "welcome", Welcome{"welcome", Success{1, true}, 3, host, "workstation", "v0.3.1", ts, addrs, []GroupSummary{{group, "Website", 812}}, true})
 }

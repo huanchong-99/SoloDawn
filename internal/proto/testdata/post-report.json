@@ -7,14 +7,8 @@
   "kind": "report",
   "thread": "DrtCn6htSBwmMPrFPbHJHA",
   "main": false,
-  "text": "",
+  "text": "Added the path indicator and its test; go test ./... passed. The work is on branch path-indicator at 9f2c1ab, pushed.",
   "mentions": [],
   "re": null,
-  "body": {
-    "commit": "9f2c1ab",
-    "files": 4,
-    "added": 212,
-    "removed": 18,
-    "pr": 31
-  }
+  "body": {}
 }

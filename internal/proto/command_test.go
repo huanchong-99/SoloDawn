@@ -25,13 +25,9 @@ var limits = Limits{10, 20, 60, 3, 5, 4, 45, 600, 30}
 func TestGroupCommandGoldens(t *testing.T) {
 	// The new group's id is the command's nonce, and g names it like any group.
 	create := GroupCommand{HomeCommand{Type: "group", Nonce: ID(group), Timestamp: ts - 5000, Group: ID(group)}, "create"}
-	golden(t, "group-create", GroupCreate{create, "Website", "project", "https://git.example/team/website.git", "main", "github",
-		[]string{"go vet ./...", "go test ./..."}, "owner", nil})
+	golden(t, "group-create", GroupCreate{create, "Website", "owner"})
 	golden(t, "group-set", GroupSet{GroupCommand{command("group", "group set"), "set"},
-		new("Website"), &[]string{"go vet ./...", "go test ./..."}, new(90), new(70), &limits, ID(secretary), nil})
-	golden(t, "group-create-team", GroupCreate{GroupCommand: create, Name: "Team", Kind: "team", Forge: "none", Checks: []string{}, MemberName: "owner"})
-	golden(t, "group-create-custom", GroupCreate{GroupCommand: create, Name: "Website", Kind: "project", Repo: "https://git.example/team/website.git", Base: "main", Forge: "custom", Checks: []string{}, MemberName: "owner", Templates: templateExample()})
-	golden(t, "group-set-templates", GroupSet{GroupCommand: GroupCommand{command("group", "group set templates"), "set"}, Templates: templateExample()})
+		new("Website"), new(90), new(70), &limits, ID(secretary)})
 	golden(t, "group-pause", GroupCommand{command("group", "group pause"), "pause"})
 	golden(t, "group-resume", GroupCommand{command("group", "group resume"), "resume"})
 }
@@ -46,9 +42,11 @@ func TestMemberCommandGoldens(t *testing.T) {
 		c.ID = ID(id("scout"))
 		return c
 	}
-	golden(t, "member-add_ai", MemberAddAI{member("add_ai"), "codex", nil, "Codex", "personal", false, []string{user}, ProfileSet{}})
-	golden(t, "member-add_ai-profile", MemberAddAI{member("add_ai"), "codex", nil, "Codex", "personal", false, []string{user}, profile()})
-	golden(t, "member-add_ai-external", MemberAddAI{scout("add_ai"), "external", new("ZCode"), "Scout", "api_key", false, []string{user}, ProfileSet{}})
+	golden(t, "member-add_ai", MemberAddAI{member("add_ai"), "codex", nil, "Codex", workspace, "personal", false, []string{user}, ProfileSet{}})
+	golden(t, "member-add_ai-profile", MemberAddAI{member("add_ai"), "codex", nil, "Codex", workspace, "personal", false, []string{user}, profile()})
+	golden(t, "member-add_ai-external", MemberAddAI{scout("add_ai"), "external", new("ZCode"), "Scout", workspace, "api_key", false, []string{user}, ProfileSet{}})
+	// An admin adds a person who is in another group homed on this node; the new member's id is n.
+	golden(t, "member-add_person", MemberAddPerson{command("member", "member add_person"), "add_person", device(signer("other browser")), "Mina"})
 	golden(t, "member-status", MemberStatus[SystemCode]{MemberCommand: member("status"), State: "working", Task: ID(taskID), Path: "local",
 		Usage: Usage{WindowPct: new(62.5), WindowResets: new(ts + 10000), DayCapPct: new(80.0),
 			SpendToday: new(0.0), SpendCap: new(10.5), TurnsToday: new(14)}})
@@ -132,13 +130,6 @@ func TestTaskCommandGoldens(t *testing.T) {
 	start := TaskCommand{command("task", "task start"), "start", ID(id("local task"))}
 	start.As = ID(agent)
 	golden(t, "task-start", TaskStart{start, "Choose a label", "Ask the owner which label the path gets.", new(ID(id("text"))), "direct"})
-	golden(t, "task-branch", TaskBranch{task("branch"), taskExample().Branch})
-	items := []CheckItem{{"go test ./...", true, new("42 tests")}}
-	golden(t, "task-checked", TaskChecked{task("checked"), true, items, commit})
-	golden(t, "task-submitted", TaskSubmitted{task("submitted"), commit, 31, "https://git.example/team/website/pull/31", DiffStats{212, 18}})
-	golden(t, "task-cloud", TaskChecked{task("cloud"), true, []CheckItem{{Name: "ci / test", OK: true}}, commit})
-	golden(t, "task-merged", TaskMerged{task("merged"), commit, "c1d9e7a2f0b34455aa8f0e6d7c2b1a9988776655", DiffStats{212, 18}})
-	golden(t, "task-conflict", TaskConflict{task("conflict"), commit, "CONFLICT (content): Merge conflict in path.go"})
 	golden(t, "task-fail", TaskFail{task("fail"), "timeout", "Turn deadline reached."})
 	golden(t, "task-preempted", TaskPreempted{task("preempted"), ID(id("text"))})
 	golden(t, "task-assign", TaskAssign{task("assign"), ID(agent), ID(reviewer)})
@@ -147,16 +138,15 @@ func TestTaskCommandGoldens(t *testing.T) {
 	golden(t, "task-cancel", task("cancel"))
 }
 
-// Without a remote a submission has no pull request, and an assign may name one role only.
-func TestTaskCommandsLeaveOutWhatDoesNotApply(t *testing.T) {
+// An assign may name one role only, and a set sends what it changes, an empty value included.
+func TestCommandsLeaveOutWhatDoesNotApply(t *testing.T) {
 	for _, tc := range []struct {
 		command any
 		want    string
 	}{
-		{TaskSubmitted{TaskCommand: task("submitted"), Commit: "abc", Stats: DiffStats{1, 2}}, `"commit":"abc","stats":{"added":1,"removed":2}}`},
 		{TaskAssign{TaskCommand: task("assign"), Reviewer: ID(reviewer)}, `"id":"` + taskID + `","reviewer":"` + reviewer + `"}`},
 		{TaskAssign{TaskCommand: task("assign"), Assignee: ID(agent)}, `"id":"` + taskID + `","assignee":"` + agent + `"}`},
-		{GroupSet{GroupCommand: GroupCommand{command("group", "group set"), "set"}, Checks: &[]string{}}, `"op":"set","checks":[]}`},
+		{GroupSet{GroupCommand: GroupCommand{command("group", "group set"), "set"}, Pass: new(0)}, `"op":"set","pass":0}`},
 		{MemberSet{MemberCommand: member("set"), Approvers: &[]string{}}, `"id":"` + agent + `","approvers":[]}`},
 		{MemberSet{MemberCommand: member("set"), Role: new("admin")}, `"id":"` + agent + `","role":"admin"}`},
 	} {
@@ -227,8 +217,8 @@ func TestHostCommandGoldens(t *testing.T) {
 	to := func(kind string) HostCommand { return HostCommand{kind, ID(id(kind)), ts, host} }
 	golden(t, "home-add", HomeAdd{to("home.add"), ID(group), device(signer("other home")), "Website",
 		[]string{"ws://192.0.2.10:47800/rv", "wss://rv.example/rv"}})
-	golden(t, "host-join", HostJoin{to("host.join"), ID(group), host, "codex", "Codex", false, "", nil, profile()})
-	golden(t, "host-join-external", HostJoin{to("host.join"), ID(group), host, "external", "Scout", false, "api_key", new("ZCode"), ProfileSet{}})
+	golden(t, "host-join", HostJoin{to("host.join"), ID(group), host, "codex", "Codex", false, workspace, "", nil, profile()})
+	golden(t, "host-join-external", HostJoin{to("host.join"), ID(group), host, "external", "Scout", false, workspace, "api_key", new("ZCode"), ProfileSet{}})
 	golden(t, "host-leave", HostLeave{to("host.leave"), ID(group), "codex", ID(agent)})
 }
 
@@ -242,16 +232,6 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 		switch kind {
 		case "group", "member", "task":
 			want = kind + "-" + fields["op"].(string)
-			if kind == "group" {
-				switch {
-				case fields["kind"] == "team":
-					want += "-team"
-				case fields["forge"] == "custom":
-					want += "-custom"
-				case fields["templates"] != nil:
-					want += "-templates"
-				}
-			}
 			if event, there := fields["event"].(map[string]any); there {
 				want += "-" + event["code"].(string)
 			}
@@ -282,7 +262,7 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 			want = strings.ReplaceAll(kind, ".", "-")
 		case "groups", "beacon":
 			want = kind
-		case "host.info": // a request, its answer, a push
+		case "host.info", "host.workspaces": // a request, its answer, a push
 			if want = strings.ReplaceAll(kind, ".", "-") + "-"; strings.HasPrefix(name, want) {
 				continue
 			}

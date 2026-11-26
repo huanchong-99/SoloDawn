@@ -20,7 +20,7 @@ func TestSystemBodies(t *testing.T) {
 		{RateLimitedBody{SystemCode{"rate_limited"}, "a", 42}, `{"code":"rate_limited","ai":"a","resets":42}`},
 		{LoginInvalidBody{SystemCode{"login_invalid"}, "a", new("signed out")}, `{"code":"login_invalid","ai":"a","detail":"signed out"}`},
 		{TaskFailedBody{SystemCode{"task_failed"}, "t", "failures"}, `{"code":"task_failed","task":"t","reason":"failures"}`},
-		{TaskMergedBody{SystemCode{"task_merged"}, "t", "abc", "def"}, `{"code":"task_merged","task":"t","commit":"abc","merge_commit":"def"}`},
+		{TaskDoneBody{SystemCode{"task_done"}, "t"}, `{"code":"task_done","task":"t"}`},
 		{SystemCode{"no_secretary"}, `{"code":"no_secretary"}`},
 		{SessionReplacedBody{SystemCode{"session_replaced"}, "a", nil}, `{"code":"session_replaced","ai":"a"}`},
 		{MemberJoinedBody{SystemCode{"member_joined"}, "m2", "m1"}, `{"code":"member_joined","member":"m2","by":"m1"}`},

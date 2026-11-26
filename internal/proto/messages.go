@@ -2,21 +2,8 @@ package proto
 
 import "errors"
 
-// BulletinBody identifies the project and secretary shown on a team bulletin.
-type BulletinBody struct {
-	From  string `json:"from"`
-	Group string `json:"group"`
-	AI    string `json:"ai"`
-}
-
-// BulletinSigned is the bulletin body a person posts, with a project group id.
-type BulletinSigned struct {
-	From  ID     `json:"from"`
-	Group string `json:"group"`
-	AI    string `json:"ai"`
-}
-
-// EmptyBody is shared by text, progress, question and reply.
+// EmptyBody is shared by text, progress, question, reply, report and
+// handback.
 type EmptyBody struct{}
 
 type BriefBody struct {
@@ -79,9 +66,6 @@ type SummaryBody struct {
 	Score   int    `json:"score"`
 	Rounds  int    `json:"rounds"`
 	Minutes int    `json:"minutes"`
-	Added   int    `json:"added"`
-	Removed int    `json:"removed"`
-	PR      *int   `json:"pr,omitempty"`
 }
 
 type CallBody struct {
@@ -98,32 +82,11 @@ type ConfirmBody struct {
 	To   []string `json:"to"`
 }
 
-type ReportBody struct {
-	Commit  string `json:"commit"`
-	Files   int    `json:"files"`
-	Added   int    `json:"added"`
-	Removed int    `json:"removed"`
-	PR      *int   `json:"pr,omitempty"`
-}
-
-type ChecksBody struct {
-	Stage  string      `json:"stage"`
-	OK     bool        `json:"ok"`
-	Commit string      `json:"commit"`
-	Items  []CheckItem `json:"items"`
-}
-
-type CheckItem struct {
-	Name   string  `json:"name"`
-	OK     bool    `json:"ok"`
-	Detail *string `json:"detail,omitempty"`
-}
-
 type ReviewBody struct {
 	Task   string       `json:"task"`
 	Num    int          `json:"num"`
 	Title  string       `json:"title"`
-	Commit string       `json:"commit"`
+	Report string       `json:"report"`
 	Round  int          `json:"round"`
 	Score  int          `json:"score"`
 	Pass   int          `json:"pass"`
@@ -136,18 +99,6 @@ type ReviewItem struct {
 	Veto bool    `json:"veto"`
 	File *string `json:"file,omitempty"`
 	Line *int    `json:"line,omitempty"`
-}
-
-type HandbackBody struct {
-	Files   []string        `json:"files"`
-	Commits []CommitSubject `json:"commits"`
-	Added   int             `json:"added"`
-	Removed int             `json:"removed"`
-}
-
-type CommitSubject struct {
-	SHA     string `json:"sha"`
-	Subject string `json:"subject"`
 }
 
 // SystemCode alone is the no_secretary body. The other system codes carry the fields below.
@@ -205,11 +156,9 @@ type TaskFailedBody struct {
 	Reason string `json:"reason"`
 }
 
-type TaskMergedBody struct {
+type TaskDoneBody struct {
 	SystemCode
-	Task        string `json:"task"`
-	Commit      string `json:"commit"`
-	MergeCommit string `json:"merge_commit"`
+	Task string `json:"task"`
 }
 
 type SessionReplacedBody struct {
@@ -270,6 +219,14 @@ type BriefReviseState struct {
 
 type TimedState struct {
 	Status string `json:"status"`
+	At     int64  `json:"at"`
+}
+
+// ReassignedState ends an approval card whose task was given to another AI:
+// By is the member who gave it.
+type ReassignedState struct {
+	Status string `json:"status"`
+	By     string `json:"by"`
 	At     int64  `json:"at"`
 }
 

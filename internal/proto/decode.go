@@ -16,13 +16,11 @@ var (
 	errNull    = errors.New("proto: null where the contract has no null")
 	errInteger = errors.New("proto: not an integer of at most 2^53-1")
 	errID      = errors.New("proto: not a random id")
-	errSlug    = errors.New("proto: not a slug")
 )
 
 var (
 	rawMessage = reflect.TypeFor[json.RawMessage]()
 	idType     = reflect.TypeFor[ID]()
-	slugType   = reflect.TypeFor[Slug]()
 	// 16 bytes are 21 characters and one that carries two bits: its other four are zero.
 	canonicalID = regexp.MustCompile(`^[A-Za-z0-9_-]{21}[AQgw]$`)
 )
@@ -46,8 +44,7 @@ var (
 //   - A field without omitempty is always present, and only a pointer field
 //     without omitempty can be null. encoding/json leaves a field at its zero
 //     value for a missing member and for null alike.
-//   - A field of type ID takes a random id and no other text, and a field of
-//     type Slug a slug.
+//   - A field of type ID takes a random id and no other text.
 //
 // A json.RawMessage is not looked into: whoever decodes it later does that.
 func Decode(data []byte, v any) error {
@@ -159,9 +156,6 @@ func fitsNumber(f float64, t reflect.Type) error {
 func fitsText(s string, t reflect.Type) error {
 	if t == idType && !canonicalID.MatchString(s) {
 		return errID
-	}
-	if t == slugType && !isSlug(s) {
-		return errSlug
 	}
 	return nil
 }

@@ -1,0 +1,14 @@
+{
+  "re": 11,
+  "ok": true,
+  "workspaces": [
+    {
+      "path": "/home/dev/website",
+      "used": 1763599940000
+    },
+    {
+      "path": "/home/dev/notes",
+      "used": 1763513600000
+    }
+  ]
+}

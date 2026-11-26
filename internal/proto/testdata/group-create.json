@@ -5,13 +5,5 @@
   "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
   "op": "create",
   "name": "Website",
-  "kind": "project",
-  "repo": "https://git.example/team/website.git",
-  "base": "main",
-  "forge": "github",
-  "checks": [
-    "go vet ./...",
-    "go test ./..."
-  ],
   "member_name": "owner"
 }

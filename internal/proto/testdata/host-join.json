@@ -8,6 +8,7 @@
   "agent": "codex",
   "name": "Codex",
   "secretary": false,
+  "workspace": "/home/dev/website",
   "model": "gpt-5.4",
   "effort": "high",
   "tier": "strong",

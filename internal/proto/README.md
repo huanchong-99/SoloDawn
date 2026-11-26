@@ -24,15 +24,23 @@ Step 2 adds `watch.start` (plain success, as in `cmd-ok`), host command
 `watch:<g>:<member>` carries ordered, reliable, binary terminal bytes from
 the node only; channel labels have no shared code definitions here.
 
-Team groups omit `repo` and `secretary`; creation omits `repo`, with empty
-`base`, `forge: none` and empty `checks`.
+There is one kind of group (P-8, decision of 2026-11-26): the group row,
+`group create` and `group set` carry no kind, repository, branch, forge,
+templates or check commands. An AI member carries `workspace`, the absolute
+path of its folder on its host, in its row, `member add_ai`, `host.join` and
+`agents[].groups[]` of `host.info`. `MemberAddPerson` (`member add_person`)
+adds a person the home knows without an invitation; it has `user` and `name`
+and no `id`, which is `n`. `HostWorkspacesRequest` and `HostWorkspaces` are
+`host.workspaces` and its answer, which has no `t`. `hello` and `welcome`
+carry `v` 3.
 
-Bulletin bodies carry `from`
-(project group id), `group` (name) and `ai` (display name), with null
-state/thread/re, `main: false` and no post `as`.
-
-Custom forge `templates` hold `push`, `open`, `checks`, `merge` argument lists
-in rows/create/set.
+The task row has `report` (the report message under review) and no slug,
+branch, commit, pull request, checks or line counts; `review.report` names
+the report a review was about. A submission is a `post` of kind `report`,
+and a host sends no task command but `fail` and `preempted`. The bodies of
+`report` and `handback` are `EmptyBody`: their text is the account. A manual
+pause's `TaskWait` and the `reassigned` state of an approval card
+(`ReassignedState`) carry `by`, the member who did it.
 
 Moved errors carry the destination device in `err.home`; codes remain text.
 
@@ -55,7 +63,7 @@ host command with `HostCommand` (`to` is always there).
   ([issues](../../issues.md)).
 - `Post[B]` holds what the author signs of the body: the row's body type,
   `EmptyBody` for a summary, `ReviewSigned` for a review, `ConfirmSigned` for a
-  watch confirmation card, `BulletinSigned` for a bulletin. The home adds the rest.
+  watch confirmation card. The home adds the rest.
 - `MemberStatus[E]` carries a host's fact as one of the event types, which are
   the system bodies without `ai`. Read it as `MemberStatus[SystemCode]` first to
   learn the code.
@@ -64,8 +72,6 @@ host command with `HostCommand` (`to` is always there).
   `TaskRow`.
 - `NewNonce` makes a random 16-byte `ID` in canonical base64url spelling
   ([envelope.md, section 1](../../planning/contracts/envelope.md)).
-- `MakeSlug` makes a task's slug from its title, by the rule of
-  [local.md, section 7](../../planning/contracts/local.md). Only the home calls it.
 
 Sender tests pass what their code encoded to `UnexpectedNulls`, with the JSON
 Pointers that may be null for that shape (e.g. `/thread`, `/re` and `/state` for
@@ -91,9 +97,8 @@ the examples, so a changed tag shows as a changed line of that file:
   of every example in turn (left out, `null`, a list for an object and the
   reverse, a text for a number and the reverse, a fraction, 2^53, a text that is
   no id) and expect what these lists say.
-- `cases`: examples with one value replaced, and whether they are read: the slugs,
-  and the values that are always `true`.
-- `slugs`: task titles and the slug of each.
+- `cases`: examples with one value replaced, and whether they are read: which
+  booleans may be `false`.
 
 Two things are outside this agreement. A member kept as JSON here (`opaque`) is
 judged by whoever decodes it. And the web client's schemas name `t`, `op`, a
@@ -119,16 +124,13 @@ alone reads four things differently from a browser. An error from `Decode` is
 - **Ids.** A field of type `ID` takes a random id, the canonical base64url spelling of 16 bytes
   (22 characters), and no other text, an empty one included. `n` and `g` of `PayloadHeader` have
   this type, and so has every id in a command payload, in an `Item`, and `g` of `inbox` and `ack`.
-  Of the bodies a `post` carries, a review's, a confirm card's and a bulletin's ids are checked:
-  `task` of `ReviewSigned`, `ai` of `ConfirmSigned`, `from` of `BulletinSigned`.
+  Of the bodies a `post` carries, a review's and a confirm card's ids are checked:
+  `task` and `report` of `ReviewSigned`, `ai` of `ConfirmSigned`.
   The host surface uses it too: `g` of `Home`, `AuditRow`, `PTYResize`, `WatchStart`, `WatchEnd`,
   `HostJoin`, `HostLeave` and `Reminder`, `msg` of `Reminder`, `ai` of `PTYResize`, `member` of
   `WatchStart`, `WatchEnd` and `HostLeave`, and `g`, `member` and `task` of `AgentGroup`.
   Rows, the other message bodies and the frames that read
   a group still hold ids as plain strings ([issues](../../issues.md)).
-- **Slugs.** A field of type `Slug` takes 1 to 40 characters, groups of `a` to `z` and `0` to `9`
-  with one `-` between two, and no other text. The `slug` of `TaskRow` has this type, so a slug
-  that the home's rule cannot make never reaches a path or a branch name.
 
 A `json.RawMessage` is not looked into; decode it with `Decode` when its type is
 known. So a wire type states the contract in its tags: `omitempty` for an optional
@@ -160,14 +162,13 @@ the type does not name, not with `Decode`.
   `MemberSet`, `MemberJoinedBody` and `MemberRemovedBody`, `HomeAdd` (`home.add`,
   populating `host.info.homes` with `home`), `ConfirmBody` and `ConfirmSigned` with
   card states (`pending`, `confirmed`, `denied`, `expired`), `call` state `denied`
-  (`TimedState`), `"confirm"` in `PushOn.On`, `Reminder.Kind` and `TaskWait.Kind`, `Asked` on
-  `TaskRow`, and
-  protocol step `v: 2` in `Hello` and `Welcome` (`step-3/knowledge.md` section 8).
+  (`TimedState`), `"confirm"` in `PushOn.On`, `Reminder.Kind` and `TaskWait.Kind`, and `Asked` on
+  `TaskRow`.
 - Presets and knowledge-base documents (`step-3/knowledge.md`) add optional `type`
   (the field `NoteType`, JSON `type`) and `name` on `NoteRow` and `Note` (answered with `id` and `replaced`
   in `CmdResult`), `preset` on `BriefBody`, and `q` on `FetchKind`. The tool lists in
-  `testdata/tools.json` add `kb_put` and `kb_search` to every kind of session and `group` to the
-  secretary's `post`.
+  `testdata/tools.json` add `kb_put` and `kb_search` to every kind of session. Since P-8 the
+  file has one task list, `task`, and `handback` in the `post` of every list but `external`.
 - Member profiles and escalation (`step-3/profiles.md`) add `Profile` (`model`, `effort`,
   `tier`, `skills`) to AI member rows and `ProfileSet` to `member add_ai`, `member set` and
   `host.join`, `member` on `HostLeave`, `refresh` on `HostInfoRequest`, `models` (`Model`) on each
@@ -179,14 +180,16 @@ the type does not name, not with `Decode`.
 - `pair.browser`, `host.offline` and `host.online` are a `HostCommand` alone;
   `takeover.end` is a `Takeover`, `takeover.start` a `TakeoverStart`.
 - `Beacon` is the payload of the signed local-network beacon; it has no `g` or `to`.
-- `testdata/trace-remote.json` and `testdata/trace-local.json` hold the complete
-  signed transcripts of one confirmed task from request to summary, with a
-  GitHub remote and with `forge: none`
-  ([trace-task.md](../../planning/flows/trace-task.md)). Their type is `TaskTrace`
-  ([`trace.go`](trace.go)). The home writes them, not this package:
-  `internal/home/trace_test.go` sends their signed commands through the home's
-  command table and fails when a file differs from what the home answers, pushes
-  and delivers; `go test ./internal/home -run TestTaskTraces -update` writes them
-  again. `web/src/lib/trace.test.ts` verifies them on their own: the device log,
-  every command signature, the rows, the inbox items with their acknowledgements,
-  and that every item, the review and the merge are about the submitted commit.
+- `testdata/trace-local.json` holds the complete signed transcript of one
+  confirmed task from request to summary
+  ([trace-task.md](../../planning/flows/trace-task.md)). Its type is `TaskTrace`
+  ([`trace.go`](trace.go)). The home writes it, not this package:
+  `internal/home/trace_test.go` sends its signed commands through the home's
+  command table and fails when the file differs from what the home answers, pushes
+  and delivers; `go test ./internal/home -run TestTaskTraces -update` writes it
+  again. `web/src/lib/trace.test.ts` verifies it on its own: the device log,
+  every command signature, the rows, and the inbox items with their acknowledgements.
+  Until the home follows P-8, the file is the old transcript with only its typed parts
+  (the group, the AI members, the inbox items and the task rows beside them) brought to
+  the new shapes, so that this package reads it; its signed commands and pushed rows are
+  still the old flow.

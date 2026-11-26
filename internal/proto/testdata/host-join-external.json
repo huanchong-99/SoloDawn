@@ -8,6 +8,7 @@
   "agent": "external",
   "name": "Scout",
   "secretary": false,
+  "workspace": "/home/dev/website",
   "account": "api_key",
   "tool": "ZCode"
 }

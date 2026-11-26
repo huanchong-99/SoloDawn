@@ -62,7 +62,6 @@ func everyAI(s session, secretary bool) []Tool {
 		"where":    choice("thread", "main"),
 	}
 	if secretary {
-		post["group"] = text()
 		post["task"] = text()
 	}
 	limit := integer(1, 100)
@@ -75,7 +74,7 @@ func everyAI(s session, secretary bool) []Tool {
 		tool("reply", map[string]ToolArg{"call": text(), "text": text()}, "call", "text"),
 		tool("read_thread", map[string]ToolArg{"task": text(), "limit": limit, "before": integer(1)}, s.unless("task")...),
 		tool("list_members", nil),
-		tool("list_tasks", map[string]ToolArg{"state": choice("queued", "active", "paused", "failed", "merged", "cancelled")}),
+		tool("list_tasks", map[string]ToolArg{"state": choice("queued", "active", "paused", "failed", "done", "cancelled")}),
 		tool("note_put", map[string]ToolArg{"text": text(), "task": text()}, "text"),
 		tool("note_list", map[string]ToolArg{"task": text(), "type": choice("preset")}),
 		tool("kb_put", map[string]ToolArg{"name": text(), "text": text()}, "name", "text"),
@@ -96,9 +95,10 @@ func requestDecision(s session) Tool {
 var netStatus = tool("net_status", nil)
 
 func toolLists() ToolLists {
+	// A takeover can reach every kind of session but an external AI's (contracts/mcp-tools.md section 5).
 	taken := []string{"text", "progress", "question", "handback"}
 	secretary := session{append(slices.Clone(taken), "summary"), true}
-	group := session{[]string{"text", "progress", "question"}, true}
+	group := session{taken, true}
 	task := session{taken, false}
 	depends := ToolArg{Type: "array", Items: new(integer(0)), Default: []any{}}
 	brief := tool("propose_brief", map[string]ToolArg{
@@ -118,18 +118,14 @@ func toolLists() ToolLists {
 		"score": integer(0, 100),
 		"items": list(map[string]ToolArg{"text": text(), "file": text(), "line": integer(1), "veto": boolean(false)}, "text"),
 	}, "score", "items")
-	level1 := slices.Concat(everyAI(task, false), []Tool{requestDecision(task), netStatus})
-	work := []Tool{
-		tool("push_branch", nil), tool("run_checks", nil), tool("submit_task", map[string]ToolArg{"summary": text()}, "summary"),
-	}
-	external := session{posts: group.posts}
+	submit := tool("submit_task", map[string]ToolArg{"summary": text()}, "summary")
+	external := session{posts: []string{"text", "progress", "question"}}
 	return ToolLists{
-		Secretary:   ToolList{slices.Concat(everyAI(secretary, true), []Tool{requestDecision(secretary), netStatus, brief, setTask})},
-		Group:       ToolList{slices.Concat(everyAI(group, false), []Tool{startTask, requestDecision(group), netStatus})},
-		Review:      ToolList{slices.Concat(everyAI(task, false), []Tool{review, requestDecision(task), netStatus})},
-		TaskLevel1:  ToolList{level1},
-		TaskLevel23: ToolList{slices.Concat(everyAI(task, false), work, []Tool{requestDecision(task), netStatus})},
-		External: ToolList{slices.Concat(everyAI(external, false), work, []Tool{
+		Secretary: ToolList{slices.Concat(everyAI(secretary, true), []Tool{requestDecision(secretary), netStatus, brief, setTask})},
+		Group:     ToolList{slices.Concat(everyAI(group, false), []Tool{startTask, requestDecision(group), netStatus})},
+		Review:    ToolList{slices.Concat(everyAI(task, false), []Tool{review, requestDecision(task), netStatus})},
+		Task:      ToolList{slices.Concat(everyAI(task, false), []Tool{submit, requestDecision(task), netStatus})},
+		External: ToolList{slices.Concat(everyAI(external, false), []Tool{submit,
 			startTask, review, requestDecision(external), netStatus,
 			tool("next_item", nil),
 			tool("done", map[string]ToolArg{"run": {Type: "integer"}}, "run"),
@@ -199,12 +195,11 @@ func TestToolListsFollowTheSessionKinds(t *testing.T) {
 		list ToolList
 		also []string
 	}{
-		"secretary":      {lists.Secretary, []string{"propose_brief", "set_task"}},
-		"group":          {lists.Group, []string{"start_task"}},
-		"review":         {lists.Review, []string{"submit_review"}},
-		"task_level_1":   {lists.TaskLevel1, nil},
-		"task_level_2_3": {lists.TaskLevel23, []string{"push_branch", "run_checks", "submit_task"}},
-		"external":       {lists.External, []string{"start_task", "submit_review", "push_branch", "run_checks", "submit_task", "next_item", "done", "report_usage"}},
+		"secretary": {lists.Secretary, []string{"propose_brief", "set_task"}},
+		"group":     {lists.Group, []string{"start_task"}},
+		"review":    {lists.Review, []string{"submit_review"}},
+		"task":      {lists.Task, []string{"submit_task"}},
+		"external":  {lists.External, []string{"start_task", "submit_review", "submit_task", "next_item", "done", "report_usage"}},
 	} {
 		got, want := names(c.list), slices.Concat(everyone, c.also)
 		slices.Sort(got)
@@ -239,13 +234,19 @@ func TestAGroupSessionNamesWhatATaskSessionHas(t *testing.T) {
 			t.Errorf("a group session may leave out the task or the people: %q", names(list))
 		}
 	}
-	for _, list := range []ToolList{lists.Review, lists.TaskLevel1, lists.TaskLevel23} {
+	for _, list := range []ToolList{lists.Review, lists.Task} {
 		if slices.Contains(required(list, "read_thread"), "task") || slices.Contains(required(list, "request_decision"), "to") {
 			t.Errorf("a task or review session must name its own task or people: %q", names(list))
 		}
 	}
 	kinds := func(list ToolList) []string { return list.Tools[0].InputSchema.Properties["kind"].Enum }
-	if !slices.Contains(kinds(lists.Secretary), "summary") || slices.Contains(kinds(lists.Group), "handback") || !slices.Contains(kinds(lists.Review), "handback") {
-		t.Errorf("post kinds: secretary %q, group %q, review %q", kinds(lists.Secretary), kinds(lists.Group), kinds(lists.Review))
+	// A takeover reaches every kind of session but an external AI's; only the secretary posts a summary.
+	for _, list := range []ToolList{lists.Group, lists.Review, lists.Task} {
+		if !slices.Contains(kinds(list), "handback") || slices.Contains(kinds(list), "summary") {
+			t.Errorf("post kinds %q in %q", kinds(list), names(list))
+		}
+	}
+	if !slices.Contains(kinds(lists.Secretary), "handback") || !slices.Contains(kinds(lists.Secretary), "summary") || slices.Contains(kinds(lists.External), "handback") {
+		t.Errorf("post kinds: secretary %q, external %q", kinds(lists.Secretary), kinds(lists.External))
 	}
 }

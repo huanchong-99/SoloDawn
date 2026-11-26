@@ -5,16 +5,14 @@
   "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
   "num": 13,
   "title": "Choose a label",
-  "slug": "choose-a-label",
   "origin": "direct",
   "plan": "Ask the owner which label the path gets.",
   "state": "active",
-  "step": "branch",
+  "step": "work",
   "assignee": "1PC8WineBrUQ-apCjx7tug",
   "foundation": true,
   "pass": 70,
   "depends": [],
-  "checks": {},
   "wait": {
     "kind": "decision",
     "msg": "TDRDfXwvOO-iOegSUoyidg",
@@ -29,8 +27,6 @@
     "rounds": 0
   },
   "stats": {
-    "added": 0,
-    "removed": 0,
     "started": 1763600000000,
     "ended": null
   },

@@ -392,3 +392,14 @@ func TestDecodeKeepsTextAsItIs(t *testing.T) {
 		t.Errorf("got %+v, %v", env, err)
 	}
 }
+
+// A step that cannot fail panics when it does.
+func TestSurePanicsOnAnError(t *testing.T) {
+	sure(nil)
+	defer func() {
+		if recover() != errID {
+			t.Error("sure did not panic with its error")
+		}
+	}()
+	sure(errID)
+}

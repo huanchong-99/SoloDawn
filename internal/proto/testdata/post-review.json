@@ -11,7 +11,9 @@
   "mentions": [],
   "re": null,
   "body": {
-    "commit": "9f2c1ab",
+    "task": "DrtCn6htSBwmMPrFPbHJHA",
+    "report": "hF6RgxMZ6JxNZWvbgMJ4rA",
+    "score": 86,
     "items": [
       {
         "text": "Missing relay path",
@@ -19,8 +21,6 @@
         "file": "path.go",
         "line": 88
       }
-    ],
-    "score": 86,
-    "task": "DrtCn6htSBwmMPrFPbHJHA"
+    ]
   }
 }
