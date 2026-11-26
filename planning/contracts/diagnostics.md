@@ -35,7 +35,8 @@ Markers as in `contracts/local.md`: `[verified]` run by the planning lead,
   milliseconds (`ms`) or a reason from the lists of section 2 (`why`); an
   error line may also hold the system's own error text (`err`), whose
   address or socket path in the data directory holds no project path or
-  secret. A device id is cut to 8 characters; other ids are whole. A session is the
+  secret. `turn.stray` also holds the sender's address and port (`from`).
+  A device id is cut to 8 characters; other ids are whole. A session is the
   three fields `g`, `ai`, `task`. A line never holds the text of a message
   or a turn, file content, a path inside a project, a token or a key: the
   owner sends this file to others.
@@ -77,6 +78,7 @@ today; the builder may move a line to the nearest place that has the fields.
 | `sig.send`, `sig.recv` | `peer`: an offer or an answer; a candidate at `debug` | `dev`, `conn`, `kind` |
 | `ice.state` | `peer`: the connection state changes | `dev`, `conn`, `state` |
 | `ice.pair` | `peer`: the selected pair changes | `dev`, `conn`, `local`, `remote` (candidate types), `proto`, `path` (`direct`, `relay`) |
+| `turn.stray` (`warn`) | `peer`: the socket of a TURN client over UDP drops a datagram that is not from its TURN server (`issues.md` FLAKY-33) | `from` |
 | `ctl.open`, `conn.close` | `peer`: `ctl` is ready; the connection is done | `dev`, `conn`; at the close `why` (`ice_failed`; `ctl_closed` when the remote side closed; `closed` when this side did), `ms` open |
 | `bg.start`, `bg.stop` | `host`, `home`, `node`: each goroutine a wait group starts (a delivery, a group sync, a poll of hosted checks, a status flush, a connection's pump), and in `host` the goroutines of a watched terminal; not the read loops of a CLI process or a terminal, the first of which `proc.*` covers | `name`; `g` and `task` when the work has them |
 
@@ -122,7 +124,11 @@ What each of the failures of 2026-11-23 would have shown (`issues.md`):
    names it:
    - `nodes.log`: every line the test process logged during the scenario.
      The harness points `log` at a buffer it empties before each scenario;
-     the in-process nodes are told apart by `node`.
+     the in-process nodes are told apart by `node`. The buffer also takes
+     pion's own lines from the test process: the debug lines of the test
+     TURN server (`turn`), of the TURN clients (`turnc`) and of the ICE
+     agents (`ice`) of every `peer.Listen` there, and pion's errors
+     (`peer.PionLog`).
    - `goroutines.txt`: the goroutines of the test process
      (`pprof.Lookup("goroutine")`, with stacks).
    - for each node run as a child process: its `logs` folder, and what it

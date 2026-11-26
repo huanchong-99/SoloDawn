@@ -181,7 +181,8 @@ of the failure; the times in the log are UTC. Do it soon: the node keeps only
 `node.log` and the file before it, 10 MB each. On macOS and Linux the node
 need not be stopped; on Windows it must be (below).
 The lines hold ids, counts and states, not messages, file contents, tokens or
-keys; an error line can name a file.
+keys; an error line can name a file, and a `turn.stray` line the network address
+that sent a stray packet to the node's relay socket.
 
 **macOS**
 
