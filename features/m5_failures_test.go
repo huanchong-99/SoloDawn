@@ -3,6 +3,7 @@
 package features
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,13 +13,14 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-// m5NoCommit is what the steps that MODEL-1126 took away say when they fail.
-const m5NoCommit = "the task row holds no commit or hosted checks: failures count crashed turns between submissions by report (MODEL-1126 plan 1.6)"
+// A5.5: three consecutive crashed turns with no submission in between stop
+// a task for a person (planning/contracts/task-machine.md rows 5, 10 and 14).
 
-// A5.5: three consecutive failures of a task stop it for a person
-// (planning/contracts/task-machine.md rows 6, 10 and 14).
-
-const m5TakenUp = "Continuing T-1."
+const (
+	m5Crash      = "a crash"
+	m5Submission = "a submission"
+	m5TakenUp    = "Continuing T-1."
+)
 
 type m5Failures struct {
 	w *m5World
@@ -26,23 +28,90 @@ type m5Failures struct {
 
 func m5RegisterFailureSteps(sc *godog.ScenarioContext, w *m5World) {
 	x := &m5Failures{w: w}
-	sc.Step(`^the work of "Claude" on the task ends in turn in "([^"]*)"$`, rewritten("AC-1", m5NoCommit))
+	sc.Step(`^the work of "Claude" on the task ends in turn in "([^"]*)"$`, x.stepEndings)
 	sc.Step(`^the third failure in a row made the task failed, and its thread mentions the owner$`, x.stepVerifyFailed)
 	sc.Step(`^the secretary tries to resume the failed task and to reassign it to "Codex"$`, x.stepSecretaryTries)
 	sc.Step(`^the home refuses both with "forbidden" and the task stays failed$`, x.stepVerifyForbidden)
 	sc.Step(`^the owner resumes the failed task$`, x.stepOwnerResumes)
 	sc.Step(`^the owner reassigns the failed task to "Codex"$`, x.stepOwnerReassigns)
-	sc.Step(`^the task is active without failures, and "(Claude|Codex)" continues from the last commit of "Claude"$`, rewritten("AC-1", m5NoCommit))
+	sc.Step(`^the task is active without failures, and "(Claude|Codex)" continues it in its own workspace$`, func(name string) error {
+		return m5FinalStep(w, func() error { return x.verifyTakenUp(name) })()
+	})
+}
+
+// stepEndings gives Claude one turn for each ending, and checks after each
+// the number of consecutive failures.
+func (x *m5Failures) stepEndings(list string) error {
+	x.w.setMemberHeld(x.w.codexM, true)
+	failures := 0
+	for i, ending := range strings.Split(list, ", ") {
+		failures++
+		if ending == m5Submission {
+			failures = 0
+		}
+		if err := x.endOnce(ending, i, failures); err != nil {
+			return fmt.Errorf("ending %d, %s: %w", i+1, ending, err)
+		}
+	}
+	return m5Same("failures at the end", failures, 3)
+}
+
+func (x *m5Failures) endOnce(ending string, i, failures int) error {
+	w := x.w
+	if err := x.wakeClaude(i); err != nil {
+		return err
+	}
+	report := x.task().Report
+	x.scriptEnding(ending)
+	w.release(w.claudeM)
+	return w.waitSaw(fmt.Sprintf("%d failures after %s", failures, ending), func() error {
+		t := x.task()
+		if t.Failures == failures && (t.Report != report) == (ending == m5Submission) {
+			return nil
+		}
+		return errors.New(w.tasksBrief())
+	})
+}
+
+// wakeClaude has exactly one item for Claude wait on the host: the first
+// assignment, else a message of the owner in the task's thread.
+func (x *m5Failures) wakeClaude(i int) error {
+	w := x.w
+	if err := m5WaitAllDormant(w.cluster.Nodes[0].Host); err != nil {
+		return err
+	}
+	if i > 0 {
+		if err := w.ownerPost("@Claude go on.", x.task().ID, []string{w.claudeM}); err != nil {
+			return err
+		}
+	}
+	return w.waitSaw("one item for Claude on the host", func() error {
+		return m5Same("queued items", w.cluster.Nodes[0].Host.QueuedCount(w.groupID, w.claudeM), 1)
+	})
+}
+
+// scriptEnding is a turn whose CLI exits before its end, or one that
+// submits the task by report. Its tool call holds Claude again until the
+// next ending.
+func (x *m5Failures) scriptEnding(ending string) {
+	w := x.w
+	hold := func(host.Caller) error {
+		w.setMemberHeld(w.claudeM, true)
+		return nil
+	}
+	if ending == m5Submission {
+		w.addBeforeHook("submit_task", hold)
+		w.writeScriptFile("claude", m5ClaudeScript(m5WorkerCalls("Ready in my folder.")))
+		return
+	}
+	w.addBeforeHook("post", hold)
+	calls, _ := m5BuildMCPCallSteps(m5PostCall("About to crash."), 2)
+	w.writeScriptFile("claude", `{"exit":1,"steps":[`+strings.Join(append(m5ClaudeTurnStart(0), calls...), ",")+`]}`)
 }
 
 func (x *m5Failures) task() proto.TaskRow {
 	t, _ := x.w.taskByNum(1)
 	return t
-}
-
-func (x *m5Failures) release(member string) {
-	x.w.setMemberHeld(member, false)
-	host.Deliver(x.w.cluster.Nodes[0].Host, x.w.groupID, member)
 }
 
 func (x *m5Failures) stepVerifyFailed() error {
@@ -70,7 +139,7 @@ func (x *m5Failures) stepSecretaryTries() error {
 		{Name: "set_task", Args: map[string]any{"task": "T-1", "action": "resume"}, WantErr: true},
 		{Name: "set_task", Args: map[string]any{"task": "T-1", "assignee": "Codex", "reviewer": "Claude"}, WantErr: true},
 	}))
-	x.release(w.secID)
+	x.w.release(w.secID)
 	return w.waitFor("the secretary's two set_task calls", func() bool { return w.toolCallCount() >= 2 })
 }
 
@@ -104,7 +173,7 @@ func (x *m5Failures) stepOwnerResumes() error {
 	if err := x.ownerTaskCmd(map[string]any{"op": "resume"}); err != nil {
 		return err
 	}
-	x.release(w.claudeM)
+	x.w.release(w.claudeM)
 	return nil
 }
 
@@ -114,6 +183,22 @@ func (x *m5Failures) stepOwnerReassigns() error {
 	if err := x.ownerTaskCmd(map[string]any{"op": "assign", "assignee": w.codexM, "reviewer": w.claudeM}); err != nil {
 		return err
 	}
-	x.release(w.codexM)
+	x.w.release(w.codexM)
 	return nil
+}
+
+func (x *m5Failures) verifyTakenUp(name string) error {
+	w := x.w
+	if err := w.waitFor(name+" to continue the task", func() bool { return w.hasMsgWithText(m5TakenUp) }); err != nil {
+		return err
+	}
+	t := x.task()
+	w.mu.Lock()
+	member, dir := w.sawTaskSess[1].Member, w.sawTaskDir[1]
+	w.mu.Unlock()
+	return errors.Join(
+		m5Same("assignee", t.Assignee, w.findMemberByName(name)),
+		m5Same("member of the task session", member, t.Assignee),
+		m5Same("folder of the task session", dir, w.workspaces[name]),
+		m5Same("the task", fmt.Sprint(t.State, t.Failures), fmt.Sprint("active", 0)))
 }

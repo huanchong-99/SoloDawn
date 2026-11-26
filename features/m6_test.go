@@ -91,19 +91,20 @@ func m6Steps(sc *godog.ScenarioContext, f fixtures) {
 }
 
 func registerM6RemoteSessionSteps(sc *godog.ScenarioContext, w *m6World) {
-	sc.Step(`^two owned nodes over ctl and a project group on the first node$`, w.givenTwoNodesAndGroup)
+	sc.Step(`^two owned nodes over ctl and a group on the first node$`, w.givenTwoNodesAndGroup)
 	sc.Step(`^"([^"]+)" on the second node is scripted to answer "([^"]+)" with "([^"]+)" and "([^"]+)" with "([^"]+)" as "([^"]+)"$`, w.givenTwoTurnScript)
 	sc.Step(`^the owner joins "([^"]+)" on the second node to the group as "([^"]+)"$`, w.givenJoinedRemoteAI)
 	sc.Step(`^the owner mentions "([^"]+)" in the group with "([^"]+)"$`, w.whenOwnerMentionsAI)
 	sc.Step(`^"([^"]+)" posts "([^"]+)" from the second node and enters waiting$`, w.thenAIPostsAndWaits)
 	sc.Step(`^one "([^"]+)" CLI process existed throughout on the second node$`, w.thenOneCLIProcessRan)
+	sc.Step(`^the second node runs the sessions of "([^"]+)" in the folder it was added with$`, w.thenRunsInJoinedFolder)
 }
 
 func registerM6CallSteps(sc *godog.ScenarioContext, w *m6World) {
-	sc.Step(`^one M6 node over ctl with a project group and joined AIs "([^"]+)" and "([^"]+)"$`, func(caller, callee string) error {
+	sc.Step(`^one M6 node over ctl with a group and joined AIs "([^"]+)" and "([^"]+)"$`, func(caller, callee string) error {
 		return w.givenOneNodeWithTwoAIs(0, caller, callee)
 	})
-	sc.Step(`^one M6 node over ctl with a project group, ask_wait_s (\d+), and joined AIs "([^"]+)" and "([^"]+)"$`, func(waitS int, caller, callee string) error {
+	sc.Step(`^one M6 node over ctl with a group, ask_wait_s (\d+), and joined AIs "([^"]+)" and "([^"]+)"$`, func(waitS int, caller, callee string) error {
 		return w.givenOneNodeWithTwoAIs(waitS, caller, callee)
 	})
 	sc.Step(`^the owner joins "([^"]+)" on the first node as "([^"]+)" and "([^"]+)" on the second node as "([^"]+)"$`, w.givenSplitAIs)
@@ -669,7 +670,10 @@ func m6ClaudeSetupDoc(caller string) map[string]any {
 }
 
 func (w *m6World) scriptOpenAskTurn(caller, callee, question, answer, postText string) error {
-	assignTurn := formatM6TaskAssignTurn(caller)
+	assignTurn, err := w.formatM6TaskAssignTurn(caller)
+	if err != nil {
+		return err
+	}
 	wantRes := m6ToolTextResult(false, string(mustMarshalNoEscape(map[string]string{"answer": answer})))
 	askSteps := mcpCallSteps(1, "ask", map[string]any{"to": callee, "text": question}, wantRes)
 	steps := claudeToolTurn(true, assignTurn, "", append(askSteps, mcpPostSteps(2, postText)...))
@@ -678,7 +682,10 @@ func (w *m6World) scriptOpenAskTurn(caller, callee, question, answer, postText s
 }
 
 func (w *m6World) scriptBusyAskAndLateReply(caller, callee, question string) error {
-	assignTurn := formatM6TaskAssignTurn(caller)
+	assignTurn, err := w.formatM6TaskAssignTurn(caller)
+	if err != nil {
+		return err
+	}
 	replyTurn := formatM6ReplyTurn(caller, callee, "Fixtures are ready.")
 	askSteps := mcpCallSteps(1, "ask", map[string]any{"to": callee, "text": question}, map[string]any{"isError": false})
 	turn1 := claudeToolTurn(true, assignTurn, "", append(askSteps, mcpPostSteps(2, "Waiting on receipt.")...))
@@ -809,15 +816,18 @@ func m6ToolTextResult(isErr bool, text string) map[string]any {
 	}
 }
 
-func formatM6TaskAssignTurn(caller string) string {
+// formatM6TaskAssignTurn is the first turn of the caller's task session,
+// which names the caller's workspace.
+func (w *m6World) formatM6TaskAssignTurn(caller string) (string, error) {
+	folder, err := aiWorkspace(w.root, w.groupID, caller)
 	return strings.Join([]string{
 		fmt.Sprintf("[SoloDawn] group %q · you are %q · task session T-2", m6GroupName, caller),
 		"== 1 of 1 · assign · instruction",
 		fmt.Sprintf("Task T-2 %q", m6TaskTitle),
-		"Branch: task/2-path-event (this folder is its worktree)",
+		fmt.Sprintf("Folder: %s (your workspace in this group)", folder),
 		"Plan: " + m6TaskPlan,
 		"Reviewer: none   Pass score: 90",
-	}, "\n")
+	}, "\n"), err
 }
 
 func formatM6CallMentionTurn(callee, caller, body, callID string) string {
@@ -936,6 +946,28 @@ func (w *m6World) notePendingCard(m proto.MsgRow) {
 
 func (w *m6World) thenOneCLIProcessRan(agent string) error {
 	return checkStartLineCount(w.aiNode.cliLog(), agent, 1)
+}
+
+// thenRunsInJoinedFolder checks the folder that the AI's node reports for the
+// AI in the group: the one every session of the AI there starts its CLI in.
+func (w *m6World) thenRunsInJoinedFolder(member string) error {
+	folder, err := aiWorkspace(w.root, w.groupID, member)
+	if err != nil {
+		return err
+	}
+	info, err := requestHostInfo(w.ctx, w.aiLink.conn)
+	if err != nil {
+		return err
+	}
+	for _, a := range info.Agents {
+		i := slices.IndexFunc(a.Groups, func(g proto.AgentGroup) bool {
+			return g.Group == w.groupID && g.Member == proto.ID(w.aiByName[member].ID)
+		})
+		if i >= 0 {
+			return m5Same("the folder of "+member, a.Groups[i].Workspace, folder)
+		}
+	}
+	return fmt.Errorf("the second node lists no session of %s: %+v", member, info.Agents)
 }
 
 func checkStartLineCount(path, agent string, want int) error {

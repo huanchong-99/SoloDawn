@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -850,11 +851,11 @@ func (w *m7World) messages() map[string]proto.MsgRow {
 }
 
 func registerM7GivenSteps(sc *godog.ScenarioContext, w *m7World) {
-	sc.Step(`^an M7 project group on a direct path with configured AI "([^"]+)" on an active task$`, w.givenDirectSingleAITask)
-	sc.Step(`^an M7 project group on a direct path with configured AIs "([^"]+)" and "([^"]+)" on active tasks$`, w.givenDirectTwoAITasks)
-	sc.Step(`^an M7 project group with configured AI "([^"]+)" accessed over a relayed WebRTC path$`, w.givenRelayedSingleAI)
-	sc.Step(`^an M7 project group on a direct path with configured AI "([^"]+)" and no tasks$`, w.givenDirectSingleAINoTask)
-	sc.Step(`^an M7 project group with configured AI "([^"]+)" on an active task over a direct path with TURN reachable$`, w.givenDirectWithTURNTask)
+	sc.Step(`^an M7 group on a direct path with configured AI "([^"]+)" on an active task$`, w.givenDirectSingleAITask)
+	sc.Step(`^an M7 group on a direct path with configured AIs "([^"]+)" and "([^"]+)" on active tasks$`, w.givenDirectTwoAITasks)
+	sc.Step(`^an M7 group with configured AI "([^"]+)" accessed over a relayed WebRTC path$`, w.givenRelayedSingleAI)
+	sc.Step(`^an M7 group on a direct path with configured AI "([^"]+)" and no tasks$`, w.givenDirectSingleAINoTask)
+	sc.Step(`^an M7 group with configured AI "([^"]+)" on an active task over a direct path with TURN reachable$`, w.givenDirectWithTURNTask)
 }
 
 func registerM7TakeoverSteps(sc *godog.ScenarioContext, w *m7World) {
@@ -876,13 +877,10 @@ func registerM7TakeoverSteps(sc *godog.ScenarioContext, w *m7World) {
 func registerM7RelayAndTaskSteps(sc *godog.ScenarioContext, w *m7World) {
 	sc.Step(`^the M7 owner sends takeover\.start for "([^"]+)" over that relayed ctl connection$`, w.whenSendTakeoverOnRelay)
 	sc.Step(`^takeover\.start is refused with error code "([^"]+)" and "([^"]+)" starts (\d+) CLI processes$`, w.thenRefusedWithNoCLIStart)
-	noTask := rewritten("AC-1", "a takeover of an AI without a task opens its group session and creates no task card (A7.7 replaced, MODEL-1126 plan 1.8)")
-	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" with no task named$`, noTask)
-	sc.Step(`^an active "([^"]+)" task card exists for "([^"]+)" and its pty channel opens in the task worktree$`, noTask)
-	sc.Step(`^the M7 owner hands back "([^"]+)"'s terminal with nothing changed in the worktree$`, noTask)
-	sc.Step(`^that takeover task is "([^"]+)" with no open task session and (\d+) handback messages$`, noTask)
-	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" again, commits "([^"]+)" with subject "([^"]+)" in the task worktree, and hands back$`, noTask)
-	sc.Step(`^the second takeover task remains "([^"]+)" and its handback message lists commit "([^"]+)" and file "([^"]+)"$`, noTask)
+	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" with no task named$`, w.whenOpenNoTaskTakeover)
+	sc.Step(`^"([^"]+)"'s pty channel opens on its group session in its workspace and no task exists$`, w.thenTakeoverOnGroupSession)
+	sc.Step(`^the M7 owner hands back "([^"]+)"'s terminal and "([^"]+)" posts handback "([^"]+)"$`, w.whenHandbackPosts)
+	sc.Step(`^"([^"]+)"'s handback "([^"]+)" is in the main line with an empty body, and still no task exists$`, w.thenHandbackInMainLine)
 	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" and verifies a non-relay selected pair in WebRTC statistics$`, w.whenOpenTakeoverVerifyDirectStats)
 	sc.Step(`^direct UDP is cut while TURN stays reachable so the same PeerConnection selects a relayed pair$`, w.whenCutDirectToRelay)
 	sc.Step(`^WebRTC selected-pair statistics report a relay candidate, the pty channel closes, and the node hands back "([^"]+)"$`, w.thenStatsRelayClosesPTYAndHandsBack)
@@ -1824,6 +1822,79 @@ func (w *m7World) checkReplayCode(wantCode string) error {
 		return fmt.Errorf("replayed takeover.start returned %q, want %q", code, wantCode)
 	}
 	return nil
+}
+
+func (w *m7World) whenOpenNoTaskTakeover(aiName string) error {
+	return w.openTakeoverSession(aiName, "", m7InteractiveHoldDoc())
+}
+
+// thenTakeoverOnGroupSession checks the session the host handed to the
+// terminal: the AI's group session, in the folder it was added with.
+func (w *m7World) thenTakeoverOnGroupSession(aiName string) error {
+	err := w.browser.waitRows(m7Event, "AI "+aiName+" in takeover", func() bool {
+		return w.browser.aiByName[aiName].State == "takeover"
+	})
+	if err != nil {
+		return err
+	}
+	folder, err := aiWorkspace(w.root, w.groupID, aiName)
+	if err != nil {
+		return err
+	}
+	want := host.SessionKey{Group: string(w.groupID), Member: w.aiID(aiName)}
+	sessions := slices.DeleteFunc(w.pn.Host.Sessions.All(), func(s host.Session) bool { return s.Member != want.Member })
+	if len(sessions) != 1 || !m7InTakeoverAt(sessions[0], want, folder) {
+		return fmt.Errorf("sessions of %s = %+v, want its group session in takeover in %s", aiName, sessions, folder)
+	}
+	return w.checkNoTask()
+}
+
+func m7InTakeoverAt(s host.Session, key host.SessionKey, folder string) bool {
+	return s.SessionKey == key && s.State == host.Takeover && s.Folder == folder
+}
+
+func (w *m7World) checkNoTask() error {
+	w.browser.mu.Lock()
+	defer w.browser.mu.Unlock()
+	for _, m := range w.browser.msgs {
+		if m.Kind == "task" {
+			return fmt.Errorf("a task card %s exists", m.ID)
+		}
+	}
+	if len(w.browser.tasks) != 0 {
+		return fmt.Errorf("tasks exist: %+v", w.browser.tasks)
+	}
+	return nil
+}
+
+func (w *m7World) whenHandbackPosts(aiName, _, handbackText string) error {
+	if err := w.setScript(m7VendorOf(aiName), m7ClaudeHandbackDoc(handbackText, nil)); err != nil {
+		return err
+	}
+	return w.sendTakeoverEnd(aiName)
+}
+
+func (w *m7World) thenHandbackInMainLine(aiName, handbackText string) error {
+	if err := w.waitMsgAndAIState(aiName, handbackText, "waiting", m7Event); err != nil {
+		return err
+	}
+	w.closeOpenSessions()
+	hb := w.handbackRow(handbackText)
+	if hb.By != w.aiID(aiName) || hb.Thread != nil || string(hb.Body) != "{}" {
+		return fmt.Errorf("handback = %+v, want %s's in the main line with body {}", hb, aiName)
+	}
+	return w.checkNoTask()
+}
+
+func (w *m7World) handbackRow(text string) proto.MsgRow {
+	w.browser.mu.Lock()
+	defer w.browser.mu.Unlock()
+	for _, m := range w.browser.msgs {
+		if m.Kind == "handback" && m.Text == text {
+			return m
+		}
+	}
+	return proto.MsgRow{}
 }
 
 func (w *m7World) whenOpenTakeoverVerifyDirectStats(aiName string) error {
