@@ -124,7 +124,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `architecture.md` | fixed constraints, components, responsibilities, diagram, trust model, repository layout and import rules |
 | `sessions.md` | kinds of CLI session, their folders, levels and states |
 | `flows/pairing.md` | first run: browser and node pair, device list |
-| `flows/connect.md` | finding a peer, racing paths, relay fallback, switching back |
+| `flows/connect.md` | finding a peer, racing paths, relay fallback |
 | `flows/sync.md` | how a client catches up with a group home |
 | `flows/agent-turn.md` | delivering a message to an AI and getting its reply |
 | `flows/approval.md` | an AI asks for permission, the owner decides |

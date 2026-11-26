@@ -259,19 +259,22 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-130** `[S1]` The official server stores nothing. It serves the website
   and the rendezvous service.
 - **R-131** `[S1]` Several paths are tried at once (UDP hole punching, TCP,
-  IPv6); the first to work is used; a better one found later replaces it.
+  IPv6); the first to work is used; ICE may move to a better one by itself (R-132).
   In step 1, TCP means a direct connection to a port the other node has
-  open, forwarded or mapped on its router (UPnP, NAT-PMP), plus the relay on
-  port 443. TCP simultaneous open between two nodes that are both behind NAT
+  open or forwarded on its router (no UPnP or NAT-PMP mapping: cut
+  2026-11-21), plus the relay on port 443. TCP simultaneous open between two nodes that are both behind NAT
   is an experiment (spike S-9) and is built in step 3 only if it shows a
   clear benefit (Q-1).
-- **R-132** `[S1]` Relay is a bridge and a last resort. While relayed, direct
-  attempts continue; on success the connection moves and the relay is dropped.
-  Relay carries small data only (chat, tasks); terminal streams are direct
-  only. Relay content is end-to-end encrypted. The user is told when relayed.
+- **R-132** `[S1]` Relay is a bridge and a last resort. A relayed connection
+  moves to a direct pair only when ICE finds one or at its next reconnect;
+  no separate attempt is made (cut 2026-11-21). Relay carries small data
+  only (chat, tasks); terminal streams are direct only. Relay content is
+  end-to-end encrypted. The user is told when relayed.
 - **R-133** `[S1]` The system must work without the server: existing direct
-  connections continue, nodes remember last addresses, devices on one local
-  network find each other, self-hosters run the same programs.
+  connections continue, and self-hosters run the same programs. Local-network
+  discovery is not built (cut 2026-11-21), nor a node's remembered addresses
+  for its own signalling (PR-2 cancelled 2026-11-22); a browser keeps the
+  `addrs` of each node's `welcome` and signals on them as well.
 - **R-134** `[S1]` Each group has a home: one machine holding its history,
   member list and task state. Others sync from it and connect to it. Default
   is the secretary's machine. The user is told plainly that this machine must

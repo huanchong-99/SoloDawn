@@ -20,7 +20,7 @@
   "nodes.relay": "Relay",
   "nodes.relay.for": "{n} min",
   "nodes.relay.title": "Using a relay — speed and data are limited.",
-  "nodes.relay.body": "Chats and task messages work as usual. The node keeps trying a direct connection and switches back automatically.",
+  "nodes.relay.body": "Chats and task messages work as usual. The connection may turn direct after a reconnect, or if your browser finds a direct path itself; otherwise it stays relayed.",
   "nodes.hosts": "Hosts",
   "nodes.hosts.warnOne": "This computer is the home of 1 group — keep it on.",
   "nodes.hosts.warn": "This computer is the home of {n} groups — keep it on.",

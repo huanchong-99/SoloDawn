@@ -1,4 +1,4 @@
-# Flow: connecting, relay fallback, moving back to direct
+# Flow: connecting and relay fallback
 
 Contracts: `contracts/rendezvous.md` (signalling, ICE settings),
 `contracts/datachannel.md` (`hello`, `welcome`). Rules: R-131 to R-133.
@@ -8,9 +8,12 @@ answering node; RV, any signalling path.
 
 ## A. Opening a connection
 
-1. C looks up the signalling paths it has for N: local-network address,
-   remembered addresses, rendezvous URLs. A browser has only rendezvous URLs
-   and, when served from a node, that node.
+1. C looks up the signalling paths it has for N: the rendezvous URLs and,
+   on the same machine, the node's own handler. A browser has the rendezvous
+   URL of its page, the `addrs` of each node's `welcome` that it stored, and,
+   when served from a node, that node; from an HTTPS page a `ws://` address
+   is blocked (`risks.md` T-18). A node dials no remembered address of its own
+   (PR-2 cancelled).
 2. C creates a peer connection with a `ctl` data channel, picks a new `conn`
    id, and sends a signed `offer` on **every** path at once, without
    waiting for its candidates (`contracts/rendezvous.md` 2.3, "Trickle").
@@ -18,9 +21,9 @@ answering node; RV, any signalling path.
    (section 5.1, point 3, there).
 3. N receives the first copy and checks the envelope
    (`contracts/envelope.md` section 3). On first application of a valid
-   ordinary offer, N closes that signer's previous inbound connection and
-   any pending inbound probe before it starts the new checks; a probe
-   offer leaves the inbound connection alone. A copy, or a replayed old
+   ordinary offer, N closes that signer's previous inbound connection
+   before it starts the new checks; a probe offer is refused
+   (`contracts/rendezvous.md` 2.3). A copy, or a replayed old
    offer, closes nothing (`contracts/rendezvous.md` 2.3, "Once only" and
    "One inbound connection per device"). N creates its peer connection
    and sends its signed `answer` on every path on which a copy of that
@@ -33,9 +36,9 @@ answering node; RV, any signalling path.
    to a port the node has open, forwarded or mapped on its router, and
    relay (UDP, and TLS on port 443). It nominates a working pair from
    those valid at the time; relay has the lowest priority. A
-   higher-priority path found later may need a probe to take effect
-   (section B). TCP simultaneous open between two nodes behind NAT is not
-   part of step 1 (R-131, spike S-9).
+   higher-priority path found later takes effect only if ICE moves to it
+   itself or at the next reconnect (section B). TCP simultaneous open
+   between two nodes behind NAT is not part of step 1 (R-131, spike S-9).
 6. DTLS completes. Each side compares the remote certificate fingerprint
    with the one in the signed description it accepted; the WebRTC stack does
    this. `ctl` opens.
@@ -87,61 +90,20 @@ answering node; RV, any signalling path.
    end whose path becomes `relay` closes a `pty` channel that is already
    open, which is hand-back (`flows/takeover.md` D). While its path is
    `relay` the web client shows "relayed, limited".
-10. C starts or stops its probe schedule from its own updated observation
-    (step 8): it probes while its path is `relay`. After 30 seconds, then
-    with the interval doubling up to 5 minutes, C sends a signed `offer`
-    with `probe: true` and a new `conn`. Both ends omit TURN on a probe.
-    N keeps one pending probe beside the current inbound connection; a
-    later probe offer supersedes a pending one. C closes its own pending
-    probe before it sends the next.
-11. A probe has 15 seconds from its offer to open its `ctl`; one that has
-    not opened by then has failed (step 14). If the probe's `ctl` opens, C
-    moves. A move is a reconnect in which the old connection serves until N
-    has accepted the new one:
-    1. C sends `hello` on the probe and starts a 10-second timer. While it
-       waits for `welcome`, closure of the old connection does not start an
-       ordinary reconnect. A matching `welcome` completes the move and cancels
-       the timer. Probe failure or timer expiry ends this attempt under step
-       14.
-    2. N promotes the probe on its first valid `hello`: the probe becomes
-       the device's inbound connection, and N closes its predecessor.
-       Nothing is carried over from it. A superseded probe or a repeated
-       `hello` cannot retire a newer connection.
-    3. C retires the old connection on `welcome`: it stops applying
-       anything from it and closes it, and the relay allocation ends with
-       it. Then C sends `sync` for each group with the last sequence
-       number it **applied** (`flows/sync.md` A). Rows that were on their
-       way on the old connection are simply read again.
-12. C sends again, under new `id`s, every request that has had no
-    response: each `cmd`, `fetch` and `host.info`, and each `sync`, which
-    is the `sync` of step 11.3 for its group. The receipt on the other side
-    makes a repeated command harmless (`contracts/commands.md`); the other
-    requests only read. They go out after the `sync` requests, in the order
-    in which they were first made. A `hello` is not among them: the new
-    connection has had its own.
-13. Both sides classify the new path. The indicator changes within one
-    second and the relay notice disappears.
-14. C closes the failed or timed-out probe and ignores a late `welcome` from
-    it. If the old connection is still usable, C continues on it and retries
-    the probe on schedule. If the old connection has also failed or closed, C
-    starts one ordinary reconnect under section C. A later loss of the
-    retained connection follows C.15.
-
-A relayed connection may also find a direct pair by itself; some browsers
-do and one does not (`contracts/rendezvous.md` section 5). Step 8 then
-classifies again, and step 10 stops the probes.
-
-Probing happens only while relayed. A connection that is already direct is
-not probed for a "more direct" path; ICE nominated a working pair when it
-opened, and it will again on the next reconnect.
+10. to 14. Removed by the decision of 2026-11-21: no relay-free probe and
+    move (`internal/peer/README.md`, "Limitations"). A relayed connection
+    stays relayed unless ICE finds a direct pair by itself; some browsers do
+    and one does not (`contracts/rendezvous.md` section 5): step 8 then
+    classifies again. A reconnect (section C) tries every path again and
+    stays relayed if direct is still blocked. A connection that is already direct
+    is not moved to a "more direct" path.
 
 ## C. Losing and regaining a connection
 
 15. When ICE reports the connection failed or closed, or its `ctl` channel
     closes, C starts again from step 1. Retries back off: 1, 2, 4 … 60
     seconds, and start again from 1 second after a connection that stayed
-    open for 60 seconds. The old connection closing during a move is not
-    this case (step 11.1).
+    open for 60 seconds.
     If no answer arrives within 10 seconds of sending an offer (the same
     timeout as `hello`), or every path used for that offer reports the
     target offline before an answer arrives, C retires that `conn` at
@@ -163,34 +125,40 @@ opened, and it will again on the next reconnect.
       stayed signed in for 60 seconds, and at once when its own network
       changes (step 16). It sends its `watch` list on the new path.
 16. Back-off is skipped, and C retries at once, when a signalling path
-    reports the target present (`presence` from rendezvous, a beacon on the
-    local network) or when C's own network changes. For a browser, its
-    network has changed when its window gets the `online` event.
-17. After `welcome`, C resumes exactly as in step 11.3: `sync` with the last
-    sequence number it applied for each group. A host that restarted has
+    reports the target present (`presence` from rendezvous) or when C's own
+    network changes. For a browser, its network has changed when its window
+    gets the `online` event.
+17. After `welcome`, C resumes: `sync` for each group with the last sequence
+    number it **applied** (`flows/sync.md` A); rows that were on their way
+    on the old connection are simply read again. A host that restarted has
     nothing cached and starts from zero.
-18. Requests in flight when the connection died are sent again after
-    `welcome`, as in step 12. A host also sends the current `member status`
-    of each of its AIs, so that the home shows what is true now.
+18. C sends again, under new `id`s, every request that has had no response:
+    each `cmd`, `fetch` and `host.info`, after the `sync` requests of step
+    17, in the order in which they were first made. The receipt on the other
+    side makes a repeated command harmless (`contracts/commands.md`); the
+    other requests only read. A `hello` is not among them: the new
+    connection has had its own. A host also sends the current `member
+    status` of each of its AIs, so that the home shows what is true now.
 
 Two nodes may each host an AI in a group homed on the other. Each then opens
 its own connection as a client of the other, and the two connections live
-side by side; steps 3 and 11.2 concern only inbound connections from one
-signer, and leave alone the connection N itself offered
+side by side; step 3 concerns only inbound connections from one signer,
+and leaves alone the connection N itself offered
 (`contracts/rendezvous.md` section 5.1, points 3 and 5).
 
 ## D. With no rendezvous service reachable
 
 - Direct connections that are open stay open; nothing they do involves the
   service. A relayed connection ends with the relay.
-- Node to node: step 1 still yields local-network and remembered addresses.
-  If one of them is reachable the connection opens exactly as above.
+- Node to node: a new connection needs a reachable rendezvous. Local-network
+  discovery and a node's remembered addresses are not built (decisions of
+  2026-11-21 and 2026-11-22; `internal/peer/README.md`, "Limitations").
+  A browser's stored `addrs` (A.1) are tried as well.
 - Browser: can connect only to the node on its own machine, from the page
   that node serves (`http://localhost:47800/`), through that node's own
   handler (`contracts/rendezvous.md` section 1, "Local delivery"). Step 1
   forwards no signalling to other nodes.
-- Two devices that are both behind NAT, on different networks, with no
-  remembered address that still works, cannot find each other until some
+- Two devices on different networks cannot find each other until some
   rendezvous is reachable. This is the stated limit of R-133; see
   `risks.md` K-2.
 
@@ -220,8 +188,8 @@ Web Lock `solodawn-device-<device id>` with `ifAvailable: true`. It holds the
 lock for its active session. If the callback receives `null`, the tab stays
 disconnected and shows "SoloDawn is open in another tab" with a "Use here"
 button. "Use here" requests the same lock with `steal: true`. When the former
-holder's `request()` promise rejects with `AbortError`, it stops reconnects
-and probes, closes its signalling and peer connections, and shows the notice.
+holder's `request()` promise rejects with `AbortError`, it stops reconnects,
+closes its signalling and peer connections, and shows the notice.
 It requests the lock again only on "Use here".
 
 Web Locks is within the browser baseline (`risks.md` Q-3): it is in Chrome
