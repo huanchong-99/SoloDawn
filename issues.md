@@ -6,6 +6,36 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · deviation · The onboarding prompt still tells the AI to check the Git identity
+
+- Symptom: the prompt that **Add a computer** gives for an AI CLI has a step "Check `git config --global user.email`; if it is empty, ask me for a name and an email and set them". `install.md` no longer has that step, and SoloDawn commits nothing and needs no Git.
+- Cause: the texts `pairing.prompt.text_rv` of `web/src/messages/pairing.en.json:15` and `pairing.zh-CN.json:15` were not changed with the model, and `web/src/lib/onboard.test.ts:242-253` and `web/e2e/connect.spec.ts:577` assert the line.
+- Status: open; found while rewriting the real-machine checklist (unit DOC-1). The fix is to delete the line from both texts and from the three tests; it is a code change, outside DOC-1.
+
+### 2026-11-27 · limitation · An AI works in its owner's own folder, with no isolation
+
+- Symptom: an AI runs at permission level 3 in the folder it was given, which is often the folder its owner uses. Uncommitted work of the owner is within its reach, and every session of the AI in the group (group, task and review) sees the same files. Before the model change a task had a worktree of its own.
+- Cause: the folder is the AI's workspace and nothing is copied (`planning/contracts/local.md` section 7; plan `MODEL-1126/plan.md` risk 1). The prompt forbids stash, reset, clean, `git add -A`, `git commit -a`, checking out over files, rebase, switching branches and a force push in the folder (`internal/host/instructions/task.md:19`); that is an instruction, not a barrier. The node reads and changes no Git state, so it cannot tell whether the owner's changes are in the way.
+- Status: open, accepted by the coordinator's decision of 2026-11-26 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)). `install.md` and the release notes tell the owner to commit or set aside their own changes before giving a folder to an AI.
+
+### 2026-11-27 · limitation · Half-finished work stays in the folder after a failure, a cancel or a reassignment
+
+- Symptom: a task that fails, is cancelled or is given to another AI leaves whatever its AI changed in the folder, and the next task in that folder starts on top of it. A task whose AI pushed to a branch of its own leaves the folder on that branch.
+- Cause: the node removes nothing when a task ends: there is no worktree to throw away (plan `MODEL-1126/plan.md` risk 2). The home frees the folder when the task row changes (`planning/contracts/task-machine.md`), not when the old AI's turn ends. The prompts ask the AI to call `submit_task` last and to end its turn (`internal/host/instructions/task.md`), and the secretary to ask an AI what state it leaves in its folder before it cancels or reassigns a task (`internal/host/instructions/secretary.md`).
+- Status: open, accepted. The owner or the secretary has to decide what to do with what is left.
+
+### 2026-11-27 · limitation · Review across computers depends on the project's own way of sharing work
+
+- Symptom: a reviewer on another computer than the assignee's can read the work only if the project shares it: with Git, a remote and a pushed branch that the report names. With no shared remote the reviewer cannot see the work and says so in the thread.
+- Cause: SoloDawn carries text only (R-111) and moves no file; the review turn says where the work is and which of three remarks applies (plan `MODEL-1126/plan.md` 1.6 and risk 4). The assignee is told to push to a branch of its own when its reviewer is on another computer, and the secretary to choose a reviewer on the assignee's computer when the project has no shared remote (`internal/host/instructions/task.md:21`, `secretary.md:22`).
+- Status: open, accepted.
+
+### 2026-11-27 · limitation · What was reviewed and what is delivered are no longer guaranteed the same
+
+- Symptom: a review names a report, and a passed review makes the task `done` at once. Nothing ties the report to a commit, nothing stops a change after the review, and a closing step such as a merge is arranged by the secretary or a person. The two checks on a task's diff that stopped a submission, the scan for secrets and the check for a change without tests, are gone: only what an AI sends to the group is scanned, and a missing test is caught by the reviewer or not at all.
+- Cause: the node runs no Git, so it has no commit to review, check or merge (plan `MODEL-1126/plan.md` 1.6, 1.8 and risks 5 and 6). `review.report` is the id of the assignee's own statement (`planning/contracts/rows.md`).
+- Status: open, accepted by the coordinator's decision of 2026-11-26. The review instructions still make a fake or missing test a veto (`internal/host/instructions/review.md`).
+
 ### 2026-11-27 · limitation · A9.12 failed once with `home_unreachable`: P1's ICE agent stood in a UDP write
 
 - Symptom: a full acceptance run on this Mac at a 1-minute load of about 2 failed A9.12 in `Given the confirmation cast with Q` with `join Q-personal: ... home_unreachable`. Repeats on `batch/model-1126` 591d32812: A9.12 alone 469 times (6 to 10 processes at a time, load 12 to 22, 49 of them under `-race`), no `home_unreachable`; the scenarios of `s2_confirm.feature` up to A9.19, 160 processes of 14 casts, 8 at a time beside 8 busy loops (load 14 to 20): one, `host.join` of Q-personal on Q1 in A9.13 answered after 15,003 ms. The other 4,462 joins of Q-personal and P-work to P1 took 6 to 664 ms, median 615.
@@ -22,7 +52,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: after unit AC-0 of MODEL-1126 `features/` compiles and its fixtures follow the new model (every AI joins with a workspace folder of its own, no bare repository, no fake `gh` or forge program, hello and welcome at version 3), but scenarios of the old model fail. The steps whose bodies the model took away fail on purpose with `rewritten by AC-<n>: <reason>` (`rewritten`, `features/helpers_test.go`); others fail because their expectations name the old model: step names `branch`, `local_check` and `merge` (`home_task`, `home_machine`, `home_review`), the roster line without the folder (`host_turn`, `host_profile`, `a10_profiles`, `a10_external`), the review checkout in the turn text (`host_turn.feature:2`), and a second task of one AI that now waits as `busy` (`m4.feature:33`, `m4.feature:48`, `m6.feature:26-39`, `s3_drivers.feature:20`).
 - Cause: plan `MODEL-1126/plan.md` section 4 gives the rewrite of these scenarios to AC-1 (M3 to M8), AC-2 (host and node) and AC-3 (home, step 2, step 3); the list by unit is `MODEL-1126/ac0-failing.md`.
-- Status: open until AC-1 to AC-3 merge.
+- Status: resolved on `batch/model-1126`: AC-1 to AC-3 rewrote the scenarios (commits `c038a82e9`, `b0fb4fbe6`, `591d32812`), and no step calls `rewritten` any more.
 
 ### 2026-11-26 · bug · A task's menu stays open after one of its items is picked
 
@@ -52,7 +82,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a task paused by hand says only that it was paused by hand, and an approval made void by a reassignment only that the task was reassigned, even when the reader did it; before 2026-11-26 the Chinese texts named the secretary. A member removed before this page was opened is shown as "Former member" on what they wrote.
 - Cause: the wait `manual` of a task row and the approval state `reassigned` carry no actor (`planning/contracts/rows.md` section 4, `planning/contracts/messages.md` 3.2; `waitFor`, `internal/home/machine.go:362`, and `tskCardRows`, `internal/home/cmd_task.go:349`), and a member's `gone` marker carries no name (`rows.md`, `gone`). The web client keeps the last row it held of each member that left (`Group.nameOf`, `web/src/lib/groups.svelte.ts:142`), and a browser cache lives in memory (`planning/flows/sync.md` G).
-- Status: open. Naming the actor needs a `by` in those rows, a contract change for the coordinator to decide.
+- Status: the first half is resolved by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the wait `manual` carries `wait.by` (`internal/home/machine.go:589`) and the approval state `reassigned` carries `by` (`tskCardRows`, `internal/home/cmd_task.go:386-396`), and the client says who paused or reassigned. The second half stays open, accepted: a member removed before the page was opened is shown as "Former member".
 
 ### 2026-11-26 · bug · A9.27 fails in its set-up and connections when six copies run at once on a Mac
 
@@ -97,13 +127,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: the new assignee's node creates its worktree from the published branch while the old assignee's node still pushes its last commits. The new AI's own push is then refused, and `push_branch` or `submit_task` fetches the branch under the clone's lock and tells it to merge `origin/<br>`, run the checks and push again (`planning/contracts/mcp-tools.md`). If the old node is off when the task moves, its unpushed commits stay on it: it pushes them when it comes back, and if the new AI has pushed by then, that push is refused, told once in the task's thread, and the commits stay on the old node's local branch.
 - Cause: the home sends the task row to one node and the `assign` item to the other at the same time, and no message says that a branch has been published (`planning/flows/task.md`, "Reassignment": two nodes do not wait for each other).
-- Status: open, accepted. Waiting would hold the task for a node that may be off for good, which is why it was reassigned.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): a task has no branch and no worktree, so nothing is published or created from a branch when it is reassigned. The new assignee's instructions tell it to find where the earlier work is before it starts (`internal/host/instructions/task.md`); what the old AI left in its own folder is the new entry "Half-finished work stays in the folder after a failure, a cancel or a reassignment".
 
 ### 2026-11-26 · limitation · A push holds the clone's lock, its hook included
 
 - Symptom: while an AI's `push_branch` or `submit_task` pushes, every other Git command of the group's clone waits: the fetch before a dormant group session's turn, a new task or review worktree, a local merge, a branch deletion. A project `pre-push` hook that runs the tests makes that minutes, up to the push's 60-minute limit.
 - Cause: a push moves `refs/remotes/origin/<br>` of the clone, which a concurrent fetch also locks ("cannot lock ref"), so it runs under the clone's lock (`PushBranch`, `internal/host/forge.go`; `planning/contracts/local.md` section 7). A push to `origin`'s push URL instead of its name was tried: it left the ref alone with Git 2.54.0 but updated it with Git 2.56.1 on CI.
-- Status: open, accepted by the coordinator.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the node makes no clone and runs no Git push; an AI that pushes does it in its own folder by the project's rules.
 
 ### 2026-11-26 · limitation · A node that missed its owner's removal and shares no other group with that home keeps the group
 
@@ -139,7 +169,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a lost home that returns after its group was restored elsewhere lists the group too. The browser shows one copy, that of the home it reached first, so a reload can show the other; when the copy shown is deleted, the other appears at its home's next list.
 - Cause: nothing in `welcome.groups` says which copy is the newer (`planning/contracts/step-2/export.md` section 4 speaks of a lost home); `Home.#list` (`web/src/lib/groups.svelte.ts`) leaves a group to the home within reach that listed it first.
-- Status: open, accepted: version 1 has no command or button that deletes a group, so a returned old home's copy stays; the owner treats it as a used scratch group (`docs/cookbook/i11-real-machine-checklist.md` step 10).
+- Status: open, accepted: version 1 has no command or button that deletes a group, so a returned old home's copy stays; the owner treats it as a used scratch group (`docs/cookbook/i11-real-machine-checklist.md` step 20).
 
 ### 2026-11-26 · bug · The fixtures of the confirmation scenarios did not match the contracts
 
@@ -244,7 +274,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a checks template can report an older request head, and a successful merge can name a later merge on the base branch.
 - Cause: `internal/host/forge_tmpl.go:124-147` supplies the submitted `{commit}` but cannot verify its use by the forge program. After merging it fetches `origin` and reads the base tip, as specified in `checks-forge.md` section 3.
-- Status: accepted contract limitations for T2-8. Real non-GitHub forge behavior and native Windows process execution remain unverified; A9.26 has not run without a signed-in scratch forge configuration.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): forge templates, hosted checks and the merge are removed.
 
 ### 2026-11-22 · limitation · Group moves follow replies, not unsolicited pushes
 
@@ -269,7 +299,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `contracts/step-3/drivers.md` section 3 requires the repository's configuration to be kept out of group sessions. `qwenDriver` cannot do that: a Qwen Code group session may load the project's `.qwen/settings.json`, `QWEN.md` and extensions (`internal/host/qwen.go`).
 - Cause: Qwen Code 0.28.0 documents no switch for all of it. Folder trust is not one: in an untrusted folder Qwen Code asks before every tool, even at `yolo`, which would turn level 3 into approval cards.
 - Read again 2026-11-26 (`docs/users/features/hooks.md` and `headless.md` at tag v0.28.0, not run): hooks do have a switch, `disableAllHooks` in the system settings file that the driver already writes (it also ends the person's own hooks; `QWEN.md` and MCP servers stay). `--safe-mode` drops the rest too, but with it the solodawn MCP server. And a project's hooks run only after a person approved them in an interactive session; non-interactive runs leave unapproved ones out, and an approval mode from settings does not change that. So the first half of A3.8 may hold already, and its second half ("runs in task and review sessions") likely fails in a fresh worktree.
-- Status: accepted by the coordinator (2026-11-22): Qwen Code ships with this limitation, the risk R-45 already accepts (only trusted repositories go into a group; `install.md`). Open until a capture shows a switch that keeps the configuration out and leaves approvals alone. The scenario of A10.4 for Qwen Code stays `@pending`: it needs the real program, an owner key, and a decision on the second half of A3.8 (`docs/cookbook/i11-real-machine-checklist.md` section 7).
+- Status: accepted by the coordinator (2026-11-22): Qwen Code ships with this limitation, the risk R-45 already accepts (only trusted repositories go into a group; `install.md`). Open until a capture shows a switch that keeps the configuration out and leaves approvals alone. The scenario of A10.4 for Qwen Code stays `@pending`: it needs the real program, an owner key, and a decision on the second half of A3.8 (`docs/cookbook/i11-real-machine-checklist.md` step 17).
 
 ### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
 
@@ -413,7 +443,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: the original live fixture checked two remote filenames without reusing M5's forge steps or inspecting request heads.
 - Cause: A9.26 used the subprocess fixture instead of M5's two-task forge flow.
-- Status: open until one run against a real forge, which needs the owner's account there (`docs/cookbook/i11-real-machine-checklist.md` section 7). The scenario reuses the applicable M5 steps with live custom templates and independently inspects both request IDs and reviewed heads. The documented run started nothing, since `TestFeatures` leaves out `@live`; `TestS2LiveForgeFeature` now runs it when `SOLODAWN_S2_LIVE_FORGE` is set, and the `@pending` tag is gone. A dry run with scripts over a bare repository as the forge passed (2026-11-26), and failed at the inspection step with a wrong merged head.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the forge and A9.26 are removed, and the real-machine checklist has no forge step.
 
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
@@ -484,25 +514,25 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a scripted CLI that calls `submit_task` immediately after `run_checks` returns can read a stale `task` row in `Host.Rows` and fail with `conflict` (`local checks have not passed`), whereas with a real model the gap between the two tool calls is seconds.
 - Cause: the home answers `task checked` before pushing the `rows` frame that carries the updated `checks.local` (`internal/home/README.md`), and `tskPrepareSubmit` (`internal/host/tools_task.go:318`) reads `checks.local` from `Host.Rows`.
-- Status: open, accepted by the coordinator's decision of 2026-11-21 (#206).
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): `run_checks` and `checks.local` are removed; `submit_task` is the submission and reads no check result.
 
 ### 2026-11-21 · deviation · Host derives the data folder from SQLite's `pragma_database_list`
 
 - Symptom: for an in-memory store (`:memory:`), `projectDir` returns `""` and delivery skips disk clone and worktree creation; for a disk store it derives `projects/<group>` from the directory of the `main` database file (`filepath.Join(filepath.Dir(dbFile), "projects", group)`), tying the host to the store's file layout.
 - Cause: `host.Host` (`internal/host/host.go:75`) has no `Dir` field yet, so `projectDir` (`internal/host/run.go`, shared by `sessionDir`, `deliver.go` and `join.go`) reads `file` from `pragma_database_list WHERE name = 'main'`.
-- Status: open (`gemini/host-dedupe` unified the three `pragma_database_list` lookups in `deliver.go`, `run.go` and `join.go` into `projectDir`). `node` setting a `Dir` field on `Host` can replace the `pragma_database_list` lookup.
+- Status: open for the one place left, `dataDir` in `internal/host/tools_workspaces.go`, which leaves the node's own data folder out of the folder list. The delivery, clone and worktree uses are ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)). `node` setting a `Dir` field on `Host` can replace the `pragma_database_list` lookup.
 
 ### 2026-11-22 · limitation · Step 17 cleanup leaves narrow turn-start windows and retries dirty merged worktrees
 
 - Symptom: a `notice` or `mention` arriving during step 17 cleanup can start one more turn in an obsolete session (whose CLI then stays open until `idle_minutes` expires), and a merged task worktree left with untracked files fails the non-forced `git worktree remove` and retries one Git call on each later `rows` push.
 - Cause: `finishSessionClose` (`internal/host/run.go`) starts `go Deliver` before the caller's `Sessions.End` (`internal/host/deliver.go`), `Runner.Close` finds no `liveProc` while `startFromDormant` is between `Move(Dormant, Working)` and `rt.procs[key] = lp`, and `RemoveTaskWorkspace(..., TaskMerged)` omits `--force` so unsaved files in a merged worktree are preserved (`planning/contracts/local.md` section 7).
-- Status: open, accepted on 2026-11-22 (`HS-23` review).
+- Status: open, accepted on 2026-11-22 (`HS-23` review), for the turn-start windows only. The retry of a dirty merged worktree is ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): a task has no worktree to remove.
 
 ### 2026-11-21 · limitation · `reportWorkspaceFailure` duplicates `member status` assembly from the session runtime
 
 - Symptom: on a task or review workspace Git failure, `reportWorkspaceFailure` (`internal/host/deliver.go:934`) builds `member status` (`turn_interrupted`) by hand and infers `state` (`waiting` when any session of the AI is `waiting`, else `dormant`) instead of sharing the session runtime's status builder.
 - Cause: HS-13 (#186) and HS-15 (#187) were built on separate branches without a shared status helper on `host.Runtime`.
-- Status: open, until N-4 consolidates `member status` assembly into one helper.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): `reportWorkspaceFailure` is removed with the task and review workspaces.
 
 ### 2026-11-21 · limitation · `max_open` is enforced in the session runtime rather than in delivery
 
@@ -631,7 +661,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `task cloud` with `ok: true` writes a `checks` message (`stage: "cloud"`, `ok: true`) in the task's thread, where `planning/contracts/task-machine.md` row 6 and `planning/flows/trace-task.md` step 8 mention a `checks` message only when hosted checks do not pass.
 - Cause: `planning/contracts/commands.md` 1.5 and `planning/contracts/messages.md` 2.8 state that the home writes a `checks` message from `task checked` (`local`) and `task cloud` (`cloud`), and `internal/proto/testdata/task-cloud.json` carries `items` when `ok` is `true`, which `TaskRow.Checks.Cloud` does not store (`revCloud` in `internal/home/cmd_review.go:39`).
-- Status: open, decided in unit HM-11 on 2026-11-21.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): hosted checks, `task cloud` and the `checks` message are removed.
 
 ### 2026-11-20 · limitation · `tools.json` freezes JSON Schema keywords that the MCP SDK may write otherwise
 
@@ -655,19 +685,19 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: on Windows a check's `cmd.exe` joins its job object only after it has started, so a process it starts in that moment is outside the job and survives the check.
 - Cause: Go starts the process before `killCheckTree` assigns it (`internal/host/checks_tree_windows.go`, `newCheckJob`).
-- Status: open. The fix is to start the shell with `CREATE_SUSPENDED`, assign it to the job, then resume it.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the node runs no check commands, and `checks_tree_windows.go` is removed.
 
 ### 2026-11-20 · limitation · A key in a UTF-16 file passes the secrets check
 
 - Symptom: a UTF-16LE file holding a private key or a token passes the secrets hard check: with `--text`, Git shows its bytes, and every second byte is NUL, so no pattern matches.
 - Cause: the patterns of `local.md` §8 match ASCII text (`internal/host/secret.go`); `checkAddedLines` reads the diff as it comes.
-- Status: open.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the hard check on a task's diff is removed. The scan of what an AI sends to the group stays (`internal/host/secret.go`); the loss of the diff scan is in the entry "What was reviewed and what is delivered are no longer guaranteed the same".
 
 ### 2026-11-20 · limitation · Files hidden by ignore rules can change what a check runs
 
 - Symptom: a file ignored through `.git/info/exclude` or `core.excludesFile`, not through the project's `.gitignore`, is shown by neither `git status` nor `git ls-files`; it can change what a project check does, so a passing check may not describe the commit alone (L5).
 - Cause: `run_checks` runs in the task's worktree (`internal/host/checks.go`, `cleanCheckHead`), where such files can exist.
-- Status: open. Step 2 closes it by running the checks on a clean export of the commit.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the node runs no check commands; the AI tests the way the project does.
 
 ### 2026-11-20 · bug · Two nodes starting together could each remove the other's socket
 

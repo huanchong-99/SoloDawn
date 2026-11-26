@@ -334,3 +334,7 @@ behaviour; a number is not used again.
   rc.1 that connects to it is answered `version`, and a node or browser of
   this version that reaches a home of rc.1 stops at `version` instead of
   retrying with an older one.
+  The migration half (what stays and what is forgotten) is proved by
+  `internal/store/forget_test.go`, which seeds a database shaped as rc.1 left
+  it and runs the real migration; the migration opens no file but the
+  database, which is why `projects/` is left as it was.

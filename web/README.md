@@ -204,8 +204,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   external AI area uses it to open setup when the new member row reaches the browser.
   Removing an external AI takes an inline confirmation, which Escape cancels.
 
-  An entry is `{ order, component }`: the lower `order` comes first, then the area's name; one
-  with `project: true` is not drawn in a team group. A
+  An entry is `{ order, component }`: the lower `order` comes first, then the area's name. A
   component with nothing to show draws nothing; an empty banner takes no room. While any area
   mounts at `chat.side`, the chat has a side column from 1024 px and, below it, a button "People
   and details" in its head that opens the panel over the chat: focus moves to the panel's close
@@ -284,7 +283,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   have this type, and so has every id in a command payload and in an inbox item, the `task` in the
   body of a review post included; rows and the other message bodies still hold ids as strings
   (`issues.md`).
-  `Slug` is a task's slug, the type of `slug` in a task row. The payload of each command has its
+  The payload of each command has its
   schema (`GroupCreate`, `Post`, `Act`, `TaskStart`); a schema names the `op`, `kind` or `code`
   that selects it. `Ctl` is the interface of a `ctl` connection: numbered requests, their
   answers, and pushes.
@@ -513,10 +512,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
     decides.
   - The create-group dialog holds the computer chosen as the home, not its place in the list, and
     sends nothing when that computer is no longer among those that can be reached. A computer
-    that appears while there was none to choose from is chosen. A team group asks only for the two
-    names and the home.
+    that appears while there was none to choose from is chosen. The dialog also lists the people who are
+    already in one of the person's groups on that computer and the person's connected AIs, each with a
+    tick, and the folder each ticked AI works in (`FolderPicker.svelte`). It creates the group first,
+    then adds each person and each AI, and says beside any of them that was refused.
   - The shell keeps the person's computers told the homes they need (`tell` in
-    `src/lib/nodes.svelte.ts`): those of team groups and of groups on another person's computer.
+    `src/lib/nodes.svelte.ts`): those of groups on another person's computer.
     What a computer's `host.info.homes` lacks is sent with `home.add`, once per connection,
     whatever it answers.
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
@@ -554,8 +555,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     approver. The panel's "Add AI" button requires a reachable group home, a group member, and at
     least one connected owned computer, and shows its reason when disabled. The add-AI dialog reads
     `host.info` from the owner's connected computers, suggests an unused member name in the group,
-    offers the secretary switch when the group has none or the reader is an admin, signs `host.join`
-    for the chosen computer, and words `home_unreachable`, `conflict` and a lost computer directly
+    offers the secretary switch when the group has none or the reader is an admin, asks for the folder
+    the AI works in (`FolderPicker.svelte`: the folders its CLI has used there, or one typed), signs
+    `host.join` for the chosen computer, and words `home_unreachable`, `conflict` and a lost computer directly
     before falling back to `Failure`.
   - AI profiles (`src/components/profile/`) show a tier badge and skills on every AI card.
     Only the AI's owner can open the inline tier/skills editor or accept a differing model-tier
@@ -598,8 +600,6 @@ file in `src/routes/`. It edits neither the shell nor another area:
   colour is drawn in `--term-dim`, 5.6 to 1 on `--term-bg`, where xterm's own half opacity gives
   4.1 to 1 (`../issues.md` for faint text in a colour). The key row scrolls; the details column
   scrolls and takes keyboard focus for that.
-  `HandbackMeta.svelte` mounts for message kind `handback` to render changed files, commits and
-  diff counts.
 - **Connection indicator and computers page.** `indicator(net, group)` in `src/lib/nodes.svelte.ts`
   gives the pill mounted at `bar` (and at `chat.head` below 768 px, where an open chat hides the
   top bar) its state, linking to `#/nodes` with an accessible `Connection status: …`
@@ -615,7 +615,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `PairBrowserDialog` (`pair.browser`).
 - **Emergency stop (R-64).** `src/components/stop/` and `src/lib/stop.ts`. "Stop AIs" is in the top
   bar (`bar`, `order: 20`) and, below 768 px, in a chat's head (`chat.head`). It shows while there
-  is something to stop: for an admin, the open project group while it is not paused; for an owner,
+  is something to stop: for an admin, the open group while it is not paused; for an owner,
   a computer whose AIs are not offline. Its panel (a `popover`) is the confirmation: each action
   says what it does and is sent at once. `setPaused` sends `group pause` and `group resume` to the
   home; `nodes.setOffline` sends `host.offline` and `host.online` to a computer of the person and
@@ -625,7 +625,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   not on the computers page), on its card, which also takes them offline with a confirmation in
   place, and on the owner's AI cards. The node pushes no `host.info` (`../issues.md`): when the
   groups show an owned computer's AIs going offline or coming back, it is read again, so another
-  browser of the owner follows. A team group has no AIs and is not paused from here.
+  browser of the owner follows.
 - **Waiting for a busy AI (R-72).** `src/components/queue/Waits.svelte` and `src/lib/queue.ts`. Under a
   message of the reader's own in the main line or a thread: that an AI busy with a task has not taken it, and
   "Go first, pausing T-12", which sends `jump`. No row names what a home has queued, so it is worked
@@ -738,7 +738,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/notify.svelte.ts`    | live in-page notification store, classification, dismissal and jump               |
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
-| `src/lib/task.ts`             | task card derivations: badge, six-step bar, review and thread                     |
+| `src/lib/task.ts`             | task card derivations: badge, three-step bar, review and thread                   |
 | `src/lib/taskops.ts`          | what a person may do to a task, why it stands still, replies in its thread        |
 | `src/lib/call.ts`             | AI-to-AI call derivations: elapsed time, route, question and inline reply         |
 | `src/lib/terminal.svelte.ts`  | terminal takeover: commands, `pty` channel, `Takeover`, what the page shows       |
@@ -753,7 +753,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/groups/`      | the group list, the cards that wait, the create-group dialog                      |
 | `src/components/chat/`        | the chat of a group: main line, message, composer                                 |
 | `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`, with its menu and actions             |
-| `src/components/thread/`      | a task's thread and its composer, scored review block, checks and system notices  |
+| `src/components/thread/`      | a task's thread and its composer, scored review block and system notices          |
 | `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line          |
 | `src/components/confirm/`     | `ConfirmCard.svelte`, mounted for kind `confirm`                                  |
 | `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
@@ -762,14 +762,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/model/`       | model/level fields, owner editor and catalog refresh                              |
 | `src/components/people/`      | invitation dialog, role/removal actions and join form                             |
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
-| `src/components/groupinfo/`   | home, commands, settings (order 19) and project memory (order 20) at `chat.side`  |
-| `src/components/forge/`       | forge choice, argument-by-argument template editor and group command disclosure   |
+| `src/components/groupinfo/`   | home, settings (order 19) and project memory (order 20) at `chat.side`            |
 | `src/components/preset/`      | style preset editor (`chat.side`, `order: 21`) and brief preset reader            |
 | `src/components/kb/`          | knowledge-base list, search and admin deletion (`chat.side`, `order: 22`)         |
 | `src/components/move/`        | owner's local export/import guidance (`chat.side`, `order: 30`)                   |
-| `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
+| `src/components/terminal/`    | terminal session sidebar                                                          |
 | `src/components/watch/`       | receive-only watch channel, standalone request action and watcher stop controls   |
-| `src/components/team/`        | attributed bulletin card; team people use the shared member panel                 |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/stop/`        | "Stop AIs" and its panel, the paused notice, the offline banner and card strip    |
 | `src/components/queue/`       | `Waits.svelte`: a message waits for a busy AI, and can go first                   |
@@ -858,13 +856,9 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   unless the watch is open. The owner's terminal
   shows the watchers, and over the terminal each pending request as the `ConfirmCard` of the chat:
   it takes no focus when it comes and gives it to the terminal when it goes.
-- Custom forges are chosen at group creation. Group settings can edit their four argument-list
-  templates, not change the forge. Each field is one argument; whitespace and empty arguments
-  are preserved, without shell parsing. The home validates template restrictions.
 - Neither group settings nor the add-AI dialog offers an external AI as secretary.
-- The add-AI dialog discloses project commands and warns when a personal-subscription secretary
-  would serve another person. The invitation dialog warns before inviting the first other person.
-  Command chips show arguments as passed; an empty argument is shown as `""`.
+- The add-AI dialog warns when a personal-subscription secretary would serve another person. The
+  invitation dialog warns before inviting the first other person.
 - A shared secretary should use a team plan or an API key, with an explicit allow-list. On a
   personal subscription every request from someone other than its owner waits for that owner's
   confirmation, every time; this cannot be switched off.
