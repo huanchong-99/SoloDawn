@@ -15,7 +15,9 @@ the start. `moveToRelay` (`s2_watch_peer_test.go`) delays its direct
 packets by 3 seconds, waits until ICE has measured that, and cuts direct
 UDP; ICE renominates the relayed pair on the same PeerConnection. The
 delay is needed: pion rates a pair by its last round trip even when it no
-longer answers. The browser and a real network are in the
+longer answers. The packets to the TURN server take 5 ms, as pion rates a
+round trip of 0 as none measured, and on Windows a relay round trip on
+127.0.0.1 reads 0. The browser and a real network are in the
 [real-machine checklist](../docs/cookbook/i11-real-machine-checklist.md),
 section 6.
 

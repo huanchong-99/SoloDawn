@@ -99,8 +99,11 @@ func (p *s2TerminalPeer) peerConnection(withTURN bool) (*webrtc.PeerConnection, 
 }
 
 // moveToRelay makes ICE renominate. Pion rates a pair that answers no more by its last round trip, and a fast dead direct pair
-// above a relayed one, so the direct path first becomes slow and is then cut.
+// above a relayed one, so the direct path first becomes slow and is then cut. Pion also rates a round trip of 0 as none
+// measured, below the slow direct pair; the relay's round trip on 127.0.0.1 reads 0 on Windows, whose clock moves in steps
+// of about 0.5 ms, so the relay is given 5 ms.
 func (p *s2TerminalPeer) moveToRelay() error {
+	p.net.relayNs.Store(int64(5 * time.Millisecond))
 	p.net.delayNs.Store(int64(3 * time.Second))
 	if err := waitUntilCtx(p.ctx, 40*time.Millisecond, "the direct round trip to be measured as slow", p.directIsSlow); err != nil {
 		return err

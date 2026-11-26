@@ -57,12 +57,13 @@ type m7NetControl struct {
 	turnAddr  string
 	cut       atomic.Bool
 	relayOnly atomic.Bool
-	delayNs   atomic.Int64
+	delayNs   atomic.Int64 // for direct packets
+	relayNs   atomic.Int64 // for packets to the TURN server
 }
 
 func (c *m7NetControl) delayFor(addr net.Addr) time.Duration {
 	if addr.String() == c.turnAddr {
-		return 0
+		return time.Duration(c.relayNs.Load())
 	}
 	return time.Duration(c.delayNs.Load())
 }
