@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { confirmSentence } from './confirm';
+import { confirmSentence, confirmStatus, isWatch } from './confirm';
 import { Group, Home } from './groups.svelte';
 import { goldens } from './mock';
 import { prefs } from './prefs.svelte';
@@ -95,5 +95,42 @@ describe('the sentence of a confirm card', () => {
       row('row-msg-text', { id: 'request', by: 'sam' }),
     );
     expect(confirmSentence(group, card('direct'))).toBe("Let $& act on the request from $& $'.");
+  });
+});
+
+describe('what a confirm card says of its state', () => {
+  const at = new Date(2026, 10, 26, 9, 58).getTime();
+  const acted = { by: 'pat', at, act: { p: '', k: '', s: '' } };
+  const group = groupWith(row('row-member-human', { id: 'sam', user: 'sam-user', name: 'Sam' }));
+
+  beforeEach(() => {
+    prefs.lang = 'en';
+  });
+
+  it('names whom a pending card waits for, in order, and a person who has left', () => {
+    const waiting = (to: string[]) =>
+      confirmStatus(group, card('direct', { body: { what: 'direct', ai: 'codex', to } }));
+    expect(waiting(['pat-user'])).toBe('Waiting for Pat');
+    expect(waiting(['sam-user', 'pat-user', 'gone'])).toBe('Waiting for Sam, Pat, Former member');
+    prefs.lang = 'zh-CN';
+    expect(waiting(['sam-user', 'pat-user', 'gone'])).toBe('等待 Sam、Pat、已离开的成员');
+  });
+
+  it('says who decided and when, and that a card expired', () => {
+    const status = (state: object) => confirmStatus(group, card('direct', { state }));
+    expect(status({ status: 'confirmed', ...acted })).toBe('Confirmed by Pat · 09:58');
+    expect(status({ status: 'denied', ...acted, by: 'gone' })).toBe(
+      'Denied by Former member · 09:58',
+    );
+    expect(status({ status: 'expired', at })).toBe('Expired · 09:58');
+    prefs.lang = 'zh-CN';
+    expect(status({ status: 'confirmed', ...acted })).toBe('Pat 已确认 · 09:58');
+    expect(status({ status: 'expired', at })).toBe('已过期 · 09:58');
+  });
+
+  it('takes only a confirm card with a watch request for a request to watch', () => {
+    expect(isWatch(card('watch'))).toBe(true);
+    expect(isWatch(card('direct'))).toBe(false);
+    expect(isWatch(card('watch', { kind: 'text' }))).toBe(false);
   });
 });

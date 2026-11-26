@@ -102,12 +102,12 @@ const takenOver = (group: Group, id: string): boolean => {
   return ai?.kind === 'ai' && ai.state === 'takeover';
 };
 
-/** True for a request to watch the takeover whose terminal page is open on screen. That page shows
- *  the card: to leave it for the chat would end the takeover. */
+/** True for a request to watch the takeover whose terminal page is open on screen: only the terminal
+ *  page has a member in its address. That page shows the card: to leave it for the chat would end
+ *  the takeover. */
 export const onOpenTerminal = (group: Group, msg: MsgRow): msg is Confirm =>
   isWatch(msg) &&
   takenOver(group, msg.body.ai) &&
-  route.page === 'terminal' &&
   route.params.g === group.g &&
   route.params.member === msg.body.ai;
 

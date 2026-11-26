@@ -681,6 +681,11 @@ describe('Notifier', () => {
     const to = [ownerUser];
     pushLive(group, [ask('watch-1', 6, { what: 'watch', ai: codexId, to })]);
     expect(shown()).toEqual(['watch-1']);
+    // The terminal page of another AI, or of the same AI in another group, is not its page.
+    setRoute(`#/terminal/${website}/${secretaryId}`);
+    expect(shown()).toEqual(['watch-1']);
+    setRoute(`#/terminal/another-group/${codexId}`);
+    expect(shown()).toEqual(['watch-1']);
     setRoute(`#/terminal/${website}/${codexId}`);
     expect(shown()).toEqual([]);
     pushLive(group, [

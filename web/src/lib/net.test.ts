@@ -618,6 +618,30 @@ it('shares a temporary watch-host connection and closes it only after the last w
   expect(net.watchHost).toBeUndefined();
 });
 
+it('dials a computer that is paired after a watch of it has ended', async () => {
+  const browser = await loadDevice({ crypto, idb: () => idb });
+  const own = await newDevice();
+  const foreign = await newDevice();
+  const log = new DeviceLog(crypto, browser.id);
+  await log.apply(
+    await signDeviceEntry(browser, browser.id, 1, 'add', browser.id, 'browser', 'Web'),
+  );
+  await log.apply(await signDeviceEntry(browser, browser.id, 2, 'add', own.id, 'node', 'Computer'));
+  await saveOwner(() => idb, log, {});
+  const { net } = startTracked('live');
+  await vi.waitFor(() => expect(net.watchHost).toBeTypeOf('function'));
+  clients[0].ready();
+  const ownPC = await answerNode(clients[0], own, browser.id, 0);
+  ownPC.ctl.deliver(welcomeFrame(1, own.id, 'Computer'));
+  await vi.waitFor(() => expect(net.homes[0].ctl).toBeDefined());
+  const end = net.watchHost!(foreign.id);
+  await vi.waitFor(() => expect(clients[0].offersFor(foreign.id)).toHaveLength(1));
+  end();
+  const entry = await signDeviceEntry(browser, browser.id, 3, 'add', foreign.id, 'node', 'AI host');
+  ownPC.ctl.deliver({ t: 'devlog', user: browser.id, entries: [entry] });
+  await vi.waitFor(() => expect(clients[0].offersFor(foreign.id)).toHaveLength(2));
+});
+
 it('reuses and keeps the group home when a watch ends on an already joined node', async () => {
   const browser = await loadDevice({ crypto, idb: () => idb });
   const own = await newDevice();
