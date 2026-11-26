@@ -41,7 +41,7 @@
     <li><b>{rounds}</b><span>{t('summary.rounds')}</span></li>
     <li><b>{duration}</b><span>{t('summary.time')}</span></li>
     <li>
-      <b class="mono">+{msg.body.added} −{msg.body.removed}</b>
+      <b><span class="add">+{msg.body.added}</span> <span class="del">−{msg.body.removed}</span></b>
       <span>
         {msg.body.pr !== undefined
           ? t('summary.pr').replace('{n}', String(msg.body.pr))
@@ -56,18 +56,40 @@
     display: inline-grid;
     color: var(--ok);
   }
+  .done-icon :global(.i) {
+    width: 16px;
+    height: 16px;
+  }
+  /* The figures in a row: a large number over its small label. What was added is green and what
+     was removed red: the two results in this card. */
   .stats {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--sp-2) var(--sp-6);
+    gap: var(--sp-3) var(--sp-8);
     font-size: var(--fs-xs);
     color: var(--text-3);
   }
   .stats b {
     display: block;
     color: var(--text);
-    font-size: var(--fs-lg);
+    font-family: var(--font-sans);
+    font-size: var(--fs-2xl);
     font-weight: 600;
-    line-height: 1.3;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+  }
+  .add {
+    color: var(--ok);
+  }
+  .del {
+    color: var(--danger);
+  }
+  @media (max-width: 640px) {
+    .stats {
+      gap: var(--sp-3) var(--sp-5);
+    }
+    .stats b {
+      font-size: var(--fs-xl);
+    }
   }
 </style>

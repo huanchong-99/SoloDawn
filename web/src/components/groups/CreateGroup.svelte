@@ -211,19 +211,23 @@
 <style>
   /* Held by its top: the choice of kind stays under the pointer while the fields below change. */
   dialog {
-    --top: clamp(16px, 8dvh - 40px, 56px);
-    margin-top: var(--top);
-    max-height: calc(100dvh - 2 * var(--top));
     overflow: auto;
+  }
+  @media (min-width: 768px) {
+    dialog {
+      --top: clamp(16px, 8dvh - 40px, 56px);
+      margin-top: var(--top);
+      max-height: calc(100dvh - 2 * var(--top));
+    }
   }
   .part {
     display: grid;
     gap: var(--sp-4);
   }
   .lead {
-    margin-top: 6px;
+    margin-top: 4px;
     color: var(--text-2);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-ui);
   }
   .two,
   .kinds {
@@ -256,7 +260,7 @@
   }
   .arrives {
     animation:
-      rise var(--dur-3) var(--ease-out),
+      rise var(--dur-2) var(--ease-out),
       appear var(--dur-2) var(--ease-out);
   }
 </style>

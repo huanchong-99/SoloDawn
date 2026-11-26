@@ -30,9 +30,15 @@
     display: flex;
     align-items: center;
     gap: var(--sp-3);
-    padding: 8px var(--sp-4);
-    background: var(--dawn-soft);
-    border-bottom: 1px solid color-mix(in srgb, var(--dawn) 35%, var(--line));
+    min-height: 44px;
+    padding: 6px var(--sp-4) 6px var(--sp-5);
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
     font-size: var(--fs-sm);
+  }
+  .tab-ban :global(.i) {
+    width: 16px;
+    height: 16px;
+    color: var(--dawn-text);
   }
 </style>

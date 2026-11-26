@@ -105,9 +105,9 @@
     overflow: auto;
   }
   .lead {
-    margin-top: 6px;
+    margin-top: 4px;
     color: var(--text-2);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-ui);
   }
   .pair-box {
     display: grid;
@@ -115,7 +115,6 @@
   }
   .cmd {
     padding: 10px 12px;
-    border: 1px solid var(--line);
     border-radius: var(--r-md);
     background: var(--surface-2);
     font-size: var(--fs-sm);

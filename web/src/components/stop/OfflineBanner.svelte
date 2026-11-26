@@ -58,14 +58,19 @@
     align-items: center;
     flex-wrap: wrap;
     gap: var(--sp-2) var(--sp-3);
-    padding: 8px var(--sp-4);
-    border-bottom: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
-    background: var(--danger-soft);
+    min-height: 44px;
+    padding: 6px var(--sp-4) 6px var(--sp-5);
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
     font-size: var(--fs-sm);
   }
   .glyph {
     display: grid;
-    color: var(--danger);
+    color: var(--text-3);
+  }
+  .glyph :global(.i) {
+    width: 16px;
+    height: 16px;
   }
   .grow {
     flex-basis: 180px;

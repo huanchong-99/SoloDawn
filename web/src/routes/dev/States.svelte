@@ -120,9 +120,13 @@
   .kind h3 {
     font-size: var(--fs-lg);
   }
+  .points h3 {
+    font-size: var(--fs-md);
+  }
   figure {
     padding: var(--sp-3) var(--sp-4) var(--sp-4);
-    border: 1px dashed var(--line);
     border-radius: var(--r-lg);
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--line);
   }
 </style>

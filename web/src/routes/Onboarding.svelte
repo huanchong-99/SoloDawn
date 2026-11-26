@@ -185,85 +185,98 @@
 <style>
   .kind {
     font-weight: 600;
-    font-size: var(--fs-sm);
+    font-size: var(--fs-ui);
     color: var(--text);
   }
+  /* The prompt: a card with its title and the copy button, the text in mono on the second
+     surface, and a line that says how long it holds. */
   .prompt {
     padding: 0;
     gap: 0;
     overflow: hidden;
   }
   .prompt > header {
-    padding: 10px 10px 10px var(--sp-4);
-    border-bottom: 1px solid var(--line);
+    padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
   }
   .prompt pre {
-    padding: var(--sp-4);
+    margin: 0 var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-size: 13.5px;
+    font-size: var(--fs-sm);
     line-height: 1.7;
   }
   .prompt pre:focus-visible {
-    outline-offset: -2px;
+    outline-offset: 2px;
   }
   .prompt footer {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 10px var(--sp-4);
-    border-top: 1px solid var(--line);
-    background: var(--surface-2);
+    padding: 10px var(--sp-4) var(--sp-3);
   }
   .browser-card p {
-    font-size: var(--fs-sm);
+    font-size: var(--fs-ui);
   }
   .howto {
     counter-reset: n;
     display: flex;
     flex-direction: column;
     gap: var(--sp-4);
+    padding-inline: var(--sp-1);
   }
   .howto li {
     counter-increment: n;
     display: grid;
-    grid-template-columns: 28px minmax(0, 1fr);
+    grid-template-columns: 24px minmax(0, 1fr);
     gap: var(--sp-3);
   }
   .howto li::before {
     content: counter(n);
     display: grid;
     place-items: center;
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
-    border: 1px solid var(--line-strong);
-    font: 500 13px var(--font-mono);
+    background: var(--surface-3);
+    font-size: var(--fs-xs);
+    font-weight: 500;
     color: var(--text-2);
   }
   .howto b {
     display: block;
+    font-size: var(--fs-ui);
+    font-weight: 500;
   }
   .howto span {
     color: var(--text-2);
     font-size: var(--fs-sm);
   }
+  /* What the person can count on: three columns, each under a small glyph. */
   .trust {
     grid-column: 1 / -1;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--sp-5);
+    gap: var(--sp-6);
     padding-top: var(--sp-6);
     border-top: 1px solid var(--line);
     font-size: var(--fs-sm);
+    line-height: 1.5;
     color: var(--text-2);
   }
   .trust b {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-2);
     color: var(--text);
-    margin-bottom: 2px;
+    font-size: var(--fs-ui);
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+  .trust b :global(.i) {
+    color: var(--text-3);
   }
   @media (max-width: 860px) {
     .trust {

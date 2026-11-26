@@ -152,41 +152,42 @@
 {/if}
 
 <style>
+  /* The one framed part of the top bar: small, outlined in red, with its pause glyph. */
+  .estop {
+    background: none;
+    box-shadow: none;
+  }
+  /* The panel opens from the button, at the top right. */
   .panel {
     position: fixed;
     inset: auto var(--sp-4) auto auto;
-    width: min(400px, calc(100vw - 2 * var(--sp-3)));
+    width: min(360px, calc(100vw - 2 * var(--sp-3)));
     margin: 0;
     padding: var(--sp-4);
     border: 0;
     border-radius: var(--r-lg);
-    background: var(--surface);
+    background: var(--raised);
     color: var(--text);
     box-shadow: var(--shadow-pop);
     outline: none;
+    transform-origin: top right;
   }
   .panel:popover-open {
     display: grid;
     gap: var(--sp-3);
-    animation:
-      drop var(--dur-4) var(--spring),
-      appear var(--dur-2) var(--ease-out);
+    animation: popin 160ms var(--ease-out);
   }
   section {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: var(--sp-4);
+    justify-items: start;
+    gap: 10px;
   }
   section + section {
     padding-top: var(--sp-3);
     border-top: 1px solid var(--line);
   }
-  section .btn {
-    min-width: 112px;
-  }
   h3 {
-    font-size: var(--fs-md);
+    font-size: var(--fs-ui);
   }
   p {
     margin-top: 2px;

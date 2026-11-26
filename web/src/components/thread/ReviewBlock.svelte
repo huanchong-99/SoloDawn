@@ -37,25 +37,26 @@
 </div>
 
 <style>
+  /* A scored review: an inset block with the score, a result, in its tone. */
   .review {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     gap: var(--sp-3);
-    padding: 8px 10px;
+    padding: 10px var(--sp-3);
     border-radius: var(--r-md);
-    background: var(--tone-soft);
+    background: var(--surface-2);
     font-size: var(--fs-sm);
   }
   .score {
     text-align: center;
-    line-height: 1.2;
+    line-height: 1.3;
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
   }
   .score b {
     display: block;
     color: var(--tone-text);
-    font: 600 var(--fs-xl) / 1.1 var(--font-mono);
+    font: 600 var(--fs-xl) / 1.2 var(--font-sans);
   }
   .bul {
     list-style: disc;
@@ -67,7 +68,7 @@
   code {
     padding: 1px 5px;
     border-radius: var(--r-sm);
-    background: var(--surface);
+    background: var(--surface-3);
   }
   .loc {
     margin-left: 4px;
@@ -76,7 +77,6 @@
     height: 18px;
     padding: 0 6px;
     margin-right: 4px;
-    font-size: 11px;
   }
   .summary {
     align-self: center;

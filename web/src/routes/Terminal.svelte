@@ -191,8 +191,10 @@
 
   <div class="takeover-wrap">
     <section class="stage" aria-label={t('terminal.aria.stage')}>
-      <div class="takeover" role="status">
-        <b><i class="sq"></i><span>{bar.title}</span></b>
+      <div class="takeover" class:driving={bar.handback} role="status">
+        <b>
+          {#if watching}<Icon name="eye" sm />{:else}<i class="sq"></i>{/if}<span>{bar.title}</span>
+        </b>
         <span class="grow">
           {#if bar.errorCode}
             <Failure code={bar.errorCode} />
@@ -215,7 +217,7 @@
       <div class="screen">
         <div class="asked" aria-live="polite">
           {#each asked as msg (msg.id)}
-            <div id={`m-${msg.id}`} out:fade={{ duration: prefersReducedMotion.current ? 0 : 200 }}>
+            <div id={`m-${msg.id}`} out:fade={{ duration: prefersReducedMotion.current ? 0 : 140 }}>
               <ConfirmCard group={group!} {msg} />
             </div>
           {/each}
@@ -268,9 +270,8 @@
     gap: var(--sp-2);
     min-width: 0;
     height: var(--bar-h);
-    padding: 0 var(--sp-4);
+    padding: 0 var(--sp-4) 0 var(--sp-2);
     border-bottom: 1px solid var(--line);
-    background: var(--surface);
   }
   .term-head h2 {
     font-size: var(--fs-md);
@@ -288,43 +289,60 @@
     min-height: 0;
     min-width: 0;
   }
+  /* The bar that says who drives, and under it the terminal as a framed dark panel. */
   .stage {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    background: var(--term-bg);
+    gap: var(--sp-3);
+    padding: var(--sp-4);
   }
   .takeover {
     display: flex;
     align-items: center;
     gap: var(--sp-3);
     flex-wrap: wrap;
-    padding: 10px var(--sp-4);
-    background: var(--text);
-    color: var(--bg);
+    min-height: 52px;
+    padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow:
+      var(--shadow-1),
+      0 0 0 1px var(--line);
+    color: var(--text-2);
     font-size: var(--fs-sm);
+    overflow: hidden;
+  }
+  /* While the owner drives, an edge of dawn along its top: a person is at the keys. */
+  .takeover.driving {
+    box-shadow:
+      inset 0 2px 0 var(--dawn),
+      var(--shadow-1),
+      0 0 0 1px var(--line);
   }
   .takeover b {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    font-size: 14px;
+    gap: var(--sp-2);
+    color: var(--text);
+    font-size: var(--fs-ui);
   }
   .takeover .sq {
     width: 9px;
     height: 9px;
     border-radius: 2px;
+    background: var(--text);
+  }
+  .takeover.driving .sq {
     background: var(--dawn);
-  }
-  .takeover > span {
-    opacity: 0.82;
-  }
-  .takeover :global(.fail) {
-    color: inherit;
   }
   .screen {
     position: relative;
     display: grid;
     min-height: 0;
+    border: 1px solid var(--term-line);
+    border-radius: 12px;
+    background: var(--term-bg);
+    overflow: hidden;
   }
   /* Over the terminal, which keeps its size and its focus, where the notifications are. */
   .asked {
@@ -344,8 +362,13 @@
     box-shadow: var(--shadow-pop);
     pointer-events: auto;
     animation:
-      drop var(--dur-4) var(--spring),
+      drop var(--dur-2) var(--ease-out),
       appear var(--dur-2) var(--ease-out);
+  }
+  .asked :global(.card) {
+    border-color: transparent;
+    background: var(--raised);
+    box-shadow: none;
   }
   .term {
     min-height: 0;
@@ -358,7 +381,7 @@
      black, and it spans that padding. */
   .term :global(.xterm) {
     height: 100%;
-    padding: var(--sp-3) var(--sp-4);
+    padding: var(--sp-4);
   }
   .term :global(.xterm-viewport) {
     background-color: var(--term-bg);
@@ -382,7 +405,7 @@
     height: 36px;
     padding: 0 10px;
     border: 1px solid var(--term-line);
-    border-radius: var(--r-sm);
+    border-radius: 8px;
     background: var(--term-key);
     color: var(--term-fg);
     font: 12px var(--font-mono);
@@ -425,12 +448,27 @@
       height: calc(100dvh - 2 * var(--bar-h));
     }
   }
+  /* On a phone the terminal has the screen to its edges, with its keys under it. */
   @media (max-width: 767px) {
     .term-head {
-      padding: 0 var(--sp-3) 0 var(--sp-2);
+      padding: 0 var(--sp-3) 0 var(--sp-1);
     }
     .stage {
+      gap: 0;
       height: calc(100dvh - var(--bar-h));
+      padding: 0;
+      background: var(--term-bg);
+    }
+    .takeover {
+      border-radius: 0;
+      padding-inline: var(--sp-3);
+    }
+    .screen {
+      border: 0;
+      border-radius: 0;
+    }
+    .term :global(.xterm) {
+      padding: var(--sp-3);
     }
   }
 </style>

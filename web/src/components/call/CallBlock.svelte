@@ -47,16 +47,16 @@
 </div>
 
 <style>
+  /* One AI asks another: an inset block, with who asked whom on its first line. */
   .call {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    padding: 8px 10px;
-    border: 1px solid var(--line);
-    border-left: 2px solid var(--sky);
+    padding: 10px var(--sp-3);
     border-radius: var(--r-md);
-    background: var(--surface);
+    background: var(--surface-2);
     font-size: var(--fs-sm);
+    line-height: 1.5;
     min-width: 0;
   }
   .call-route {
@@ -64,7 +64,10 @@
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
-    font-weight: 600;
+    font-weight: 500;
+  }
+  .call-route :global(.i) {
+    color: var(--text-3);
   }
   .call-route .muted {
     font-weight: 400;
@@ -76,6 +79,9 @@
     font-weight: inherit;
     vertical-align: baseline;
   }
+  .call-route .badge {
+    background: var(--surface-3);
+  }
   .depth {
     white-space: nowrap;
   }
@@ -83,12 +89,18 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
+  .text :global(code) {
+    background: var(--surface-3);
+  }
   .reply {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-columns: 20px minmax(0, 1fr);
     gap: var(--sp-2);
-    padding-top: 6px;
-    border-top: 1px dashed var(--line);
+    padding-top: var(--sp-2);
+    border-top: 1px solid var(--line);
+  }
+  .reply b {
+    font-weight: 500;
   }
   .reply > :global(.av) {
     margin-top: 1px;

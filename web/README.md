@@ -22,8 +22,9 @@ connections to paired nodes under the single-tab Web Lock. A development server 
 computer and the one group of the wire examples unless the address carries `?nomock`; everywhere
 else the shell connects to each paired node over its rendezvous.
 
-The interface mockups are in `design/`. They are the visual reference for the interface: implement
-screens to match them, and add the motion they leave out.
+The visual reference for the interface is `design/README.md`, sections 1 and 3: the design
+language (colour, type, the chat layout, the anatomy of a card, the motion catalogue). The static
+HTML mockups beside it show the first design and are superseded.
 
 ## Use this capability
 
@@ -371,6 +372,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
 - **Fonts.** Geist and Geist Mono 1.9.2, one variable `woff2` each, are served from
   `public/fonts/` with their licence (OFL-1.1); the page requests nothing from a third party. A
   browser downloads a face only when text uses it and shows the system fonts until it arrives.
+  Chinese is drawn by the system's font (`--font-sans` in `tokens.css` names PingFang SC,
+  Hiragino Sans GB, Microsoft YaHei and Noto Sans CJK SC). The weights in use are 400, 500 and 600.
+- **Icons.** `src/components/Icon.svelte` holds the line icons as path strings copied from Lucide
+  (ISC, parts MIT from Feather), under the names the client uses; no icon package is installed or
+  loaded. The licence text is in `src/components/ICONS-NOTICE.md`. The vendor marks in
+  `Avatar.svelte` are those of `design/icons/NOTICE.md`.
 - **Texts.** Every interface string is a key in both languages and is read with `t(key)`. The
   shell's are in `src/messages/zh-CN.json` and `src/messages/en.json`, under the namespaces
   `app`, `nav`, `bar`, `page` (the title of each page), `pref` (the names of the preferences),
@@ -394,13 +401,22 @@ file in `src/routes/`. It edits neither the shell nor another area:
   browser's View Transitions cross-fade the page, and `svelte/motion` reads the system setting.
   `svelte/animate`'s `flip`, part of Svelte, moves a group to its new place in the list; it runs
   in script, which the styles cannot still, so its duration is 0 under reduced motion. What
-  arrives rises from `--travel` below its place (`rise` in `base.css`): a message, a dialog, the
-  list of mentions, the rows of the group list one after another. A count that changes lands with
-  `--spring`.
-  The tokens are in `tokens.css` beside the others: four durations (`--dur-1` 120 ms hover and
-  press, `--dur-2` 200 ms switch and focus, `--dur-3` 320 ms arrival and cross-fade, `--dur-4`
-  500 ms spring), `--ease` for a change of state, `--ease-out` for an arrival, `--spring` for what
-  a person moved, `--travel` and `--stagger`. Only `transform` and `opacity` are animated; a colour
+  arrives rises from `--rise` below its place (`rise` in `base.css`): the rows of the group list
+  one after another, a pill over the composer, a question asked in a task card. A message drawn
+  within 3 s of being written comes in from its own side (`live` in `Message.svelte`); what a chat
+  opens with and a page of older messages are simply there. A layer that opens from a trigger (a
+  menu, the stop panel, the list of mentions) grows from the trigger's corner (`popin`); a dialog
+  fades in a little smaller than it is, and below 768 px it is a sheet that comes up from the
+  bottom edge. A count that changes lands with `--spring`, and so does the outcome pill of a card
+  whose state changes while it is in view (`components/changed.ts` marks the card
+  `data-changed`). What leaves through a Svelte block leaves at once, except a notice and a
+  confirm card over the terminal, which fade out in 140 ms: the test DOM never ends an exit
+  transition. Nothing loops but the dot of an AI at work and the spinner of a pairing step.
+  The tokens are in `tokens.css` beside the others: five durations (`--dur-1` 120 ms hover and
+  press, `--dur-2` 200 ms a change of state, `--dur-3` 320 ms arrival and cross-fade, `--dur-4`
+  500 ms spring, `--dur-out` 140 ms what leaves), `--ease` for a change of state, `--ease-out` for
+  an arrival, `--ease-in` for an exit, `--spring` for what a person moved, `--travel` (12 px, a
+  page and its parts), `--rise` (8 px) and `--stagger`. Only `transform` and `opacity` are animated; a colour
   that changes on hover, press or focus is a layer under or around the part whose opacity changes.
   Keyboard focus is seen in full the moment it lands: the skip button is in place and the ring
   is opaque at once, and only the ring's settling onto the part is animated.

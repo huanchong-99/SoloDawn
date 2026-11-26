@@ -93,9 +93,12 @@
         class="item"
         class:danger={op === 'cancel'}
         disabled={!group.home.ctl}
-        popovertarget={uid}
-        popovertargetaction="hide"
-        onclick={() => onpick(op)}
+        onclick={() => {
+          // Before the pick: a result that lands at once replaces this item, and the browser
+          // then skips the hide a popovertarget would do after the click.
+          hide();
+          onpick(op);
+        }}
       >
         <Icon name={icons[op]} sm /><span class="grow">{t(`task.op.${op}`)}</span>
       </button>
@@ -107,27 +110,27 @@
   .more {
     margin: -7px -8px -7px 0;
   }
+  /* A popover that opens from the button, whose corner is its origin. */
   .menu {
     position: fixed;
     inset: auto;
-    min-width: 176px;
+    min-width: 184px;
     max-width: min(300px, calc(100vw - 16px));
     margin: 0;
     padding: 6px;
     border: 0;
-    border-radius: var(--r-lg);
-    background: var(--surface);
+    border-radius: 12px;
+    background: var(--raised);
     color: var(--text);
     box-shadow: var(--shadow-pop);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-ui);
     outline: none;
+    transform-origin: top right;
   }
   .menu:popover-open {
     display: grid;
     gap: 2px;
-    animation:
-      rise var(--dur-2) var(--ease-out),
-      appear var(--dur-1) var(--ease-out);
+    animation: popin 160ms var(--ease-out);
   }
   .item {
     position: relative;
@@ -138,13 +141,16 @@
     min-height: 36px;
     padding: 0 10px;
     border: 0;
-    border-radius: var(--r-md);
+    border-radius: 8px;
     background: none;
     color: var(--text);
     text-align: start;
     text-decoration: none;
   }
   .item :global(.i) {
+    width: 16px;
+    height: 16px;
+    stroke-width: 1.5;
     color: var(--text-3);
   }
   .item::before {
@@ -153,7 +159,7 @@
     inset: 0;
     z-index: -1;
     border-radius: inherit;
-    background: var(--surface-2);
+    background: var(--surface-3);
     opacity: 0;
     transition: opacity var(--dur-1) var(--ease);
   }

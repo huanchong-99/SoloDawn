@@ -145,7 +145,7 @@
       <div class="row end">
         <button
           type="button"
-          class="btn btn-sm btn-danger"
+          class="btn btn-sm btn-danger solid"
           disabled={locked}
           aria-busy={busy}
           onclick={() => void run('cancel')}
@@ -242,14 +242,16 @@
   .none {
     display: contents;
   }
+  /* What holds the task up, and a question asked in place: inset blocks on the second surface.
+     Neither is tinted; a glyph in the tone says how it stands. */
   .hold {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: var(--sp-2) var(--sp-3);
-    padding: 8px 10px;
+    padding: 10px var(--sp-3);
     border-radius: var(--r-md);
-    background: var(--tone-soft, var(--surface-2));
+    background: var(--surface-2);
     font-size: var(--fs-sm);
   }
   .hold p {
@@ -259,7 +261,7 @@
     line-height: 1.5;
   }
   .hold :global(.i) {
-    margin-top: 3px;
+    margin-top: 2px;
     color: var(--tone-text, var(--text-3));
   }
   .hold .row:empty {
@@ -268,22 +270,19 @@
   .ask {
     display: grid;
     gap: var(--sp-3);
-    padding: 12px;
-    border: 1px solid var(--line);
+    padding: var(--sp-3);
     border-radius: var(--r-md);
+    background: var(--surface-2);
     font-size: var(--fs-sm);
     outline-offset: -2px;
     /* Clear of the day that stays at the top of the line. */
     scroll-margin-block: var(--sp-12);
     animation:
-      rise var(--dur-3) var(--ease-out),
+      rise var(--dur-2) var(--ease-out),
       appear var(--dur-2) var(--ease-out);
   }
-  .hot {
-    border-color: color-mix(in srgb, var(--danger) 30%, var(--line));
-    background: var(--danger-soft);
-  }
   .ask b {
+    font-size: var(--fs-ui);
     font-weight: 600;
   }
   .ask p {

@@ -1,97 +1,230 @@
 # SoloDawn interface design notes
 
-Date: 2026-11-20. Status: mockups; the real front end is written after the owner has reviewed them.
-
-Open `index.html` for the table of contents. All pages are static HTML and need no build; open them directly in a browser.
+Date: 2026-11-20; sections 1 and 3 rewritten on 2026-11-26 for the redesign of the web client.
+Status: sections 1 and 3 are the visual reference of the client in `web/src/`. The static HTML
+mockups in this directory (`index.html`, `chat.html`, `groups.html`, `nodes.html`,
+`onboarding.html`, `settings.html`, `terminal.html`, `components.html`, with `base.css`, `base.js`
+and `tokens.css`) are superseded: they show the first design and are kept unchanged as a record.
+Sections 4 to 11 describe those mockups; where they differ from sections 1 and 3, sections 1 and 3
+hold.
 
 ## 1. Design idea
 
-**In one sentence: warm color is kept for the places that need you.**
+**In one sentence: calm neutrals, one accent, and colour only for meaning.** The client should
+look premium and still be simple to anyone who sees it for the first time, with a chat that reads
+as naturally as the messengers people already use.
 
-This product carries a lot of information: several people, several computers and several AIs all talking at once. The user really needs to know only three things: what the AIs are doing, where they are stuck, and who they are waiting for. So the whole design follows one rule:
+- **Calm neutrals.** The page is near-white in the light theme and graphite in the dark one.
+  Navigation (the rail, the top bar, the group list) stands on the page colour and recedes; the
+  content (the chat, the side panel, cards, dialogs) stands on the card colour and leads.
+- **One accent.** An indigo blue, kept under the token name `--sky`, marks what can be acted on
+  and what an AI is doing: primary buttons, links and mentions, the focus ring, the icon of the
+  current navigation entry, an AI's working glyph, the current step of a task, the person's own
+  bubbles (as the tint `--mine`) and the send button when it can send. Nowhere else.
+- **Dawn is a signal.** Amber still means "a person is needed", and only that, but as a small
+  signal: the pill of a card that waits, the count of a group with waiting items, the label and
+  dot of the waiting strip, a tint in the border of a waiting card. Never a frame around half the
+  screen and never a button: a button on a waiting card is the accent.
+- **Green and red are results.** Green is something passed or finished; red is a failure, a
+  refusal that is a failure, or the emergency stop. A refusal by a person and a pause are states,
+  not failures: they are neutral.
+- **Hierarchy by size, weight and space.** Fewer borders, more alignment, one 4 px rhythm.
+  Surfaces are told apart by tone first, a hairline second, a shadow last.
+- **Motion confirms.** Short, interruptible, from the place a thing comes from. Nothing waits
+  for an animation, and under reduced motion nothing moves.
 
-- The interface as a whole is a calm neutral. The dark theme is the ink blue before dawn; the light theme is paper white in morning light.
-- The whole system has exactly one warm color, called "dawn". It appears only on things a person has to handle: waiting for your approval, waiting for your decision, waiting for you to confirm the start, a restricted connection that needs your attention.
-- Wherever a screen is warm, something there is waiting for you. No warm color means nothing needs you right now.
+What stays from the first design:
 
-This is also how the name "dawn" is used: no sun is drawn and no gradient is spread; a line of light shows only where a person is needed.
-
-Four more practices run through everything:
-
-1. **The main line does not flood.** The main line holds only requests, task briefs, task cards, approvals, decisions and completion summaries. The AIs' progress, their conversations with each other and the reviews are folded into the "thread" at the bottom of a task card, which shows a one-line summary by default.
-2. **Waiting for you and waiting for others look different.** Waiting for you is a solid warm fill; waiting for others is a gray hollow circle that names who is being waited for.
-3. **People are round, AIs are square.** The avatar shape tells a person from an AI at a glance. An AI's square holds the brand mark of its vendor; the secretary shows the mark of the model behind it, plus a "secretary" corner badge.
-4. **State is not carried by color alone.** Working is a breathing dot, waiting is a hollow circle, sleeping is a crescent, paused is two vertical bars, taken over is a square. Users with color blindness can tell them apart.
+1. **People are round, AIs are rounded squares** that hold the mark of their vendor; the
+   secretary has its badge.
+2. **State is never carried by colour alone.** Working is a breathing dot, waiting a hollow
+   circle, sleeping a crescent, paused two bars, taken over a square, offline a dashed circle.
+3. **The main line does not flood.** Progress, the AIs' talk with each other and reviews live in
+   the thread at the foot of a task card.
+4. **The thin horizon line** (`--horizon`) is the only gradient, on the logo and the onboarding
+   page. No glass, no glow, no coloured card heads, no second accent.
+5. **The terminal is dark in both themes.**
 
 ## 2. Relation to pachat.ai
 
 I looked at its home page, and took only its level of finish: whitespace, corner radii and consistent font weights. Layout, colors, brand and illustrations were not reused. It is soft pastel gradients with a cartoon mascot, for a general audience; SoloDawn is a workbench for developers to watch AIs work, so it takes a restrained, information-dense route that uses outlines instead of shadows.
 
-## 3. Design tokens
+## 3. The design language
 
-All of them are in `tokens.css`, as CSS variables. Each color is one line written as `light-dark(light value, dark value)`, and switching themes changes only `color-scheme`. Without a `data-theme` attribute the system setting is followed.
+All tokens are in `web/src/styles/tokens.css`, the shared styles in `web/src/styles/base.css`.
+Each colour is one line written as `light-dark(light value, dark value)` with 6-digit hex values,
+and soft fills are `color-mix(in srgb, var(--x) N%, var(--surface))`; the contrast scenario of
+`features/web_a11y.feature` reads that format. Switching themes changes only `color-scheme`.
 
-### 3.1 Colors
+### 3.1 Colours
 
-| Token           | Light     | Dark      | Use                                          |
-| --------------- | --------- | --------- | -------------------------------------------- |
-| `--bg`          | `#F6F4EF` | `#0C0F16` | page background                              |
-| `--surface`     | `#FFFFFF` | `#141822` | cards, panels                                |
-| `--surface-2`   | `#EFECE5` | `#1C212D` | inset blocks, hover                          |
-| `--surface-3`   | `#E5E1D8` | `#262C3A` | pressed, slider tracks                       |
-| `--line`        | `#E2DED5` | `#272C39` | dividers, card borders                       |
-| `--line-strong` | `#8C8982` | `#646C7E` | input borders                                |
-| `--text`        | `#171A21` | `#ECEEF3` | body text                                    |
-| `--text-2`      | `#4A505C` | `#B3B9C6` | secondary text                               |
-| `--text-3`      | `#5F646F` | `#8E95A5` | auxiliary text                               |
-| `--sky`         | `#2A55D6` | `#8CABFF` | sky: an AI is working, links, keyboard focus |
-| `--dawn`        | `#F2A036` | `#F6B152` | dawn: waiting for you (fill color)           |
-| `--dawn-text`   | `#8A4B00` | `#F6B152` | dawn-colored text on ordinary backgrounds    |
-| `--on-dawn`     | `#2A1A00` | `#2A1A00` | text on a dawn fill                          |
-| `--ok`          | `#146F44` | `#62CC91` | passed, online                               |
-| `--danger`      | `#B92E27` | `#FF857D` | failed, rejected, emergency stop             |
+| Token           | Light     | Dark      | Use                                                                   |
+| --------------- | --------- | --------- | --------------------------------------------------------------------- |
+| `--bg`          | `#F5F6F8` | `#0D0E11` | rail, top bar, group list, page                                       |
+| `--surface`     | `#FFFFFF` | `#16171B` | chat canvas, side panel, cards, dialogs                               |
+| `--surface-2`   | `#F0F1F4` | `#1E2025` | others' bubbles, inset blocks, hover                                  |
+| `--surface-3`   | `#E4E6EB` | `#292B31` | pressed, tracks, disabled fill                                        |
+| `--raised`      | `#FFFFFF` | `#1E2025` | what is lifted off its ground: a selected row, a plain button, a menu |
+| `--line`        | `#E6E8EC` | `#2A2C32` | hairlines, card borders                                               |
+| `--line-strong` | `#7F8590` | `#6E737E` | input borders (3:1 or more)                                           |
+| `--text`        | `#15171C` | `#EDEEF0` | body text                                                             |
+| `--text-2`      | `#4A505B` | `#B6BAC3` | secondary text                                                        |
+| `--text-3`      | `#5C6270` | `#8F949F` | auxiliary text (still 4.5:1 or more)                                  |
+| `--sky`         | `#3A57E8` | `#8FA3FF` | the accent                                                            |
+| `--dawn`        | `#F2A23A` | `#F4B256` | needs a person (fill)                                                 |
+| `--dawn-text`   | `#9A5300` | `#F4B256` | dawn-coloured text on an ordinary surface                             |
+| `--on-dawn`     | `#2A1A00` | `#2A1A00` | text on a dawn fill                                                   |
+| `--ok`          | `#12784A` | `#5ED193` | passed, finished, online                                              |
+| `--danger`      | `#C42F28` | `#FF8A80` | failed, the emergency stop                                            |
 
-There are only five semantic roles: neutral, sky, dawn, ok and danger. There is no separate "warning color"; reminders such as a restricted relay also use dawn, because they also mean "please take a look".
+`--sky-soft`, `--dawn-soft`, `--ok-soft` and `--danger-soft` are mixed from the semantic colour and
+the card colour; `--mine` (14% of the accent) is the person's own bubble; `--need-line` is the
+border of a card that waits. In the dark theme a shadow barely shows, so a raised layer is one
+step lighter (`--raised`) with its hairline.
 
-The four light backgrounds (`--sky-soft` and so on) are mixed from the semantic colors and the card color and have no values of their own. The terminal area has its own set, `--term-*`, which is dark in both themes.
+Rules:
 
-The brand gradient `--horizon` (indigo, rose, amber) is used only on the logo and on a thin line on the contents page.
+- A selected row of the group list is neutral (`--raised` with `--shadow-1`), never the accent.
+- A note (`.note`) is a neutral inset block; its tone colours its glyph and lead words only. The
+  one note on dawn is the "home of N groups" line of the computers page, which asks for attention.
+- Avatars and group marks are tinted from the hue of their id: `oklch(0.94 0.04 h)` with the
+  initial in `oklch(0.42 0.09 h)` in the light theme, `oklch(0.32 0.05 h)` with
+  `oklch(0.86 0.07 h)` in the dark one (7:1 or more). They are computed in `Avatar.svelte`.
 
-### 3.2 Fonts and sizes
+### 3.2 Type
 
-- Latin text and numbers: Geist (Google Fonts). Chinese: the system font (PingFang, Microsoft YaHei). Code, branch names and the terminal: Geist Mono.
-- Without a network everything falls back to system fonts and the pages display as usual.
-- Numbers use tabular figures (`tabular-nums`), so usage, times and scores line up.
+Geist for Latin and numbers and Geist Mono for code, branches and the terminal, both self-hosted
+(OFL); Chinese comes from the system (PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans
+CJK SC). Weights 400, 500 and 600 only. Headings are 600 with `text-wrap: balance`; the Latin
+ones are tightened by 0.01em (`:lang(en)`), Chinese ones are not. Numbers that line up are
+tabular. No text is smaller than 12 px, except the 11 px labels of the navigation. A section head
+(`.sec-title`) is 13/600 in `--text-2`; a Latin one is upper case at 12 px, 0.04em apart.
 
-| Token      | Size    | Used for                                                    |
-| ---------- | ------- | ----------------------------------------------------------- |
-| `--fs-xs`  | 12px    | times, badges, captions                                     |
-| `--fs-sm`  | 13px    | messages inside threads, secondary card information         |
-| `--fs-md`  | 15px    | body text, main-line messages                               |
-| `--fs-lg`  | 17px    | card titles                                                 |
-| `--fs-xl`  | 21px    | page titles                                                 |
-| `--fs-2xl` | 28px    | large section titles                                        |
-| `--fs-3xl` | 30-46px | main title of the onboarding page, varies with screen width |
+| Token      | Size / line height            | Use                                       |
+| ---------- | ----------------------------- | ----------------------------------------- |
+| `--fs-xs`  | 12 / 1.4                      | times, meta, badges                       |
+| `--fs-sm`  | 13 / 1.5                      | thread rows, card meta, side panel values |
+| `--fs-ui`  | 14 / 1.45                     | buttons, list previews, form labels       |
+| `--fs-md`  | 15 / 1.6                      | message text, list names                  |
+| `--fs-lg`  | 16 / 1.3                      | card titles, dialog titles                |
+| `--fs-xl`  | 20 / 1.3                      | page titles                               |
+| `--fs-2xl` | 26 / 1.25                     | summary numbers                           |
+| `--fs-3xl` | clamp(30px, 5vw, 44px) / 1.15 | onboarding headline                       |
 
-Body line height is 1.6 (Chinese needs to be looser than English); headings use 1.25. The main line is 15px and threads are 13px; this one-step difference in size lets threads recede naturally.
+### 3.3 Space, radius, size, elevation
 
-### 3.3 Spacing, radii, shadows, motion
+- Spacing is on a 4 px base (`--sp-1` to `--sp-16`).
+- Radius: `--r-sm` 6 (badges, inline code, chips), `--r-md` 10 (buttons, inputs), `--r-lg` 14
+  (cards, popovers), `--r-xl` 18 (bubbles, the composer, dialogs), `--r-full`.
+- Controls are 36 px (`--ctl`), 30 px small (`--ctl-sm`), and 44 px under a coarse pointer.
+- Widths: rail 64 (76 in English), group list 300, side panel 340, top bar 52, chat head 56,
+  `--measure` 760, `--card-w` 560 (the widest card in the chat), `--bubble-w` min(72%, 600px)
+  (82% on a phone).
+- Elevation: `--shadow-1` (cards, a selected row), `--shadow-pop` (menus, popovers, notices),
+  `--shadow-dlg` (dialogs, sheets, the panel that slides over the chat), `--scrim`.
+- Icons are Lucide's paths (`web/src/components/ICONS-NOTICE.md`), stroke 1.75 at 20 px and 1.5 at
+  16 px, round caps and joins; 24 px in empty states only.
 
-- **Spacing:** based on 4px, nine steps in all: 4, 8, 12, 16, 20, 24, 32, 48, 64.
-- **Radii:** 6 (badges, code blocks), 10 (buttons, inputs), 14 (cards), 20 (overlays), full (pills).
-- **Shadows:** cards use no shadow and are told apart by a 1px outline, which is cleaner in the dark theme and cheaper to render. Only overlays use one shadow step, `--shadow-pop`.
-- **Motion:** two durations, 120ms for hover and 200ms for expanding, on the same easing curve. Only one thing moves all the time: the breathing dot for "working" (besides it, the onboarding page has a spinner while connecting and the terminal has a blinking cursor). All of it is turned off when the system asks for reduced motion.
+### 3.4 Shared parts
 
-### 3.4 Layout
+- **Buttons.** Primary is the accent; `.btn-dawn` keeps its class and looks like it. The plain
+  button is `--raised` with a hairline and `--shadow-1`; ghost has no border; danger is red text
+  on the plain button, and `.btn-danger.solid` is the button that confirms something destructive.
+  Disabled is `--surface-3` with `--text-3`. Hover is a layer whose opacity changes; a press
+  sinks the button to 0.96.
+- **Inputs** are 36 px on `--surface` with a `--line-strong` border. Radios and checkboxes are
+  drawn at 18 px with the accent when chosen; the switch is 44 by 26.
+- **Badges** are 20 px pills; `.solid` is for counts. The pill of a waiting card is soft dawn
+  with a dot.
+- **Segmented control**: a `--surface-2` track with a raised thumb that slides by `--at`.
+- **Settings**: a grouped list on a card, rows of 52 px, hairlines inset 16 px.
+- **Dialogs**: radius 18, `--shadow-dlg`, 480 px (`.wide` 640), padding 24. Below 768 px a dialog
+  is a bottom sheet with a decorative grabber and safe-area padding.
+- **Radio cards** (`.acct`, the options of a decision, the AIs of the add-AI dialog): 56 px,
+  radius 12; the chosen one has the accent border and `--sky-soft`; a disabled one is at 0.55.
+- **Empty states** (`.blank`): a 48 px circle with a 24 px icon, a title, one line, at most one
+  primary button. No dashed borders.
+- **Ready for lists of members and folders**: `.pick-row` (a member to pick, 52 px), `.path-row`
+  (a folder path in mono with its action), `.sec-title` (a section head with its count).
 
-| Width                              | Layout                                                                                                                                                            |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| below 768px (phone)                | top bar + content + three-item bottom navigation. The group chat and terminal pages hide the bottom navigation to give the space to the input box and the key bar |
-| 768-1023px (tablet, narrow window) | left navigation + content. The member bar slides out from the icon at the top right                                                                               |
-| 1024-1279px                        | left navigation + chat + member bar                                                                                                                               |
-| 1280px and above                   | left navigation + group list + chat + member bar                                                                                                                  |
+### 3.5 The chat
 
-Chat content is at most 760px wide and is not stretched further; a line holds no more than fifty Chinese characters.
+The main line is a conversation, so it has bubbles; a card is a document with actions, so it
+stands on its own surface; a thread is a work log, so it is compact flat rows.
+
+- **Others** stand on the left: a 36 px picture (32 on a phone) at the top of a run, the name in
+  13/500, badges, the time, then the bubble on `--surface-2`. A run is what the code calls
+  `joined`: its later messages have no head and are 4 px apart, and the corners toward a
+  neighbour on the author's side tighten to 6 px.
+- **The person's own** messages stand on the right without a picture, on `--mine`; the head is
+  one quiet line ("You · 19:42").
+- **Cards** stand in the author's column, at most `--card-w` wide; on a phone they span it.
+- **The day** is a small pill on a band of the canvas colour that stays at the top of the line.
+- **Notes of the home** are centred lines of 12 px.
+- **The time of a joined message** shows beside its bubble under the pointer, and for all of them
+  while keyboard focus is on the main line.
+- **The composer** is one raised container of radius 18: the text on top and a row with the
+  mention button and the send circle under it; one row on a phone and in a thread.
+- **Threads**: rows of 13/1.5 with a 20 px picture, 8 px apart, no boxes.
+
+### 3.6 Cards
+
+One anatomy for every card: a head (a 16 px glyph, the kind in 13/500, an optional id in mono,
+the state pill on the right), a title in 16/600, key-value rows (`.kv`: labels 72 px wide in
+Chinese and 96 px in English, 13 px in `--text-3`; values 14 px), actions on the left with the
+primary first and a quiet note after them. The kind is told by glyph and words, never by a colour.
+
+- **Waiting for the person**: a tint of dawn in the border and the soft pill; nothing else.
+- **Settled**: no shadow, the title in `--text-2`, the pill as the outcome (ok for confirmed, a
+  neutral pill with a cross for a refusal).
+- **Decision**: the options are radio cards with the key in mono; the chosen one has the accent
+  border and a tick.
+- **Task**: the stages are one row of 4 px segments for any number of steps (done ok, current
+  accent, waiting dawn, later `--surface-3`), with the stage in words beside it; questions asked
+  in place and holds are inset blocks on `--surface-2`.
+- **Summary**: figures in 26/600, additions green and removals red.
+
+### 3.7 Motion
+
+Only `transform` and `opacity` animate; a colour that changes on hover, press or focus is a layer
+whose opacity changes. `base.css` holds the one `prefers-reduced-motion: reduce` block.
+
+| Token       | Value  | Use                                      |
+| ----------- | ------ | ---------------------------------------- |
+| `--dur-1`   | 120 ms | hover, press, small fades                |
+| `--dur-2`   | 200 ms | a change of state, a popover, a bubble   |
+| `--dur-3`   | 320 ms | a panel, a sheet, a page                 |
+| `--dur-4`   | 500 ms | a spring comes to rest                   |
+| `--dur-out` | 140 ms | what leaves                              |
+| `--travel`  | 12 px  | how far a page and its parts come        |
+| `--rise`    | 8 px   | how far a bubble, a pill or a list comes |
+| `--stagger` | 30 ms  | between the parts of an arriving page    |
+
+`--ease` is for a change of state, `--ease-out` for an arrival, `--ease-in` for an exit,
+`--spring` for what a person moved and for counts.
+
+| What                                                     | How                                                        |
+| -------------------------------------------------------- | ---------------------------------------------------------- |
+| A message that arrives while the chat is open            | fade, rise 8 px and scale from 0.98, from its own side     |
+| Messages on open and on paging                           | no animation                                               |
+| A card whose state changes in view                       | the new pill lands with the spring (`data-changed`)        |
+| A count                                                  | lands with the spring each time it changes                 |
+| The group list reorders                                  | `flip`, 240 ms                                             |
+| A chip of the waiting strip                              | fade and scale from 0.96                                   |
+| An AI at work                                            | a dot that breathes, the one motion that loops             |
+| The panel over the chat below 1024 px                    | slides in over a scrim in 320 ms, out in 140 ms            |
+| A dialog; a sheet on a phone                             | fade and scale from 0.97; up from the bottom edge          |
+| A menu, the stop panel, the mention list                 | fade and scale from 0.96 from the trigger's corner, 160 ms |
+| A notice                                                 | down from the top, fades out in 140 ms                     |
+| A task stage advances                                    | its segment fills from the left                            |
+| The send button can send                                 | its glyph lands with the spring                            |
+| A disclosure                                             | the chevron turns                                          |
+| A pairing step is done                                   | its tick lands with the spring                             |
+| Page change, theme and language, press, logo, focus ring | as `web/README.md` (Motion) says                           |
+
+What leaves the page through a Svelte block (a menu, a list, a pill) leaves at once: the test
+DOM never ends an exit transition, so only the notices and the confirm cards over the terminal,
+which had one before, fade out.
 
 ## 4. Components and their states
 

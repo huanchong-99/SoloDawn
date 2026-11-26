@@ -168,15 +168,6 @@
         {/each}
       </div>
     {/if}
-    <button
-      type="button"
-      class="icon-btn"
-      aria-label={t('chat.mention')}
-      disabled={readonly}
-      onclick={startMention}
-    >
-      <Icon name="at" />
-    </button>
     <textarea
       bind:this={field}
       rows="1"
@@ -196,6 +187,15 @@
       onclick={read}
       onfocus={read}
       onkeydown={keydown}></textarea>
+    <button
+      type="button"
+      class="icon-btn"
+      aria-label={t('chat.mention')}
+      disabled={readonly}
+      onclick={startMention}
+    >
+      <Icon name="at" />
+    </button>
     <button class="btn btn-primary send" aria-label={t('chat.send')} disabled={!sendable}>
       <Icon name="send" />
     </button>
@@ -208,8 +208,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-2);
-    padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--line);
+    padding: var(--sp-2) var(--sp-6) calc(var(--sp-3) + env(safe-area-inset-bottom));
     background: var(--surface);
   }
   .composer > * {
@@ -225,31 +224,42 @@
     font-size: var(--fs-sm);
   }
   .note-line {
-    padding-left: 10px;
+    padding-left: 14px;
     color: var(--text-3);
     font-size: var(--fs-xs);
     animation: appear var(--dur-2) var(--ease-out);
   }
+  /* The field is one raised container. With room, the text is on top and a row of tools under
+     it; on a phone and in a thread they share one row. */
   form {
     position: relative;
-    display: flex;
-    align-items: flex-end;
-    gap: var(--sp-2);
-    padding: 6px;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--r-lg);
-    background: var(--bg);
+    display: grid;
+    grid-template:
+      'field field' auto
+      'at send' auto
+      / minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 6px 8px 8px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    background: var(--raised);
+    box-shadow: var(--shadow-1);
   }
-  form:focus-within {
-    outline: var(--focus);
-    outline-offset: 1px;
+  /* Focus in the field: the border in the accent and a soft ring, both there at once. The
+     outline is for forced colours, which drop the ring. */
+  form:has(textarea:focus) {
+    border-color: var(--sky);
+    box-shadow:
+      0 0 0 3px var(--sky-soft),
+      var(--shadow-1);
+    outline: 2px solid transparent;
   }
   textarea {
-    flex: 1;
+    grid-area: field;
     min-width: 0;
     min-height: 36px;
     max-height: 40dvh;
-    padding: 6px 4px;
+    padding: 6px 8px;
     border: 0;
     background: none;
     resize: none;
@@ -257,23 +267,58 @@
     line-height: 1.6;
   }
   /* The hint is one line, cut at the edge of a narrow field. */
+  /* It ends clear of the button beside it: where it is too long, its last characters thin out
+     (a browser draws no ellipsis in a multi-line field). */
   textarea:placeholder-shown {
     white-space: nowrap;
     overflow: hidden;
+    mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
   }
+  form > .icon-btn {
+    grid-area: at;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+  }
+  form > .icon-btn :global(.i) {
+    width: 18px;
+    height: 18px;
+  }
+  /* A circle: quiet while there is nothing to send, the accent when there is. Its glyph lands
+     with a spring the moment it can send. */
   .send {
-    width: 36px;
+    grid-area: send;
+    width: 32px;
+    height: 32px;
     padding: 0;
+    border: 0;
+    border-radius: 50%;
+    box-shadow: none;
+  }
+  .send::before {
+    inset: 0;
+    border-radius: inherit;
+  }
+  .send::after {
+    border-radius: 50%;
+  }
+  .send :global(.i) {
+    width: 18px;
+    height: 18px;
+  }
+  .send:enabled :global(.i) {
+    animation: land var(--dur-4) var(--spring);
   }
   /* Told above the field, where the eye is: the home cannot be reached, or the text is long. */
   .state {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
+    padding-left: 14px;
     color: var(--dawn-text);
     font-size: var(--fs-sm);
     animation:
-      rise var(--dur-3) var(--ease-out),
+      rise var(--dur-2) var(--ease-out),
       appear var(--dur-2) var(--ease-out);
   }
   .state.over,
@@ -288,15 +333,15 @@
     flex: none;
     width: 8px;
     height: 8px;
-    border: 2px solid currentColor;
+    border: 1.5px solid currentColor;
     border-radius: 50%;
   }
   /* How full the row is: a bar that grows from the left, by transform alone. */
   .meter {
     flex: none;
     width: 56px;
-    height: 6px;
-    border-radius: 3px;
+    height: 4px;
+    border-radius: 2px;
     background: var(--surface-3);
     overflow: hidden;
   }
@@ -309,6 +354,7 @@
     transform-origin: left;
     transition: transform var(--dur-2) var(--ease);
   }
+  /* The list of mentions opens from the field's corner. */
   .mentions {
     position: absolute;
     left: 0;
@@ -320,13 +366,12 @@
     max-height: 240px;
     padding: 6px;
     border-radius: var(--r-lg);
-    background: var(--surface);
+    background: var(--raised);
     box-shadow: var(--shadow-pop);
     overflow: auto;
+    font-size: var(--fs-ui);
     transform-origin: bottom left;
-    animation:
-      rise var(--dur-2) var(--ease-out),
-      appear var(--dur-1) var(--ease-out);
+    animation: popin 160ms var(--ease-out);
   }
   .mentions button {
     position: relative;
@@ -337,7 +382,7 @@
     min-height: 36px;
     padding: 0 8px;
     border: 0;
-    border-radius: var(--r-md);
+    border-radius: 8px;
     background: none;
     text-align: start;
   }
@@ -348,7 +393,7 @@
     inset: 0;
     z-index: -1;
     border-radius: inherit;
-    background: var(--surface-2);
+    background: var(--surface-3);
     opacity: 0;
     transition: opacity var(--dur-1) var(--ease);
   }
@@ -357,12 +402,44 @@
   }
   @media (hover: hover) {
     .mentions button:hover::before {
+      opacity: 0.6;
+    }
+    .mentions [aria-selected='true']:hover::before {
       opacity: 1;
+    }
+  }
+  /* One row: on a phone, and at the end of a thread. */
+  .in-thread form {
+    grid-template: 'at field send' auto / auto minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 2px;
+    padding: 4px 6px;
+    border-radius: var(--r-lg);
+    box-shadow: none;
+  }
+  .in-thread textarea {
+    padding-inline: 4px;
+  }
+  @media (max-width: 767px) {
+    .composer {
+      padding-inline: var(--sp-3);
+    }
+    form {
+      grid-template: 'at field send' auto / auto minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 2px;
+      padding: 5px 6px;
+      border-radius: 22px;
+    }
+    textarea {
+      margin-right: 6px;
+      padding-inline: 4px;
     }
   }
   @media (pointer: fine) {
     .in-thread textarea {
-      padding-block: 7.5px;
+      min-height: 32px;
+      padding-block: 5.5px;
     }
   }
   @media (pointer: coarse) {
@@ -372,8 +449,10 @@
       /* Below 16px, Safari on a phone zooms the page into a focused field. */
       font-size: 16px;
     }
+    form > .icon-btn,
     .send {
       width: 44px;
+      height: 44px;
     }
   }
 </style>

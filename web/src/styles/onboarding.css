@@ -13,7 +13,18 @@
   color: var(--text);
   font-weight: 600;
   font-size: var(--fs-lg);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
+}
+.onboarding .top .icon-btn {
+  --hover: var(--surface-3);
+  width: 32px;
+  height: 32px;
+}
+@media (pointer: coarse) {
+  .onboarding .top .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
 }
 .onboarding .brand:hover {
   text-decoration: none;
@@ -21,7 +32,7 @@
 .onboarding .hero {
   position: relative;
   overflow: clip;
-  padding: var(--sp-12) var(--sp-5) 76px;
+  padding: var(--sp-12) var(--sp-5) 72px;
   text-align: center;
 }
 .onboarding .hero::before {
@@ -33,11 +44,12 @@
   height: 2400px;
   translate: -50% 0;
   border-radius: 50%;
-  border-top: 1px solid color-mix(in srgb, var(--dawn) 70%, transparent);
+  /* The one line of first light: a thin arc and a faint glow under it. */
+  border-top: 1px solid color-mix(in srgb, var(--dawn) 45%, transparent);
   background: radial-gradient(
     closest-side at 50% 0,
-    color-mix(in srgb, var(--dawn) 16%, transparent),
-    transparent 22%
+    color-mix(in srgb, var(--dawn) 8%, transparent),
+    transparent 18%
   );
   mask-image: linear-gradient(90deg, transparent 36%, #000 46%, #000 54%, transparent 64%);
   pointer-events: none;
@@ -47,15 +59,23 @@
 }
 .onboarding .hero h1 {
   font-size: var(--fs-3xl);
-  letter-spacing: -0.03em;
+  line-height: 1.15;
   max-width: 16em;
   margin: var(--sp-4) auto var(--sp-3);
   text-wrap: balance;
 }
+.onboarding:lang(en) .hero h1 {
+  letter-spacing: -0.02em;
+}
+/* Chinese breaks only between phrases; plain wrapping then breaks after 「，」. */
+.onboarding:lang(zh) .hero h1 {
+  word-break: keep-all;
+  text-wrap: wrap;
+}
 .onboarding .hero p {
   color: var(--text-2);
-  font-size: var(--fs-lg);
-  max-width: 34em;
+  font-size: var(--fs-md);
+  max-width: 560px;
   margin: 0 auto;
   text-wrap: pretty;
 }
@@ -76,8 +96,12 @@
 }
 
 .onboarding .wrap.single {
-  grid-template-columns: minmax(0, 34em);
+  grid-template-columns: minmax(0, 400px);
   justify-content: center;
+}
+.onboarding .wrap.single .card p {
+  color: var(--text-2);
+  font-size: var(--fs-ui);
 }
 
 @media (max-width: 860px) {
@@ -86,8 +110,5 @@
   }
   .onboarding .hero {
     padding-top: var(--sp-8);
-  }
-  .onboarding .hero p {
-    font-size: var(--fs-md);
   }
 }

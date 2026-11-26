@@ -247,25 +247,51 @@
 {/if}
 
 <style>
+  /* Sections, not boxed cards: a head with its count and one small action, then the AIs one
+     under another with a hairline between them. */
   .members {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-3);
-    padding: var(--sp-4);
+    padding: var(--sp-2) var(--sp-4) var(--sp-4);
   }
   .head {
     display: grid;
     gap: 4px;
+    padding-block: var(--sp-2) var(--sp-1);
+  }
+  .head .row,
+  .people-head {
+    min-height: 36px;
   }
   .add-why {
     text-align: right;
   }
+  .member {
+    gap: var(--sp-3);
+    padding: var(--sp-4) 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+  .member + .member {
+    border-top: 1px solid var(--line);
+  }
   .member header {
     flex-wrap: nowrap;
-    align-items: flex-start;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+  .member h3 {
+    font-size: var(--fs-md);
   }
   .member p.st {
-    margin-top: 2px;
+    margin-top: 1px;
+    align-items: baseline;
+    line-height: 1.4;
+  }
+  .member p.st i {
+    align-self: center;
   }
   .owner {
     color: var(--text-3);
@@ -275,13 +301,9 @@
     position: relative;
     display: inline-grid;
     flex: none;
+    align-self: flex-start;
   }
-  .av-wrap :global(.av) {
-    width: 40px;
-    height: 40px;
-    border-radius: 11px;
-    font-size: 15px;
-  }
+  /* The secretary's badge on its picture. */
   .av-wrap.sec::before {
     content: attr(data-sec);
     position: absolute;
@@ -290,73 +312,59 @@
     z-index: 1;
     display: grid;
     place-items: center;
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
-    border: 2px solid var(--surface);
+    box-shadow: 0 0 0 2px var(--surface);
     background: var(--text);
-    color: var(--bg);
+    color: var(--surface);
     font-size: 10px;
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1;
   }
-  .av-wrap[data-st]::after {
-    content: '';
-    position: absolute;
-    right: -3px;
-    bottom: -3px;
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
-    border: 2px solid var(--surface);
-    background: var(--text-3);
-  }
-  .av-wrap[data-st='working']::after {
-    background: var(--sky);
-  }
-  .av-wrap[data-st='needyou']::after,
-  .av-wrap[data-st='limited']::after {
-    background: var(--dawn);
-  }
-  .av-wrap[data-st='waiting']::after {
-    background: var(--surface);
-    box-shadow: inset 0 0 0 2px var(--text-3);
-  }
-  .av-wrap[data-st='sleeping']::after {
-    background: var(--surface-3);
-  }
-  .av-wrap[data-st='takeover']::after {
-    border-radius: 3px;
-    background: var(--text);
-  }
   .kv {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: 6px var(--sp-4);
+    --kv-w: 72px;
+    gap: 6px var(--sp-3);
     font-size: var(--fs-sm);
+    line-height: 1.5;
   }
-  .kv dt {
-    color: var(--text-3);
+  .kv :global(dt) {
+    font-size: var(--fs-xs);
+    line-height: calc(var(--fs-sm) * 1.5);
   }
-  .kv dd {
-    min-width: 0;
+  .member :global(.card-foot) {
+    gap: 6px;
+  }
+  /* Removing an AI is quiet until it is asked for, but it says what it is. */
+  .member :global(.card-foot .btn-ghost) {
+    color: var(--danger);
+    --hover: var(--danger-soft);
   }
   .people-head {
     margin-top: var(--sp-2);
+    padding-top: var(--sp-3);
+    border-top: 1px solid var(--line);
+    min-height: 48px;
   }
   .people {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
+    --av: 28px;
   }
   .person {
     display: grid;
     grid-column: 1 / -1;
     grid-template-columns: subgrid;
     align-items: center;
-    gap: var(--sp-2);
-    padding: 6px 0;
+    gap: 2px 10px;
+    min-height: 44px;
+    padding: 4px 0;
   }
   .person-name {
+    font-size: var(--fs-ui);
     overflow-wrap: anywhere;
+  }
+  .person-name .muted {
+    font-size: var(--fs-xs);
   }
 </style>

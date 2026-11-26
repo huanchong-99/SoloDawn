@@ -83,6 +83,9 @@
 </div>
 
 <style>
+  /* Taking a computer's AIs offline, and bringing them back: a row at the foot of its head. A
+     computer that was stopped is not a failure, so nothing here is red but the button that
+     stops. */
   .strip {
     display: flex;
     align-items: center;
@@ -94,12 +97,13 @@
     outline-offset: -2px;
   }
   .hot {
-    background: var(--danger-soft);
+    background: var(--surface-2);
   }
   .grow {
     flex-basis: 160px;
   }
   b {
+    font-size: var(--fs-ui);
     font-weight: 500;
   }
   p {
@@ -111,6 +115,17 @@
     margin-left: auto;
   }
   .acts .btn {
-    min-width: 112px;
+    height: var(--ctl-sm);
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: var(--fs-sm);
+  }
+  /* Coming back online is the way forward. */
+  .hot .btn:only-child {
+    --hover: color-mix(in srgb, var(--sky) 86%, var(--text));
+    border-color: transparent;
+    background: var(--sky);
+    box-shadow: none;
+    color: var(--on-sky);
   }
 </style>

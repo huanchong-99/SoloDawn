@@ -254,51 +254,49 @@
     overflow: auto;
   }
   .lead {
-    margin-top: 6px;
+    margin-top: 4px;
     color: var(--text-2);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-ui);
   }
   legend {
     padding: 0;
     margin-bottom: 6px;
     font-weight: 500;
   }
+  /* Each AI that can join is a radio card. */
   .choices {
     display: grid;
     gap: var(--sp-2);
+    --av: 32px;
   }
   .choice {
     display: flex;
     align-items: center;
     gap: var(--sp-3);
-    padding: 10px 12px;
+    min-height: 56px;
+    padding: 10px 14px;
     border: 1px solid var(--line);
-    border-radius: var(--r-md);
+    border-radius: 12px;
+    background: var(--surface);
     cursor: pointer;
     font-size: var(--fs-sm);
+    line-height: 1.45;
     color: var(--text-2);
   }
   .choice:has(:checked) {
     border-color: var(--sky);
     background: var(--sky-soft);
+    box-shadow: inset 0 0 0 0.5px var(--sky);
   }
   .choice.disabled {
-    border-style: dashed;
-    background: var(--surface-2);
-    color: var(--text-3);
+    opacity: 0.55;
     cursor: not-allowed;
-  }
-  .choice input {
-    margin: 0;
-    accent-color: var(--sky);
   }
   .choice b {
     display: block;
     color: var(--text);
-    font-size: 14px;
-  }
-  .choice.disabled b {
-    color: var(--text-3);
+    font-size: var(--fs-ui);
+    font-weight: 500;
   }
   .sub {
     display: block;
@@ -317,12 +315,6 @@
     gap: var(--sp-2);
     font-size: var(--fs-sm);
     cursor: pointer;
-  }
-  .check input {
-    width: 16px;
-    height: 16px;
-    margin: 0;
-    accent-color: var(--sky);
   }
   .fail {
     color: var(--danger);

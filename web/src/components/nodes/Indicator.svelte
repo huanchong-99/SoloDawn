@@ -49,12 +49,14 @@
 {/if}
 
 <style>
+  /* A dot and a few words, with no frame: it is told by the shape of its dot and by its words.
+     Only when something is wrong does it take a soft ground. */
   .conn {
     height: 32px;
     min-width: 0;
     padding: 0 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--r-full);
+    border-radius: var(--r-md);
+    color: var(--text-2);
     font-size: var(--fs-xs);
     white-space: nowrap;
   }
@@ -70,22 +72,26 @@
     .conn[data-st='ok']:hover,
     .conn[data-st='linking']:hover,
     .conn[data-st='offline']:hover {
-      background: var(--surface-2);
+      background: var(--surface-3);
     }
   }
   .conn[data-st='limited'],
   .conn[data-st='some'] {
-    border-color: color-mix(in srgb, var(--dawn) 50%, var(--line));
     background: var(--dawn-soft);
+    color: var(--dawn-text);
   }
   .conn[data-st='down'] {
-    border-color: color-mix(in srgb, var(--danger) 50%, var(--line));
     background: var(--danger-soft);
     color: var(--danger);
   }
   @media (max-width: 767px) {
     .ms {
       display: none;
+    }
+  }
+  @media (pointer: coarse) {
+    .conn {
+      height: 44px;
     }
   }
 </style>

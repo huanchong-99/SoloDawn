@@ -5,6 +5,7 @@
   import { prefs, t } from '../../lib/prefs.svelte';
   import { clock } from '../../lib/when';
   import Failure from '../Failure.svelte';
+  import { changed } from '../changed';
   import Icon from '../Icon.svelte';
 
   /** A decision card with multiple-choice options and a free-text answer field (messages.md 2.4, 3.3). */
@@ -68,7 +69,14 @@
   }
 </script>
 
-<section bind:this={cardEl} class="card" class:need={canAct} aria-label={t('decision.kind')}>
+<section
+  bind:this={cardEl}
+  class="card"
+  class:need={canAct}
+  class:settled={!pending}
+  use:changed={msg.state.status}
+  aria-label={t('decision.kind')}
+>
   <header class="card-head">
     <Icon name="fork" />
     <span class="kind">{t('decision.kind')}</span>
@@ -106,7 +114,7 @@
             disabled={!inTo || readonly || busy || overLimit}
             onclick={() => void choose(opt.id)}
           >
-            <b>{opt.id} · {opt.label}</b>
+            <b><span class="key">{opt.id}</span> · {opt.label}</b>
             <span>{opt.effect}</span>
             {#if opt.id === msg.body.recommended}
               <span class="badge">{t('decision.recommended')}</span>
@@ -115,7 +123,7 @@
         {:else}
           {@const chosen = msg.state.status === 'decided' && msg.state.choice === opt.id}
           <div class="opt static" class:chosen>
-            <b>{opt.id} · {opt.label}</b>
+            <b><span class="key">{opt.id}</span> · {opt.label}</b>
             <span>{opt.effect}</span>
             {#if chosen}
               <span class="badge" data-tone="ok">
@@ -177,46 +185,73 @@
 </section>
 
 <style>
+  /* The free answer and its button share one row while the field keeps room to be read. */
   .free-answer {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--sp-2);
-    flex-wrap: wrap;
+
+    input {
+      flex-basis: 220px;
+    }
   }
   .context {
     color: var(--text-2);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-ui);
   }
+  /* The options are radio cards side by side; they stack where two no longer fit. */
   .opts {
     display: grid;
     gap: var(--sp-2);
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
   }
   .opt {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 10px 12px;
+    min-height: 56px;
+    padding: 10px 14px;
     border: 1px solid var(--line);
-    border-radius: var(--r-md);
+    border-radius: 12px;
     background: var(--surface);
     text-align: left;
     font-size: var(--fs-sm);
+    line-height: 1.5;
     color: var(--text-2);
+
     b {
       color: var(--text);
-      font-size: 14px;
+      font-size: var(--fs-ui);
+      font-weight: 500;
+    }
+    .key {
+      font-family: var(--font-mono);
+      font-size: var(--fs-sm);
     }
     .badge {
       align-self: flex-start;
       margin-top: 4px;
     }
-    &.static {
-      background: var(--surface-2);
+    /* Decided: the options not taken step back. */
+    &.static:not(.chosen) {
+      color: var(--text-3);
+
+      b {
+        color: var(--text-2);
+      }
     }
+    /* The one taken: the accent in its border, and a tick. */
     &.chosen {
-      border-color: color-mix(in srgb, var(--ok) 55%, var(--line));
-      background: var(--ok-soft);
+      border-color: var(--sky);
+      background: var(--sky-soft);
+      box-shadow: inset 0 0 0 0.5px var(--sky);
+
+      .badge {
+        padding: 0;
+        background: none;
+        color: var(--sky);
+      }
     }
   }
   button.opt {
@@ -226,14 +261,16 @@
     &::before {
       content: '';
       position: absolute;
-      inset: -1px;
+      inset: 0;
       z-index: -1;
-      border: 1px solid var(--dawn);
-      border-radius: inherit;
-      background: var(--dawn-soft);
+      border-radius: 11px;
+      background: var(--surface-2);
       opacity: 0;
       pointer-events: none;
       transition: opacity var(--dur-1) var(--ease);
+    }
+    &:not([disabled]):active::before {
+      opacity: 1;
     }
   }
   @media (hover: hover) {
@@ -242,16 +279,14 @@
     }
   }
   button.opt[disabled] {
-    background: var(--surface-2);
-    color: var(--text-3);
-    border-style: dashed;
+    opacity: 0.55;
     cursor: not-allowed;
   }
   .answer {
-    padding: 8px 10px;
+    padding: 10px 12px;
     border-radius: var(--r-md);
     background: var(--surface-2);
-    font-size: var(--fs-sm);
+    font-size: var(--fs-ui);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }

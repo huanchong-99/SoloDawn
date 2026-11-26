@@ -42,7 +42,7 @@
   /* Wide: the list beside what is open. Narrow: one of the two. (design notes, 3.4) */
   .groups {
     display: grid;
-    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
     height: 100%;
   }
   .groups > :global(*) {
@@ -56,9 +56,9 @@
   .groups > :global(:nth-child(2)) {
     animation-delay: var(--stagger), 0s;
   }
+  /* The list recedes: it stands on the page colour, as the navigation does. */
   .list {
     border-right: 1px solid var(--line);
-    background: var(--surface);
     overflow: auto;
   }
   .rest {
@@ -71,17 +71,16 @@
     justify-items: start;
     gap: var(--sp-4);
     padding: var(--sp-2) var(--sp-4);
+    background: var(--surface);
   }
   .missing p {
     max-width: 420px;
-    padding: var(--sp-4) var(--sp-5);
-    border: 1px dashed var(--line-strong);
-    border-radius: var(--r-lg);
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
     color: var(--text-2);
-    font-size: var(--fs-sm);
-    animation:
-      rise var(--dur-3) var(--ease-out),
-      appear var(--dur-2) var(--ease-out);
+    font-size: var(--fs-ui);
+    animation: appear var(--dur-2) var(--ease-out);
   }
   @media (min-width: 1280px) {
     .missing .back {

@@ -41,7 +41,7 @@
       </div>
     </div>
     {#if waiting.length}
-      <ul class="card need todos">
+      <ul class="card todos">
         {#each waiting as { group, msg, kind }, i (msg.id)}
           <li class="todo" style:--i={Math.min(i, 8)}>
             <Icon name={icons[kind]} />
@@ -60,12 +60,10 @@
         {/each}
       </ul>
     {:else}
-      <div class="card calm">
-        <span class="mark"><Icon name="check" /></span>
-        <div>
-          <b>{t('groups.waiting.none')}</b>
-          <p class="muted">{t('groups.waiting.none.body')}</p>
-        </div>
+      <div class="calm blank">
+        <span class="blank-mark"><Icon name="check" /></span>
+        <b>{t('groups.waiting.none')}</b>
+        <p>{t('groups.waiting.none.body')}</p>
       </div>
     {/if}
   </section>
@@ -77,48 +75,46 @@
     flex-direction: column;
     gap: var(--sp-4);
     width: 100%;
-    max-width: var(--measure);
+    max-width: calc(640px + 2 * var(--sp-6));
     margin-inline: auto;
-    padding: var(--sp-6);
+    padding: var(--sp-8) var(--sp-6);
   }
+  /* What waits, as rows on one card: the kind's glyph, the sentence, the group, the way there. */
   .todos {
     padding: 0;
     gap: 0;
   }
   .todo {
+    position: relative;
     display: flex;
     align-items: center;
     gap: var(--sp-3);
-    padding: 12px var(--sp-4);
+    min-height: 60px;
+    padding: 10px var(--sp-4);
     animation:
-      rise var(--dur-3) var(--ease-out) calc(var(--i) * 45ms) backwards,
-      appear var(--dur-2) var(--ease-out) calc(var(--i) * 45ms) backwards;
+      rise var(--dur-3) var(--ease-out) calc(var(--i) * var(--stagger)) backwards,
+      appear var(--dur-2) var(--ease-out) calc(var(--i) * var(--stagger)) backwards;
   }
-  .todo + .todo {
+  .todo + .todo::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto var(--sp-4);
     border-top: 1px solid var(--line);
   }
   .todo :global(.i) {
-    color: var(--dawn-text);
+    color: var(--text-2);
+  }
+  .todo b {
+    display: block;
+    font-size: var(--fs-ui);
+    font-weight: 500;
+    line-height: 1.45;
   }
   .todo p {
-    font-size: var(--fs-sm);
+    font-size: var(--fs-xs);
+    line-height: 1.4;
   }
   .calm {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--sp-3);
-  }
-  .calm p {
-    font-size: var(--fs-sm);
-  }
-  .mark {
-    display: grid;
-    place-items: center;
-    flex: none;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--ok-soft);
-    color: var(--ok);
+    margin-top: var(--sp-8);
   }
 </style>

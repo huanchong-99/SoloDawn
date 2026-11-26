@@ -47,48 +47,45 @@
 </span>
 
 <style>
+  /* 36px in the main line and the side panel, 20px (`sm`) in a thread and inside a card; a part
+     that wants another size sets --av or --av-sm. The tint is drawn from the hue: a pale ground
+     and the initial in a darker shade of the same hue, 7:1 or more in both themes. */
   .av {
+    --s: var(--av, 36px);
     display: inline-grid;
     place-items: center;
     flex: none;
-    width: 32px;
-    height: 32px;
+    width: var(--s);
+    height: var(--s);
     border-radius: 50%;
-    background: color-mix(in oklch, oklch(0.72 0.13 var(--h)) 26%, var(--surface-2));
-    color: var(--text);
-    font-size: 13px;
+    background: light-dark(oklch(0.94 0.04 var(--h)), oklch(0.32 0.05 var(--h)));
+    color: light-dark(oklch(0.42 0.09 var(--h)), oklch(0.86 0.07 var(--h)));
+    font-size: calc(var(--s) * 0.4);
     font-weight: 600;
     line-height: 1;
   }
   /* The card colour behind a mark keeps the brand colours at 3:1 or more in both themes. */
   .ai {
-    border: 1px solid var(--line-strong);
-    border-radius: 9px;
-    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 30%;
+    background: var(--raised);
   }
   svg {
-    width: 62%;
-    height: 62%;
+    width: 58%;
+    height: 58%;
   }
   .sm {
-    width: 22px;
-    height: 22px;
-    font-size: 10px;
-  }
-  .sm.ai {
-    border-radius: 6px;
+    --s: var(--av-sm, 20px);
   }
   .group {
-    width: 44px;
-    height: 44px;
-    border-radius: 13px;
-    background: color-mix(in oklch, oklch(0.7 0.14 var(--h)) 24%, var(--surface-2));
-    font-size: 15px;
+    --s: 44px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 500;
   }
   .group.sm {
-    width: 32px;
-    height: 32px;
-    border-radius: 10px;
+    --s: 32px;
+    border-radius: 9px;
     font-size: 13px;
   }
 </style>

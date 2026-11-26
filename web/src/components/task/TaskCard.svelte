@@ -176,33 +176,51 @@
       order: 1;
     }
   }
+  /* The stages as one row of segments, however many there are: done, the one being worked on,
+     one that waits for the person, and those to come. A new stage fills its segment from the
+     left. The words beside the row say the stage, so colour is not its only carrier. */
   .steps {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 2px;
+
     i {
+      position: relative;
       flex: 1;
       height: 4px;
       border-radius: 2px;
       background: var(--surface-3);
+      overflow: hidden;
+    }
+    i::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: var(--fill, transparent);
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform var(--dur-3) var(--ease-out);
+    }
+    i[data-s]::before {
+      transform: none;
     }
     i.skip {
       opacity: 0.45;
     }
     i[data-s='done'] {
-      background: color-mix(in srgb, var(--ok) 75%, var(--surface));
+      --fill: var(--ok);
     }
     i[data-s='now'] {
-      background: var(--sky);
+      --fill: var(--sky);
     }
     i[data-s='wait'] {
-      background: var(--dawn);
+      --fill: var(--dawn);
     }
     i[data-s='fail'] {
-      background: var(--danger);
+      --fill: var(--danger);
     }
     span {
-      margin-left: 8px;
+      margin-left: 10px;
       color: var(--text-3);
       font-size: var(--fs-xs);
       white-space: nowrap;
@@ -218,16 +236,23 @@
   .res {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: 4px;
     margin-right: 10px;
-    font-weight: 500;
     white-space: nowrap;
     color: var(--tone-text, var(--text-2));
   }
   code {
-    padding: 1px 5px;
+    padding: 2px 6px;
     border-radius: var(--r-sm);
     background: var(--surface-2);
+    font-size: var(--fs-xs);
     overflow-wrap: anywhere;
+  }
+  /* The way into the thread: its count in the accent, the newest line beside it. */
+  .thread-fold > summary b {
+    color: var(--sky);
+  }
+  .thread-fold > summary .cut {
+    color: var(--text-3);
   }
 </style>
