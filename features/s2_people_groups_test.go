@@ -91,11 +91,7 @@ func (w *s2PeopleWorld) qListsOtherGroup(name string) error {
 // laterBrowserLists enrolls another browser of Q, connects it to P1 and
 // reads the groups its welcome lists.
 func (w *s2PeopleWorld) laterBrowserLists(name string) error {
-	b, err := w.cast.AddBrowser(w.cast.Q, "Q later")
-	if err != nil {
-		return err
-	}
-	bc, err := openS2PeopleCtl(w.cast.Ctx, w.cleanup, b, w.cast.P1.ID())
+	bc, err := w.connectLaterBrowser()
 	if err != nil {
 		return err
 	}
@@ -113,6 +109,21 @@ func (w *s2PeopleWorld) laterBrowserLists(name string) error {
 		return fmt.Errorf("the welcome of Q's later browser lists %+v, want %q", welc.Groups, name)
 	}
 	return nil
+}
+
+// connectLaterBrowser connects the new browser once P1 has applied its device
+// entry, which the entry's device row on Q's connected browser shows: until
+// then P1 drops the browser's signalling as unknown_device
+// (contracts/envelope.md section 3).
+func (w *s2PeopleWorld) connectLaterBrowser() (*peerBrowserConn, error) {
+	b, err := w.cast.AddBrowser(w.cast.Q, "Q later")
+	if err != nil {
+		return nil, err
+	}
+	if err := w.awaitQJoinedOnView(w.qView, w.qHomeBC); err != nil {
+		return nil, err
+	}
+	return openS2PeopleCtl(w.cast.Ctx, w.cleanup, b, w.cast.P1.ID())
 }
 
 func (w *s2PeopleWorld) addStrangerRefused(code string) error {
