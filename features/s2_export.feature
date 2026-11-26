@@ -21,3 +21,9 @@ Feature: Step 2 exporting and importing a group
     Then P2 is home and has the exported rows
     When Q follows an invitation from P2 and join succeeds without adding a member row
     Then Q's browser peer and Q1 use P2 as the restored home
+
+  Scenario: A file that v3.0.0-rc.1 wrote is refused in one line that says why (A8.7)
+    Given P has a project group "Comet" on P1 with Q and Q-team on Q1
+    When P takes a copy on P1 that carries the schema version of v3.0.0-rc.1
+    Then importing that copy on P2 is refused in one line that says it was written by another version
+    And P2 holds no row of the group

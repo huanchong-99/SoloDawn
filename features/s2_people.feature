@@ -11,6 +11,20 @@ Feature: Step 2 people, invitations, roles, removal and host surfaces
     Then Q has a human member row with role "member" and Q's device log is on P1 as device rows
     And both P's and Q's browsers show Q and the pre-join history without a reload
 
+  Scenario: A group of people without an AI has a main line, notes and members, and a later joiner reads its history (A9.22)
+    Given the people cast with P's group "Alpha" on P1 and pre-join history "Welcome before Q"
+    And P writes the note "Shared plan" in the people group
+    When P creates an invitation for the people group on P1
+    And Q's browser joins the people group with that #join link as "Q"
+    Then Q's browser reads the main line "Welcome before Q", the note "Shared plan" and the members P and Q, and the group has no AI
+
+  Scenario: A person who is already in another group on the home is added without a link (A9.46)
+    Given the people cast where Q has joined P's group "Alpha" on P1 as "Q"
+    When P creates group "Beta" on P1 and adds Q to it as "Q"
+    Then Q's connected browser lists "Beta" without a reload
+    And a browser of Q that connects to P1 later lists "Beta"
+    And add_person on P1 for a person who is in no group there is refused with "not_found"
+
   Scenario: Invalid device log, second use, expired invitation and member invite refusal (A9.2)
     Given an in-process home node P1 for P with group "Alpha" under a controllable people clock
     When P creates an invitation with nonce "inv-1" on the controllable home
@@ -49,7 +63,7 @@ Feature: Step 2 people, invitations, roles, removal and host surfaces
   Scenario: Joining Q-team from Q1 and refusing non-member or duplicate-secretary add_ai (A9.5)
     Given the people cast where P's group "Alpha" on P1 has a secretary, P also has group "Solo" and Q has joined only the first as "Q"
     When Q1 joins Q-team to the people group with host.join
-    Then Q-team's member row has host Q1 and user Q and Q1 holds a Git clone
+    Then Q-team's member row has host Q1, user Q and the folder Q chose as its workspace
     And Q's host.join to Q1 for P's other group is refused with "forbidden"
     And host.join from Q with secretary true while the group has a secretary is refused with "forbidden"
 

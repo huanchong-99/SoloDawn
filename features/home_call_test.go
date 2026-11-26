@@ -84,7 +84,7 @@ func (w *homeCallWorld) start() error {
 	w.state.Tasks[w.taskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.taskID, Seq: 6}, Group: grp, Num: 1,
 		Title: "Report path changes", Origin: "brief",
-		State: "active", Step: "local_check", Assignee: w.members["ai-one"], Reviewer: w.members["ai-two"],
+		State: "active", Step: "work", Assignee: w.members["ai-one"], Reviewer: w.members["ai-two"],
 		Pass: 90, Depends: []string{}, Created: w.now.UnixMilli() - 60_000, Stats: proto.TaskStats{Started: w.now.UnixMilli() - 60_000},
 	}
 	w.state.Seq, w.state.Num = 6, 1

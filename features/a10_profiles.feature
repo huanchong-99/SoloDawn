@@ -21,10 +21,10 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     And the owner sends member set for "L" with tier "light" and skills "docs"
     And L is limited and the host of S is offline
     When C takes its next turn
-    Then the turn lists every AI member with its tier, state and skills as in section 3 of the profiles contract
+    Then the turn lists every AI member with its folder, tier, state and skills as in section 3 of the profiles contract
     And the turn lists L as "limited" and S as "offline"
     And C's instructions hold the four rules of assignment
-    And list_members answers as in step 1
+    And list_members answers as in step 1, with each AI's folder
 
   Scenario: Escalation of a stuck assignee (A10.10)
     Given the profiles cast with M the assignee of task T
@@ -35,12 +35,12 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     Then task T has stuck kind "review", n 2 and ask true
     And the browser shows the badge "must ask a stronger AI" on task T
     And M's reviewed item ends with the line naming S and not L or C
-    And submit_task by M fails with "conflict" with no push, no pull request and no report
+    And submit_task by M fails with "conflict" and there is no report
     When L replies to M's call in the thread of task T
     And S replies to L's call in the thread of task T
     And S replies to M's call in the thread of another task
     And the host of S goes offline
-    Then submit_task by M fails with "conflict" with no push, no pull request and no report
+    Then submit_task by M fails with "conflict" and there is no report
     When the host of S returns
     And S replies to M's call in the thread of task T
     Then task T has stuck kind "review", n 2 and ask false
@@ -49,18 +49,7 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     When M fails a review
     Then task T has stuck kind "review", n 3 and ask true
     And M's reviewed item ends with the line naming S and not L or C
-    And submit_task by M fails with "conflict" with no push, no pull request and no report
-    Given the profiles cast with M the assignee of task T
-    When M fails hosted checks
-    And M fails hosted checks
-    Then task T has stuck kind "checks", n 2 and ask true
-    And the browser shows the badge "must ask a stronger AI" on task T
-    And M's checks item ends with the line naming S and not L or C
-    And submit_task by M fails with "conflict" with no push, no pull request and no report
-    When S replies to M's call in the thread of task T
-    Then task T has stuck kind "checks", n 2 and ask false
-    And the browser shows no badge "must ask a stronger AI" on task T
-    And submit_task by M succeeds
+    And submit_task by M fails with "conflict" and there is no report
 
   Scenario: No stronger AI, and the secretary as candidate (A10.11)
     Given the profiles cast with S the assignee of task T
@@ -83,15 +72,6 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     Then task T has stuck kind "review", n 2 and ask false
 
   Scenario: What counts as failures in a row (A10.12)
-    Given the profiles cast with M the assignee of task T
-    When M fails hosted checks
-    And M fails a review
-    Then task T has stuck kind "review", n 1 and ask false
-    Given the profiles cast with M the assignee of task T
-    When M fails a review
-    And M passes hosted checks on the next commit
-    And M fails a review
-    Then task T has stuck kind "review", n 2 and ask true
     Given the profiles cast with M the assignee of task T
     When M fails a review
     And M passes a review

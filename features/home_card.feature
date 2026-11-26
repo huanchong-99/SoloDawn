@@ -52,6 +52,20 @@ Feature: Approval and decision cards in the home
     And the card task waits for "nothing"
     And the card home has queued "decided secretary task 1, decided ai-one task 1"
 
+  Scenario Outline: An approval card that ended because its task went to another AI names who gave it (A5.23)
+    Given a card home with an active task assigned to "ai-one"
+    And "ai-one" has posted an approval card for command "npm test"
+    When <who> gives the card task to "ai-three"
+    Then the card home answers ok
+    And the approval card ended "reassigned" by "<member>"
+    And the card task waits for "nothing"
+    And the card home has queued "assign ai-three task 1"
+
+    Examples:
+      | who           | member    |
+      | the owner     | owner     |
+      | the secretary | secretary |
+
   Scenario Outline: Unauthorized signers and malformed card actions are refused
     Given a card home with an active task assigned to "ai-one"
     And "ai-one" has posted an approval card for command "npm install"

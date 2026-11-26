@@ -76,8 +76,8 @@ func homeMachineSteps(sc *godog.ScenarioContext, _ fixtures) {
 	sc.Step(`^the (host|secretary|admin|person|assignee|reviewer) sends "([^"]*)" to the task machine$`, func(sender, kind string) {
 		m.send(sender, kind, home.Event{Report: "c1", OK: true})
 	})
-	sc.Step(`^the host sends "([^"]*)" for commit "([^"]*)" to the task machine$`, func(kind, commit string) {
-		m.send("host", kind, home.Event{Report: commit, OK: true})
+	sc.Step(`^the (assignee|reviewer) sends "([^"]*)" for report "([^"]*)" to the task machine$`, func(sender, kind, report string) {
+		m.send(sender, kind, home.Event{Report: report, OK: true})
 	})
 	sc.Step(`^the secretary names "([^"]*)" as the task's (assignee|reviewer)$`, func(ai, role string) {
 		e := home.Event{Assignee: ai}
@@ -116,9 +116,18 @@ func homeMachineSteps(sc *godog.ScenarioContext, _ fixtures) {
 		}
 		return nil
 	})
-	sc.Step(`^every queued item of the task is retired and its pending cards expire$`, func() error {
-		if !reflect.DeepEqual(m.fx.Retire, []home.ItemFilter{{}}) || m.fx.Cards != "expired" {
-			return fmt.Errorf("the task machine retires %+v and makes the pending cards %q", m.fx.Retire, m.fx.Cards)
+	sc.Step(`^the task machine writes a "([^"]*)" system message and its pending cards expire$`, func(code string) error {
+		if m.fx.System != code || m.fx.Main || m.fx.Cards != "expired" {
+			return fmt.Errorf("the task machine writes system %q (main %v) and makes the pending cards %q", m.fx.System, m.fx.Main, m.fx.Cards)
+		}
+		return nil
+	})
+	sc.Step(`^the task machine retires the queued review items and queues "([^"]*)"$`, func(want string) error {
+		if !reflect.DeepEqual(m.fx.Retire, []home.ItemFilter{{Why: "review"}}) {
+			return fmt.Errorf("the task machine retires %+v", m.fx.Retire)
+		}
+		if got := homeMachineItems(m.fx.Items); got != want {
+			return fmt.Errorf("the task machine queued %q, want %q", got, want)
 		}
 		return nil
 	})

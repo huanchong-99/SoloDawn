@@ -41,7 +41,7 @@ Feature: Group and member commands in the home
     Then the group command answers "conflict"
     When the owner sets the group secretary to "Codex"
     Then the group command answers "conflict"
-    When that task becomes "merged"
+    When that task becomes "done"
     And the owner removes AI "Codex"
     Then the group command answers ok
     And AI "Codex" is gone and inbox item 0 is retired

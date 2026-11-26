@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -66,26 +67,24 @@ func (w *homeReviewWorld) PutReceipt(signer, nonce string, _ int64, result store
 
 func homeReviewSteps(sc *godog.ScenarioContext) {
 	w := &homeReviewWorld{now: time.UnixMilli(1763600000000)}
-	gone := rewritten("AC-3", "a task has no checks, remote or pull request: the assignee submits by a post of kind report (MODEL-1126 plan 1.6)")
-	sc.Step(`^a review home without a remote$`, w.setup)
-	sc.Step(`^a review home with a GitHub remote$`, gone)
-	sc.Step(`^the assignee's host reports "(passing|failing)" local checks on commit "([^"]*)"$`, gone)
-	sc.Step(`^the assignee's host has reported passing local checks on commit "([^"]*)"$`, gone)
-	sc.Step(`^the assignee's host submits commit "([^"]*)"$`, w.submit)
-	sc.Step(`^the assignee's host submits commit "([^"]*)" on pull request (\d+)$`, gone)
-	sc.Step(`^the assignee's host reports "(passing|failing)" hosted checks on commit "([^"]*)"$`, gone)
-	sc.Step(`^commit "([^"]*)" (?:has reached step "review"|is checked and submitted for review)$`, w.reachReview)
-	sc.Step(`^"([^"]*)" posts a review of commit "([^"]*)" with score (\d+)$`, func(who, c string, score int) error {
-		return w.postReview(who, c, score, false)
+	sc.Step(`^a review home$`, w.setup)
+	sc.Step(`^the (assignee|reviewer) submits report "([^"]*)"$`, w.submitAs)
+	sc.Step(`^report "([^"]*)" (?:has reached step "review"|is submitted for review)$`, w.reachReview)
+	sc.Step(`^(\d+) minutes pass$`, func(n int) { w.now = w.now.Add(time.Duration(n) * time.Minute) })
+	sc.Step(`^"([^"]*)" posts a review of report "([^"]*)" with score (\d+)$`, func(who, r string, score int) error {
+		return w.postReview(who, r, score, false)
 	})
-	sc.Step(`^"([^"]*)" posts a veto review of commit "([^"]*)" with score (\d+)$`, func(who, c string, score int) error {
-		return w.postReview(who, c, score, true)
+	sc.Step(`^"([^"]*)" posts a veto review of report "([^"]*)" with score (\d+)$`, func(who, r string, score int) error {
+		return w.postReview(who, r, score, true)
 	})
-	sc.Step(`^(\d+) more reviews fail on new commits$`, w.failMoreReviews)
+	sc.Step(`^(\d+) more reviews fail on new reports$`, w.failMoreReviews)
+	sc.Step(`^the thread of the review task ends with system "([^"]*)"$`, w.checkLastSystem)
+	sc.Step(`^the secretary posts summary "([^"]*)" for the review task$`, w.postSummary)
+	sc.Step(`^the summary appears in the thread and the main line with score (\d+), (\d+) round and (\d+) minutes$`, w.checkSummary)
 	sc.Step(`^the review home answers ok$`, func() error { return w.checkAnswer("") })
 	sc.Step(`^the review home answers "([^"]*)"$`, w.checkAnswer)
 	sc.Step(`^the review home answers review passed (true|false) in round (\d+)$`, w.checkReviewAnswer)
-	sc.Step(`^the review task is "([^"]*)" at step "([^"]*)" for commit "([^"]*)"$`, w.checkTask)
+	sc.Step(`^the review task is "([^"]*)" at step "([^"]*)" for report "([^"]*)"$`, w.checkTask)
 	sc.Step(`^the latest review row has score (\d+) and ok (true|false)$`, w.checkReviewRow)
 	sc.Step(`^the review home has queued "([^"]*)"$`, w.checkQueued)
 }
@@ -174,19 +173,21 @@ func (w *homeReviewWorld) apply(by identity.Key, payload any) error {
 	return nil
 }
 
-// submit posts the assignee's report, which the scenarios name as they named a commit.
-func (w *homeReviewWorld) submit(name string) error {
+// submit posts the assignee's report under the name a scenario gives it.
+func (w *homeReviewWorld) submit(name string) error { return w.submitAs("assignee", name) }
+
+func (w *homeReviewWorld) submitAs(role, name string) error {
 	w.queuedOut = nil
 	tid, id := proto.ID(w.taskID), w.reportID(name)
 	w.reports[string(id)] = name
 	p := proto.Post[proto.EmptyBody]{
 		HomeCommand: proto.HomeCommand{
 			Type: "post", Nonce: id, Timestamp: w.now.UnixMilli(),
-			Group: proto.ID(w.state.ID), As: proto.ID(w.members["assignee"]),
+			Group: proto.ID(w.state.ID), As: proto.ID(w.members[role]),
 		},
 		Kind: "report", Thread: &tid, Text: "Ready for review.", Mentions: []proto.ID{}, Body: proto.EmptyBody{},
 	}
-	return w.apply(w.hosts["assignee"], p)
+	return w.apply(w.hosts[role], p)
 }
 
 func (w *homeReviewWorld) reportID(name string) proto.ID { return exampleID("rev report " + name) }
@@ -210,7 +211,7 @@ func (w *homeReviewWorld) postReview(role, commit string, score int, veto bool) 
 
 func (w *homeReviewWorld) failMoreReviews(count int) error {
 	for i := range count {
-		commit := fmt.Sprintf("c%d", i+3)
+		commit := fmt.Sprintf("r%d", i+3)
 		if err := w.reachReview(commit); err != nil {
 			return err
 		}
@@ -245,6 +246,69 @@ func (w *homeReviewWorld) checkTask(state, step, commit string) error {
 	t := w.state.Tasks[w.taskID]
 	if t.State != state || t.Step != step || t.Report != string(w.reportID(commit)) {
 		return fmt.Errorf("task is state=%q step=%q report=%q", t.State, t.Step, w.reports[t.Report])
+	}
+	return nil
+}
+
+func (w *homeReviewWorld) checkLastSystem(code string) error {
+	last := w.state.Tasks[w.taskID].Thread.Last
+	if last == nil || last.Kind != "system" {
+		return fmt.Errorf("the thread ends with %+v", last)
+	}
+	for _, m := range w.msgs {
+		if w.taskSystem(m, last.Timestamp) == code {
+			return nil
+		}
+	}
+	return fmt.Errorf("the thread of the task holds no system message %q", code)
+}
+
+// taskSystem is the code of a system message in the task's thread written at
+// that time, else "".
+func (w *homeReviewWorld) taskSystem(m proto.MsgRow, ts int64) string {
+	var body proto.SystemCode
+	if m.Kind != "system" || m.Thread == nil || *m.Thread != w.taskID || m.Timestamp != ts || json.Unmarshal(m.Body, &body) != nil {
+		return ""
+	}
+	return body.Code
+}
+
+func (w *homeReviewWorld) postSummary(text string) error {
+	tid := proto.ID(w.taskID)
+	p := proto.Post[proto.EmptyBody]{
+		HomeCommand: proto.HomeCommand{
+			Type: "post", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(),
+			Group: proto.ID(w.state.ID), As: proto.ID(w.members["secretary"]),
+		},
+		Kind: "summary", Thread: &tid, Main: true, Text: text, Mentions: []proto.ID{}, Body: proto.EmptyBody{},
+	}
+	if err := w.apply(w.hosts["secretary"], p); err != nil {
+		return err
+	}
+	w.lastMsg = w.msgs[string(p.Nonce)]
+	return nil
+}
+
+func (w *homeReviewWorld) checkSummary(score, rounds, minutes int) error {
+	if err := w.checkSummaryRow(proto.SummaryBody{Task: w.taskID, Score: score, Rounds: rounds, Minutes: minutes}); err != nil {
+		return err
+	}
+	last := w.state.Tasks[w.taskID].Thread.Last
+	if last == nil || [2]string{last.Kind, last.By} != [2]string{"summary", w.members["secretary"]} {
+		return fmt.Errorf("the thread ends with %+v", last)
+	}
+	return nil
+}
+
+// checkSummaryRow checks that the summary is in the task's thread and in the
+// main line, with that body.
+func (w *homeReviewWorld) checkSummaryRow(want proto.SummaryBody) error {
+	var body proto.SummaryBody
+	if err := json.Unmarshal(w.lastMsg.Body, &body); err != nil {
+		return err
+	}
+	if body != want || !w.lastMsg.Main || !reflect.DeepEqual(w.lastMsg.Thread, &w.taskID) {
+		return fmt.Errorf("summary row main=%v thread=%v body=%+v; want %+v", w.lastMsg.Main, w.lastMsg.Thread, body, want)
 	}
 	return nil
 }

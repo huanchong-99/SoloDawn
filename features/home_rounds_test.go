@@ -271,7 +271,7 @@ func (w *homeRoundsWorld) seedGroupCmd(assignee string, idleMin int) home.Func {
 		}
 		task := proto.TaskRow{
 			RowHeader: proto.RowHeader{Type: "task", ID: w.taskID}, Group: s.ID, Num: 1,
-			Title: "Task 1", Origin: "brief", State: "active", Step: "local_check",
+			Title: "Task 1", Origin: "brief", State: "active", Step: "work",
 			Assignee: w.members[assignee], Reviewer: w.members["ai-two"], Pass: 90, Depends: []string{},
 			Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
 		}

@@ -73,7 +73,7 @@ Feature: A request for another person's AI needs its owner's word
       """
     And "P-work" is scripted for confirmation tools:
       """
-      [[],[{"name":"run_checks"}],[{"name":"submit_task","args":{"summary":"Ready to inspect"}}]]
+      [[],[{"name":"submit_task","args":{"summary":"Ready to inspect"}}]]
       """
     When P asks "Secretary" in "main" with "Plan the two roles" as "plan" for confirmation
     Then a confirmation "msg" row is seen as "brief":
@@ -96,15 +96,9 @@ Feature: A request for another person's AI needs its owner's word
       """
     And "P-work" receives a confirmation turn matching "^== .* · assign · instruction$"
     And "P-work" is waiting after its confirmation turn
-    And "P-work" has a task commit "Ready to inspect"
     And the confirmation "task" rows contain 0 matches:
       """
       {"id":"${inspect}","wait":{"kind":"confirm"}}
-      """
-    When P asks "P-work" in "inspect" with "Run checks for review" as "checks" for confirmation
-    Then a confirmation "task" row is seen as "inspect":
-      """
-      {"id":"${inspect}","checks":{"local":{"ok":true}}}
       """
     When P asks "P-work" in "inspect" with "Submit for review" as "submit" for confirmation
     Then a confirmation "task" row is seen as "inspect":
@@ -113,7 +107,7 @@ Feature: A request for another person's AI needs its owner's word
       """
     And "Q-personal" has 0 confirmation items of kind "assign"
     And "Q-personal" has 0 confirmation items of kind "review"
-    And Q1 has no confirmation task or review checkout
+    And Q1 has no session of the tasks "implement" and "inspect"
     And P's confirmation browser sees "card" as "pending"
     When Q sends confirmation action "confirm" on "card"
     Then the confirmation command answers "ok"
@@ -362,7 +356,7 @@ Feature: A request for another person's AI needs its owner's word
       """
     And "Q-team" is scripted for confirmation tools:
       """
-      [[],[{"name":"run_checks"}],[{"name":"submit_task","args":{"summary":"Path ready for review"}}],[]]
+      [[],[{"name":"submit_task","args":{"summary":"Path ready for review"}}],[]]
       """
     And "P-work" is scripted for confirmation tools:
       """
@@ -381,12 +375,6 @@ Feature: A request for another person's AI needs its owner's word
       """
     And "Q-team" receives a confirmation turn matching "^== .* · assign · instruction$"
     And "Q-team" is waiting after its confirmation turn
-    And "Q-team" has a task commit "Path ready for review"
-    When Q asks "Q-team" in "task" with "Check the path" as "checks" for confirmation
-    Then a confirmation "task" row is seen as "task":
-      """
-      {"id":"${task}","checks":{"local":{"ok":true}}}
-      """
     When Q asks "Q-team" in "task" with "Submit the path" as "submit" for confirmation
     Then "Q-team" receives a confirmation turn matching "^== [0-9]+ of [0-9]+ · reviewed · instruction\n-- from .P-work. \(AI\) in T-[0-9]+ · information$"
 

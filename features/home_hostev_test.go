@@ -183,7 +183,7 @@ func (w *homeHostEvWorld) setup(secMode string) error {
 	w.state.Tasks[w.taskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.taskID}, Group: group, Num: 1,
 		Title: "Handle host events", Origin: "brief",
-		State: "active", Step: "local_check", Assignee: w.members["codex"], Reviewer: w.members["claude"], Depends: []string{},
+		State: "active", Step: "work", Assignee: w.members["codex"], Reviewer: w.members["claude"], Depends: []string{},
 	}
 	w.state.Seq = 10
 	w.disk, w.receipts, w.items = homeHostEvDisk{}, homeHostEvReceipts{}, nil

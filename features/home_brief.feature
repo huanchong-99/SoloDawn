@@ -20,17 +20,17 @@ Feature: Briefs and their confirmation in the home
     Then the home answers ok to both
     And the brief is "confirmed"
     And the home holds 2 tasks
-    And task 1 is "active" and task 2 is "queued" until task 1 is merged
+    And task 1 is "active" and task 2 is "queued" until task 1 is done
     And the home has queued "assign ai-one task 1, confirmed secretary"
 
-  Scenario: A task that depends on another starts only after that one merged
+  Scenario: A task that depends on another starts only after that one is done (A5.6)
     Given a group home with a secretary and three working AIs
     And the secretary has posted the brief
     And the owner has confirmed the brief
     When the secretary gives task 2 to "ai-three" while it is queued
-    Then task 2 is "queued" and the home has queued nothing that makes a worktree
-    When task 1 is merged
-    Then task 2 is "active" and the home has queued "assign ai-three task 2"
+    Then task 2 is "queued" and the home has queued no work item
+    When 15 minutes pass and task 1 is done
+    Then task 2 is "active", started when task 1 was done, and the home has queued "notice secretary task 1, assign ai-three task 2"
 
   Scenario: Sending a brief back tells the secretary, and a new brief supersedes it
     Given a group home with a secretary and three working AIs

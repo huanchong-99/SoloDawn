@@ -14,15 +14,12 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-// s2ConfirmNoWorktree is what the steps that MODEL-1126 took away say when they fail.
-const s2ConfirmNoWorktree = "a task runs in its assignee's workspace: there is no task worktree or review checkout (MODEL-1126 plan 1.5)"
-
 func s2ConfirmObservationSteps(sc *godog.ScenarioContext, w *s2ConfirmWorld) {
 	sc.Step(`^a confirmation "(msg|task|member|group)" row is seen as "([^"]+)":$`, w.awaitRow)
 	sc.Step(`^the confirmation "(msg|task|member|group)" rows contain (\d+) matches:$`, w.countRows)
 	sc.Step(`^"([^"]+)" receives a confirmation turn matching "([^"]+)"$`, w.awaitTurn)
 	sc.Step(`^"([^"]+)" has (\d+) confirmation items of kind "([^"]+)"$`, w.countItems)
-	sc.Step(`^Q1 has no confirmation task or review checkout$`, rewritten("AC-3", s2ConfirmNoWorktree))
+	sc.Step(`^Q1 has no session of the tasks "([^"]+)" and "([^"]+)"$`, w.noQSessions)
 	sc.Step(`^the approval "([^"]+)" mentions P and Q$`, w.approvalMentions)
 	sc.Step(`^P's confirmation browser sees "([^"]+)" as "([^"]+)"$`, w.browserCardStatus)
 }
@@ -224,4 +221,16 @@ func (w *s2ConfirmWorld) awaitIdle(ai string) error {
 		ids, err := w.matchRows("member", map[string]any{"id": w.ais[ai].ID, "state": "waiting"})
 		return len(ids) == 1, err
 	})
+}
+
+// noQSessions checks that Q1 holds no session of either task.
+func (w *s2ConfirmWorld) noQSessions(first, second string) error {
+	rows, err := readS2SQLiteRows(w.cast.Ctx, s2ExportDB(w.cast.Q1), "SELECT member, task FROM session WHERE g = ? AND task IN (?, ?)", w.gid, w.ids[first], w.ids[second])
+	if err != nil {
+		return err
+	}
+	if len(rows) != 0 {
+		return fmt.Errorf("Q1 has sessions of those tasks: %v", rows)
+	}
+	return nil
 }

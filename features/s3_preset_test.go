@@ -464,31 +464,55 @@ func (w *s3PresetWorld) checkTwoTaskTurns(preset string) error {
 	}
 	wantBlock := fmt.Sprintf("Style preset %q:\nPrinciples: one accent colour; no motion longer than 200 ms.\nNotes of this group:\n- Keep routes flat.", preset)
 	for _, t := range briefTasks {
-		turnText, err := w.composeTaskAssign(t)
-		if err != nil {
+		if err := w.checkTaskTurns(t, preset, wantBlock); err != nil {
 			return err
-		}
-		if !strings.Contains(turnText, wantBlock) {
-			return fmt.Errorf("task T-%d assign turn missing preset block:\n%s", t.Num, turnText)
-		}
-		revSess := host.Session{
-			SessionKey: host.SessionKey{Group: w.group, Member: t.Reviewer, Task: t.ID},
-			Kind:       host.ReviewSession,
-			Home:       w.node.ID(),
-			Name:       "Reviewer",
-		}
-		revRaw, _ := json.Marshal(proto.InboxItem{
-			Item: proto.Item{Item: 2, AI: proto.ID(t.Reviewer), Why: "review", Task: proto.ID(t.ID), Msg: proto.ID(w.nextID("report"))},
-		})
-		revText, _, err := host.Compose(w.h, revSess, host.ItemsTurn, []json.RawMessage{revRaw})
-		if err != nil {
-			return err
-		}
-		if !strings.HasSuffix(revText, fmt.Sprintf("Style preset: %q", preset)) {
-			return fmt.Errorf("task T-%d review turn missing preset name:\n%s", t.Num, revText)
 		}
 	}
 	return nil
+}
+
+// checkTaskTurns checks that a task's assign turn holds the preset's block
+// and its review turn names the preset.
+func (w *s3PresetWorld) checkTaskTurns(t proto.TaskRow, preset, wantBlock string) error {
+	turnText, err := w.composeTaskAssign(t)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(turnText, wantBlock) {
+		return fmt.Errorf("task T-%d assign turn missing preset block:\n%s", t.Num, turnText)
+	}
+	revText, err := w.composeReview(t)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(revText, fmt.Sprintf("\nStyle preset: %q\n", preset)) {
+		return fmt.Errorf("task T-%d review turn missing preset name:\n%s", t.Num, revText)
+	}
+	return nil
+}
+
+// composeReview composes the review turn of a task for a report of its
+// assignee.
+func (w *s3PresetWorld) composeReview(t proto.TaskRow) (string, error) {
+	revSess := host.Session{
+		SessionKey: host.SessionKey{Group: w.group, Member: t.Reviewer, Task: t.ID},
+		Kind:       host.ReviewSession,
+		Home:       w.node.ID(),
+		Name:       "Reviewer",
+	}
+	tid := t.ID
+	report := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: string(w.nextID("report"))}, Group: w.group, Thread: &tid,
+		By: t.Assignee, Kind: "report", Text: "Cards are calm.", Mentions: []string{}, Body: json.RawMessage(`{}`)}
+	reportRaw, err := json.Marshal(report)
+	if err != nil {
+		return "", err
+	}
+	revRaw, _ := json.Marshal(proto.InboxItem{
+		Item: proto.Item{Item: 2, AI: proto.ID(t.Reviewer), Why: "review", Task: proto.ID(t.ID), Msg: proto.ID(report.ID)},
+		Msg:  reportRaw,
+	})
+	text, _, err := host.Compose(w.h, revSess, host.ItemsTurn, []json.RawMessage{revRaw})
+	return text, err
 }
 
 func (w *s3PresetWorld) proposeAndConfirmNoPreset() error {

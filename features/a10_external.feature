@@ -16,7 +16,7 @@ Feature: External agents take and finish one item without a CLI driver
     When the external owner mentions X with "First mention"
     Then an external look exits 0
     And the external handout is a "group" run containing "First mention"
-    And the external handout folder is the project clone
+    And the external handout folder is the folder X was added with
     And the external home has 0 inbox items
     And external member "X" has state "working"
     And an external look exits 3
@@ -93,7 +93,7 @@ Feature: External agents take and finish one item without a CLI driver
     And X's note "X's note" and document "external-note" with "X's memory" are on the home as X's
     And X's search for "memory" returns document "external-note" with "X's memory" by X
     And X asks the managed member and gets its scripted answer
-    And external MCP calls "run_checks" with {} and gets "conflict"
+    And external MCP calls "submit_task" with {"summary":"Nothing to submit"} and gets "conflict"
     And external MCP calls "submit_review" with {"score":100,"items":[]} and gets "conflict"
     And an external post with a test secret is refused
     And external MCP next_item returns none
@@ -104,34 +104,27 @@ Feature: External agents take and finish one item without a CLI driver
     Then external member "X" has state "waiting"
     And external MCP rejects an unknown member
 
-  Scenario Outline: External task and review runs use their own checkout (A10.22)
-    Given a project with external X and forge "<forge>"
+  Scenario Outline: External task and review runs are in the folder X was added with (A10.22)
+    Given a project with external X
     And a scripted stdio MCP client connects as X
     When the external brief runs with X as "<role>"
-    Then the external task merges and its worktree is removed
+    Then the external task is done
 
     Examples:
-      | forge  | role     |
-      | none   | assignee |
-      | none   | reviewer |
-      | github | assignee |
-      | github | reviewer |
+      | role     |
+      | assignee |
+      | reviewer |
 
-  Scenario Outline: Two tasks run from brief to merge with X as one of the two AIs (A10.22, A5.1)
-    Given a project with external X, a managed AI that works and reviews, and forge "<forge>"
+  Scenario: Two tasks run from brief to done with X as one of the two AIs (A10.22, A5.1)
+    Given a project with external X and a managed AI that works and reviews
     And a scripted stdio MCP client connects as X
     When the owner confirms a brief of two tasks that X and the managed AI do and review for each other
     Then X works on its task while the review of the other waits, and X's next run is that review
-    And both external tasks are on the base with two summary cards, and the owner saw no card but the brief
-    And each task and review had a folder of its own, and the folders and branches are gone
-
-    Examples:
-      | forge  |
-      | none   |
-      | github |
+    And both external tasks are done with two summary cards, each assignee's work is in its own folder, and the owner saw no card but the brief
+    And every session ran in the folder of its AI, the task sessions are gone and the node's data directory holds no project folder
 
   Scenario: An external AI's progress appears in its task's thread (A10.22)
-    Given a project with external X and forge "none"
+    Given a project with external X
     And a scripted stdio MCP client connects as X
     When X takes the task of an external brief
     And external MCP calls "post" with {"text":"Halfway there","kind":"progress"} and gets "ok"

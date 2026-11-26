@@ -5,6 +5,7 @@ package features
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,9 +15,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
-
-// a10NoChecks is what the steps that MODEL-1126 took away say when they fail.
-const a10NoChecks = "hosted checks go, and a submission is a report that pushes nothing: the ask-first rule is rewritten on submit_task by report (MODEL-1126 plan 1.6, 3.2)"
 
 func init() { stepSets["a10_profiles"] = a10ProfilesSteps }
 
@@ -48,20 +46,18 @@ func a10ProfilesSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^no other person's browser offers the editor of "([^"]*)"$`, func(name string) error { return w.forbidden(name, "strong", "forbidden") })
 	sc.Step(`^L is limited and the host of S is offline$`, w.offlineRoster)
 	sc.Step(`^C takes its next turn$`, w.secretaryTurn)
-	sc.Step(`^the turn lists every AI member with its tier, state and skills as in section 3 of the profiles contract$`, w.roster)
+	sc.Step(`^the turn lists every AI member with its folder, tier, state and skills as in section 3 of the profiles contract$`, w.roster)
 	sc.Step(`^the turn lists L as "limited" and S as "offline"$`, w.roster)
 	sc.Step(`^C's instructions hold the four rules of assignment$`, func() error { return w.turn.checkAssignmentRules() })
-	sc.Step(`^list_members answers as in step 1$`, w.listMembers)
+	sc.Step(`^list_members answers as in step 1, with each AI's folder$`, w.listMembers)
 	sc.Step(`^(M|S) (fails|passes) a review$`, w.reviewTask)
-	sc.Step(`^M fails hosted checks$`, rewritten("AC-3", a10NoChecks))
-	sc.Step(`^M passes hosted checks on the next commit$`, rewritten("AC-3", a10NoChecks))
 	sc.Step(`^task T has stuck kind "([^"]*)", n (\d+) and ask (true|false)$`, w.stuck)
 	sc.Step(`^task T has no stuck$`, w.notStuck)
 	sc.Step(`^the browser shows (no badge|the badge) "must ask a stronger AI" on task T$`, w.badge)
-	sc.Step(`^(M|S)'s (reviewed|checks) item ends with the line naming (S|C) and not (L|M) or (C|L)$`, w.escalation)
+	sc.Step(`^(M|S)'s reviewed item ends with the line naming (S|C) and not (L|M) or (C|L)$`, w.escalation)
 	sc.Step(`^(M|S)'s reviewed item has no added line$`, w.noEscalation)
-	sc.Step(`^submit_task by (M|S) fails with "conflict" with no push, no pull request and no report$`, rewritten("AC-3", a10NoChecks))
-	sc.Step(`^submit_task by (M|S) succeeds$`, rewritten("AC-3", a10NoChecks))
+	sc.Step(`^submit_task by (M|S) fails with "conflict" and there is no report$`, w.submitBlocked)
+	sc.Step(`^submit_task by (M|S) succeeds$`, w.submitOK)
 	sc.Step(`^(L|S|C) replies to (M|L|S)'s call in the thread of (task T|another task)$`, w.reply)
 	sc.Step(`^the host of S goes offline$`, func() { w.setState("S", "offline") })
 	sc.Step(`^the host of S returns$`, func() { w.setState("S", "waiting") })
@@ -85,7 +81,7 @@ func (w *a10ProfileWorld) cast(assignee, mode string) error {
 	}
 	for _, name := range []string{"S", "M", "L", "C"} {
 		ai := w.state.AIs[w.members[name]]
-		ai.Name, ai.CLI, ai.State, ai.Account, ai.HostName = name, "claude", "waiting", "personal", "node"
+		ai.Name, ai.CLI, ai.State, ai.Account, ai.HostName, ai.Workspace = name, "claude", "waiting", "personal", "node", "/work/"+name
 		ai.Profile = proto.Profile{Tier: a10CastTier(name, mode)}
 		w.state.AIs[ai.ID] = ai
 	}
@@ -193,7 +189,7 @@ func (w *a10ProfileWorld) secretaryTurn() error {
 }
 
 func (w *a10ProfileWorld) roster() error {
-	want := "[SoloDawn] group \"Website\" · you are \"Secretary\" · secretary session\nAI members (CLI on computer · tier · state · skills):\n- \"C\" · claude on node · standard · waiting\n- \"L\" · claude on node · light · limited · docs\n- \"M\" · claude on node · standard · waiting\n- \"S\" · claude on node · strong · offline · Go backend"
+	want := "[SoloDawn] group \"Website\" · you are \"Secretary\" · secretary session\nAI members (CLI on computer · folder · tier · state · skills):\n- \"C\" · claude on node · /work/C · standard · waiting\n- \"L\" · claude on node · /work/L · light · limited · docs\n- \"M\" · claude on node · /work/M · standard · waiting\n- \"S\" · claude on node · /work/S · strong · offline · Go backend"
 	if !strings.HasPrefix(w.turn.text, want+"\n") {
 		return fmt.Errorf("turn = %q, want prefix %q", w.turn.text, want)
 	}
@@ -212,10 +208,10 @@ func (w *a10ProfileWorld) listMembers(ctx context.Context) error {
 		return err
 	}
 	want := []map[string]any{
-		{"name": "C", "kind": "ai", "host": "node", "state": "waiting", "account": "personal", "usage": map[string]any{}},
-		{"name": "L", "kind": "ai", "host": "node", "state": "limited", "account": "personal", "usage": map[string]any{}},
-		{"name": "M", "kind": "ai", "host": "node", "state": "waiting", "account": "personal", "usage": map[string]any{}},
-		{"name": "S", "kind": "ai", "host": "node", "state": "offline", "account": "personal", "usage": map[string]any{}},
+		{"name": "C", "kind": "ai", "host": "node", "workspace": "/work/C", "state": "waiting", "account": "personal", "usage": map[string]any{}},
+		{"name": "L", "kind": "ai", "host": "node", "workspace": "/work/L", "state": "limited", "account": "personal", "usage": map[string]any{}},
+		{"name": "M", "kind": "ai", "host": "node", "workspace": "/work/M", "state": "waiting", "account": "personal", "usage": map[string]any{}},
+		{"name": "S", "kind": "ai", "host": "node", "workspace": "/work/S", "state": "offline", "account": "personal", "usage": map[string]any{}},
 		{"name": "owner", "kind": "human"},
 	}
 	return hostModelsEqual(result.Members, want)
@@ -232,9 +228,6 @@ func (w *a10ProfileWorld) badge(kind string) error {
 }
 
 func (w *a10ProfileWorld) compose(kind string) error {
-	if kind == "checks" {
-		return rewritten("AC-3", "hosted checks are removed: the halves of A10.11 and A10.12 on two failed hosted checks go (MODEL-1126 plan 3.2)")()
-	}
 	if err := w.syncTurn(); err != nil {
 		return err
 	}
@@ -249,8 +242,8 @@ func (w *a10ProfileWorld) compose(kind string) error {
 	return err
 }
 
-func (w *a10ProfileWorld) escalation(_, kind, candidate, _, _ string) error {
-	if err := w.compose(kind); err != nil {
+func (w *a10ProfileWorld) escalation(_, candidate, _, _ string) error {
+	if err := w.compose("reviewed"); err != nil {
 		return err
 	}
 	stuck := w.state.Tasks[w.taskID].Stuck
@@ -308,4 +301,45 @@ func (w *a10ProfileWorld) assignL() error {
 		return err
 	}
 	return w.checkAnswer("")
+}
+
+// submitTool calls submit_task in the assignee's task session on the host,
+// whose rows hold the task as the home has it.
+func (w *a10ProfileWorld) submitTool(ctx context.Context) error {
+	if err := w.syncTurn(); err != nil {
+		return err
+	}
+	s := w.turn.sessionFor("task")
+	s.Member = map[string]string{"M": turnPeerID, "S": turnAIID}[w.assignee]
+	_, err := host.Tools["submit_task"].Call(ctx, w.turn.h, host.Caller{Session: s}, json.RawMessage(`{"summary":"Ready for review."}`))
+	return err
+}
+
+// submitBlocked checks both ends: the host refuses submit_task before it
+// sends anything, and the home refuses the report and writes no row.
+func (w *a10ProfileWorld) submitBlocked(ctx context.Context, _ string) error {
+	err := w.submitTool(ctx)
+	coded, ok := errors.AsType[*host.Error](err)
+	if !ok || coded.Code != "conflict" || !strings.HasPrefix(coded.Message, "Ask a stronger AI before submitting again.") {
+		return fmt.Errorf("submit_task answered %v", err)
+	}
+	w.commit++
+	return w.refuseSubmit(fmt.Sprintf("a10-submit-%d", w.commit))
+}
+
+// submitOK checks that the host sends submit_task on and that the home makes
+// the report the one under review.
+func (w *a10ProfileWorld) submitOK(ctx context.Context, _ string) error {
+	if err := w.submitTool(ctx); err != nil {
+		return err
+	}
+	w.commit++
+	name := fmt.Sprintf("a10-submit-%d", w.commit)
+	if err := w.reachReview(name); err != nil {
+		return err
+	}
+	if err := w.checkAnswer(""); err != nil {
+		return err
+	}
+	return w.checkTask("active", "review", name)
 }

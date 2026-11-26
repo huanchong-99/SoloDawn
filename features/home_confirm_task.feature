@@ -20,7 +20,7 @@ Feature: A task role needs its owner's word
   Scenario: A reviewer is asked at role creation but waits only when review is reached
     When the first owner confirms a brief naming the other AI as reviewer
     Then the active role has no confirmation wait
-    When the assignee submits passing local checks
+    When the assignee submits its report
     Then the active role waits for confirmation
     And the first owner cannot confirm the role card
     When the other owner confirms the role card
@@ -37,8 +37,9 @@ Feature: A task role needs its owner's word
     Then the role delivery is "assign"
     And no role-confirmation card was created
 
-  Scenario: A replacement brief requires a new confirmation
+  Scenario: A replacement brief requires a new confirmation (A9.13)
     When the first owner confirms a brief assigning two tasks to the other AI
     And the other owner confirms the role card
+    And the first owner cancels the role task
     And the first owner confirms another brief for the other AI
     Then the active role waits for confirmation

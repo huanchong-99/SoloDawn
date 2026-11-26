@@ -5,7 +5,7 @@ Feature: Rounds in threads, queue jumps and the quiet-task timer
   the thread or an admin's "task resume" ends the wait. "jump" sends every unacknowledged
   mention item that the named message of that person produced again at once, as a jump under its
   number. The "quiet" timer notifies the secretary once per quiet period for an active
-  task with no wait before step "merge" that has had no thread message for "idle_notice_minutes".
+  task with no wait that has had no thread message for "idle_notice_minutes".
 
   Scenario: Ten AI rounds pause the task until a person posts in the thread
     Given a rounds home with a secretary, two working AIs and an active task for "ai-one"
