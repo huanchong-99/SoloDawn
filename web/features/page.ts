@@ -81,9 +81,10 @@ export function go(hash: string) {
   flushSync();
 }
 
-/** The top of the main line comes into view, or leaves it. */
-export function scrollToTop(isIntersecting = true) {
-  inView!([{ isIntersecting }]);
+/** The top of the main line comes into view, or leaves it; or, told at once, each of the
+ *  changes in turn. */
+export function scrollToTop(...looks: boolean[]) {
+  inView!((looks.length ? looks : [true]).map((isIntersecting) => ({ isIntersecting })));
   flushSync();
 }
 

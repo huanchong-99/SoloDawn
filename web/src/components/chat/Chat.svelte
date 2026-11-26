@@ -65,8 +65,10 @@
   // browser after a page load; this does not.
   let keys = $state(false);
 
+  // The observer can look twice before it tells, oldest first: as when a jump scrolls to the top
+  // in the frame after the line drew the newest messages.
   $effect(() => {
-    const seen = new IntersectionObserver(([entry]) => (atEdge = entry.isIntersecting), {
+    const seen = new IntersectionObserver((looks) => (atEdge = looks.at(-1)!.isIntersecting), {
       root: scroller,
       rootMargin: '600px 0px 0px',
     });
