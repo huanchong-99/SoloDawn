@@ -18,13 +18,12 @@ func TestConfirmAuthorityAndParticipation(t *testing.T) {
 		started             int64
 		want                bool
 	}{
-		{"local_check", "assignee", "", 1, true},
-		{"local_check", "assignee", "", 0, false},
-		{"local_check", "reviewer", "", 1, false},
+		{"work", "assignee", "", 1, true},
+		{"work", "assignee", "", 0, false},
+		{"work", "reviewer", "", 1, false},
 		{"review", "reviewer", "", 1, true},
-		{"merge", "reviewer", "", 1, true},
-		{"local_check", "reviewer", "reviewer", 1, true},
-		{"local_check", "reviewer", "former", 1, false},
+		{"work", "reviewer", "reviewer", 1, true},
+		{"work", "reviewer", "former", 1, false},
 		{"review", "other", "", 1, false},
 	} {
 		task := proto.TaskRow{State: "active", Step: tc.step, Assignee: "assignee", Reviewer: "reviewer"}
@@ -40,8 +39,8 @@ func TestConfirmAuthorityAndParticipation(t *testing.T) {
 	s.AIs["ai"] = proto.AIMemberRow{MemberRow: proto.MemberRow{User: "owner"}}
 	taskID := "task"
 	s.Tasks[taskID] = proto.TaskRow{State: "active", Assignee: "ai"}
-	for _, state := range []string{"merged", "cancelled"} {
-		task := proto.TaskRow{State: state, Step: "merge", Assignee: "a", Reviewer: "r"}
+	for _, state := range []string{"done", "cancelled"} {
+		task := proto.TaskRow{State: state, Step: "review", Assignee: "a", Reviewer: "r"}
 		cardTestSame(t, cfmTakesPart(task, "a"), true)
 		cardTestSame(t, cfmTakesPart(task, "r"), true)
 		cardTestSame(t, cfmTakesPart(task, "former"), false)

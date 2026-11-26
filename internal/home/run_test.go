@@ -327,7 +327,7 @@ func runGroupsFrame(entries ...proto.GroupSummary) string {
 
 // The rows of the test commands.
 func runGroupRow(group, name string, seq int64) proto.GroupRow {
-	return proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: group, Seq: seq}, Name: name, Kind: "project", Home: node.ID(), Secretary: aiID}
+	return proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: group, Seq: seq}, Name: name, Home: node.ID(), Secretary: aiID}
 }
 
 func runPerson(seq int64) proto.HumanMemberRow {

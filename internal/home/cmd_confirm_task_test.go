@@ -88,7 +88,7 @@ func TestRoleReassignmentAndReviewerWait(t *testing.T) {
 	d[calTaskID] = proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: calTaskID}, Kind: "task"}
 	task := s.Tasks[calTaskID]
 	task.Brief, task.Step, task.Reviewer = "", "review", calA
-	task.Assignee, task.Commit = calC, "commit"
+	task.Assignee, task.Report = calC, id(184)
 	s.Tasks[calTaskID] = task
 	assign := proto.TaskAssign{TaskCommand: proto.TaskCommand{HomeCommand: proto.HomeCommand{Type: "task", Nonce: proto.ID(id(185)), Timestamp: clock, Group: proto.ID(groupID)}, Op: "assign", ID: proto.ID(calTaskID)}, Reviewer: proto.ID(calB)}
 	_, res := postSend(t, s, d, browser, assign)
@@ -100,7 +100,7 @@ func TestRoleReassignmentAndReviewerWait(t *testing.T) {
 	res = cardApply(t, s, d, receipts{}, guest, cfmAct(guest, 186, card.ID, "confirm", ""))
 	cardCommit(s, d, res)
 	equal(t, res.Answer.OK, true)
-	equal(t, res.Items, []home.Item{{AI: calB, Why: "review", Task: calTaskID, Commit: "commit"}})
+	equal(t, res.Items, []home.Item{{AI: calB, Why: "review", Task: calTaskID, Msg: id(184)}})
 	equal(t, s.Tasks[calTaskID].Wait, (*proto.TaskWait)(nil))
 }
 
@@ -136,11 +136,6 @@ func TestRoleDeniedThenGivenByTheOwner(t *testing.T) {
 
 	equal(t, give(guest, briefA), []home.Item{{AI: briefA, Why: "assign", Task: first}})
 	equal(t, s.Tasks[first].Asked, []string{briefB})
-	task(guest, "branch", `,"branch":"task/5-report-path-changes"`)
-	task(guest, "checked", `,"ok":true,"items":[],"commit":"c1"`)
-	task(guest, "submitted", `,"commit":"c1","pr":1,"pr_url":"https://x/1","stats":{"added":1,"removed":0}`)
-	checks := task(guest, "cloud", `,"ok":false,"items":[],"commit":"c1"`)
-	equal(t, checks, []home.Item{{AI: briefA, Why: "checks", Task: first, Msg: id(n)}})
 	equal(t, task(browser, "pause", ""), []home.Item(nil))
 	equal(t, task(browser, "resume", ""), []home.Item{{AI: briefA, Why: "resume", Task: first}})
 	equal(t, s.Tasks[second].Asked, []string{briefB, briefA})

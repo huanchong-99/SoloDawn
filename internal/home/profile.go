@@ -65,12 +65,14 @@ func profileMustAsk(task proto.TaskRow) bool {
 	return task.Stuck != nil && task.Stuck.Ask
 }
 
-func profileFailure(stuck *proto.Stuck, kind string, stronger bool) *proto.Stuck {
+// profileFailure counts a review that did not pass, the one kind of failure
+// that is counted (planning/contracts/step-3/profiles.md section 4).
+func profileFailure(stuck *proto.Stuck, stronger bool) *proto.Stuck {
 	n := 1
-	if stuck != nil && stuck.Kind == kind {
+	if stuck != nil {
 		n += stuck.N
 	}
-	return &proto.Stuck{Kind: kind, N: n, Ask: n >= 2 && stronger}
+	return &proto.Stuck{Kind: "review", N: n, Ask: n >= 2 && stronger}
 }
 
 func profileStrength(ai proto.AIMemberRow) int {
@@ -81,7 +83,7 @@ func profileStrength(ai proto.AIMemberRow) int {
 }
 
 func (s *State) profileHasStronger(task proto.TaskRow, ev Event) bool {
-	if ev.OK || (ev.Kind != OnCloud && ev.Kind != OnReview) {
+	if ev.OK || ev.Kind != OnReview {
 		return false
 	}
 	strength := profileStrength(s.AIs[task.Assignee])
@@ -95,7 +97,7 @@ func (s *State) profileHasStronger(task proto.TaskRow, ev Event) bool {
 
 func profileStepRefusal(task proto.TaskRow, ev Event, err error) *Refusal {
 	msg := "the task machine refused the command"
-	if ev.Kind == OnSubmitted && err == RefusedConflict && profileMustAsk(task) {
+	if ev.Kind == OnReport && err == RefusedConflict && profileMustAsk(task) {
 		msg = "ask a stronger AI before submitting again"
 	}
 	return &Refusal{err.Error(), msg}

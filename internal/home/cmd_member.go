@@ -24,8 +24,10 @@ var (
 	memAccounts = []string{"personal", "team", "api_key"}
 )
 
-// memAddAI adds an AI member hosted by the signing node. When secretary is
-// set, it updates the group row and clears any previous secretary's flag.
+// memAddAI adds an AI member hosted by the signing node, with the workspace
+// that node resolved: the home stores the path as sent and never changes it.
+// When secretary is set, it updates the group row and clears any previous
+// secretary's flag.
 func memAddAI(s *State, c Command) (Result, *Refusal) {
 	if c.Who.AI != "" {
 		return Result{}, &Refusal{"forbidden", "only a host node of a member adds an AI"}
@@ -56,8 +58,8 @@ func memDevice(log *identity.Log, device string) (name string) {
 }
 
 func memAddValid(p proto.MemberAddAI) *Refusal {
-	if p.Name == "" || !memCLI.MatchString(p.CLI) || !slices.Contains(memAccounts, p.Account) {
-		return &Refusal{"bad_request", "member add_ai requires a name, a supported cli and an account type"}
+	if p.Name == "" || p.Workspace == "" || !memCLI.MatchString(p.CLI) || !slices.Contains(memAccounts, p.Account) {
+		return &Refusal{"bad_request", "member add_ai requires a name, a workspace, a supported cli and an account type"}
 	}
 	if refusal := externalToolValidate(p.CLI, p.Tool, false); refusal != nil {
 		return refusal
@@ -91,7 +93,7 @@ func memNewAI(s *State, c Command, p proto.MemberAddAI, hostName string) proto.A
 			RowHeader: proto.RowHeader{Type: "member", ID: string(p.ID)},
 			Group:     s.ID, Kind: "ai", User: c.Who.User, Name: p.Name, LastSeen: c.Now,
 		},
-		CLI: p.CLI, Host: c.Who.Device, HostName: hostName, Secretary: p.Secretary,
+		CLI: p.CLI, Host: c.Who.Device, HostName: hostName, Workspace: p.Workspace, Secretary: p.Secretary,
 		Account: p.Account, Allow: []string{}, Approvers: memApprovers(c.Who.User, p.Approvers),
 		State: "dormant", Since: c.Now, Path: path, Usage: proto.Usage{},
 		Profile: profileUpdate(proto.Profile{}, p.ProfileSet),

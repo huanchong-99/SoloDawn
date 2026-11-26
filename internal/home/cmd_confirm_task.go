@@ -152,7 +152,7 @@ func (s *State) cftHasRole(request, ai string) bool {
 
 func cftNames(task proto.TaskRow, ai string) bool { return task.Assignee == ai || task.Reviewer == ai }
 
-func cftFinal(state string) bool { return state == taskMerged || state == taskCancelled }
+func cftFinal(state string) bool { return state == taskDone || state == taskCancelled }
 
 func (s *State) cftHoldItem(d Disk, it Item) bool {
 	return slices.Contains(workItems, it.Why) && cftHeld(cftCard(d, s.Tasks[it.Task], it.AI))
@@ -238,15 +238,15 @@ func (s *State) cftTasksFor(req, ai string) []proto.TaskRow {
 }
 
 func cftActivation(d Disk, task proto.TaskRow, ai string) []Item {
-	ctx := tskItemCtx{taskID: task.ID, assignMsg: tskLatestFeedback(d, task.ID), kept: d.Queued()}
-	if task.Step == stepBranch {
+	ctx := tskItemCtx{taskID: task.ID, assignMsg: tskLatestReview(d, task.ID), kept: d.Queued()}
+	if ctx.assignMsg == "" {
 		ctx.assignMsg = task.ID
 	}
 	if ai == task.Assignee {
 		return ctx.items([]TaskItem{{AI: ai, Why: itemAssign}})
 	}
 	if task.Step == stepReview {
-		return ctx.items([]TaskItem{{AI: ai, Why: itemReview, Commit: task.Commit, IfNone: true}})
+		return ctx.items([]TaskItem{{AI: ai, Why: itemReview, Report: task.Report, IfNone: true}})
 	}
 	return nil
 }

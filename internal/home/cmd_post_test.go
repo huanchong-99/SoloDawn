@@ -31,8 +31,8 @@ func postState(t *testing.T) *home.State {
 	s.People[postGuest] = person(postGuest, guest, "member")
 	s.Tasks[postTask] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: postTask, Seq: 8}, Group: groupID, Num: 1,
-		Title: "Show path", Slug: proto.MakeSlug("Show path"), Origin: "brief", Brief: id(65),
-		State: "active", Step: "local_check", Assignee: postA, Reviewer: postB, Pass: 90,
+		Title: "Show path", Origin: "brief", Brief: id(65),
+		State: "active", Step: "work", Assignee: postA, Reviewer: postB, Pass: 90,
 		Depends: []string{}, Thread: proto.ThreadSummary{Count: 3, Rounds: 2},
 		Stats: proto.TaskStats{Started: clock - 5000}, Created: clock - 5000,
 	}
@@ -215,26 +215,6 @@ func TestPostProgressAndQuestion(t *testing.T) {
 	equal(t, res.Items, ([]home.Item)(nil))
 }
 
-func TestPostReport(t *testing.T) {
-	s := postState(t)
-	thread := postTask
-	bare := proto.ReportBody{Commit: "9f2c1ab", Files: 4, Added: 212, Removed: 18}
-	env, res := postSend(t, s, disk{}, laptop, postMake(90, postA, "report", &thread, []string{postB}, nil, "All green.", bare))
-	equal(t, res.Answer, store.Outcome{OK: true})
-	equal(t, res.Items, ([]home.Item)(nil))
-	wantMsg := postExpectedMsg(90, 11, postA, "report", &thread, "All green.", []string{postB}, nil, postRawJSON(t, bare), env)
-	equal(t, res.Rows[0].Value(), any(wantMsg))
-	equal(t, res.Rows[1].Value().(proto.TaskRow).Thread.Last, &proto.ThreadMessage{By: postA, Kind: "report", Text: "All green.", Timestamp: postTS})
-	postCheckNulls(t, res.Rows[0].Value(), "/re", "/state")
-	s.Commit(res)
-
-	pr := 31
-	withPR := proto.ReportBody{Commit: "9f2c1ab", Files: 4, Added: 212, Removed: 18, PR: &pr}
-	_, res = postSend(t, s, disk{}, laptop, postMake(91, postA, "report", &thread, nil, nil, "", withPR))
-	equal(t, res.Answer, store.Outcome{OK: true})
-	equal(t, res.Rows[0].Value().(proto.MsgRow).Body, postRawJSON(t, withPR))
-}
-
 type postRefusalEnv struct {
 	s       *home.State
 	by      identity.Key
@@ -251,7 +231,7 @@ func postJSONText(v any) string {
 
 func TestPostRefusals(t *testing.T) {
 	thread, missing := postTask, id(99)
-	report := proto.ReportBody{Commit: "9f2c1ab", Files: 1, Added: 2, Removed: 0}
+	report := proto.EmptyBody{}
 
 	cases := map[string]struct {
 		code  string
@@ -276,9 +256,9 @@ func TestPostRefusals(t *testing.T) {
 			bad := "not-an-id"
 			e.by, e.payload = browser, postJSONText(postMake(95, "", "text", nil, nil, &bad, "x", proto.EmptyBody{}))
 		}},
-		"report missing commit": {code: "bad_request", setup: func(e *postRefusalEnv) {
+		"report without a body": {code: "bad_request", setup: func(e *postRefusalEnv) {
 			raw := postJSONText(postMake(95, postA, "report", &thread, nil, nil, "", report))
-			e.payload = strings.Replace(raw, `"commit"`, `"sha"`, 1)
+			e.payload = strings.Replace(raw, `"body":{}`, `"body":null`, 1)
 		}},
 		"mentioning a member twice": {code: "bad_request", setup: func(e *postRefusalEnv) {
 			e.by, e.payload = browser, postJSONText(postMake(95, "", "text", nil, []string{postA, postA}, nil, "x", proto.EmptyBody{}))
@@ -320,7 +300,7 @@ func TestPostRefusals(t *testing.T) {
 
 func TestPostHandback(t *testing.T) {
 	thread := postTask
-	facts := proto.HandbackBody{Files: []string{"a.go"}, Commits: []proto.CommitSubject{{SHA: "9f2c1ab", Subject: "Fix"}}, Added: 40, Removed: 3}
+	facts := proto.EmptyBody{}
 	t.Run("an AI in a thread notifies the secretary", func(t *testing.T) {
 		s := postState(t)
 		env, res := postSend(t, s, disk{}, laptop, postMake(100, postA, "handback", &thread, nil, nil, "Owner asked for X.", facts))
@@ -329,12 +309,15 @@ func TestPostHandback(t *testing.T) {
 		equal(t, res.Rows[1].Value().(proto.TaskRow).Thread.Last.Kind, "handback")
 		equal(t, res.Items, []home.Item{{AI: aiID, Why: "notice", Task: postTask, Msg: id(100), Code: "handback"}})
 	})
-	t.Run("the secretary posts in the main line and notifies nobody", func(t *testing.T) {
-		s := postState(t)
-		_, res := postSend(t, s, disk{}, laptop, postMake(101, aiID, "handback", nil, nil, nil, "", proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}}))
-		equal(t, res.Answer, store.Outcome{OK: true})
-		equal(t, len(res.Rows), 1)
-		equal(t, res.Items, ([]home.Item)(nil))
+	t.Run("an AI without a task, the secretary or a working AI, posts in the main line and notifies nobody", func(t *testing.T) {
+		for n, as := range []string{aiID, postA} {
+			s := postState(t)
+			_, res := postSend(t, s, disk{}, laptop, postMake(101+byte(n), as, "handback", nil, nil, nil, "", facts))
+			equal(t, res.Answer, store.Outcome{OK: true})
+			equal(t, len(res.Rows), 1)
+			equal(t, res.Rows[0].Value().(proto.MsgRow).By, as)
+			equal(t, res.Items, ([]home.Item)(nil))
+		}
 	})
 	t.Run("without a secretary a thread hand-back notifies nobody", func(t *testing.T) {
 		s := postState(t)
@@ -342,11 +325,6 @@ func TestPostHandback(t *testing.T) {
 		_, res := postSend(t, s, disk{}, laptop, postMake(102, postA, "handback", &thread, nil, nil, "", facts))
 		equal(t, res.Answer, store.Outcome{OK: true})
 		equal(t, res.Items, ([]home.Item)(nil))
-	})
-	t.Run("another AI in the main line is refused", func(t *testing.T) {
-		s := postState(t)
-		_, res := postSend(t, s, disk{}, laptop, postMake(103, postA, "handback", nil, nil, nil, "", facts))
-		postAssertRefused(t, res, "bad_request")
 	})
 	t.Run("a person is refused", func(t *testing.T) {
 		s := postState(t)

@@ -77,7 +77,7 @@ func cfmTaskRunning(state string) bool {
 }
 
 func cfmReviewerStarted(task proto.TaskRow) bool {
-	return task.Step == stepReview || task.Step == stepMerge || (task.Review != nil && task.Review.By == task.Reviewer)
+	return task.Step == stepReview || (task.Review != nil && task.Review.By == task.Reviewer)
 }
 
 func (s *State) cfmNewCard(c Command, what string, req proto.MsgRow, ai proto.AIMemberRow) proto.MsgRow {

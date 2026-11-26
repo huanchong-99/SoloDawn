@@ -138,15 +138,15 @@ func retSeedBoundaryRows(t *testing.T, db *store.Store, cut8 int64) (oldMarkerSe
 		id, state string
 		mt        int64
 	}{
-		{"t-merged", "merged", old},
+		{"t-done", "done", old},
 		{"t-cancelled", "cancelled", old},
 		{"t-active", "active", old},
-		{"t-edge", "merged", cut8},
+		{"t-edge", "done", cut8},
 	} {
 		nextSeq++
 		retPutRow(t, db, groupID, task.mt, proto.TaskRow{
 			RowHeader: proto.RowHeader{Type: "task", ID: task.id, Seq: nextSeq}, Group: groupID,
-			Num: int(nextSeq), Title: task.id, Slug: proto.MakeSlug(task.id), Origin: "direct", State: task.state,
+			Num: int(nextSeq), Title: task.id, Origin: "direct", State: task.state,
 			Assignee: aiID, Reviewer: aiID, Pass: 90, Depends: []string{}, Created: old,
 		})
 	}

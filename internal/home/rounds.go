@@ -68,8 +68,8 @@ func rndJumpItems(d Disk, msg string) (Result, *Refusal) {
 }
 
 // rndQuiet is the quiet-task timer (task-machine.md row 23): while the group is
-// not paused, for each active task with no wait before step merge that has had
-// no thread message for limits.idle_notice_minutes, it queues one quiet notice
+// not paused, for each active task with no wait that has had no thread
+// message for limits.idle_notice_minutes, it queues one quiet notice
 // for the secretary per quiet period.
 func rndQuiet(s *State, _ Disk, now int64) Result {
 	if s.Group.Secretary == "" || s.Group.Limits.IdleNoticeMinutes <= 0 || s.Group.Paused != nil {
@@ -131,7 +131,7 @@ func (s *State) rndAfterPost(c Command, res Result) Result {
 	if !inThread {
 		return res
 	}
-	task := rndFindTask(res.Rows)
+	task := rndFindTask(res.Rows, *msg.Thread)
 	if c.Who.AI == "" {
 		return s.rndPersonPost(c, res, task)
 	}
@@ -188,9 +188,11 @@ func rndThreadMsg(rows []Row, id string) (found proto.MsgRow, inThread bool) {
 	return found, inThread
 }
 
-func rndFindTask(rows []Row) (found proto.TaskRow) {
+// rndFindTask is the task of the post's thread among the rows of its result,
+// which may hold other tasks: the ones a passed review started.
+func rndFindTask(rows []Row, thread string) (found proto.TaskRow) {
 	for _, r := range rows {
-		if t, ok := r.Value().(proto.TaskRow); ok {
+		if t, ok := r.Value().(proto.TaskRow); ok && t.ID == thread {
 			found = t
 		}
 	}
@@ -200,7 +202,7 @@ func rndFindTask(rows []Row) (found proto.TaskRow) {
 func rndPutTask(rows []Row, task proto.TaskRow) []Row {
 	out := slices.Clone(rows)
 	for i, r := range out {
-		if _, ok := r.Value().(proto.TaskRow); ok {
+		if t, ok := r.Value().(proto.TaskRow); ok && t.ID == task.ID {
 			out[i] = RowOf(task)
 		}
 	}

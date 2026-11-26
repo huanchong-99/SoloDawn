@@ -42,7 +42,7 @@ func noteState(t *testing.T) *home.State {
 	s.People[noteAdmin] = person(noteAdmin, second, "admin")
 	s.People[noteMember] = person(noteMember, guest, "member")
 	s.AIs[noteWorker] = ai(noteWorker, laptop)
-	s.Tasks[noteTask] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: noteTask, Seq: 9}, State: "merged"}
+	s.Tasks[noteTask] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: noteTask, Seq: 9}, State: "done"}
 	return s
 }
 

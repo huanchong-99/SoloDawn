@@ -45,7 +45,7 @@ func pauSysRow(msgID, code, by string) proto.MsgRow {
 func pauTask(n byte, state, step, assignee, reviewer string, wait *proto.TaskWait) proto.TaskRow {
 	return proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: id(n)}, State: state, Step: step,
-		Assignee: assignee, Reviewer: reviewer, Commit: fmt.Sprintf("c%d", n), Wait: wait,
+		Assignee: assignee, Reviewer: reviewer, Report: fmt.Sprintf("m%d", n), Wait: wait,
 	}
 }
 
@@ -82,7 +82,7 @@ func TestPauseRepeatChangesNothing(t *testing.T) {
 			if op == "pause" {
 				s.Group.Paused = &proto.GroupPause{By: ownerID, At: clock - 9000}
 			}
-			s.Tasks[id(31)] = pauTask(31, "active", "local_check", pauWorkA, "", nil)
+			s.Tasks[id(31)] = pauTask(31, "active", "work", pauWorkA, "", nil)
 			res := briefApply(t, s, disk{}, receipts{}, pauAdminKey, pauCmd(pauAdminKey, op, 71, ""))
 			equal(t, res, home.Result{Answer: store.Outcome{OK: true}})
 		})
@@ -123,13 +123,13 @@ func TestPauseResumeWakesTasksByRow24(t *testing.T) {
 	approval := &proto.TaskWait{Kind: "approval", Since: clock - 4000}
 	s.Tasks = map[string]proto.TaskRow{
 		id(31): pauTask(31, "active", "branch", pauWorkA, "", nil),
-		id(32): pauTask(32, "active", "local_check", pauWorkB, "", approval),
+		id(32): pauTask(32, "active", "work", pauWorkB, "", approval),
 		id(33): pauTask(33, "active", "review", pauWorkA, pauWorkB, nil),
 		id(34): pauTask(34, "active", "review", pauWorkB, pauWorkA, approval),
-		id(35): pauTask(35, "active", "merge", pauWorkA, pauWorkB, nil),
+		id(35): pauTask(35, "done", "review", pauWorkA, pauWorkB, nil),
 		id(36): pauTask(36, "paused", "review", pauWorkB, pauWorkA, nil),
 	}
-	queued := []store.Item{{Why: "review", AI: pauWorkB, Task: &[]string{id(33)}[0], Commit: &[]string{"c33"}[0]}}
+	queued := []store.Item{{Why: "review", AI: pauWorkB, Task: &[]string{id(33)}[0], Msg: &[]string{"m33"}[0]}}
 
 	res := briefApply(t, s, tskDisk{queued: queued}, receipts{}, pauAdminKey, pauCmd(pauAdminKey, "resume", 73, ""))
 	want := s.Group
@@ -138,7 +138,7 @@ func TestPauseResumeWakesTasksByRow24(t *testing.T) {
 	equal(t, res, home.Result{Rows: res.Rows, Answer: store.Outcome{OK: true}, Items: []home.Item{
 		{AI: pauWorkA, Why: "resume", Task: id(31)},
 		{AI: pauWorkA, Why: "resume", Task: id(33)},
-		{AI: pauWorkA, Why: "review", Task: id(34), Commit: "c34"},
+		{AI: pauWorkA, Why: "review", Task: id(34), Msg: "m34"},
 	}})
 	equal(t, briefRows(res), []any{want, pauSysRow(id(73), "group_resumed", pauAdminID)})
 }
@@ -148,7 +148,7 @@ func TestPauseResumeWakesTasksByRow24(t *testing.T) {
 func TestPauseStopsQuietReminders(t *testing.T) {
 	s := pauState(t)
 	s.Group.Limits.IdleNoticeMinutes = 1
-	task := pauTask(31, "active", "local_check", pauWorkA, "", nil)
+	task := pauTask(31, "active", "work", pauWorkA, "", nil)
 	task.Created = clock - 60_000
 	s.Tasks[task.ID] = task
 	quiet := home.Timers["quiet"]

@@ -16,9 +16,8 @@ func signed(id int64) (json.RawMessage, error) {
 
 func TestInboxDelivery(t *testing.T) {
 	s := openDB(t, ":memory:")
-	msg, task, commit := "msg", "task", "commit"
-	review := Item{Group: "g", AI: "ai", Host: "host", Why: "review", Msg: &msg, Task: &task, Commit: &commit,
-		NotBefore: 50, Created: 10}
+	msg, task := "msg", "task"
+	review := Item{Group: "g", AI: "ai", Host: "host", Why: "review", Msg: &msg, Task: &task, NotBefore: 50, Created: 10}
 	notice := Item{Group: "g", AI: "secretary", Host: "host", Why: "notice", Created: 20}
 	check(t, s.Write(func(tx *Tx) error {
 		for i, item := range []Item{review, {Group: "g", Host: "other"}, notice} {

@@ -10,15 +10,15 @@ import (
 // Step reads a task row and an event and returns the row as the event leaves
 // it, with what the home must do beside writing it. It reads no clock, no
 // store and no other row: what a row of the table needs from outside the task
-// (the group's limits, the pending cards, whether a dependency is merged) the
-// caller puts into the event.
+// (the group's limits, the pending cards, whether a dependency is done and
+// whether the folder is busy) the caller puts into the event.
 //
 // What stays with the caller: who the sender is (Sender), the checks a table
 // row makes on a card or on the group, the fields a command only copies into
-// the row (branch, pr, pr_url, stats.added, stats.removed, thread.count,
-// thread.last), the bodies of the messages, and the fan-out over other tasks:
-// OnReleased for each queued task that depends on a merged one, OnOrphaned
-// for each that depends on a cancelled one, OnGroupResume for every task.
+// the row (thread.count, thread.last), the bodies of the messages, and the
+// fan-out over other tasks: OnReleased for each queued task when a row may
+// have freed a dependency or a folder, OnOrphaned for each that depends on a
+// cancelled one, OnGroupResume for every task.
 
 // EventKind names the row of the table an event asks for.
 type EventKind string
@@ -26,14 +26,9 @@ type EventKind string
 const (
 	OnConfirm     EventKind = "confirm"      // row 1: one entry of a confirmed brief; the row is new
 	OnStart       EventKind = "start"        // row 2: task start; the row is new
-	OnBranch      EventKind = "branch"       // row 3
-	OnChecked     EventKind = "checked"      // row 4
-	OnSubmitted   EventKind = "submitted"    // row 5
-	OnCloud       EventKind = "cloud"        // row 6
+	OnReport      EventKind = "report"       // row 5: post of kind report
 	OnReview      EventKind = "review"       // row 7: post of kind review
-	OnMerged      EventKind = "merged"       // row 8, for the merged task
-	OnReleased    EventKind = "released"     // row 8, for a queued task that depends on the merged one
-	OnConflict    EventKind = "conflict"     // row 9
+	OnReleased    EventKind = "released"     // section 2, "Starting a queued task": a queued task looked at
 	OnFail        EventKind = "fail"         // row 10
 	OnAssign      EventKind = "assign"       // row 11
 	OnPause       EventKind = "pause"        // row 12
@@ -69,20 +64,20 @@ const (
 type Event struct {
 	Kind   EventKind
 	By     Sender
-	Member string // the AI the command is signed for (`as`), when there is one
+	Member string // the member the command is by: the AI it is signed for (`as`), else the person
 	Now    int64  // the home's clock, in milliseconds
 
 	Limits   proto.Limits // the group's limits
-	Remote   bool         // the group has a remote (`forge` is not `none`)
 	Stronger bool         // the group has an AI stronger than the assignee
 
-	Commit   string // rows 4 to 9: the commit the command names
-	OK       bool   // rows 4 and 6: the checks passed; row 7: the review passed (commands.md 1.8)
+	Report   string // row 5: the report message; row 7: the report the review names
+	OK       bool   // row 7: the review passed (commands.md 1.8)
 	Score    int    // row 7: the score the home wrote
 	Reason   string // row 10: crash or timeout
 	Assignee string // row 11: the assignee to set, or "" to keep it
 	Reviewer string // row 11: the reviewer to set, or "" to keep it
-	Blocked  bool   // rows 1 and 8: a dependency of the task is not merged
+	Blocked  bool   // row 1 and OnReleased: a dependency of the task is not done
+	Busy     bool   // rows 1, 2 and OnReleased: another started task has the folder of the assignee; row 11: of the assignee to set
 
 	Card    PendingCard   // rows 17 and 19: the card posted; rows 18 and 20: the card decided
 	Asker   string        // rows 18 and 20: the AI that posted the card
@@ -113,8 +108,8 @@ type TaskItem struct {
 	Why    string
 	AI     string // the member it is for; a notice has none, it is the secretary's
 	Code   string // why notice: the case (task-machine.md section 5)
-	Commit string // why review and merge
-	IfNone bool   // why review: queue it only if none is queued for this AI and commit
+	Report string // why review: the report message under review
+	IfNone bool   // why review: queue it only if none is queued for this AI and report
 }
 
 // ItemFilter selects queued inbox items of the task. An empty field selects every value.
@@ -140,30 +135,25 @@ const (
 	taskActive    = "active"
 	taskPaused    = "paused"
 	taskFailed    = "failed"
-	taskMerged    = "merged"
+	taskDone      = "done"
 	taskCancelled = "cancelled"
 
-	stepBranch = "branch"
-	stepLocal  = "local_check"
-	stepCloud  = "cloud_check"
+	stepWork   = "work"
 	stepReview = "review"
-	stepMerge  = "merge"
 
 	waitDepends   = "depends"
+	waitBusy      = "busy"
 	waitApproval  = "approval"
 	waitDecision  = "decision"
 	waitReviewer  = "reviewer"
-	waitConflict  = "conflict"
 	waitManual    = "manual"
 	waitRounds    = "rounds"
 	waitPreempted = "preempted"
 
 	itemAssign   = "assign"
-	itemChecks   = "checks"
 	itemReviewed = "reviewed"
 	itemReview   = "review"
 	itemResume   = "resume"
-	itemMerge    = "merge"
 	itemDecided  = "decided"
 	itemNotice   = "notice"
 )
@@ -171,15 +161,12 @@ const (
 var (
 	statesNew     = []string{""} // the row has no state yet
 	statesRunning = []string{taskActive, taskPaused}
+	statesStarted = []string{taskActive, taskPaused, taskFailed}             // the task has its folder
 	statesOpen    = []string{taskQueued, taskActive, taskPaused, taskFailed} // not final
 	statesActive  = []string{taskActive}
 
-	stepsChecked     = []string{stepLocal, stepCloud, stepReview}
-	stepsBeforeMerge = []string{stepBranch, stepLocal, stepCloud, stepReview}
-
 	waitsOfCards = []string{"", waitConfirm, waitApproval, waitDecision} // no wait, or a card wait
-	waitsKept    = []string{waitReviewer, waitConflict}
-	workItems    = []string{itemAssign, itemChecks, itemReviewed, itemReview, itemResume, itemMerge}
+	workItems    = []string{itemAssign, itemReviewed, itemReview, itemResume}
 )
 
 // taskRule is one line of the table: who may send the event, when, and what it does.
@@ -194,41 +181,32 @@ type taskRule struct {
 
 // An event with several lines takes the first whose sender and condition hold.
 var taskRules = map[EventKind][]taskRule{
-	OnConfirm:   {{by: ByAdmin | ByPerson, states: statesNew, do: (*taskMove).create}},
-	OnStart:     {{by: ByAI, states: statesNew, do: (*taskMove).start}},
-	OnBranch:    {{by: ByHost, states: statesRunning, steps: []string{stepBranch}, do: (*taskMove).branch}},
-	OnChecked:   {{by: ByHost, states: statesRunning, steps: stepsChecked, do: (*taskMove).checked}},
-	OnSubmitted: {{by: ByHost, states: statesRunning, steps: stepsChecked, also: (*taskMove).checkedCommit, do: (*taskMove).submitted}},
-	OnCloud:     {{by: ByHost, states: statesRunning, steps: []string{stepCloud}, also: (*taskMove).sameCommit, do: (*taskMove).cloud}},
-	OnReview:    {{by: byReviewer, states: statesActive, steps: []string{stepReview}, also: (*taskMove).reviewable, do: (*taskMove).reviewed, orPaused: true}},
-	OnMerged:    {{by: ByHost, states: statesActive, steps: []string{stepMerge}, also: (*taskMove).sameCommit, do: (*taskMove).merged}},
-	OnReleased:  {{by: ByHome, states: []string{taskQueued}, do: (*taskMove).released}},
-	OnConflict:  {{by: ByHost, states: statesActive, steps: []string{stepMerge}, also: (*taskMove).sameCommit, do: (*taskMove).conflicted}},
-	OnFail:      {{by: ByHost, states: statesActive, steps: stepsBeforeMerge, do: (*taskMove).crashed, orPaused: true}},
+	OnConfirm:  {{by: ByAdmin | ByPerson, states: statesNew, do: (*taskMove).create}},
+	OnStart:    {{by: ByAI, states: statesNew, do: (*taskMove).start}},
+	OnReport:   {{by: byAssignee, states: statesRunning, do: (*taskMove).submitted}},
+	OnReview:   {{by: byReviewer, states: statesActive, steps: []string{stepReview}, also: (*taskMove).reviewable, do: (*taskMove).reviewed, orPaused: true}},
+	OnReleased: {{by: ByHome, states: []string{taskQueued}, do: (*taskMove).judge}},
+	OnFail:     {{by: ByHost, states: statesActive, do: (*taskMove).crashed, orPaused: true}},
 	OnAssign: {
-		{by: BySecretary, states: []string{taskQueued, taskActive, taskPaused}, steps: stepsBeforeMerge, do: (*taskMove).assign},
-		{by: ByAdmin, states: statesOpen, steps: stepsBeforeMerge, do: (*taskMove).assign},
+		{by: BySecretary, states: []string{taskQueued, taskActive, taskPaused}, also: (*taskMove).folderFree, do: (*taskMove).assign},
+		{by: ByAdmin, states: statesOpen, also: (*taskMove).folderFree, do: (*taskMove).assign},
 	},
-	OnPause: {{by: BySecretary | ByAdmin, states: statesActive, steps: stepsBeforeMerge, do: (*taskMove).pauseByHand, orPaused: true}},
+	OnPause: {{by: BySecretary | ByAdmin, states: statesActive, do: (*taskMove).pauseByHand, orPaused: true}},
 	OnResume: {
 		{by: BySecretary, states: []string{taskPaused}, also: (*taskMove).notByRounds, do: (*taskMove).resume},
 		{by: ByAdmin, states: []string{taskPaused, taskFailed}, do: (*taskMove).resume},
 		{by: ByHost, states: []string{taskPaused}, also: (*taskMove).preempted, do: (*taskMove).activate},
 	},
-	OnCancel: {
-		{by: ByAdmin, states: statesOpen, do: (*taskMove).cancel},
-		{by: BySecretary, states: statesOpen, steps: stepsBeforeMerge, do: (*taskMove).cancel},
-		{by: ByHost, states: statesOpen, steps: stepsBeforeMerge, also: (*taskMove).takeover, do: (*taskMove).cancel},
-	},
+	OnCancel:      {{by: BySecretary | ByAdmin, states: statesOpen, do: (*taskMove).cancel}},
 	OnOrphaned:    {{by: ByHome, states: []string{taskQueued}, do: (*taskMove).orphaned}},
-	OnPreempted:   {{by: ByHost, states: statesActive, steps: stepsBeforeMerge, do: (*taskMove).preempt, orPaused: true}},
+	OnPreempted:   {{by: ByHost, states: statesActive, do: (*taskMove).preempt, orPaused: true}},
 	OnApproval:    {{by: byAssignee | byReviewer, states: statesActive, do: (*taskMove).approval, orPaused: true}},
 	OnApprove:     {{by: ByAdmin | ByPerson, do: (*taskMove).decided}},
 	OnDecision:    {{by: BySecretary | ByAI, states: statesOpen, do: (*taskMove).decision}},
 	OnChoose:      {{by: ByAdmin | ByPerson, do: (*taskMove).chosen}},
 	OnMention:     {{by: BySecretary | ByAI, do: (*taskMove).mention}},
 	OnText:        {{by: ByAdmin | ByPerson, do: (*taskMove).text}},
-	OnQuiet:       {{by: ByHome, states: statesActive, steps: stepsBeforeMerge, also: (*taskMove).idle, do: (*taskMove).quiet}},
+	OnQuiet:       {{by: ByHome, states: statesActive, also: (*taskMove).idle, do: (*taskMove).quiet}},
 	OnGroupResume: {{by: ByHome, do: (*taskMove).groupResume}},
 }
 
@@ -249,7 +227,7 @@ func Step(t proto.TaskRow, e Event) (proto.TaskRow, Effects, error) {
 	if err != nil {
 		return t, Effects{}, err
 	}
-	if e.Kind == OnSubmitted && profileMustAsk(t) {
+	if e.Kind == OnReport && profileMustAsk(t) {
 		return t, Effects{}, RefusedConflict
 	}
 	rule.do(&m)
@@ -316,30 +294,23 @@ func taskIn(set []string, v string) bool { return len(set) == 0 || slices.Contai
 
 // The conditions beside state and step.
 
-func (m *taskMove) sameCommit() bool { return m.e.Commit == m.t.Commit }
-
-func (m *taskMove) checkedCommit() bool {
-	c := m.t.Checks.Local
-	return c != nil && c.OK && c.Commit == m.e.Commit
+func (m *taskMove) reviewable() bool {
+	return m.waitKind() != waitReviewer && m.e.Report == m.t.Report
 }
-
-func (m *taskMove) reviewable() bool { return m.waitKind() != waitReviewer && m.sameCommit() }
 
 func (m *taskMove) notByRounds() bool { return m.waitKind() != waitRounds }
 
 func (m *taskMove) preempted() bool { return m.waitKind() == waitPreempted }
 
-func (m *taskMove) takeover() bool { return m.t.Origin == "takeover" }
-
 func (m *taskMove) idle() bool { return m.t.Wait == nil }
 
-// moving says whether the rows that act only on an active task before step
-// merge may act (section 2, the point of no return).
-func (m *taskMove) moving() bool { return m.t.State == taskActive && m.t.Step != stepMerge }
+// folderFree is the refusal of row 11: a started task is never given to an
+// assignee whose folder is busy with another task.
+func (m *taskMove) folderFree() bool { return !m.e.Busy || m.t.State == taskQueued }
 
 // cardsDecide says whether a card may set or clear the wait (section 2).
 func (m *taskMove) cardsDecide() bool {
-	return m.moving() && slices.Contains(waitsOfCards, m.waitKind())
+	return m.t.State == taskActive && slices.Contains(waitsOfCards, m.waitKind())
 }
 
 func (m *taskMove) waitKind() string {
@@ -427,7 +398,7 @@ func (m *taskMove) notice(code string) { m.queue(TaskItem{Why: itemNotice, Code:
 func (m *taskMove) retire(f ItemFilter) { m.x.Retire = append(m.x.Retire, f) }
 
 // activate makes the task active with the wait it has then. At step review
-// the reviewer gets the commit unless it is queued for them already.
+// the reviewer gets the report unless it is queued for them already.
 func (m *taskMove) activate() {
 	m.t.State, m.t.Wait = taskActive, m.restored()
 	if m.t.Step == stepReview {
@@ -435,11 +406,11 @@ func (m *taskMove) activate() {
 	}
 }
 
-// askReview gives the commit to the reviewer. Without one an active task
+// askReview gives the report to the reviewer. Without one an active task
 // waits for a reviewer; a paused one does when it becomes active.
 func (m *taskMove) askReview(ifNone bool) {
 	if m.t.Reviewer != "" {
-		m.queue(TaskItem{Why: itemReview, AI: m.t.Reviewer, Commit: m.t.Commit, IfNone: ifNone})
+		m.queue(TaskItem{Why: itemReview, AI: m.t.Reviewer, Report: m.t.Report, IfNone: ifNone})
 		return
 	}
 	if m.t.State == taskActive {
@@ -447,11 +418,11 @@ func (m *taskMove) askReview(ifNone bool) {
 	}
 }
 
-// pause is the pause of rows 12, 16 and 21: it keeps a reviewer or conflict wait it replaces.
+// pause is the pause of rows 12, 16 and 21: it keeps a reviewer wait it replaces.
 func (m *taskMove) pause(kind string) {
 	wait := m.waitFor(kind)
-	if k := m.waitKind(); slices.Contains(waitsKept, k) {
-		wait.Kept = k
+	if m.waitKind() == waitReviewer {
+		wait.Kept = waitReviewer
 	}
 	m.t.State, m.t.Wait = taskPaused, wait
 }
@@ -473,18 +444,6 @@ func (m *taskMove) stop(reason string) {
 	m.notice("task_failed")
 }
 
-// passed is row 6 for checks that passed, and row 5 without a remote.
-func (m *taskMove) passed() {
-	m.t.Step, m.t.Failures = stepReview, 0
-	if stuck := m.t.Stuck; stuck != nil && stuck.Kind == "checks" {
-		m.t.Stuck = nil
-	}
-	if m.t.Reviewer == "" {
-		m.notice("no_reviewer")
-	}
-	m.askReview(false)
-}
-
 // forgive starts the counters of R-63 again (rows 11 and 13, from failed).
 func (m *taskMove) forgive() {
 	m.t.Failures = 0
@@ -496,7 +455,7 @@ func (m *taskMove) forgive() {
 	}
 }
 
-// end makes the task final (rows 8 and 15).
+// end makes the task final (rows 7 and 15).
 func (m *taskMove) end(state string) {
 	now := m.e.Now
 	m.t.State, m.t.Wait, m.t.Stats.Ended = state, nil, &now
@@ -505,57 +464,55 @@ func (m *taskMove) end(state string) {
 
 // The rows.
 
-// create is row 1: queued, and released at once unless a dependency is not merged.
+// create is row 1.
 func (m *taskMove) create() {
-	m.t.State, m.t.Step, m.t.Wait = taskQueued, stepBranch, m.waitFor(waitDepends)
-	m.released()
+	m.t.State, m.t.Step = taskQueued, stepWork
+	m.judge()
 }
 
 // start is row 2.
 func (m *taskMove) start() {
-	m.t.Step, m.t.Assignee, m.t.Reviewer, m.t.Foundation = stepBranch, m.e.Member, "", false
-	m.activate()
-	if !m.takeover() {
-		m.queue(TaskItem{Why: itemAssign, AI: m.t.Assignee})
-	}
+	m.t.State, m.t.Step, m.t.Assignee, m.t.Reviewer, m.t.Foundation = taskQueued, stepWork, m.e.Member, "", false
+	m.judge()
 	m.notice("task_started")
 }
 
-// branch is row 3.
-func (m *taskMove) branch() { m.t.Step = stepLocal }
-
-// checked is row 4.
-func (m *taskMove) checked() {
-	m.t.Checks.Local = &proto.Check{OK: m.e.OK, At: m.e.Now, Commit: m.e.Commit}
+// judge is "Starting a queued task" (section 2): the task starts unless a
+// dependency is not done or its folder is busy, which its wait then says.
+func (m *taskMove) judge() {
+	switch {
+	case m.e.Blocked:
+		m.hold(waitDepends)
+	case m.e.Busy:
+		m.hold(waitBusy)
+	default:
+		m.t.Stats.Started = m.e.Now
+		m.activate()
+		m.queue(TaskItem{Why: itemAssign, AI: m.t.Assignee})
+	}
 }
 
-// submitted is row 5. Any review item still queued is about the old commit.
+// hold keeps a queued task waiting. A wait that says the same already stays
+// as it is, with its since.
+func (m *taskMove) hold(kind string) {
+	if m.waitKind() != kind {
+		m.t.Wait = m.waitFor(kind)
+	}
+}
+
+// submitted is row 5. Any review item still queued is about an earlier report.
 func (m *taskMove) submitted() {
-	m.t.Commit = m.e.Commit
+	m.t.Report, m.t.Step, m.t.Failures = m.e.Report, stepReview, 0
 	m.retire(ItemFilter{Why: itemReview})
-	m.settle(waitsKept...)
-	if m.e.Remote {
-		m.t.Step = stepCloud
-		return
+	if m.t.Reviewer == "" {
+		m.notice("no_reviewer")
 	}
-	m.passed()
-}
-
-// cloud is row 6.
-func (m *taskMove) cloud() {
-	m.t.Checks.Cloud = &proto.Check{OK: m.e.OK, At: m.e.Now, Commit: m.e.Commit}
-	if m.e.OK {
-		m.passed()
-		return
-	}
-	m.t.Step = stepLocal
-	m.strike(TaskItem{Why: itemChecks, AI: m.t.Assignee})
-	m.t.Stuck = profileFailure(m.t.Stuck, "checks", m.e.Stronger)
+	m.askReview(false)
 }
 
 // reviewed is row 7.
 func (m *taskMove) reviewed() {
-	r := proto.Review{Score: m.e.Score, OK: m.e.OK, By: m.e.Member, Commit: m.e.Commit, At: m.e.Now}
+	r := proto.Review{Score: m.e.Score, OK: m.e.OK, By: m.e.Member, Report: m.e.Report, At: m.e.Now}
 	if last := m.t.Review; last != nil {
 		r.Round, r.Failed = last.Round, last.Failed
 	}
@@ -563,40 +520,19 @@ func (m *taskMove) reviewed() {
 	m.t.Review = &r
 	if m.e.OK {
 		m.t.Stuck = nil
-		m.t.Step = stepMerge
-		m.queue(TaskItem{Why: itemMerge, AI: m.t.Assignee, Commit: m.t.Commit})
+		m.end(taskDone)
+		m.x.System = "task_done"
+		m.notice("task_done")
 		return
 	}
-	m.t.Stuck = profileFailure(m.t.Stuck, "review", m.e.Stronger)
+	m.t.Stuck = profileFailure(m.t.Stuck, m.e.Stronger)
 	r.Failed++
 	if r.Failed > m.e.Limits.ReviewRounds {
 		m.stop("review_rounds")
 		return
 	}
-	m.t.Step = stepLocal
+	m.t.Step = stepWork
 	m.queue(TaskItem{Why: itemReviewed, AI: m.t.Assignee})
-}
-
-// merged is row 8 for the merged task.
-func (m *taskMove) merged() {
-	m.end(taskMerged)
-	m.x.System = "task_merged"
-	m.notice("task_merged")
-}
-
-// released is row 8 for a task that waited for the merged one.
-func (m *taskMove) released() {
-	if m.e.Blocked {
-		return
-	}
-	m.activate()
-	m.queue(TaskItem{Why: itemAssign, AI: m.t.Assignee})
-}
-
-// conflicted is row 9.
-func (m *taskMove) conflicted() {
-	m.t.Step, m.t.Wait = stepLocal, m.waitFor(waitConflict)
-	m.notice("conflict")
 }
 
 // crashed is row 10.
@@ -607,12 +543,11 @@ func (m *taskMove) assign() {
 	was := *m
 	m.setAssignee()
 	m.setReviewer()
-	m.settle(waitConflict)
 	if was.t.State == taskFailed {
 		m.forgive()
 		m.activate()
 	}
-	if m.t.Assignee != was.t.Assignee || was.t.State == taskFailed || was.waitKind() == waitConflict {
+	if m.t.Assignee != was.t.Assignee || was.t.State == taskFailed {
 		m.queue(TaskItem{Why: itemAssign, AI: m.t.Assignee})
 	}
 }
@@ -633,7 +568,7 @@ func (m *taskMove) setAssignee() {
 }
 
 // setReviewer names another reviewer: the old one's queued review is retired.
-// At step review a reviewer wait ends and the new reviewer gets the commit;
+// At step review a reviewer wait ends and the new reviewer gets the report;
 // a task that was failed gets it when assign makes it active.
 func (m *taskMove) setReviewer() {
 	old := m.t.Reviewer
@@ -648,8 +583,11 @@ func (m *taskMove) setReviewer() {
 	}
 }
 
-// pauseByHand is row 12.
-func (m *taskMove) pauseByHand() { m.pause(waitManual) }
+// pauseByHand is row 12: the wait says who paused.
+func (m *taskMove) pauseByHand() {
+	m.pause(waitManual)
+	m.t.Wait.By = m.e.Member
+}
 
 // resume is row 13; row 13b is activate alone.
 func (m *taskMove) resume() {
@@ -698,7 +636,7 @@ func (m *taskMove) decided() {
 
 // decision is row 19.
 func (m *taskMove) decision() {
-	if m.moving() && m.t.Wait == nil {
+	if m.t.State == taskActive && m.t.Wait == nil {
 		m.t.Wait = taskCardWait(m.posted(waitDecision))
 	}
 }
@@ -714,7 +652,7 @@ func (m *taskMove) chosen() {
 // mention is row 21.
 func (m *taskMove) mention() {
 	m.t.Thread.Rounds++
-	if m.t.Thread.Rounds < m.e.Limits.Rounds || !m.moving() {
+	if m.t.Thread.Rounds < m.e.Limits.Rounds || m.t.State != taskActive {
 		return
 	}
 	m.pause(waitRounds)
@@ -735,10 +673,10 @@ func (m *taskMove) quiet() { m.notice("quiet") }
 
 // groupResume is row 24. The row does not change.
 func (m *taskMove) groupResume() {
-	if m.moving() && m.t.Wait == nil {
+	if m.t.Wait == nil {
 		m.queue(TaskItem{Why: itemResume, AI: m.t.Assignee})
 	}
 	if m.t.Step == stepReview && m.t.Reviewer != "" {
-		m.queue(TaskItem{Why: itemReview, AI: m.t.Reviewer, Commit: m.t.Commit, IfNone: true})
+		m.queue(TaskItem{Why: itemReview, AI: m.t.Reviewer, Report: m.t.Report, IfNone: true})
 	}
 }

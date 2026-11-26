@@ -7,15 +7,15 @@ import (
 )
 
 // Messages in the main line and in task threads: post of kinds text, progress,
-// question, report and handback (planning/contracts/commands.md 1.3;
-// planning/contracts/messages.md 1, 2.7 and 2.10). A message in a thread advances
-// the task's thread summary (planning/contracts/rows.md section 4).
+// question and handback (planning/contracts/commands.md 1.3;
+// planning/contracts/messages.md 1 and 2.10). A message in a thread advances
+// the task's thread summary (planning/contracts/rows.md section 4). The body
+// of each of these kinds is empty.
 
 func init() {
 	Commands.Add("post/text", postText)
 	Commands.Add("post/progress", postProgress)
 	Commands.Add("post/question", postQuestion)
-	Commands.Add("post/report", postReport)
 	Commands.Add("post/handback", postHandback)
 }
 
@@ -31,7 +31,7 @@ const (
 )
 
 func postText(s *State, c Command) (Result, *Refusal) {
-	rows, msg, refusal := postWrite[proto.EmptyBody](s, c, postKindText, false, false)
+	rows, msg, refusal := postWrite(s, c, postKindText, false, false)
 	if refusal != nil {
 		return Result{}, refusal
 	}
@@ -57,25 +57,18 @@ func postQuestion(s *State, c Command) (Result, *Refusal) {
 }
 
 func postTalk(s *State, c Command, kind string, inThreadOnly bool) (Result, *Refusal) {
-	rows, msg, refusal := postWrite[proto.EmptyBody](s, c, kind, true, inThreadOnly)
+	rows, msg, refusal := postWrite(s, c, kind, true, inThreadOnly)
 	if refusal != nil {
 		return Result{}, refusal
 	}
 	return s.cfmGateItems(c, cfmWhatDirect, msg, rows, s.postWakes(msg)), nil
 }
 
-func postReport(s *State, c Command) (Result, *Refusal) {
-	rows, _, refusal := postWrite[proto.ReportBody](s, c, postKindReport, true, true)
-	if refusal != nil {
-		return Result{}, refusal
-	}
-	return Result{Rows: rows}, nil
-}
-
-// postHandback writes a hand-back summary: in a thread, or anywhere when as
-// is the secretary. One in a thread is a notice for the secretary.
+// postHandback writes an AI's hand-back account: in the thread of its task,
+// or in the main line for a session without one. One in a thread is a notice
+// for the secretary.
 func postHandback(s *State, c Command) (Result, *Refusal) {
-	rows, msg, refusal := postWrite[proto.HandbackBody](s, c, postKindHandback, true, !s.Secretary(c.Who))
+	rows, msg, refusal := postWrite(s, c, postKindHandback, true, false)
 	if refusal != nil {
 		return Result{}, refusal
 	}
@@ -86,15 +79,15 @@ func postHandback(s *State, c Command) (Result, *Refusal) {
 	return Result{Rows: rows, Items: items}, nil
 }
 
-func postWrite[B any](s *State, c Command, kind string, aiOnly, inThreadOnly bool) ([]Row, proto.MsgRow, *Refusal) {
+func postWrite(s *State, c Command, kind string, aiOnly, inThreadOnly bool) ([]Row, proto.MsgRow, *Refusal) {
 	if aiOnly && c.Who.AI == "" {
 		return nil, proto.MsgRow{}, &Refusal{"forbidden", "only an AI posts this kind of message"}
 	}
-	var p proto.Post[B]
+	var p proto.Post[proto.EmptyBody]
 	if refusal := c.Decode(&p); refusal != nil {
 		return nil, proto.MsgRow{}, refusal
 	}
-	mentions, refusal := s.postCheck(c.Who, kind, inThreadOnly, p.Thread, p.Mentions)
+	mentions, refusal := s.postCheck(inThreadOnly, p.Thread, p.Mentions)
 	if refusal != nil {
 		return nil, proto.MsgRow{}, refusal
 	}
@@ -106,28 +99,19 @@ func postWrite[B any](s *State, c Command, kind string, aiOnly, inThreadOnly boo
 	return s.postRows(msg), msg, nil
 }
 
-func (s *State) postCheck(w Who, kind string, inThreadOnly bool, thread *proto.ID, raw []proto.ID) ([]string, *Refusal) {
+func (s *State) postCheck(inThreadOnly bool, thread *proto.ID, raw []proto.ID) ([]string, *Refusal) {
 	if inThreadOnly && thread == nil {
 		return nil, &Refusal{"bad_request", "the post belongs in a task thread"}
 	}
-	if refusal := s.postThread(w, kind, thread); refusal != nil {
-		return nil, refusal
+	if thread != nil && !s.postHasTask(*thread) {
+		return nil, &Refusal{"not_found", "the post names no task"}
 	}
 	return s.postMentions(raw)
 }
 
-func (s *State) postThread(w Who, kind string, thread *proto.ID) *Refusal {
-	if thread == nil {
-		return nil
-	}
-	task, ok := s.Tasks[string(*thread)]
-	if !ok {
-		return &Refusal{"not_found", "the post names no task"}
-	}
-	if kind == postKindReport && task.Assignee != w.AI {
-		return &Refusal{"forbidden", "only the assignee of the task posts a report"}
-	}
-	return nil
+func (s *State) postHasTask(id proto.ID) bool {
+	_, ok := s.Tasks[string(id)]
+	return ok
 }
 
 // postMentions checks the members a post mentions and returns their ids: each

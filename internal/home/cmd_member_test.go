@@ -28,7 +28,7 @@ func memAddCmd(n byte, memberID, cli, name, account string, secretary bool) prot
 			Op:          "add_ai",
 			ID:          proto.ID(memberID),
 		},
-		CLI: cli, Name: name, Account: account, Secretary: secretary, Approvers: []string{browser.ID()},
+		CLI: cli, Name: name, Workspace: "/home/dev/website", Account: account, Secretary: secretary, Approvers: []string{browser.ID()},
 	}
 }
 
@@ -79,7 +79,7 @@ func TestMemberAddAIHostAndPath(t *testing.T) {
 			RowHeader: proto.RowHeader{Type: "member", ID: remoteID, Seq: 11},
 			Group:     groupID, Kind: "ai", User: browser.ID(), Name: "Remote Codex", LastSeen: clock,
 		},
-		CLI: "codex", Host: laptop.ID(), HostName: "studio", Secretary: false,
+		CLI: "codex", Host: laptop.ID(), HostName: "studio", Workspace: "/home/dev/website", Secretary: false,
 		Account: "team", Allow: []string{}, Approvers: []string{browser.ID()},
 		State: "dormant", Since: clock, Path: "direct", Usage: proto.Usage{},
 		Profile: proto.Profile{Tier: "standard"},
@@ -90,13 +90,14 @@ func TestMemberAddAIHostAndPath(t *testing.T) {
 	grpNoNulls(t, briefRows(res)[0])
 	s.Commit(res)
 
-	// The home takes any driver name; the node checks that it has the driver.
+	// The home takes any driver name and any path, as its host wrote it; the
+	// node checks that it has the driver and the folder.
 	cmdLocal := memAddCmd(91, localID, "qwen_code", "Local Claude", "api_key", false)
-	cmdLocal.Approvers = []string{guest.ID(), browser.ID()}
+	cmdLocal.Workspace, cmdLocal.Approvers = `C:\Users\dev\site`, []string{guest.ID(), browser.ID()}
 	res = grpApply(t, s, memDisk{}, receipts{}, node, cmdLocal)
 	wantLocal := wantRemote
 	wantLocal.ID, wantLocal.Seq, wantLocal.Name = localID, 12, "Local Claude"
-	wantLocal.CLI, wantLocal.Host, wantLocal.HostName = "qwen_code", node.ID(), "home-box"
+	wantLocal.CLI, wantLocal.Host, wantLocal.HostName, wantLocal.Workspace = "qwen_code", node.ID(), "home-box", `C:\Users\dev\site`
 	wantLocal.Account, wantLocal.Approvers, wantLocal.Path = "api_key", []string{guest.ID(), browser.ID()}, "local"
 	equal(t, briefRows(res), []any{wantLocal})
 }
@@ -170,6 +171,10 @@ func TestMemberAddAIRefusals(t *testing.T) {
 		},
 		"with an empty name": {
 			change: func(p *proto.MemberAddAI) { p.Name = "" },
+			code:   "bad_request",
+		},
+		"with an empty workspace": {
+			change: func(p *proto.MemberAddAI) { p.Workspace = "" },
 			code:   "bad_request",
 		},
 		"with a cli name outside a-z, 0-9 and _": {
@@ -391,7 +396,7 @@ func TestMemberRemoveWorkingAndSecretary(t *testing.T) {
 		owned.User, owned.Host = device(6).ID(), device(6).ID()
 		s.AIs[grpWorkerA] = owned
 		// Finished tasks on this AI, and active tasks on other AIs, allow removal.
-		s.Tasks[id(110)] = proto.TaskRow{State: "merged", Assignee: grpWorkerA}
+		s.Tasks[id(110)] = proto.TaskRow{State: "done", Assignee: grpWorkerA}
 		s.Tasks[id(111)] = proto.TaskRow{State: "cancelled", Reviewer: grpWorkerA}
 		s.Tasks[id(120)] = proto.TaskRow{State: "active", Assignee: grpWorkerB, Reviewer: grpWorkerB}
 		d := memDisk{

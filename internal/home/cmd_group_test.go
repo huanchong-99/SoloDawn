@@ -33,8 +33,7 @@ func grpCreatePayload(nonce, g string) proto.GroupCreate {
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: proto.ID(nonce), Timestamp: grpCreateTS, Group: proto.ID(g)},
 			Op:          "create",
 		},
-		Name: "Website", Kind: "project", Repo: "https://git.example/team/website.git",
-		Base: "main", Forge: "github", Checks: []string{"go vet ./...", "go test ./..."}, MemberName: "owner",
+		Name: "Website", MemberName: "owner",
 	}
 }
 
@@ -112,42 +111,33 @@ func grpSetCmd(n byte) proto.GroupSet {
 }
 
 func TestGroupCreateWritesTheGroupAndOwner(t *testing.T) {
-	for _, forge := range []string{"github", "none"} {
-		t.Run(forge, func(t *testing.T) {
-			s := empty(t)
-			r := receipts{}
-			p := grpCreatePayload(groupID, groupID)
-			p.Forge = forge
-			if forge == "none" {
-				p.Checks = []string{}
-			}
-			res := grpApply(t, s, disk{}, r, browser, p)
-			wantGroup := proto.GroupRow{
-				RowHeader: proto.RowHeader{Type: "group", ID: groupID, Seq: 1}, Name: "Website", Kind: "project",
-				Repo: p.Repo, Base: "main", Forge: forge, Home: node.ID(), Checks: p.Checks,
-				Pass: 90, PassFoundation: 70, Limits: grpDefaultLimits, Created: clock,
-			}
-			wantOwner := proto.HumanMemberRow{
-				MemberRow: proto.MemberRow{
-					RowHeader: proto.RowHeader{Type: "member", ID: grpOwnerID(groupID), Seq: 2},
-					Group:     groupID, Kind: "human", User: browser.ID(), Name: "owner", LastSeen: clock,
-				},
-				Role: "owner", Online: true,
-			}
-			equal(t, res.Answer, store.Outcome{OK: true})
-			equal(t, res.GroupsChanged, true)
-			rows := briefRows(res)
-			equal(t, rows, append([]any{wantGroup, wantOwner}, grpOwnerDevices(t, 3)...))
-			grpNoNulls(t, rows[0], "/paused")
-			grpNoNulls(t, rows[1])
-			s.Commit(res)
-			equal(t, s.Group, wantGroup)
-			equal(t, s.People[wantOwner.ID], wantOwner)
-			// Repeating the same create answers from the receipt without new rows.
-			again := grpApply(t, s, disk{}, r, browser, p)
-			equal(t, again, home.Result{Answer: store.Outcome{OK: true}})
-		})
+	s := empty(t)
+	r := receipts{}
+	p := grpCreatePayload(groupID, groupID)
+	res := grpApply(t, s, disk{}, r, browser, p)
+	wantGroup := proto.GroupRow{
+		RowHeader: proto.RowHeader{Type: "group", ID: groupID, Seq: 1}, Name: "Website", Home: node.ID(),
+		Pass: 90, PassFoundation: 70, Limits: grpDefaultLimits, Created: clock,
 	}
+	wantOwner := proto.HumanMemberRow{
+		MemberRow: proto.MemberRow{
+			RowHeader: proto.RowHeader{Type: "member", ID: grpOwnerID(groupID), Seq: 2},
+			Group:     groupID, Kind: "human", User: browser.ID(), Name: "owner", LastSeen: clock,
+		},
+		Role: "owner", Online: true,
+	}
+	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, res.GroupsChanged, true)
+	rows := briefRows(res)
+	equal(t, rows, append([]any{wantGroup, wantOwner}, grpOwnerDevices(t, 3)...))
+	grpNoNulls(t, rows[0], "/paused")
+	grpNoNulls(t, rows[1])
+	s.Commit(res)
+	equal(t, s.Group, wantGroup)
+	equal(t, s.People[wantOwner.ID], wantOwner)
+	// Repeating the same create answers from the receipt without new rows.
+	again := grpApply(t, s, disk{}, r, browser, p)
+	equal(t, again, home.Result{Answer: store.Outcome{OK: true}})
 }
 
 func TestGroupCreateRefusals(t *testing.T) {
@@ -165,32 +155,16 @@ func TestGroupCreateRefusals(t *testing.T) {
 		},
 		"by a member who is not the owner": {existing: true, by: guest, code: "forbidden"},
 		"by a non-owner before creation":   {by: guest, code: "forbidden"},
-		"with checks of the wrong type": {
-			raw:  `{"t":"group","n":"` + groupID + `","ts":1763600000000,"g":"` + groupID + `","op":"create","checks":"bad"}`,
+		"with a name of the wrong type": {
+			raw:  `{"t":"group","n":"` + groupID + `","ts":1763600000000,"g":"` + groupID + `","op":"create","name":7,"member_name":"owner"}`,
 			code: "bad_request",
 		},
 		"where g differs from n": {
 			change: func(p *proto.GroupCreate) { p.Nonce = proto.ID(id(1)) },
 			code:   "bad_request",
 		},
-		"with kind team": {
-			change: func(p *proto.GroupCreate) { p.Kind = "team" },
-			code:   "bad_request",
-		},
-		"with forge gitlab": {
-			change: func(p *proto.GroupCreate) { p.Forge = "gitlab" },
-			code:   "bad_request",
-		},
 		"with an empty name": {
 			change: func(p *proto.GroupCreate) { p.Name = "" },
-			code:   "bad_request",
-		},
-		"with an empty repo": {
-			change: func(p *proto.GroupCreate) { p.Repo = "" },
-			code:   "bad_request",
-		},
-		"with an empty base": {
-			change: func(p *proto.GroupCreate) { p.Base = "" },
 			code:   "bad_request",
 		},
 		"with an empty member_name": {
@@ -244,13 +218,8 @@ func TestGroupSetEachFieldIndividually(t *testing.T) {
 			set:  func(p *proto.GroupSet) { v := "Website"; p.Name = &v },
 			want: func(*proto.GroupRow) {},
 		},
-		"empty checks list by admin": {
+		"pass score by admin": {
 			by:   guest,
-			set:  func(p *proto.GroupSet) { v := []string{}; p.Checks = &v },
-			want: func(g *proto.GroupRow) { g.Checks = []string{} },
-		},
-		"pass score": {
-			by:   browser,
 			set:  func(p *proto.GroupSet) { v := 85; p.Pass = &v },
 			want: func(g *proto.GroupRow) { g.Pass = 85 },
 		},
@@ -300,7 +269,7 @@ func TestGroupSetSecretaryTransitions(t *testing.T) {
 		s.AIs[aiID] = sec
 		s.Group.Secretary = ""
 		// Finished tasks on this AI, and active tasks on other AIs, do not block becoming secretary.
-		s.Tasks[id(80)] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(80)}, State: "merged", Assignee: grpWorkerA}
+		s.Tasks[id(80)] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(80)}, State: "done", Assignee: grpWorkerA}
 		s.Tasks[id(81)] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(81)}, State: "cancelled", Reviewer: grpWorkerA}
 		s.Tasks[id(86)] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(86)}, State: "active", Assignee: grpWorkerB, Reviewer: aiID}
 
