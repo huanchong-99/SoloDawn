@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
-	"errors"
 	"log"
 	"sync"
 	"time"
@@ -304,11 +303,13 @@ func extFailStart(h *Host, d *delivery, key aiGroupKey, s Session, batch []verif
 	failStart(h, stateOf(h), s, gone)
 }
 
+// extHandOut composes the context after the delivery is recorded: it reads the
+// report a review item writes into the session row. A context that fails
+// then loses the turn, as a node that stops there does (flows/agent-turn.md
+// step 7).
 func extHandOut(h *Host, ep *extPart, d *delivery, key aiGroupKey, s Session, batch []verifiedItem) (proto.Handout, bool, error) {
 	raw, _ := collectRawItems(batch)
-	text, turn, textErr := Compose(h, s, ItemsTurn, raw)
-	replaced, _, replErr := Compose(h, s, ReplacedTurn, nil)
-	err := errors.Join(textErr, replErr)
+	text, turn, err := Compose(h, s, ItemsTurn, raw)
 	if err == nil {
 		err = commitTurnItems(h, externalAgent, s.SessionKey, batch)
 	}
@@ -317,6 +318,11 @@ func extHandOut(h *Host, ep *extPart, d *delivery, key aiGroupKey, s Session, ba
 		return proto.Handout{}, false, err
 	}
 	ackBatch(h, batch)
+	s, _ = h.Sessions.Get(s.SessionKey)
+	replaced, _, err := Compose(h, s, ReplacedTurn, nil)
+	if err != nil {
+		return proto.Handout{}, false, err
+	}
 	run := batch[0].item.Item
 	extOpenRun(h, ep, key, s, run, turn)
 	return proto.Handout{

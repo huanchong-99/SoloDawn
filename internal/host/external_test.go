@@ -264,3 +264,42 @@ func TestExternalTaskHandOutNamesTheTaskByItsNumber(t *testing.T) {
 		t.Fatalf("task take = %+v %v %v", got, ok, err)
 	}
 }
+
+// The context of a review hand-out is what a replaced review session is told,
+// which names the report the review item carries: the report is on the
+// session row before that context is composed.
+func TestExternalReviewContextReadsTheRecordedReport(t *testing.T) {
+	r := newExternalRig(t, false)
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "T", Origin: "brief", State: "active", Step: "review", Report: testMsg2, Assignee: testAI2, Reviewer: testAI1})
+	var reports []string
+	r.onCompose = func(s Session, items []json.RawMessage) {
+		if items == nil {
+			reports = append(reports, s.Report)
+		}
+	}
+	r.pushExternalItem(proto.Item{Item: 13, Why: "review", Task: testTask1, Msg: testMsg2})
+	got, ok, err := r.h.ExternalTake(testGroup1, testAI1)
+	if !ok || err != nil || got.Kind != "review" || len(reports) != 1 || reports[0] != testMsg2 {
+		t.Fatalf("review take = %+v %v %v, context composed with reports %q", got, ok, err, reports)
+	}
+}
+
+// A context that cannot be composed after the items were recorded loses the
+// turn, as a node that stops there does: the items stay delivered and
+// acknowledged, and no run opens.
+func TestExternalContextFailsAfterTheDelivery(t *testing.T) {
+	r := newExternalRig(t, false)
+	failure := errors.New("context")
+	r.onCompose = func(_ Session, items []json.RawMessage) {
+		if items != nil {
+			r.composeMu.Lock()
+			r.composeE = failure
+			r.composeMu.Unlock()
+		}
+	}
+	r.pushExternalItem(proto.Item{Item: 14, Why: "mention", Msg: testMsg1})
+	if _, ok, err := r.h.ExternalTake(testGroup1, testAI1); ok || !errors.Is(err, failure) || r.h.QueuedCount(testGroup1, testAI1) != 0 || r.home.ackCountFor(14) != 1 {
+		t.Fatalf("take = %v %v", ok, err)
+	}
+	mustState(t, r.h, "offline", "")
+}
