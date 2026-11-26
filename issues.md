@@ -87,6 +87,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/host/opencode.go` and `internal/host/qwen.go` read no state of the MCP server, and no contract names one.
 - Status: open, left as it is (coordinator, 2026-11-26).
 
+### 2026-11-26 · limitation · macOS may ask about `solodawn` again after each update
+
+- Symptom: after an update the firewall may ask again whether `solodawn` may accept incoming connections, although it was allowed before; not observed yet.
+- Cause: the release binaries are signed ad hoc (`.github/workflows/release.yml`), so their designated requirement is their cdhash, which changes with every release; the firewall stores it with the app's entry.
+- Status: open, accepted for 1.0 (coordinator, 2026-11-26): `install.md` says to allow it again. Signing with a Developer ID is a later decision of the owner.
+
 ### 2026-11-26 · limitation · On a Mac with the Application Firewall, a UDP write can block every connection on one local address
 
 - Symptom: on the development Mac, some runs of A9.2 (five or six WebRTC connections between in-process peers each) failed with `timed out … waiting for ctl … saw 1: connection ended before it was ready`. Two causes were found; they are different failures:
@@ -382,7 +388,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: on macOS with the Application Firewall enabled, incoming UDP and ICE-TCP flows to an unsigned `solodawn` (or test) binary are blocked (`verdict: 2 (Block)`) unless the user clicks Allow when macOS asks or adds `solodawn` under System Settings → Network → Firewall → Options, so direct connections fail and fall back to the relay.
 - Cause: release and development binaries are not code-signed (`install.md`, "Verify and install"), and the macOS Application Firewall blocks unsolicited incoming connections to unsigned executables until allowed.
-- Status: open, documented in `install.md`.
+- Status: open, documented in `install.md`. Why macOS sometimes never asks: the resolved entry "Every Go binary shares one macOS firewall identity" (2026-11-26).
 
 ### 2026-11-21 · limitation · Windows `AF_UNIX` half-close does not always deliver EOF; a shim may outlive its CLI until the session closes
 
@@ -854,6 +860,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom (local smoke test of v3.0.0-rc.1, findings F2 to F5, a host firewall blocking the direct connection): the page showed "establishing a direct connection" until "expired"; `solodawn pair` printed only `pairing secret expired`, up to 4 minutes after the page had expired; stopping the node printed `context canceled`. The onboarding note said that the node keeps trying direct (`pairing.status.relay_note`). `install.md` did not say that pairing installs the login service.
 - Cause: the browser's peer retried a connection that ICE failed without telling the page (`Peer.#ended`, `web/src/lib/peer.ts`); `waitPair` returned `errPairExpired` whatever it had seen, and `ctx.Err()` on a stop (`internal/node/pair.go`); role `b` started its own 10 minutes when it joined, since nothing carried the code's expiry; the note predates the cut of the relay-free probe (as `nodes.relay.body` below).
 - Status: resolved on `fix/pairing-reasons`: the page shows `pairing.error.unreached` (en, zh) when ICE fails an attempt and keeps it at expiry; `pair` says `no connection to the browser could be made; check a firewall on this computer or its network` when the browser was found but never connected, and `the node stopped`; `pair` carries `exp` (`contracts/envelope.md` section 6) and role `b` ends with the creator; the note and `install.md` are corrected.
+
+### 2026-11-26 · bug · Every Go binary shares one macOS firewall identity, so a block for a test binary silently blocks `solodawn`
+
+- Symptom: in the smoke test of `v3.0.0-rc.1` on the Mac mini, macOS never asked about `solodawn` and dropped every incoming flow to it: the firewall log shows `Handle flow with processPID: … and bundleid: a.out`, then `Found known filter app by signing identifier: … processName: peer.test, … designatedRequirement: (null), bundle id: a.out, filterAction: 2` and `return known verdict: 2`. The entry was an old "Block incoming connections" for `…/go-build540054719/b308/peer.test`. A copy re-signed as `org.solodawn.smoke1126` still showed `bundleid: a.out`.
+- Cause: the firewall keys an app by its code-signing identifier (the flow's `bundleid`), and keeps no designated requirement for a linker-signed binary, so one entry matches every binary with that identifier. Evidence in the same log: Playwright's `chrome-headless-shell` (ad-hoc, `Identifier=headless_shell`, no Info.plist) shows `bundleid: headless_shell`, and Firefox's `plugin-container` (`Identifier=plugin-container`, Info.plist `org.mozilla.plugincontainer`) shows `bundleid: plugin-container`. Go's linker signs every darwin binary ad hoc as `a.out` (it links to a file of that name), so every `go build` and `go test` binary, and the released `solodawn` up to `v3.0.0-rc.1`, is the same app to the firewall: one Allow or Block applies to all of them. Why the re-signed copy stayed `a.out` was not proved; re-signing keeps the Mach-O `LC_UUID`, and the firewall maps flows to executables by that UUID (`processPathFromUUID`, `Updating app rule to contain the effective UUID` in `socketfilterfw`). It also explains the local firewall failures of test binaries in the entries of 2026-11-22, 2026-11-20 (three peer scenarios) and A7.9: in the same log the test binaries (`features.test`, the scenarios' `solodawn.exe`) are matched to the `peer.test` entry with verdict 2.
+- Status: resolved for release builds on branch `ci/macos-identity`: `.github/workflows/release.yml` builds on macOS and links the darwin pair with Apple's linker, embeds `cmd/solodawn/Info.plist` (`CFBundleIdentifier` `org.solodawn.node`) as `__TEXT,__info_plist`, and signs them ad hoc, which takes the identifier from that Info.plist; the job fails unless `codesign -dv` shows `Identifier=org.solodawn.node`. The Linux and Windows binaries are unchanged (the four of `v3.0.0-rc.1` were rebuilt byte for byte on macOS). Development builds from `go build` and test binaries keep `a.out`. Not proved on the firewall itself: that needs a listening binary, which makes macOS ask; the owner's next run of checklist step 2 is the proof. macOS may ask again after each update: see the limitation "macOS may ask about `solodawn` again after each update".
+
+### 2026-11-26 · bug · Five of the six release binaries recorded a modified work tree
+
+- Symptom: `go version -m` of the `v3.0.0-rc.1` binaries shows `vcs.modified=true` and a module version ending in `+dirty` for every binary but `linux_amd64`.
+- Cause: the build loop of `.github/workflows/release.yml` writes each binary into `dist/`, which Git did not ignore, so every build after the first saw an untracked file.
+- Status: resolved on branch `ci/macos-identity`: `/dist/` is in `.gitignore`, and the release job fails unless `go version -m` of every binary shows `vcs.modified=false`.
 
 ### 2026-11-26 · bug · FLAKY-34: A7.4 failed once: the test browser dropped the interactive CLI's first output
 

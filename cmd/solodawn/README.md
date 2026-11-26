@@ -18,6 +18,7 @@ registers, and turns the result into an exit code. The command line is specified
 | --- | --- |
 | `main.go` | `main`, `run` (looks the first word up in `node.Subcommands`), and the registration of `rendezvous`, `pair`, `version`, `node`, `mcp`, `status`, `pair-browser` and `open` |
 | `service.go` | `service install` and `service remove` |
+| `Info.plist` | The identity `org.solodawn.node` that the release build embeds in the macOS binaries and signs them with (`.github/workflows/release.yml`), so the macOS firewall tells `solodawn` from other Go programs |
 
 `group` (`internal/node/export.go`), `wait` and `done` (`internal/node/external.go`) register
 themselves from `internal/node`; this package does not name them.

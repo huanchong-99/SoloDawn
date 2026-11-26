@@ -4,6 +4,12 @@ name: Release
 # vMAJOR.MINOR.PATCH-rc.N, builds the six binaries stamped with the tag and
 # their SHA256SUMS, and keeps them as a workflow artifact. It creates no
 # release and no tag.
+#
+# It runs on macOS because the two darwin binaries are linked by Apple's linker
+# with cmd/solodawn/Info.plist embedded and signed ad hoc as org.solodawn.node:
+# the macOS Application Firewall keys its decisions on that identity, and every
+# other Go binary shares the identity a.out. The Linux and Windows binaries are
+# cross-compiled exactly as before.
 
 on:
   push:
@@ -17,7 +23,7 @@ permissions:
 jobs:
   build:
     if: ${{ !github.event.deleted }}
-    runs-on: ubuntu-latest
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       # The tag filters above cannot refuse leading zeros: v01.2.3 and v1.2.3-rc.01 match them.
@@ -50,24 +56,40 @@ jobs:
           cp ../install.md ../internal/node/webdist/
 
       - name: Build six binaries stamped with the tag
-        env:
-          CGO_ENABLED: '0'
         run: |
           mkdir dist
           for os in linux darwin windows; do
             suffix=
+            cgo=0
+            link=
             if [[ "$os" == windows ]]; then suffix=.exe; fi
+            if [[ "$os" == darwin ]]; then
+              cgo=1
+              link="-linkmode=external -extldflags '-sectcreate __TEXT __info_plist $PWD/cmd/solodawn/Info.plist'"
+            fi
             for arch in amd64 arm64; do
-              GOOS="$os" GOARCH="$arch" go build -trimpath \
-                -ldflags="-s -w -X github.com/huanchong-99/SoloDawn/internal/node.Version=$GITHUB_REF_NAME" \
+              # The deployment target is Go's own macOS minimum; Apple's linker would use the runner's.
+              CGO_ENABLED="$cgo" MACOSX_DEPLOYMENT_TARGET=13.0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+                -ldflags="-s -w -X github.com/huanchong-99/SoloDawn/internal/node.Version=$GITHUB_REF_NAME $link" \
                 -o "dist/solodawn_${GITHUB_REF_NAME}_${os}_${arch}${suffix}" ./cmd/solodawn
             done
           done
-          test "$("dist/solodawn_${GITHUB_REF_NAME}_linux_amd64" version)" = "$GITHUB_REF_NAME"
+          for arch in amd64 arm64; do
+            bin="dist/solodawn_${GITHUB_REF_NAME}_darwin_${arch}"
+            codesign -s - -f "$bin"
+            codesign -dv "$bin" 2>&1 | grep -Fx Identifier=org.solodawn.node
+          done
+          test "$("dist/solodawn_${GITHUB_REF_NAME}_darwin_arm64" version)" = "$GITHUB_REF_NAME"
+
+      - name: Refuse a binary built from a modified work tree
+        run: |
+          for bin in dist/solodawn_*; do
+            go version -m "$bin" | grep -Fx $'\tbuild\tvcs.modified=false'
+          done
 
       - name: Checksum the six binaries
         working-directory: dist
-        run: sha256sum solodawn_* > SHA256SUMS
+        run: shasum -a 256 solodawn_* > SHA256SUMS
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

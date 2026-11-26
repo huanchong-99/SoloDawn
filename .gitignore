@@ -2,3 +2,4 @@
 /solodawn.exe
 *.test
 *.test.exe
+/dist/

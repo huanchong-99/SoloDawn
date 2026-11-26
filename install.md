@@ -39,9 +39,13 @@ fi | grep -Fxf SHA256SUMS &&
 
 On success the matching line appears. On macOS the last step clears the
 quarantine mark that a browser download carries, which would otherwise
-stop the unsigned binary from running; it runs only after the checksum
-matched. On macOS with the Application Firewall enabled, allow `solodawn`
-when asked, or direct connections to it fail and only the relay works. Add
+stop the ad-hoc-signed binary from running; it runs only after the checksum
+matched. On macOS with the Application Firewall enabled, macOS asks once
+whether `solodawn` may accept incoming connections: allow it, or direct
+connections to it fail and only the relay works. If it never asks and direct
+connections fail, remove a blocked `solodawn` or other Go program (often a
+`.test` binary) under System Settings, Network, Firewall, Options, then
+restart the node. macOS may ask again after an update: allow it again. Add
 `$HOME/.local/bin` to your `PATH` if needed.
 
 **Windows** (PowerShell)
