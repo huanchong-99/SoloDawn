@@ -309,6 +309,78 @@ func TestNodeWebPortShadowedOnLoopback(t *testing.T) {
 	checkLocalWebServer(t, n.httpPort)
 }
 
+// When the web port is taken, macOS can hand a wildcard bind on port 0 a port
+// that another process holds on 127.0.0.1 only (the fake below does that on
+// every system); the node must not dial that process as its own rendezvous.
+func TestNodeFallbackPortShadowedOnLoopback(t *testing.T) {
+	stranger := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(stranger.Close)
+	port := strconv.Itoa(stranger.Listener.Addr().(*net.TCPAddr).Port)
+	saved := tcpListen
+	t.Cleanup(func() { tcpListen = saved })
+	tcpListen = func(network, addr string) (net.Listener, error) {
+		switch addr {
+		case "127.0.0.1:" + strconv.Itoa(defaultWebPort):
+			return nil, io.ErrNoProgress
+		case ":0":
+			addr = ":" + port
+		}
+		return saved(network, addr)
+	}
+	n, err := openNode(t.Context(), socketRoot(t))
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	if strconv.Itoa(n.httpPort) == port {
+		t.Fatalf("the node serves on the stranger's port %s", port)
+	}
+	checkLocalWebServer(t, n.httpPort)
+}
+
+// A free port whose listen on every address fails as held, as one held on ::1
+// only does on Linux, gives way to another pick.
+func TestNodeFallbackPortHeldElsewherePicksAgain(t *testing.T) {
+	saved := tcpListen
+	t.Cleanup(func() { tcpListen = saved })
+	var held string
+	tcpListen = func(network, addr string) (net.Listener, error) {
+		if addr == "127.0.0.1:"+strconv.Itoa(defaultWebPort) {
+			return nil, io.ErrNoProgress
+		}
+		if held == "" && !strings.HasPrefix(addr, "127.0.0.1:") {
+			holder, err := saved(network, addr)
+			mustNoErr(t, err)
+			t.Cleanup(func() { holder.Close() })
+			held = addr
+		}
+		return saved(network, addr)
+	}
+	n, err := openNode(t.Context(), socketRoot(t))
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	if ":"+strconv.Itoa(n.httpPort) == held {
+		t.Fatalf("the node serves on the held port %s", held)
+	}
+	checkLocalWebServer(t, n.httpPort)
+}
+
+// The picks of a free port are bounded, and the last error is the start's.
+func TestListenNodeHTTPStopsPicking(t *testing.T) {
+	saved := tcpListen
+	t.Cleanup(func() { tcpListen = saved })
+	listens := 0
+	tcpListen = func(network, addr string) (net.Listener, error) {
+		if strings.HasPrefix(addr, "127.0.0.1:") {
+			return saved(network, addr)
+		}
+		listens++
+		return nil, addrInUse
+	}
+	if _, err := listenNodeHTTP("0"); !errors.Is(err, addrInUse) {
+		t.Fatalf("error = %v", err)
+	}
+	mustEqual(t, listens, 1+freePicks)
+}
+
 // A web port that nothing holds is the one the node serves on.
 func TestListenNodeHTTPTakesAFreePort(t *testing.T) {
 	probe, err := net.Listen("tcp", "127.0.0.1:0")

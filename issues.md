@@ -45,8 +45,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-27 · bug · A node of the step-2 cast sometimes exits at start: its own rendezvous answers 400 or 404
 
 - Symptom: in the same repeats, 9 of about 2,700 casts failed in `Given the confirmation cast with Q` because P1 or Q1 never opened its socket; the node's stderr held only `failed to WebSocket dial: expected handshake response status code 101 but got 400` (or `404`). Also seen in the stress of FLAKY-33 above.
-- Cause: not found. The node listens on `:0`, every address (`listenNodeHTTP`, `internal/node/node.go:423-431`), dials its local rendezvous at `127.0.0.1:<port>` (`startLocalHTTP`, `node.go:308`) and ends on that error. Whether another listener on `127.0.0.1` with the same port took the dial was not checked.
-- Status: open.
+- Cause: when port 47800 is taken, `listenNodeHTTP` fell back to `:0`, and macOS could hand out a port that another program held on `127.0.0.1`; the node then dialled it (`internal/node/node.go:430` and `:308` before the fix) and ended on that error.
+- Fix: the fallback picks a port that is free on `127.0.0.1` and listens on all addresses with it, picking again (up to 3 times) when that port is in use.
+- Status: resolved.
 
 ### 2026-11-27 · limitation · Acceptance scenarios of the old model fail until units AC-1 to AC-3 rewrite them
 
