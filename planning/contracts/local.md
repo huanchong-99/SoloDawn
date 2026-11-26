@@ -156,21 +156,26 @@ in case count as two folders (`risks.md` K-35).
 (`contracts/datachannel.md` section 7) lists, for one CLI, the folders it
 was used in on this computer, so that the person can choose one. The four
 finders are the package `internal/host/workspaces`, which imports nothing
-from `host`; each takes the user's home folder (for OpenCode, a function
-that fetches a path from its server) and returns folders with the time of
+from `host`; each takes the user's home folder (for Codex and OpenCode, a
+function that asks the CLI's server) and returns folders with the time of
 the newest session in each.
 
 | CLI | Source | Status |
 | --- | --- | --- |
 | Claude Code | the session files `~/.claude/projects/<name>/*.jsonl` (`CLAUDE_CONFIG_DIR` in place of `~/.claude` when set). For each folder there, the newest file is read line by line until a record has `cwd`, for at most 200 lines; that value is the folder. The folder's own name cannot be used: it is the path with every character outside ASCII letters and digits replaced by `-` | `[verified]` on one macOS computer with Claude Code 2.1.311: all 23 folders that held sessions gave a `cwd`, on line 3 in most files and at the latest on line 48. The file layout is not a documented interface |
-| Codex | the first line of each `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (`CODEX_HOME` in place of `~/.codex` when set): a record of type `session_meta` whose `payload.cwd` is the folder | `[verified]` 22 of 22 files, Codex CLI 0.164.0. Not built: the app-server request `thread/list`, whose threads carry `cwd` and `updatedAt`; it is the documented way, `[verified]` in the generated schema and by a run, and is what this finder changes to if the file layout changes. It needs the driver's process and connection, which the package does not import |
-| OpenCode | `GET /api/project` of `opencode serve`, through the server the driver already starts to list models; the finder gets the fetch as a function | `[documented]` the endpoint ([server documentation](https://opencode.ai/docs/server/)); `[unverified]` which field of a project holds the folder: unit HS-W reads it in OpenCode's source |
-| Qwen Code | the session files `~/.qwen/projects/<sanitized-cwd>/chats/*.jsonl`, read as for Claude Code: every record has `cwd` | `[documented]` the path ([headless documentation](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/)); read in the vendor's source, not run: `cwd: string` in `ChatRecord`, `packages/core/src/services/chatRecordingService.ts` |
+| Codex | the app-server request `thread/list` with `sortKey` `updated_at` and an empty `modelProviders` (every provider; omitted, it lists only the configured one), through the host's app-server connection (as `model/list` is probed), paged by `nextCursor` until it is null: each thread's `cwd` is the folder and `updatedAt` (seconds) its time. `sourceKinds` is left out, so the threads of interactive sources (`cli`, `vscode`) are listed, not those of `codex exec`. Its own interface: it lists the compressed rollouts (`.jsonl.zst`) too, and does not depend on the file layout | `[verified]` in the generated schema of Codex CLI 0.164.0 and by a run on one macOS computer: 40 threads, 27 folders, newest first, the same with and without `modelProviders` there (one provider); `[source]` the provider filter, `app-server/src/request_processors/thread_processor.rs:5919-5929` of `rust-v0.164.0` |
+| OpenCode | `GET /api/session?order=desc&limit=1000` (newest created first) of `opencode serve`, then `&cursor=` with `cursor.next` until a page is empty, through the server the driver already starts to list models; the finder gets the fetch as a function. Each session's `location.directory` is the folder and `time.updated` (milliseconds) its time. Version 1.19.6 has no `/api/project` | `[source]` OpenCode v1.19.6: the route in `packages/protocol/src/groups/session.ts`, the fields in `packages/schema/src/session.ts`, the listing of every session without `directory` or `project` in `packages/core/src/session.ts` (`list`) |
+| Qwen Code | the session files `projects/<sanitized-cwd>/chats/*.jsonl` under `QWEN_RUNTIME_DIR`, else `QWEN_HOME`, else `~/.qwen`, read as for Claude Code: every record has `cwd` | `[documented]` the path ([headless documentation](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/)); `[source]` Qwen Code v0.28.6, not run: `cwd: string` in `ChatRecord`, `packages/core/src/services/chatRecordingService.ts:549`; the directory in `Storage.getRuntimeBaseDir` and `getGlobalQwenDir`, `packages/core/src/config/storage.ts:172-203`. A runtime directory set in Qwen Code's settings is not followed, since the node does not open that file |
 
-- The finders walk newest first and stop when the answer is full. The time
+- Claude Code and Qwen Code: the finder walks the projects newest first and
+  opens a session file only when the request asks for the next folder, so
+  the walk stops when the answer is full. Codex and OpenCode: every page is
+  fetched, then the sessions are sorted by update time, before the first
+  folder; the walk stops early only on the request's side. OpenCode's server
+  orders by creation time, so the newest update can be on any page. The time
   of a folder is that of its newest session: the modification time of the
-  newest session file, or for OpenCode the time its server gives
-  `[unverified]`.
+  newest session file, or for Codex and OpenCode the newest update time
+  that the server gives for a session there.
 - What the request does with what a finder returns: it resolves each folder
   as `host.join` does, so that a path of the list equals the `workspace` of
   a member that has it, and keeps the newer time when two spellings name
