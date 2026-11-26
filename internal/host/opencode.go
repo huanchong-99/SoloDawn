@@ -192,7 +192,7 @@ func (p *openCodeProcess) post(path string, body any) error {
 }
 
 func (p *openCodeProcess) request(method, path string, body any) (*http.Response, error) {
-	req, err := http.NewRequest(method, p.base+path, strings.NewReader(marshalWire(body)))
+	req, err := http.NewRequest(method, p.base+path, wireBody(body))
 	if err != nil {
 		return nil, err
 	}

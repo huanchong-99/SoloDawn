@@ -161,7 +161,7 @@ func (p *qwenProcess) Close() error {
 
 // request sends one call to the daemon; a status of 300 or more is an error.
 func (p *qwenProcess) request(method, path string, body any) (*http.Response, error) {
-	req, err := http.NewRequest(method, p.base+path, strings.NewReader(marshalWire(body)))
+	req, err := http.NewRequest(method, p.base+path, wireBody(body))
 	if err != nil {
 		return nil, err
 	}

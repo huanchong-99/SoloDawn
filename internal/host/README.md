@@ -181,7 +181,7 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 
 ### Local servers (`serve.go`)
 
-The drivers whose CLI runs as a local HTTP server share `serve.go`: `serve` starts the server detached from any terminal and returns its standard output and a wait that kills what it left running, `serverAddress` reads the `listening on` line up to the first space after the address, and `readSSE` reads the event stream with `bufio.Reader`, so an event has no size limit.
+The drivers whose CLI runs as a local HTTP server share `serve.go`: `serve` starts the server detached from any terminal and returns its standard output and a wait that kills what it left running, `serverAddress` reads the `listening on` line up to the first space after the address, `readSSE` reads the event stream with `bufio.Reader`, so an event has no size limit, and `wireBody` is a request's JSON body: none for a request without a value, such as the `GET` of the event stream.
 
 ## CLI detection and sign-in
 
