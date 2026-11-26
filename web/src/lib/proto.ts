@@ -66,6 +66,7 @@ export const Pair = v.object({
   name: str,
   role: str,
   mac: str,
+  exp: v.optional(int),
 });
 export type Pair = v.InferOutput<typeof Pair>;
 

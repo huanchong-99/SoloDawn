@@ -849,6 +849,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-26 · bug · Pairing that cannot connect gave no reason, and `pair` outlived the code
+
+- Symptom (local smoke test of v3.0.0-rc.1, findings F2 to F5, a host firewall blocking the direct connection): the page showed "establishing a direct connection" until "expired"; `solodawn pair` printed only `pairing secret expired`, up to 4 minutes after the page had expired; stopping the node printed `context canceled`. The onboarding note said that the node keeps trying direct (`pairing.status.relay_note`). `install.md` did not say that pairing installs the login service.
+- Cause: the browser's peer retried a connection that ICE failed without telling the page (`Peer.#ended`, `web/src/lib/peer.ts`); `waitPair` returned `errPairExpired` whatever it had seen, and `ctx.Err()` on a stop (`internal/node/pair.go`); role `b` started its own 10 minutes when it joined, since nothing carried the code's expiry; the note predates the cut of the relay-free probe (as `nodes.relay.body` below).
+- Status: resolved on `fix/pairing-reasons`: the page shows `pairing.error.unreached` (en, zh) when ICE fails an attempt and keeps it at expiry; `pair` says `no connection to the browser could be made; check a firewall on this computer or its network` when the browser was found but never connected, and `the node stopped`; `pair` carries `exp` (`contracts/envelope.md` section 6) and role `b` ends with the creator; the note and `install.md` are corrected.
+
 ### 2026-11-26 · bug · FLAKY-34: A7.4 failed once: the test browser dropped the interactive CLI's first output
 
 - Symptom: CI run 45758291863 (`test (macos-latest)`, `rebuild` ed742b4e8), A7.4 on the fifth Codex takeover: `timed out after 15s waiting for "\"ready\":" in the pty output; saw 1:` with nothing received. The fake CLI log ends with `start codex` (the CLI ran); the goroutine dump shows the host's `pumpOut` attached to that PTY and waiting to read (`internal/host/pty.go:286`), with nothing left to send. The same code passed on the PR runs and in 8 runs under CPU load on the Mac.

@@ -206,6 +206,8 @@ export class Connection {
   path: Path | undefined;
   /** The code with which the node refused this connection's hello, when it did. */
   refused: string | undefined;
+  /** ICE ended it: no pair of candidates worked. */
+  iceFailed = false;
   /** Hears the node's pushes. */
   onpush: (frame: Push) => void = () => {};
   /** Hears the path each time it is read: when ctl opens, and every second after. */
@@ -253,7 +255,9 @@ export class Connection {
     this.#ctl.onmessage = ({ data }) => this.#deliver(data);
     this.#ctl.onclose = this.close;
     this.#pc.onconnectionstatechange = () => {
-      if (this.#pc.connectionState === 'failed') this.close();
+      if (this.#pc.connectionState !== 'failed') return;
+      this.iceFailed = true;
+      this.close();
     };
     this.#pc.onicecandidate = this.#trickle;
     this.#deadline = setTimeout(this.close, patience);
@@ -465,6 +469,8 @@ export class Peer {
   #listener: Listener | undefined;
   #attempt: Connection | undefined;
   #closed = false;
+  /** Hears that an attempt ended because ICE failed; the peer still tries again. */
+  unreached = () => {};
   /** The requests without a response, in the order they were first made. */
   readonly #asked = new Set<Ask>();
   /** How long the connection that was lost stayed open, until its reconnect is scheduled. */
@@ -615,6 +621,7 @@ export class Peer {
   #ended(conn: Connection, open: number) {
     if (conn === this.#conn) this.#offline();
     else if (conn !== this.#attempt) return;
+    else if (conn.iceFailed) this.unreached();
     this.#attempt = undefined;
     if (final(conn.refused)) return this.#stop(conn.refused!);
     this.#lost = open;

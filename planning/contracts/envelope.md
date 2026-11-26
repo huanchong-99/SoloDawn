@@ -239,10 +239,15 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
 
 ```json
 {"t":"pair","k":"<my device id>","kind":"node","name":"workstation",
- "role":"a","mac":"<HMAC>"}
+ "role":"a","mac":"<HMAC>","exp":1763600600000}
 ```
 
 - `role` is `a` for the side that created the secret, `b` for the other.
+- `exp` (optional) is when the sender's 10 minutes for the secret end, Unix
+  milliseconds; `mac` does not cover it. The side in role `b` ends its own
+  window at the `exp` of the accepted role `a` message when that is earlier,
+  so both sides stop when the secret does. A message without `exp` changes
+  nothing.
 - `mac` = HMAC-SHA256(key = secret bytes, message = `"solodawn/pair/1\n"`
   + role + `"\n"` + device id + `"\n"` + kind + `"\n"` + name),
   base64url. Each part is the field as it stands in the message after
@@ -257,7 +262,8 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   that it knows that the other's device id, kind and name are authentic
   for the next 10 minutes, and accepts signed signalling from it. The
   rendezvous service sees the room id and both messages, and can change
-  nothing in them without the secret: `kind` and `name` are what the side
+  nothing in them without the secret but `exp`; a changed `exp` can only
+  end role `b` earlier, as dropping the message can. `kind` and `name` are what the side
   that already belongs to a person writes into the `add` entry.
 - Until the newcomer is in the log, the connection carries `hello` and
   `devlog` and nothing else.

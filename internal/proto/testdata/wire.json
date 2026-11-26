@@ -84,7 +84,7 @@
   "note-kb": {"optional":["as","name","type"],"nullable":["task"],"fraction":[],"id":["as","g","id","n"],"opaque":[]},
   "note-preset": {"optional":["name","type"],"nullable":["task"],"fraction":[],"id":["g","id","n"],"opaque":[]},
   "offer": {"optional":["to"],"nullable":[],"fraction":[],"id":["n"],"opaque":[]},
-  "pair": {"optional":[],"nullable":[],"fraction":[],"id":[],"opaque":[]},
+  "pair": {"optional":["exp"],"nullable":[],"fraction":[],"id":[],"opaque":[]},
   "pair-browser": {"optional":[],"nullable":[],"fraction":[],"id":["n"],"opaque":[]},
   "perm-set": {"optional":[],"nullable":[],"fraction":[],"id":["g","n"],"opaque":[]},
   "post-approval": {"optional":["as","body.full","body.why"],"nullable":["re","thread"],"fraction":[],"id":["as","g","mentions","n","thread"],"opaque":[]},
