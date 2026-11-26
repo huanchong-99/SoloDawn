@@ -416,7 +416,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-21 · limitation · Finished tasks stay in a group's state in memory after retention until a restart
 
-- Symptom: after the daily retention run deletes a `merged` or `cancelled` task row older than `retention_days` from SQLite, `State.Tasks` in the running home still holds that task row until the loop restarts. A rule or a state read that inspects `State.Tasks` before a restart still sees the finished task; a cold read from the store snapshot and a restarted loop do not.
+- Symptom: after the daily retention run deletes a `done` or `cancelled` task row older than `retention_days` from SQLite, `State.Tasks` in the running home still holds that task row until the loop restarts. A rule or a state read that inspects `State.Tasks` before a restart still sees the finished task; a cold read from the store snapshot and a restarted loop do not.
 - Cause: retention runs `home.Retain` (`internal/home/retention.go`, `Retain`; `internal/store/retention.go`, `Retain`) directly against SQLite, deleting aged rows without removing finished tasks from `State.Tasks` (`internal/home/home.go`).
 - Status: open, accepted for step 1 (`internal/home/README.md`, "Retention"). Finished tasks take no further commands and occupy little memory until the next restart; `grp.num` keeps the highest task number so task numbers are never reused after a restart.
 

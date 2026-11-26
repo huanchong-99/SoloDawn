@@ -78,3 +78,26 @@ func TestRetention(t *testing.T) {
 	equal(t, v.Seq, int64(30))
 	equal(t, v.Purged, int64(20))
 }
+
+func TestRetentionKeepsAFinishedTaskThatAnUnfinishedOneDependsOn(t *testing.T) {
+	s := openDB(t, ":memory:")
+	now := time.Date(2026, 5, 6, 1, 0, 0, 0, time.UTC)
+	old := now.AddDate(0, 0, -2).UnixMilli() - 1
+	task := func(id, state string, seq int64, depends ...string) {
+		put(t, s, "g", old, proto.TaskRow{RowHeader: header("task", id, seq), Group: "g", State: state, Depends: depends})
+	}
+	task("done", "done", 1)
+	task("cancelled", "cancelled", 2)
+	task("lone", "done", 3)
+	task("waits", "queued", 4, "done", "cancelled")
+	left := func() string {
+		return scalar[string](t, s.db, "SELECT coalesce(group_concat(id,',' ORDER BY seq),'') FROM row WHERE g='g'")
+	}
+	retain := func() { check(t, s.Write(func(tx *Tx) error { return tx.Retain(now, 2) })) }
+
+	retain()
+	equal(t, left(), "done,cancelled,waits")
+	task("waits", "done", 5, "done", "cancelled")
+	retain()
+	equal(t, left(), "")
+}

@@ -122,7 +122,7 @@ func TestPauseResumeWakesTasksByRow24(t *testing.T) {
 	s.Group.Paused = &proto.GroupPause{By: ownerID, At: clock - 5000}
 	approval := &proto.TaskWait{Kind: "approval", Since: clock - 4000}
 	s.Tasks = map[string]proto.TaskRow{
-		id(31): pauTask(31, "active", "branch", pauWorkA, "", nil),
+		id(31): pauTask(31, "active", "work", pauWorkA, "", nil),
 		id(32): pauTask(32, "active", "work", pauWorkB, "", approval),
 		id(33): pauTask(33, "active", "review", pauWorkA, pauWorkB, nil),
 		id(34): pauTask(34, "active", "review", pauWorkB, pauWorkA, approval),

@@ -188,3 +188,27 @@ func retSyncResets(t *testing.T, w *runWorld, since int64) bool {
 		}
 	}
 }
+
+// A finished task that a queued task depends on survives retention, so the
+// restarted home still sees the dependency as done.
+func TestRetentionKeepsADependencyAcrossARestart(t *testing.T) {
+	tables := runTables()
+	var seen []string
+	tables.Commands["note"] = func(s *home.State, _ home.Command) (home.Result, *home.Refusal) {
+		for _, id := range []string{"a", "b"} {
+			seen = append(seen, id+":"+s.Tasks[id].State)
+		}
+		return home.Result{}, nil
+	}
+	w, _ := runFounded(t, tables)
+	w.loop.Close()
+	old := int64(1)
+	retSetSetting(t, w.db, "retention_days", `7`)
+	retPutRow(t, w.db, groupID, old, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: "a", Seq: 4}, Group: groupID, State: "done"})
+	retPutRow(t, w.db, groupID, old, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: "b", Seq: 5}, Group: groupID, State: "queued", Depends: []string{"a"}})
+
+	retRun(t, w.db, clock+10*retDay)
+	restarted := runStart(t, w.db, tables)
+	restarted.attach(browser).does(groupID, "note", "")
+	equal(t, seen, []string{"a:done", "b:queued"})
+}

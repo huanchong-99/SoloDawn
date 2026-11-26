@@ -269,7 +269,10 @@ DELETE FROM row   WHERE r = 'msg'  AND gone = 0 AND keep = 0 AND pending = 0
                                                AND row.data->>'$.body.what' = 'direct'
                                                AND (row.data->>'re' = t.id
                                                     OR row.data->>'re' = t.data->>'brief'))));
-DELETE FROM row   WHERE r = 'task' AND final = 1 AND mt < :cutoff;
+DELETE FROM row   WHERE r = 'task' AND final = 1 AND mt < :cutoff
+                    AND NOT EXISTS (SELECT 1 FROM row AS t, json_each(t.data, '$.depends') AS d
+                                    WHERE t.g = row.g AND t.r = 'task' AND t.final = 0
+                                      AND d.value = row.id);
 DELETE FROM inbox WHERE created < :cutoff;
 DELETE FROM audit WHERE ts < :cutoff;
 DELETE FROM usage WHERE day < :cutoff_day;
@@ -284,7 +287,9 @@ DELETE FROM receipt WHERE ts < :now - 86400000;
   marker while `purged` stayed, and a client would never learn of the
   deletion.
 - A finished task is aged from the day it finished (`mt`), not from the day
-  it was created.
+  it was created. It is not deleted while a task that is not final lists it
+  in `depends`: that task waits on it, and a missing row would never count
+  as done.
 - A card that is still pending is never deleted, however old: someone still
   has to act on it. It goes with the next run after it is decided.
 - A brief, the `task` message of a task made from it and the `confirm`
