@@ -7,6 +7,9 @@ import (
 	"syscall"
 )
 
+// addrInUse is the error of a listen on a port that is held.
+const addrInUse = syscall.EADDRINUSE
+
 func startDetached(exe string, args ...string) error {
 	cmd := exec.Command(exe, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

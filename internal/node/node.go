@@ -417,17 +417,38 @@ func listenNodePeer(udpPort, tcpPort int, id string) (*peer.Sockets, error) {
 	return peerListen(0, 0, id)
 }
 
-// listenNodeHTTP treats the port as taken when another process holds it on
-// 127.0.0.1 only: macOS and Windows still grant the wildcard bind, and the
-// node's own dial to 127.0.0.1 would then reach that process.
+// listenNodeHTTP serves on the port, or on a free one when it is taken.
 func listenNodeHTTP(port string) (net.Listener, error) {
-	if probe, err := tcpListen("tcp", "127.0.0.1:"+port); err == nil {
-		probe.Close()
-		if ln, err := tcpListen("tcp", ":"+port); err == nil {
-			return ln, nil
-		}
+	if ln, err := listenUnshadowed(port); err == nil {
+		return ln, nil
 	}
-	return tcpListen("tcp", ":0")
+	return listenFree(freePicks)
+}
+
+// freePicks bounds the picks of a free port: a port free on 127.0.0.1 can
+// still be held on another address (::1 on Linux) or taken before the listen.
+const freePicks = 3
+
+func listenFree(picks int) (net.Listener, error) {
+	ln, err := listenUnshadowed("0")
+	if picks > 1 && errors.Is(err, addrInUse) {
+		return listenFree(picks - 1)
+	}
+	return ln, err
+}
+
+// listenUnshadowed treats the port as taken when another process holds it on
+// 127.0.0.1 only: macOS and Windows still grant the wildcard bind, and the
+// node's own dial to 127.0.0.1 would then reach that process. Port 0 is
+// picked on 127.0.0.1 too, because macOS hands a wildcard bind on port 0 such
+// a port.
+func listenUnshadowed(port string) (net.Listener, error) {
+	probe, err := tcpListen("tcp", "127.0.0.1:"+port)
+	if err != nil {
+		return nil, err
+	}
+	probe.Close()
+	return tcpListen("tcp", ":"+strconv.Itoa(probe.Addr().(*net.TCPAddr).Port))
 }
 
 func (n *nodeRuntime) localWebURL() string {
