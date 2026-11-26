@@ -397,17 +397,15 @@
             "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
             "num": 12,
             "title": "Node: report path changes",
-            "slug": "node-report-path-changes",
             "origin": "brief",
             "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
             "state": "active",
-            "step": "branch",
+            "step": "work",
             "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
             "reviewer": "eidbAPCqbEQST1SNYbMP3w",
             "foundation": false,
             "pass": 90,
             "depends": [],
-            "checks": {},
             "wait": null,
             "failures": 0,
             "thread": {
@@ -415,8 +413,6 @@
               "rounds": 0
             },
             "stats": {
-              "added": 0,
-              "removed": 0,
               "started": 1763600030000,
               "ended": null
             },
@@ -487,7 +483,7 @@
                   "origin": "brief",
                   "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
                   "state": "active",
-                  "step": "branch",
+                  "step": "work",
                   "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
                   "reviewer": "eidbAPCqbEQST1SNYbMP3w",
                   "foundation": false,
@@ -594,9 +590,9 @@
         "t": "cmd",
         "id": 4,
         "env": {
-          "p": "{\"t\":\"task\",\"n\":\"azVn6uQwQqe1eMvqfRkoUw\",\"ts\":1763600040000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"op\":\"branch\",\"id\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"branch\":\"task/12-node-report-path-changes\"}",
+          "p": "{\"t\":\"post\",\"n\":\"hyiSwbG6PxMTZKdIjMWVHA\",\"ts\":1763600090000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"amN_vvO5mnzm6dn1FWj0-Q\",\"kind\":\"progress\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Plan: add the event, emit it on every switch, write tests.\",\"mentions\":[],\"re\":null,\"body\":{}}",
           "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-          "s": "PQhSRXPYDiE0-lYmywT5Gh_nEgdn-RgyBliltzQzJMFO2oPvIzroCqe7chDaMWLKvo_CqlT90S43hrw-yHwIAw"
+          "s": "NPewJAbC-hNgRmaSJhZDz_sEEmR99yOTLtVg_mHeuD41wFAc-eunBmsrZGNdlg1Fl2gsI92kj-dZ5Pm-BfknBA"
         }
       },
       "answer": {
@@ -608,33 +604,56 @@
         "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
         "rows": [
           {
+            "r": "msg",
+            "id": "hyiSwbG6PxMTZKdIjMWVHA",
+            "seq": 806,
+            "pos": 806,
+            "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
+            "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
+            "main": false,
+            "by": "amN_vvO5mnzm6dn1FWj0-Q",
+            "kind": "progress",
+            "ts": 1763600090000,
+            "text": "Plan: add the event, emit it on every switch, write tests.",
+            "mentions": [],
+            "re": null,
+            "body": {},
+            "state": null,
+            "env": {
+              "p": "{\"t\":\"post\",\"n\":\"hyiSwbG6PxMTZKdIjMWVHA\",\"ts\":1763600090000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"amN_vvO5mnzm6dn1FWj0-Q\",\"kind\":\"progress\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Plan: add the event, emit it on every switch, write tests.\",\"mentions\":[],\"re\":null,\"body\":{}}",
+              "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
+              "s": "NPewJAbC-hNgRmaSJhZDz_sEEmR99yOTLtVg_mHeuD41wFAc-eunBmsrZGNdlg1Fl2gsI92kj-dZ5Pm-BfknBA"
+            }
+          },
+          {
             "r": "task",
             "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "seq": 806,
+            "seq": 807,
             "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
             "num": 12,
             "title": "Node: report path changes",
-            "slug": "node-report-path-changes",
             "origin": "brief",
             "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
             "state": "active",
-            "step": "local_check",
+            "step": "work",
             "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
             "reviewer": "eidbAPCqbEQST1SNYbMP3w",
             "foundation": false,
             "pass": 90,
             "depends": [],
-            "branch": "task/12-node-report-path-changes",
-            "checks": {},
             "wait": null,
             "failures": 0,
             "thread": {
-              "count": 0,
-              "rounds": 0
+              "count": 1,
+              "rounds": 0,
+              "last": {
+                "by": "amN_vvO5mnzm6dn1FWj0-Q",
+                "kind": "progress",
+                "text": "Plan: add the event, emit it on every switch, write tests.",
+                "ts": 1763600090000
+              }
             },
             "stats": {
-              "added": 0,
-              "removed": 0,
               "started": 1763600030000,
               "ended": null
             },
@@ -650,9 +669,9 @@
         "t": "cmd",
         "id": 5,
         "env": {
-          "p": "{\"t\":\"post\",\"n\":\"hyiSwbG6PxMTZKdIjMWVHA\",\"ts\":1763600090000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"amN_vvO5mnzm6dn1FWj0-Q\",\"kind\":\"progress\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Branch created. Reporting path changes from the peer loop.\",\"mentions\":[],\"re\":null,\"body\":{}}",
+          "p": "{\"t\":\"post\",\"n\":\"PDqIOgE7mSm24_PdskpvVg\",\"ts\":1763600150000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"amN_vvO5mnzm6dn1FWj0-Q\",\"kind\":\"report\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Path events are sent on every switch. Ran the tests: 42 passed. Commit 9f2c1ab on branch t12-path-events.\",\"mentions\":[],\"re\":null,\"body\":{}}",
           "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-          "s": "N1JfqJQ3jsdhG0H81Z-DlHWLfHOq35z6OB1Z-_xTmFD9bPoL4GrSiBU8xVGp1wIJWJL0BlWy-akc_GETWO6pBw"
+          "s": "gf9VUWszwvaLO0UsT2ZlgxKVk20_ersl_vxaZ6FK4otOa8FPptwWqUvxcxOvfxsr5HK1MiXeGhyM2kHU5tKEDw"
         }
       },
       "answer": {
@@ -665,324 +684,56 @@
         "rows": [
           {
             "r": "msg",
-            "id": "hyiSwbG6PxMTZKdIjMWVHA",
-            "seq": 807,
-            "pos": 807,
-            "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-            "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "main": false,
-            "by": "amN_vvO5mnzm6dn1FWj0-Q",
-            "kind": "progress",
-            "ts": 1763600090000,
-            "text": "Branch created. Reporting path changes from the peer loop.",
-            "mentions": [],
-            "re": null,
-            "body": {},
-            "state": null,
-            "env": {
-              "p": "{\"t\":\"post\",\"n\":\"hyiSwbG6PxMTZKdIjMWVHA\",\"ts\":1763600090000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"amN_vvO5mnzm6dn1FWj0-Q\",\"kind\":\"progress\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Branch created. Reporting path changes from the peer loop.\",\"mentions\":[],\"re\":null,\"body\":{}}",
-              "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-              "s": "N1JfqJQ3jsdhG0H81Z-DlHWLfHOq35z6OB1Z-_xTmFD9bPoL4GrSiBU8xVGp1wIJWJL0BlWy-akc_GETWO6pBw"
-            }
-          },
-          {
-            "r": "task",
-            "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "seq": 808,
-            "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-            "num": 12,
-            "title": "Node: report path changes",
-            "slug": "node-report-path-changes",
-            "origin": "brief",
-            "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
-            "state": "active",
-            "step": "local_check",
-            "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
-            "reviewer": "eidbAPCqbEQST1SNYbMP3w",
-            "foundation": false,
-            "pass": 90,
-            "depends": [],
-            "branch": "task/12-node-report-path-changes",
-            "checks": {},
-            "wait": null,
-            "failures": 0,
-            "thread": {
-              "count": 1,
-              "rounds": 0,
-              "last": {
-                "by": "amN_vvO5mnzm6dn1FWj0-Q",
-                "kind": "progress",
-                "text": "Branch created. Reporting path changes from the peer loop.",
-                "ts": 1763600090000
-              }
-            },
-            "stats": {
-              "added": 0,
-              "removed": 0,
-              "started": 1763600030000,
-              "ended": null
-            },
-            "created": 1763600030000
-          }
-        ]
-      },
-      "inboxes": []
-    },
-    {
-      "from": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-      "cmd": {
-        "t": "cmd",
-        "id": 6,
-        "env": {
-          "p": "{\"t\":\"task\",\"n\":\"WHkpIgI5nrYFLM-F0XGzXg\",\"ts\":1763600140000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"op\":\"checked\",\"id\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"ok\":true,\"items\":[{\"name\":\"go vet ./...\",\"ok\":true},{\"name\":\"go test ./...\",\"ok\":true,\"detail\":\"18 tests\"}],\"commit\":\"9f2c1abf43f3224eb6826ef971a943dbab4795ce\"}",
-          "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-          "s": "tlPobafmRG4fsiml94MDRUlscVP24a6TL4KuPpF65nhGV2Jj22Sx0AguklL2-kJqbCWCNjG0Dfk9eWK7a6KyAQ"
-        }
-      },
-      "answer": {
-        "re": 6,
-        "ok": true
-      },
-      "rows": {
-        "t": "rows",
-        "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-        "rows": [
-          {
-            "r": "msg",
-            "id": "WHkpIgI5nrYFLM-F0XGzXg",
-            "seq": 809,
-            "pos": 809,
-            "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-            "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "main": false,
-            "by": "system",
-            "kind": "checks",
-            "ts": 1763600140000,
-            "text": "",
-            "mentions": [],
-            "re": null,
-            "body": {
-              "stage": "local",
-              "ok": true,
-              "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
-              "items": [
-                {
-                  "name": "go vet ./...",
-                  "ok": true
-                },
-                {
-                  "name": "go test ./...",
-                  "ok": true,
-                  "detail": "18 tests"
-                }
-              ]
-            },
-            "state": null
-          },
-          {
-            "r": "task",
-            "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "seq": 810,
-            "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-            "num": 12,
-            "title": "Node: report path changes",
-            "slug": "node-report-path-changes",
-            "origin": "brief",
-            "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
-            "state": "active",
-            "step": "local_check",
-            "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
-            "reviewer": "eidbAPCqbEQST1SNYbMP3w",
-            "foundation": false,
-            "pass": 90,
-            "depends": [],
-            "branch": "task/12-node-report-path-changes",
-            "checks": {
-              "local": {
-                "ok": true,
-                "at": 1763600140000,
-                "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-              }
-            },
-            "wait": null,
-            "failures": 0,
-            "thread": {
-              "count": 2,
-              "rounds": 0,
-              "last": {
-                "by": "system",
-                "kind": "checks",
-                "text": "",
-                "ts": 1763600140000
-              }
-            },
-            "stats": {
-              "added": 0,
-              "removed": 0,
-              "started": 1763600030000,
-              "ended": null
-            },
-            "created": 1763600030000
-          }
-        ]
-      },
-      "inboxes": []
-    },
-    {
-      "from": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-      "cmd": {
-        "t": "cmd",
-        "id": 7,
-        "env": {
-          "p": "{\"t\":\"post\",\"n\":\"PDqIOgE7mSm24_PdskpvVg\",\"ts\":1763600150000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"amN_vvO5mnzm6dn1FWj0-Q\",\"kind\":\"report\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Path changes are emitted with transport kind and round-trip time.\",\"mentions\":[],\"re\":null,\"body\":{\"commit\":\"9f2c1abf43f3224eb6826ef971a943dbab4795ce\",\"files\":3,\"added\":84,\"removed\":12}}",
-          "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-          "s": "r3ixdyHDhD0U6g8g8lS0cRY5Wu7BGKYXjyhgfERQi_62vXqq4nLlXHnSMBs5jZ0HxIy4BmeXzQqVtzZeZU55Dg"
-        }
-      },
-      "answer": {
-        "re": 7,
-        "ok": true
-      },
-      "rows": {
-        "t": "rows",
-        "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-        "rows": [
-          {
-            "r": "msg",
             "id": "PDqIOgE7mSm24_PdskpvVg",
-            "seq": 811,
-            "pos": 811,
+            "seq": 808,
+            "pos": 808,
             "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
             "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
             "main": false,
             "by": "amN_vvO5mnzm6dn1FWj0-Q",
             "kind": "report",
             "ts": 1763600150000,
-            "text": "Path changes are emitted with transport kind and round-trip time.",
+            "text": "Path events are sent on every switch. Ran the tests: 42 passed. Commit 9f2c1ab on branch t12-path-events.",
             "mentions": [],
             "re": null,
-            "body": {
-              "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
-              "files": 3,
-              "added": 84,
-              "removed": 12
-            },
+            "body": {},
             "state": null,
             "env": {
-              "p": "{\"t\":\"post\",\"n\":\"PDqIOgE7mSm24_PdskpvVg\",\"ts\":1763600150000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"amN_vvO5mnzm6dn1FWj0-Q\",\"kind\":\"report\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Path changes are emitted with transport kind and round-trip time.\",\"mentions\":[],\"re\":null,\"body\":{\"commit\":\"9f2c1abf43f3224eb6826ef971a943dbab4795ce\",\"files\":3,\"added\":84,\"removed\":12}}",
+              "p": "{\"t\":\"post\",\"n\":\"PDqIOgE7mSm24_PdskpvVg\",\"ts\":1763600150000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"amN_vvO5mnzm6dn1FWj0-Q\",\"kind\":\"report\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Path events are sent on every switch. Ran the tests: 42 passed. Commit 9f2c1ab on branch t12-path-events.\",\"mentions\":[],\"re\":null,\"body\":{}}",
               "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-              "s": "r3ixdyHDhD0U6g8g8lS0cRY5Wu7BGKYXjyhgfERQi_62vXqq4nLlXHnSMBs5jZ0HxIy4BmeXzQqVtzZeZU55Dg"
+              "s": "gf9VUWszwvaLO0UsT2ZlgxKVk20_ersl_vxaZ6FK4otOa8FPptwWqUvxcxOvfxsr5HK1MiXeGhyM2kHU5tKEDw"
             }
           },
           {
             "r": "task",
             "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "seq": 812,
+            "seq": 809,
             "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
             "num": 12,
             "title": "Node: report path changes",
-            "slug": "node-report-path-changes",
-            "origin": "brief",
-            "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
-            "state": "active",
-            "step": "local_check",
-            "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
-            "reviewer": "eidbAPCqbEQST1SNYbMP3w",
-            "foundation": false,
-            "pass": 90,
-            "depends": [],
-            "branch": "task/12-node-report-path-changes",
-            "checks": {
-              "local": {
-                "ok": true,
-                "at": 1763600140000,
-                "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-              }
-            },
-            "wait": null,
-            "failures": 0,
-            "thread": {
-              "count": 3,
-              "rounds": 0,
-              "last": {
-                "by": "amN_vvO5mnzm6dn1FWj0-Q",
-                "kind": "report",
-                "text": "Path changes are emitted with transport kind and round-trip time.",
-                "ts": 1763600150000
-              }
-            },
-            "stats": {
-              "added": 0,
-              "removed": 0,
-              "started": 1763600030000,
-              "ended": null
-            },
-            "created": 1763600030000
-          }
-        ]
-      },
-      "inboxes": []
-    },
-    {
-      "from": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-      "cmd": {
-        "t": "cmd",
-        "id": 8,
-        "env": {
-          "p": "{\"t\":\"task\",\"n\":\"AkLmNlfwoOCy8vmhhBTatA\",\"ts\":1763600160000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"op\":\"submitted\",\"id\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"commit\":\"9f2c1abf43f3224eb6826ef971a943dbab4795ce\",\"stats\":{\"added\":84,\"removed\":12}}",
-          "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-          "s": "czPvCt2vnm-OYKx0ITvEyOcHAYzJJgZOLEFnTYF1wtNiEgk0wU_5voTC4GgynwRL_6MmCvfJkRUWDxN7N_DKAA"
-        }
-      },
-      "answer": {
-        "re": 8,
-        "ok": true
-      },
-      "rows": {
-        "t": "rows",
-        "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-        "rows": [
-          {
-            "r": "task",
-            "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "seq": 813,
-            "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-            "num": 12,
-            "title": "Node: report path changes",
-            "slug": "node-report-path-changes",
             "origin": "brief",
             "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
             "state": "active",
             "step": "review",
-            "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
+            "report": "PDqIOgE7mSm24_PdskpvVg",
             "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
             "reviewer": "eidbAPCqbEQST1SNYbMP3w",
             "foundation": false,
             "pass": 90,
             "depends": [],
-            "branch": "task/12-node-report-path-changes",
-            "checks": {
-              "local": {
-                "ok": true,
-                "at": 1763600140000,
-                "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-              }
-            },
             "wait": null,
             "failures": 0,
             "thread": {
-              "count": 3,
+              "count": 2,
               "rounds": 0,
               "last": {
                 "by": "amN_vvO5mnzm6dn1FWj0-Q",
                 "kind": "report",
-                "text": "Path changes are emitted with transport kind and round-trip time.",
+                "text": "Path events are sent on every switch. Ran the tests: 42 passed. Commit 9f2c1ab on branch t12-path-events.",
                 "ts": 1763600150000
               }
             },
             "stats": {
-              "added": 84,
-              "removed": 12,
               "started": 1763600030000,
               "ended": null
             },
@@ -1005,10 +756,32 @@
                   "task": "m9rr_hiiT8n2dHNSTlYVKQ",
                   "msg": "PDqIOgE7mSm24_PdskpvVg"
                 },
+                "msg": {
+                  "r": "msg",
+                  "id": "PDqIOgE7mSm24_PdskpvVg",
+                  "seq": 808,
+                  "pos": 808,
+                  "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
+                  "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
+                  "main": false,
+                  "by": "amN_vvO5mnzm6dn1FWj0-Q",
+                  "kind": "report",
+                  "ts": 1763600150000,
+                  "text": "Path events are sent on every switch. Ran the tests: 42 passed. Commit 9f2c1ab on branch t12-path-events.",
+                  "mentions": [],
+                  "re": null,
+                  "body": {},
+                  "state": null,
+                  "env": {
+                    "p": "{\"t\":\"post\",\"n\":\"PDqIOgE7mSm24_PdskpvVg\",\"ts\":1763600150000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"amN_vvO5mnzm6dn1FWj0-Q\",\"kind\":\"report\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Path events are sent on every switch. Ran the tests: 42 passed. Commit 9f2c1ab on branch t12-path-events.\",\"mentions\":[],\"re\":null,\"body\":{}}",
+                    "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
+                    "s": "gf9VUWszwvaLO0UsT2ZlgxKVk20_ersl_vxaZ6FK4otOa8FPptwWqUvxcxOvfxsr5HK1MiXeGhyM2kHU5tKEDw"
+                  }
+                },
                 "task": {
                   "r": "task",
                   "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-                  "seq": 813,
+                  "seq": 809,
                   "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
                   "num": 12,
                   "title": "Node: report path changes",
@@ -1016,6 +789,7 @@
                   "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
                   "state": "active",
                   "step": "review",
+                  "report": "PDqIOgE7mSm24_PdskpvVg",
                   "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
                   "reviewer": "eidbAPCqbEQST1SNYbMP3w",
                   "foundation": false,
@@ -1024,12 +798,12 @@
                   "wait": null,
                   "failures": 0,
                   "thread": {
-                    "count": 3,
+                    "count": 2,
                     "rounds": 0,
                     "last": {
                       "by": "amN_vvO5mnzm6dn1FWj0-Q",
                       "kind": "report",
-                      "text": "Path changes are emitted with transport kind and round-trip time.",
+                      "text": "Path events are sent on every switch. Ran the tests: 42 passed. Commit 9f2c1ab on branch t12-path-events.",
                       "ts": 1763600150000
                     }
                   },
@@ -1056,15 +830,15 @@
       "from": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
       "cmd": {
         "t": "cmd",
-        "id": 9,
+        "id": 6,
         "env": {
-          "p": "{\"t\":\"post\",\"n\":\"ve2I2R3vdH44jz1g8O3nmw\",\"ts\":1763600230000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"eidbAPCqbEQST1SNYbMP3w\",\"kind\":\"review\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Path transitions and round-trip fields are covered cleanly.\",\"mentions\":[],\"re\":null,\"body\":{\"task\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"commit\":\"9f2c1abf43f3224eb6826ef971a943dbab4795ce\",\"score\":93,\"items\":[{\"text\":\"Covers direct-to-relay and relay-to-direct transitions.\",\"veto\":false,\"file\":\"internal/peer/path.go\",\"line\":42}]}}",
+          "p": "{\"t\":\"post\",\"n\":\"ve2I2R3vdH44jz1g8O3nmw\",\"ts\":1763600230000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"eidbAPCqbEQST1SNYbMP3w\",\"kind\":\"review\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Path transitions and round-trip fields are covered cleanly.\",\"mentions\":[],\"re\":null,\"body\":{\"task\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"report\":\"PDqIOgE7mSm24_PdskpvVg\",\"score\":93,\"items\":[{\"text\":\"Covers direct-to-relay and relay-to-direct transitions.\",\"veto\":false,\"file\":\"internal/peer/path.go\",\"line\":42}]}}",
           "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-          "s": "_UtpqRAmwTfWmuUreq1nZLaxjTLPjzTyQ_oWkfxuvCGywsEb3mvlJcqro79w5woCQOmLhRwg_aciwhngcLMUCw"
+          "s": "sDkw3iUCpbL1rRWglQaKiN-PNCNCXJi8AiS_MPnzVqT0ufWYQirUHvpaAfsWC5pKy0sjJ86lT9BxOOmdx4tfCA"
         }
       },
       "answer": {
-        "re": 9,
+        "re": 6,
         "ok": true,
         "passed": true,
         "round": 1
@@ -1076,8 +850,8 @@
           {
             "r": "msg",
             "id": "ve2I2R3vdH44jz1g8O3nmw",
-            "seq": 814,
-            "pos": 814,
+            "seq": 810,
+            "pos": 810,
             "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
             "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
             "main": false,
@@ -1091,7 +865,7 @@
               "task": "m9rr_hiiT8n2dHNSTlYVKQ",
               "num": 12,
               "title": "Node: report path changes",
-              "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
+              "report": "PDqIOgE7mSm24_PdskpvVg",
               "round": 1,
               "score": 93,
               "pass": 90,
@@ -1107,44 +881,55 @@
             },
             "state": null,
             "env": {
-              "p": "{\"t\":\"post\",\"n\":\"ve2I2R3vdH44jz1g8O3nmw\",\"ts\":1763600230000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"eidbAPCqbEQST1SNYbMP3w\",\"kind\":\"review\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Path transitions and round-trip fields are covered cleanly.\",\"mentions\":[],\"re\":null,\"body\":{\"task\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"commit\":\"9f2c1abf43f3224eb6826ef971a943dbab4795ce\",\"score\":93,\"items\":[{\"text\":\"Covers direct-to-relay and relay-to-direct transitions.\",\"veto\":false,\"file\":\"internal/peer/path.go\",\"line\":42}]}}",
+              "p": "{\"t\":\"post\",\"n\":\"ve2I2R3vdH44jz1g8O3nmw\",\"ts\":1763600230000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"eidbAPCqbEQST1SNYbMP3w\",\"kind\":\"review\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":false,\"text\":\"Path transitions and round-trip fields are covered cleanly.\",\"mentions\":[],\"re\":null,\"body\":{\"task\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"report\":\"PDqIOgE7mSm24_PdskpvVg\",\"score\":93,\"items\":[{\"text\":\"Covers direct-to-relay and relay-to-direct transitions.\",\"veto\":false,\"file\":\"internal/peer/path.go\",\"line\":42}]}}",
               "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-              "s": "_UtpqRAmwTfWmuUreq1nZLaxjTLPjzTyQ_oWkfxuvCGywsEb3mvlJcqro79w5woCQOmLhRwg_aciwhngcLMUCw"
+              "s": "sDkw3iUCpbL1rRWglQaKiN-PNCNCXJi8AiS_MPnzVqT0ufWYQirUHvpaAfsWC5pKy0sjJ86lT9BxOOmdx4tfCA"
             }
+          },
+          {
+            "r": "msg",
+            "id": "0yuJMQyezSnkuUnz9LDQsw",
+            "seq": 811,
+            "pos": 811,
+            "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
+            "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
+            "main": false,
+            "by": "system",
+            "kind": "system",
+            "ts": 1763600230000,
+            "text": "",
+            "mentions": [],
+            "re": null,
+            "body": {
+              "code": "task_done",
+              "task": "m9rr_hiiT8n2dHNSTlYVKQ"
+            },
+            "state": null
           },
           {
             "r": "task",
             "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "seq": 815,
+            "seq": 812,
             "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
             "num": 12,
             "title": "Node: report path changes",
-            "slug": "node-report-path-changes",
             "origin": "brief",
             "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
-            "state": "active",
-            "step": "merge",
-            "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
+            "state": "done",
+            "step": "review",
+            "report": "PDqIOgE7mSm24_PdskpvVg",
             "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
             "reviewer": "eidbAPCqbEQST1SNYbMP3w",
             "foundation": false,
             "pass": 90,
             "depends": [],
-            "branch": "task/12-node-report-path-changes",
-            "checks": {
-              "local": {
-                "ok": true,
-                "at": 1763600140000,
-                "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-              }
-            },
             "review": {
               "round": 1,
               "failed": 0,
               "score": 93,
               "ok": true,
               "by": "eidbAPCqbEQST1SNYbMP3w",
-              "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
+              "report": "PDqIOgE7mSm24_PdskpvVg",
               "at": 1763600230000
             },
             "wait": null,
@@ -1153,17 +938,15 @@
               "count": 4,
               "rounds": 0,
               "last": {
-                "by": "eidbAPCqbEQST1SNYbMP3w",
-                "kind": "review",
-                "text": "Path transitions and round-trip fields are covered cleanly.",
+                "by": "system",
+                "kind": "system",
+                "text": "",
                 "ts": 1763600230000
               }
             },
             "stats": {
-              "added": 84,
-              "removed": 12,
               "started": 1763600030000,
-              "ended": null
+              "ended": 1763600230000
             },
             "created": 1763600030000
           }
@@ -1179,21 +962,44 @@
               {
                 "item": {
                   "item": 5,
-                  "ai": "amN_vvO5mnzm6dn1FWj0-Q",
-                  "why": "merge",
-                  "task": "m9rr_hiiT8n2dHNSTlYVKQ"
+                  "ai": "DPCZ39OiwZepCQEMDC04ow",
+                  "why": "notice",
+                  "task": "m9rr_hiiT8n2dHNSTlYVKQ",
+                  "msg": "0yuJMQyezSnkuUnz9LDQsw",
+                  "code": "task_done"
+                },
+                "msg": {
+                  "r": "msg",
+                  "id": "0yuJMQyezSnkuUnz9LDQsw",
+                  "seq": 811,
+                  "pos": 811,
+                  "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
+                  "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
+                  "main": false,
+                  "by": "system",
+                  "kind": "system",
+                  "ts": 1763600230000,
+                  "text": "",
+                  "mentions": [],
+                  "re": null,
+                  "body": {
+                    "code": "task_done",
+                    "task": "m9rr_hiiT8n2dHNSTlYVKQ"
+                  },
+                  "state": null
                 },
                 "task": {
                   "r": "task",
                   "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-                  "seq": 815,
+                  "seq": 812,
                   "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
                   "num": 12,
                   "title": "Node: report path changes",
                   "origin": "brief",
                   "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
-                  "state": "active",
-                  "step": "merge",
+                  "state": "done",
+                  "step": "review",
+                  "report": "PDqIOgE7mSm24_PdskpvVg",
                   "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
                   "reviewer": "eidbAPCqbEQST1SNYbMP3w",
                   "foundation": false,
@@ -1214,15 +1020,15 @@
                     "count": 4,
                     "rounds": 0,
                     "last": {
-                      "by": "eidbAPCqbEQST1SNYbMP3w",
-                      "kind": "review",
-                      "text": "Path transitions and round-trip fields are covered cleanly.",
+                      "by": "system",
+                      "kind": "system",
+                      "text": "",
                       "ts": 1763600230000
                     }
                   },
                   "stats": {
                     "started": 1763600030000,
-                    "ended": null
+                    "ended": 1763600230000
                   },
                   "created": 1763600030000
                 }
@@ -1243,199 +1049,7 @@
       "from": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
       "cmd": {
         "t": "cmd",
-        "id": 10,
-        "env": {
-          "p": "{\"t\":\"task\",\"n\":\"XAime2fVfAsDKnAnTI8NFQ\",\"ts\":1763600270000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"op\":\"merged\",\"id\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"commit\":\"9f2c1abf43f3224eb6826ef971a943dbab4795ce\",\"merge_commit\":\"c1d9e7a2f0b34455aa8f0e6d7c2b1a9988776655\",\"stats\":{\"added\":84,\"removed\":12}}",
-          "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-          "s": "aCq3ZLWZBCVFKZm25Qel95QpPlTPXT2MrGhWN2JkNKOMCqZ7JAoOwL55ivpmUCaFLJH_luFbxVHal5hJa6PPDA"
-        }
-      },
-      "answer": {
-        "re": 10,
-        "ok": true
-      },
-      "rows": {
-        "t": "rows",
-        "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-        "rows": [
-          {
-            "r": "task",
-            "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "seq": 816,
-            "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-            "num": 12,
-            "title": "Node: report path changes",
-            "slug": "node-report-path-changes",
-            "origin": "brief",
-            "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
-            "state": "merged",
-            "step": "merge",
-            "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
-            "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
-            "reviewer": "eidbAPCqbEQST1SNYbMP3w",
-            "foundation": false,
-            "pass": 90,
-            "depends": [],
-            "branch": "task/12-node-report-path-changes",
-            "checks": {
-              "local": {
-                "ok": true,
-                "at": 1763600140000,
-                "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-              }
-            },
-            "review": {
-              "round": 1,
-              "failed": 0,
-              "score": 93,
-              "ok": true,
-              "by": "eidbAPCqbEQST1SNYbMP3w",
-              "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
-              "at": 1763600230000
-            },
-            "wait": null,
-            "failures": 0,
-            "thread": {
-              "count": 5,
-              "rounds": 0,
-              "last": {
-                "by": "system",
-                "kind": "system",
-                "text": "",
-                "ts": 1763600270000
-              }
-            },
-            "stats": {
-              "added": 84,
-              "removed": 12,
-              "started": 1763600030000,
-              "ended": 1763600270000
-            },
-            "created": 1763600030000
-          },
-          {
-            "r": "msg",
-            "id": "XAime2fVfAsDKnAnTI8NFQ",
-            "seq": 817,
-            "pos": 817,
-            "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-            "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "main": false,
-            "by": "system",
-            "kind": "system",
-            "ts": 1763600270000,
-            "text": "",
-            "mentions": [],
-            "re": null,
-            "body": {
-              "code": "task_merged",
-              "task": "m9rr_hiiT8n2dHNSTlYVKQ",
-              "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
-              "merge_commit": "c1d9e7a2f0b34455aa8f0e6d7c2b1a9988776655"
-            },
-            "state": null
-          }
-        ]
-      },
-      "inboxes": [
-        {
-          "to": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-          "inbox": {
-            "t": "inbox",
-            "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-            "items": [
-              {
-                "item": {
-                  "item": 6,
-                  "ai": "DPCZ39OiwZepCQEMDC04ow",
-                  "why": "notice",
-                  "task": "m9rr_hiiT8n2dHNSTlYVKQ",
-                  "msg": "XAime2fVfAsDKnAnTI8NFQ",
-                  "code": "task_merged"
-                },
-                "msg": {
-                  "r": "msg",
-                  "id": "XAime2fVfAsDKnAnTI8NFQ",
-                  "seq": 817,
-                  "pos": 817,
-                  "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-                  "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
-                  "main": false,
-                  "by": "system",
-                  "kind": "system",
-                  "ts": 1763600270000,
-                  "text": "",
-                  "mentions": [],
-                  "re": null,
-                  "body": {
-                    "code": "task_merged",
-                    "task": "m9rr_hiiT8n2dHNSTlYVKQ",
-                    "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
-                    "merge_commit": "c1d9e7a2f0b34455aa8f0e6d7c2b1a9988776655"
-                  },
-                  "state": null
-                },
-                "task": {
-                  "r": "task",
-                  "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-                  "seq": 816,
-                  "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-                  "num": 12,
-                  "title": "Node: report path changes",
-                  "origin": "brief",
-                  "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
-                  "state": "merged",
-                  "step": "merge",
-                  "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
-                  "reviewer": "eidbAPCqbEQST1SNYbMP3w",
-                  "foundation": false,
-                  "pass": 90,
-                  "depends": [],
-                  "review": {
-                    "round": 1,
-                    "failed": 0,
-                    "score": 93,
-                    "ok": true,
-                    "by": "eidbAPCqbEQST1SNYbMP3w",
-                    "report": "PDqIOgE7mSm24_PdskpvVg",
-                    "at": 1763600230000
-                  },
-                  "wait": null,
-                  "failures": 0,
-                  "thread": {
-                    "count": 5,
-                    "rounds": 0,
-                    "last": {
-                      "by": "system",
-                      "kind": "system",
-                      "text": "",
-                      "ts": 1763600270000
-                    }
-                  },
-                  "stats": {
-                    "started": 1763600030000,
-                    "ended": 1763600270000
-                  },
-                  "created": 1763600030000
-                }
-              }
-            ]
-          },
-          "acks": [
-            {
-              "t": "ack",
-              "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
-              "item": 6
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "from": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
-      "cmd": {
-        "t": "cmd",
-        "id": 11,
+        "id": 7,
         "env": {
           "p": "{\"t\":\"post\",\"n\":\"qn7T659sHreaXX_WDoIsPA\",\"ts\":1763600280000,\"g\":\"rlWx7Fla0KH2Uz8R8dFO8Q\",\"as\":\"DPCZ39OiwZepCQEMDC04ow\",\"kind\":\"summary\",\"thread\":\"m9rr_hiiT8n2dHNSTlYVKQ\",\"main\":true,\"text\":\"Path changes are reported with the active transport kind and round-trip time.\",\"mentions\":[],\"re\":null,\"body\":{}}",
           "k": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM",
@@ -1443,7 +1057,7 @@
         }
       },
       "answer": {
-        "re": 11,
+        "re": 7,
         "ok": true
       },
       "rows": {
@@ -1453,8 +1067,8 @@
           {
             "r": "msg",
             "id": "qn7T659sHreaXX_WDoIsPA",
-            "seq": 818,
-            "pos": 818,
+            "seq": 813,
+            "pos": 813,
             "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
             "thread": "m9rr_hiiT8n2dHNSTlYVKQ",
             "main": true,
@@ -1468,9 +1082,7 @@
               "task": "m9rr_hiiT8n2dHNSTlYVKQ",
               "score": 93,
               "rounds": 1,
-              "minutes": 4,
-              "added": 84,
-              "removed": 12
+              "minutes": 3
             },
             "state": null,
             "env": {
@@ -1482,42 +1094,33 @@
           {
             "r": "task",
             "id": "m9rr_hiiT8n2dHNSTlYVKQ",
-            "seq": 819,
+            "seq": 814,
             "g": "rlWx7Fla0KH2Uz8R8dFO8Q",
             "num": 12,
             "title": "Node: report path changes",
-            "slug": "node-report-path-changes",
             "origin": "brief",
             "brief": "CgFOMrqkuLi6PZ9mBnIN-Q",
-            "state": "merged",
-            "step": "merge",
-            "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
+            "state": "done",
+            "step": "review",
+            "report": "PDqIOgE7mSm24_PdskpvVg",
             "assignee": "amN_vvO5mnzm6dn1FWj0-Q",
             "reviewer": "eidbAPCqbEQST1SNYbMP3w",
             "foundation": false,
             "pass": 90,
             "depends": [],
-            "branch": "task/12-node-report-path-changes",
-            "checks": {
-              "local": {
-                "ok": true,
-                "at": 1763600140000,
-                "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-              }
-            },
             "review": {
               "round": 1,
               "failed": 0,
               "score": 93,
               "ok": true,
               "by": "eidbAPCqbEQST1SNYbMP3w",
-              "commit": "9f2c1abf43f3224eb6826ef971a943dbab4795ce",
+              "report": "PDqIOgE7mSm24_PdskpvVg",
               "at": 1763600230000
             },
             "wait": null,
             "failures": 0,
             "thread": {
-              "count": 6,
+              "count": 5,
               "rounds": 0,
               "last": {
                 "by": "DPCZ39OiwZepCQEMDC04ow",
@@ -1527,10 +1130,8 @@
               }
             },
             "stats": {
-              "added": 84,
-              "removed": 12,
               "started": 1763600030000,
-              "ended": 1763600270000
+              "ended": 1763600230000
             },
             "created": 1763600030000
           }

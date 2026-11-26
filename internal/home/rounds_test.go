@@ -86,8 +86,8 @@ func rndState(t *testing.T) *home.State {
 func rndTaskRow(taskID string, num int) proto.TaskRow {
 	return proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: taskID, Seq: 8},
-		Group:     groupID, Num: num, Title: "Report path", Slug: "report-path",
-		Origin: "brief", State: "active", Step: "local_check", Commit: "c1",
+		Group:     groupID, Num: num, Title: "Report path",
+		Origin: "brief", State: "active", Step: "work", Report: id(49),
 		Assignee: briefA, Reviewer: briefB, Pass: 90, Depends: []string{},
 		Stats: proto.TaskStats{Started: clock - 120_000}, Created: clock - 200_000,
 	}
@@ -226,7 +226,7 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 		tPaused := rndTaskRow(runID(3), 3)
 		tPaused.State, tPaused.Wait = "paused", &proto.TaskWait{Kind: "manual", Since: clock - 1000}
 		tMerge := rndTaskRow(runID(4), 4)
-		tMerge.Step = "merge"
+		tMerge.State, tMerge.Step = "done", "review"
 		tWaiting := rndTaskRow(runID(5), 5)
 		tWaiting.Wait = &proto.TaskWait{Kind: "reviewer", Since: clock - 1000}
 		s.Tasks[t1.ID], s.Tasks[t2.ID] = t1, t2
@@ -332,8 +332,8 @@ func TestRoundsTenExchangesPauseAndResume(t *testing.T) {
 	}
 }
 
-func TestRoundsThreadPostRulesAndStepMerge(t *testing.T) {
-	t.Run("main-line, human-only, self-only, review rows, report, step merge, and no secretary", func(t *testing.T) {
+func TestRoundsThreadPostRulesAndDoneTask(t *testing.T) {
+	t.Run("main-line, human-only, self-only, review rows, report, done task, and no secretary", func(t *testing.T) {
 		s, d := rndState(t), &rndDisk{msgs: map[string]proto.MsgRow{}}
 		taskID := id(70)
 		s.Tasks[taskID] = rndTaskRow(taskID, 1)
@@ -348,13 +348,13 @@ func TestRoundsThreadPostRulesAndStepMerge(t *testing.T) {
 		t1 := s.Tasks[taskID]
 		t1.Step = "review"
 		s.Tasks[taskID] = t1
-		revBody := fmt.Sprintf(`{"task":%q,"commit":"c1","score":80,"items":[]}`, taskID)
+		revBody := fmt.Sprintf(`{"task":%q,"report":%q,"score":80,"items":[]}`, taskID, id(49))
 		s.Commit(briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 53, briefB, "review", taskID, "needs work", []string{}, revBody)))
 		equal(t, s.Tasks[taskID].Thread.Rounds, 0)
 
 		// Sixth failed review mentioning another AI writes [reviewMsg, taskFailedMsg, taskRow] and counts 1 round.
 		t1 = s.Tasks[taskID]
-		t1.Step, t1.Review = "review", &proto.Review{Round: 5, Failed: 5, Score: 80, By: briefB, Commit: "c1", At: clock - 500}
+		t1.Step, t1.Review = "review", &proto.Review{Round: 5, Failed: 5, Score: 80, By: briefB, Report: id(49), At: clock - 500}
 		s.Tasks[taskID] = t1
 		revSixth := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 54, briefB, "review", taskID, "stop", []string{briefA}, revBody))
 		equal(t, len(revSixth.Rows), 3)
@@ -363,24 +363,24 @@ func TestRoundsThreadPostRulesAndStepMerge(t *testing.T) {
 
 		// Report mentioning another AI counts 1 round even though report queues no mention item.
 		t1 = s.Tasks[taskID]
-		t1.State, t1.Step, t1.Failures, t1.Review = "active", "local_check", 0, nil
+		t1.State, t1.Step, t1.Failures, t1.Review = "active", "work", 0, nil
 		s.Tasks[taskID] = t1
-		s.Commit(briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 55, briefA, "report", taskID, "", []string{briefB}, `{"commit":"c1","files":1,"added":2,"removed":0}`)))
-		equal(t, s.Tasks[taskID].Thread.Rounds, 2)
+		s.Commit(briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 55, briefA, "report", taskID, "", []string{briefB}, "")))
+		equal(t, []any{s.Tasks[taskID].Thread.Rounds, s.Tasks[taskID].Report}, []any{2, id(55)})
 
-		// A5.18: at step merge, reaching limits.rounds increments Thread.Rounds without pausing or writing rounds_limit.
-		mergeTask := s.Tasks[taskID]
-		mergeTask.Step, mergeTask.Thread.Rounds = "merge", 9
-		s.Tasks[taskID] = mergeTask
-		atMerge := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 56, briefA, "question", taskID, "q", []string{briefB}, ""))
-		equal(t, len(atMerge.Rows), 2)
-		equal(t, atMerge.Items, []home.Item{{AI: briefB, Why: "mention", Task: taskID, Msg: id(56)}})
-		s.Commit(atMerge)
-		equal(t, []any{s.Tasks[taskID].State, s.Tasks[taskID].Step, s.Tasks[taskID].Thread.Rounds}, []any{"active", "merge", 10})
+		// In the thread of a done task, reaching limits.rounds increments Thread.Rounds without pausing or writing rounds_limit.
+		doneTask := s.Tasks[taskID]
+		doneTask.State, doneTask.Thread.Rounds = "done", 9
+		s.Tasks[taskID] = doneTask
+		afterDone := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 56, briefA, "question", taskID, "q", []string{briefB}, ""))
+		equal(t, len(afterDone.Rows), 2)
+		equal(t, afterDone.Items, []home.Item{{AI: briefB, Why: "mention", Task: taskID, Msg: id(56)}})
+		s.Commit(afterDone)
+		equal(t, []any{s.Tasks[taskID].State, s.Tasks[taskID].Step, s.Tasks[taskID].Thread.Rounds}, []any{"done", "review", 10})
 
 		// Without a secretary, reaching limits.rounds writes rounds_limit without queuing a secretary notice.
 		activeAgain := s.Tasks[taskID]
-		activeAgain.Step, activeAgain.Thread.Rounds = "local_check", 9
+		activeAgain.State, activeAgain.Step, activeAgain.Thread.Rounds = "active", "work", 9
 		s.Tasks[taskID] = activeAgain
 		s.Group.Secretary = ""
 		noSec := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 57, briefA, "question", taskID, "q", []string{briefB}, ""))
@@ -406,14 +406,14 @@ func TestRoundsThreadPostRulesAndStepMerge(t *testing.T) {
 				{RowHeader: proto.RowHeader{Type: "msg", ID: id(82)}, Thread: &t1ID, Kind: "approval", Timestamp: 300, Body: json.RawMessage(fmt.Sprintf(`{"task":%q,"approvers":["u-app"]}`, t1ID))},
 			},
 			queued: []store.Item{
-				{ID: 1, AI: briefB, Why: "review", Task: &t2ID, Commit: rndPtr("c1")},
-				{ID: 2, AI: briefB, Why: "review", Task: &t1ID, Commit: rndPtr("c0")},
+				{ID: 1, AI: briefB, Why: "review", Task: &t2ID, Msg: rndPtr(id(49))},
+				{ID: 2, AI: briefB, Why: "review", Task: &t1ID, Msg: rndPtr(id(48))},
 			},
 		}
 
 		res := briefApply(t, s, d, receipts{}, browser, rndPostEnv(browser, 85, "", "text", t1ID, "continue", []string{briefA}, ""))
 		equal(t, res.Items, []home.Item{
-			{AI: briefB, Why: "review", Task: t1ID, Commit: "c1"},
+			{AI: briefB, Why: "review", Task: t1ID, Msg: id(49)},
 			{AI: briefA, Why: "mention", Task: t1ID, Msg: id(85)},
 		})
 		s.Commit(res)
@@ -423,14 +423,14 @@ func TestRoundsThreadPostRulesAndStepMerge(t *testing.T) {
 		t1 = s.Tasks[t1ID]
 		t1.State, t1.Wait, t1.Thread.Rounds = "paused", &proto.TaskWait{Kind: "rounds", Since: clock}, 10
 		s.Tasks[t1ID] = t1
-		d.queued = []store.Item{{ID: 3, AI: briefB, Why: "review", Task: &t1ID, Commit: rndPtr("c1")}}
+		d.queued = []store.Item{{ID: 3, AI: briefB, Why: "review", Task: &t1ID, Msg: rndPtr(id(49))}}
 		resDup := briefApply(t, s, d, receipts{}, browser, rndPostEnv(browser, 86, "", "text", t1ID, "again", []string{}, ""))
 		equal(t, len(resDup.Items), 0)
 	})
 }
 
-// A mention queued at the round limit reaches the host after failed hosted
-// checks turn the rounds-paused task failed and an admin resumes it, and the
+// A mention queued at the round limit reaches the host after an admin's
+// resume, a third crash and another resume of the rounds-paused task, and the
 // mentions of a rounds-paused task leave the wake-up cap after an hour.
 func TestRoundsFailedTaskDeliveryAndWakeCap(t *testing.T) {
 	t.Run("mention at rounds limit is delivered after task becomes failed and is resumed", func(t *testing.T) {
@@ -439,14 +439,14 @@ func TestRoundsFailedTaskDeliveryAndWakeCap(t *testing.T) {
 		taskID := id(70)
 		localCmds["group/create"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 			grp := proto.GroupRow{
-				RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Site", Kind: "project",
-				Home: s.Home, Secretary: aiID, Forge: "github", Pass: 90, PassFoundation: 70,
+				RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Site",
+				Home: s.Home, Secretary: aiID, Pass: 90, PassFoundation: 70,
 				Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5, IdleNoticeMinutes: 30},
 			}
 			task := proto.TaskRow{
 				RowHeader: proto.RowHeader{Type: "task", ID: taskID}, Group: s.ID, Num: 1,
-				Title: "Cloud task", Slug: "cloud-task", Origin: "direct", State: "active", Step: "cloud_check",
-				Commit: "c1", Failures: 2, Assignee: briefA, Reviewer: briefB, Pass: 90, Depends: []string{},
+				Title: "Crashing task", Origin: "direct", State: "active", Step: "work",
+				Failures: 2, Assignee: briefA, Reviewer: briefB, Pass: 90, Depends: []string{},
 				Thread: proto.ThreadSummary{Count: 9, Rounds: 9}, Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
 			}
 			return home.Result{
@@ -462,16 +462,18 @@ func TestRoundsFailedTaskDeliveryAndWakeCap(t *testing.T) {
 		p.next()
 		host.next()
 
-		// 10th mention pauses task with wait rounds; failed cloud check moves it to failed (wait null);
-		// admin task/resume and person thread text make it active again.
+		// 10th mention pauses task with wait rounds; an admin's resume makes it active, the third crash
+		// in a row stops it (wait null), and another resume and a person's thread text make it active again.
 		m10 := id(60)
 		w.loop.Cmd(host.conn, 2, rndPostEnv(laptop, 60, briefA, "question", taskID, "10th", []string{briefB}, ""))
 		host.next()
-		w.loop.Cmd(host.conn, 3, laptop.Sign(fmt.Sprintf(`{"t":"task","op":"cloud","n":%q,"ts":%d,"g":%q,"id":%q,"commit":"c1","ok":false,"items":[{"name":"ci","ok":false}]}`, id(61), clock, groupID, taskID)))
-		host.next()
-		w.loop.Cmd(p.conn, 2, rndResumeEnv(browser, 62, "", taskID))
+		w.loop.Cmd(p.conn, 2, rndResumeEnv(browser, 59, "", taskID))
 		p.next()
-		w.loop.Cmd(p.conn, 3, rndPostEnv(browser, 63, "", "text", taskID, "fixed", []string{}, ""))
+		w.loop.Cmd(host.conn, 3, laptop.Sign(fmt.Sprintf(`{"t":"task","op":"fail","n":%q,"ts":%d,"g":%q,"id":%q,"reason":"crash","detail":"exit 1"}`, id(61), clock, groupID, taskID)))
+		host.next()
+		w.loop.Cmd(p.conn, 3, rndResumeEnv(browser, 62, "", taskID))
+		p.next()
+		w.loop.Cmd(p.conn, 4, rndPostEnv(browser, 63, "", "text", taskID, "fixed", []string{}, ""))
 		p.next()
 
 		// When the host takes its inbox, the 10th mention is due at once, its task active.
@@ -486,13 +488,13 @@ func TestRoundsFailedTaskDeliveryAndWakeCap(t *testing.T) {
 		taskID := id(71)
 		localCmds["group/create"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 			grp := proto.GroupRow{
-				RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Cap", Kind: "project",
-				Home: s.Home, Secretary: aiID, Forge: "none", Pass: 90, PassFoundation: 70,
+				RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Cap",
+				Home: s.Home, Secretary: aiID, Pass: 90, PassFoundation: 70,
 				Limits: proto.Limits{Rounds: 10, WakesPerHour: 2, Failures: 3, ReviewRounds: 5, IdleNoticeMinutes: 30},
 			}
 			task := proto.TaskRow{
 				RowHeader: proto.RowHeader{Type: "task", ID: taskID}, Group: s.ID, Num: 1,
-				Title: "Cap task", Slug: "cap-task", Origin: "direct", State: "active", Step: "local_check",
+				Title: "Cap task", Origin: "direct", State: "active", Step: "work",
 				Assignee: briefA, Reviewer: briefB, Pass: 90, Depends: []string{},
 				Thread: proto.ThreadSummary{Count: 9, Rounds: 9}, Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
 			}
@@ -546,15 +548,15 @@ func TestRoundsLoopJumpAndQuiet(t *testing.T) {
 	localCmds := maps.Clone(tables.Commands)
 	localCmds["group/create"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 		grp := proto.GroupRow{
-			RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Site", Kind: "project",
-			Home: s.Home, Secretary: aiID, Forge: "none", Pass: 90, PassFoundation: 70,
+			RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Site",
+			Home: s.Home, Secretary: aiID, Pass: 90, PassFoundation: 70,
 			Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5, IdleNoticeMinutes: 1},
 		}
 		own := person(ownerID, browser, "owner")
 		sec, worker := ai(aiID, laptop), ai(briefA, laptop)
 		task := proto.TaskRow{
 			RowHeader: proto.RowHeader{Type: "task", ID: id(70)}, Group: s.ID, Num: 1,
-			Title: "Direct task", Slug: "direct-task", Origin: "direct", State: "active", Step: "local_check",
+			Title: "Direct task", Origin: "direct", State: "active", Step: "work",
 			Assignee: briefA, Pass: 90, Depends: []string{}, Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
 		}
 		return home.Result{

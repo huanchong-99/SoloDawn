@@ -131,7 +131,7 @@ func synCard(id string, pos int64, thread *string, main bool, status string) pro
 func synTask(id string, num int) proto.TaskRow {
 	return proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: id}, Group: groupID, Num: num,
-		Title: "Task", Slug: proto.MakeSlug("Task"), Origin: "direct", State: "active", Step: "branch",
+		Title: "Task", Origin: "direct", State: "active", Step: "work",
 		Assignee: aiID, Pass: 90, Depends: []string{}, Stats: proto.TaskStats{Started: clock}, Created: clock,
 	}
 }

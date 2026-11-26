@@ -256,7 +256,7 @@ func wpushFoundGroup(t *testing.T, w *runWorld, grpID, name string, nBase byte) 
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: proto.ID(grpID), Timestamp: clock, Group: proto.ID(grpID)},
 			Op:          "create",
 		},
-		Name: name, Kind: "project", Repo: "r", Base: "main", Forge: "none", Checks: []string{}, MemberName: "Owner",
+		Name: name, MemberName: "Owner",
 	}
 	wpushCmdOK(t, w, wpushBrowserOne, briefSign(wpushBrowserOne, create))
 	addSec := proto.MemberAddAI{
@@ -264,7 +264,7 @@ func wpushFoundGroup(t *testing.T, w *runWorld, grpID, name string, nBase byte) 
 			HomeCommand: proto.HomeCommand{Type: "member", Nonce: proto.ID(id(nBase)), Timestamp: clock, Group: proto.ID(grpID)},
 			Op:          "add_ai", ID: proto.ID(wpushSecMem),
 		},
-		CLI: "claude", Name: "Dawn", Account: "api_key", Secretary: true, Approvers: []string{},
+		CLI: "claude", Name: "Dawn", Workspace: "/home/dev/website", Account: "api_key", Secretary: true, Approvers: []string{},
 	}
 	wpushCmdOK(t, w, wpushHostNode, briefSign(wpushHostNode, addSec))
 	addAI := proto.MemberAddAI{
@@ -272,7 +272,7 @@ func wpushFoundGroup(t *testing.T, w *runWorld, grpID, name string, nBase byte) 
 			HomeCommand: proto.HomeCommand{Type: "member", Nonce: proto.ID(id(nBase + 1)), Timestamp: clock, Group: proto.ID(grpID)},
 			Op:          "add_ai", ID: proto.ID(wpushAIMem),
 		},
-		CLI: "codex", Name: "Codex", Account: "api_key", Approvers: []string{},
+		CLI: "codex", Name: "Codex", Workspace: "/home/dev/website", Account: "api_key", Approvers: []string{},
 	}
 	wpushCmdOK(t, w, wpushHostNode, briefSign(wpushHostNode, addAI))
 }
@@ -333,8 +333,8 @@ func wpushReminderFixtures(t *testing.T, ownerMem, secretCmd, secretText string)
 	grpName := "Website <Alpha> & Co"
 	taskRow := proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: wpushTaskID}, Group: groupID, Num: 1,
-		Title: "Ship encrypted Web Push reminders\nDetails ignored", Slug: "ship-encrypted-web-push-reminders",
-		State: "merged", Step: "merge", Assignee: wpushAIMem,
+		Title: "Ship encrypted Web Push reminders\nDetails ignored",
+		State: "done", Step: "review", Assignee: wpushAIMem,
 	}
 	updatedCard := proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: id(15)}, Pos: 1, Group: groupID, By: wpushAIMem, Kind: "approval",

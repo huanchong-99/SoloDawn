@@ -20,22 +20,16 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-// The two task transcripts of planning/flows/trace-task.md are what this home
-// answers, pushes and delivers for their signed commands. With -update the
-// test writes them; without, it fails when they differ from what the home
-// produces now.
-var traceUpdate = flag.Bool("update", false, "write ../proto/testdata/trace-*.json from the home")
+// The task transcript of planning/flows/trace-task.md is what this home
+// answers, pushes and delivers for its signed commands. With -update the test
+// writes it; without, it fails when it differs from what the home produces
+// now.
+var traceUpdate = flag.Bool("update", false, "write ../proto/testdata/trace-local.json from the home")
 
 // traceTS is the start of the transcripts, in Unix milliseconds.
 const traceTS int64 = 1763600000000
 
-const (
-	traceCommit      = "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-	traceMergeCommit = "c1d9e7a2f0b34455aa8f0e6d7c2b1a9988776655"
-	traceTitle       = "Node: report path changes"
-	tracePR          = 31
-	tracePRURL       = "https://git.example/team/website/pull/31"
-)
+const traceTitle = "Node: report path changes"
 
 func traceID(label string) string {
 	h := sha256.Sum256([]byte(label))
@@ -47,46 +41,39 @@ func traceKey(label string) identity.Key {
 	return identity.Key(ed25519.NewKeyFromSeed(seed[:]))
 }
 
-// traceRun is one transcript as it is produced: the cast, the home's state
+// traceRun is the transcript as it is produced: the cast, the home's state
 // and store, and what has been recorded so far.
 type traceRun struct {
-	t          *testing.T
-	remote     bool
-	ob, ha, hb identity.Key
-	reviewer   identity.Key // the node that hosts mY
-	g          string
-	mO, mS     string
-	mX, mY     string
-	task       proto.TaskRow // as the last step left it
-	db         *store.Store
-	run        *runGroup
-	tr         proto.TaskTrace
+	t      *testing.T
+	ob, ha identity.Key
+	g      string
+	mO, mS string
+	mX, mY string
+	task   proto.TaskRow // as the last step left it
+	db     *store.Store
+	run    *runGroup
+	tr     proto.TaskTrace
 }
 
-func newTraceRun(t *testing.T, remote bool) *traceRun {
+func newTraceRun(t *testing.T) *traceRun {
 	t.Helper()
 	db, err := store.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	r := &traceRun{t: t, remote: remote, ob: traceKey("trace browser"), ha: traceKey("trace host a"), hb: traceKey("trace host b"),
+	r := &traceRun{t: t, ob: traceKey("trace browser"), ha: traceKey("trace host a"),
 		g: traceID("trace group"), mS: traceID("trace secretary"), mX: traceID("trace ai x"), mY: traceID("trace ai y"), db: db}
-	r.mO, r.reviewer = grpOwnerID(proto.ID(r.g)), r.ha
-	cast := []identity.Key{r.ob, r.ha}
-	names := []string{"OB", "HA"}
-	if remote {
-		r.reviewer, cast, names = r.hb, append(cast, r.hb), append(names, "HB")
-	}
-	r.start(cast, names)
+	r.mO = grpOwnerID(proto.ID(r.g))
+	r.start()
 	return r
 }
 
 // start makes the transcript's beginning and the home's state and store from it.
-func (r *traceRun) start(cast []identity.Key, names []string) {
-	kinds, devNames := []string{"browser", "node", "node"}, []string{"phone browser", "workstation", "laptop"}
+func (r *traceRun) start() {
+	names, kinds, devNames := []string{"OB", "HA"}, []string{"browser", "node"}, []string{"phone browser", "workstation"}
 	r.tr.Devlog = proto.Devlog{Type: "devlog", User: r.ob.ID()}
-	for i, k := range cast {
+	for i, k := range []identity.Key{r.ob, r.ha} {
 		r.tr.Keys = append(r.tr.Keys, proto.TraceKey{Name: names[i], Device: k.ID()})
 		entry := proto.DeviceEntry{
 			PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: proto.ID(traceID(fmt.Sprintf("trace dev %d", i+1))), Timestamp: traceTS - 70000 + int64(i)*1000},
@@ -114,14 +101,9 @@ func (r *traceRun) start(cast []identity.Key, names []string) {
 }
 
 func (r *traceRun) groupRow() proto.GroupRow {
-	repo, forge := "/srv/repos/website", "none"
-	if r.remote {
-		repo, forge = "https://git.example/team/website.git", "github"
-	}
 	return proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: r.g, Seq: 796}, Name: "Website", Kind: "project",
-		Repo: repo, Base: "main", Forge: forge, Home: r.ha.ID(), Secretary: r.mS,
-		Checks: []string{"go vet ./...", "go test ./..."}, Pass: 90, PassFoundation: 70,
+		RowHeader: proto.RowHeader{Type: "group", ID: r.g, Seq: 796}, Name: "Website",
+		Home: r.ha.ID(), Secretary: r.mS, Pass: 90, PassFoundation: 70,
 		Limits:  proto.Limits{Rounds: 10, WakesPerHour: 20, TurnMinutes: 60, Failures: 3, ReviewRounds: 5, AskDepth: 4, AskWaitS: 45, ApprovalWaitS: 600, IdleNoticeMinutes: 30},
 		Created: traceTS - 60000,
 	}
@@ -135,22 +117,18 @@ func (r *traceRun) ownerRow() proto.HumanMemberRow {
 }
 
 func (r *traceRun) aiRows() []proto.AIMemberRow {
-	ai := func(id, name, cli string, host identity.Key, hostName, path string, secretary bool, seq int64) proto.AIMemberRow {
+	ai := func(id, name, cli string, secretary bool, seq int64) proto.AIMemberRow {
 		return proto.AIMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: seq}, Group: r.g, Kind: "ai", User: r.ob.ID(), Name: name, LastSeen: traceTS - 10000},
-			CLI:       cli, Host: host.ID(), HostName: hostName, Secretary: secretary, Account: "personal",
+			CLI:       cli, Host: r.ha.ID(), HostName: "workstation", Workspace: "/home/dev/website", Secretary: secretary, Account: "personal",
 			Profile: proto.Profile{Tier: "standard"},
-			Allow:   []string{}, Approvers: []string{r.ob.ID()}, State: "waiting", Since: traceTS - 10000, Path: path, Usage: proto.Usage{},
+			Allow:   []string{}, Approvers: []string{r.ob.ID()}, State: "waiting", Since: traceTS - 10000, Path: "local", Usage: proto.Usage{},
 		}
 	}
-	revName, revPath := "workstation", "local"
-	if r.remote {
-		revName, revPath = "laptop", "direct"
-	}
 	return []proto.AIMemberRow{
-		ai(r.mS, "Secretary", "claude", r.ha, "workstation", "local", true, 798),
-		ai(r.mX, "Claude", "claude", r.ha, "workstation", "local", false, 799),
-		ai(r.mY, "Codex", "codex", r.reviewer, revName, revPath, false, 800),
+		ai(r.mS, "Secretary", "claude", true, 798),
+		ai(r.mX, "Claude", "claude", false, 799),
+		ai(r.mY, "Codex", "codex", false, 800),
 	}
 }
 
@@ -206,18 +184,16 @@ func (r *traceRun) deliver(now int64) []proto.TraceInbox {
 	r.write(func(tx *store.Tx) error {
 		d := &runDisk{tx: tx, group: r.g}
 		due, _ := runDue(d.Queued(), now)
-		err := d.err
-		for _, host := range []string{r.ha.ID(), r.hb.ID()} {
-			lot, failed := runLotOf(r.run.state, d, true, nil, host, due)
-			err = errors.Join(err, failed)
-			for _, frame := range lot.frames {
-				inbox, acks := frame.(proto.Inbox), []proto.Ack{}
-				for _, entry := range inbox.Items {
-					acks = append(acks, proto.Ack{Type: "ack", Group: proto.ID(r.g), Item: entry.Item.Item})
-					err = errors.Join(err, tx.Ack(r.g, host, entry.Item.Item))
-				}
-				inboxes = append(inboxes, proto.TraceInbox{To: host, Inbox: inbox, Acks: acks})
+		host := r.ha.ID()
+		lot, failed := runLotOf(r.run.state, d, true, nil, host, due)
+		err := errors.Join(d.err, failed)
+		for _, frame := range lot.frames {
+			inbox, acks := frame.(proto.Inbox), []proto.Ack{}
+			for _, entry := range inbox.Items {
+				acks = append(acks, proto.Ack{Type: "ack", Group: proto.ID(r.g), Item: entry.Item.Item})
+				err = errors.Join(err, tx.Ack(r.g, host, entry.Item.Item))
 			}
+			inboxes = append(inboxes, proto.TraceInbox{To: host, Inbox: inbox, Acks: acks})
 		}
 		return err
 	})
@@ -230,16 +206,12 @@ func (r *traceRun) cmd(t, label string, after int64, as string) proto.HomeComman
 	return proto.HomeCommand{Type: t, Nonce: proto.ID(traceID(label)), Timestamp: traceTS + after, Group: proto.ID(r.g), As: proto.ID(as)}
 }
 
-func (r *traceRun) taskCmd(op string, after int64) proto.TaskCommand {
-	return proto.TaskCommand{HomeCommand: r.cmd("task", "trace "+op, after, ""), Op: op, ID: proto.ID(r.task.ID)}
-}
-
 func (r *traceRun) thread() *proto.ID {
 	id := proto.ID(r.task.ID)
 	return &id
 }
 
-// steps sends the commands of trace-task.md, rows 1 to 11.
+// steps sends the commands of trace-task.md, steps 1 to 7.
 func (r *traceRun) steps() {
 	r.send(r.ob, proto.Post[proto.EmptyBody]{HomeCommand: r.cmd("post", "trace m1", 10000, ""),
 		Kind: "text", Text: "Show the connection path and warn when relayed.", Mentions: []proto.ID{}})
@@ -249,37 +221,17 @@ func (r *traceRun) steps() {
 			Scope:    proto.BriefScope{In: []string{"node path events"}, Out: []string{"relay server"}},
 			Tasks:    []proto.BriefTask{{Title: traceTitle, Assignee: r.mX, Reviewer: r.mY, Depends: []int{}}}, Pass: 90, Requester: r.mO}})
 	r.send(r.ob, proto.Act{HomeCommand: r.cmd("act", "trace c1", 30000, ""), Msg: proto.ID(traceID("trace m2")), Action: "confirm"})
-	r.send(r.ha, proto.TaskBranch{TaskCommand: r.taskCmd("branch", 40000), Branch: fmt.Sprintf("task/%d-%s", r.task.Num, r.task.Slug)})
 	r.send(r.ha, proto.Post[proto.EmptyBody]{HomeCommand: r.cmd("post", "trace progress", 90000, r.mX), Kind: "progress",
-		Thread: r.thread(), Text: "Branch created. Reporting path changes from the peer loop.", Mentions: []proto.ID{}})
-	r.send(r.ha, proto.TaskChecked{TaskCommand: r.taskCmd("checked", 140000), OK: true, Commit: traceCommit,
-		Items: []proto.CheckItem{{Name: "go vet ./...", OK: true}, {Name: "go test ./...", OK: true, Detail: new("18 tests")}}})
-	r.submit()
-	r.send(r.reviewer, proto.Post[proto.ReviewSigned]{HomeCommand: r.cmd("post", "trace review", 230000, r.mY), Kind: "review",
+		Thread: r.thread(), Text: "Plan: add the event, emit it on every switch, write tests.", Mentions: []proto.ID{}})
+	r.send(r.ha, proto.Post[proto.EmptyBody]{HomeCommand: r.cmd("post", "trace report", 150000, r.mX), Kind: "report",
+		Thread: r.thread(), Mentions: []proto.ID{},
+		Text: "Path events are sent on every switch. Ran the tests: 42 passed. Commit 9f2c1ab on branch t12-path-events."})
+	r.send(r.ha, proto.Post[proto.ReviewSigned]{HomeCommand: r.cmd("post", "trace review", 230000, r.mY), Kind: "review",
 		Thread: r.thread(), Text: "Path transitions and round-trip fields are covered cleanly.", Mentions: []proto.ID{},
-		Body: proto.ReviewSigned{Task: proto.ID(r.task.ID), Commit: traceCommit, Score: 93, Items: []proto.ReviewItem{
+		Body: proto.ReviewSigned{Task: proto.ID(r.task.ID), Report: proto.ID(traceID("trace report")), Score: 93, Items: []proto.ReviewItem{
 			{Text: "Covers direct-to-relay and relay-to-direct transitions.", File: new("internal/peer/path.go"), Line: new(42)}}}})
-	r.send(r.ha, proto.TaskMerged{TaskCommand: r.taskCmd("merged", 270000), Commit: traceCommit, MergeCommit: traceMergeCommit,
-		Stats: proto.DiffStats{Added: 84, Removed: 12}})
 	r.send(r.ha, proto.Post[proto.EmptyBody]{HomeCommand: r.cmd("post", "trace summary", 280000, r.mS), Kind: "summary",
 		Thread: r.thread(), Main: true, Text: "Path changes are reported with the active transport kind and round-trip time.", Mentions: []proto.ID{}})
-}
-
-// submit is rows 7 and 8: the report, the submission and, with a remote, the
-// hosted checks.
-func (r *traceRun) submit() {
-	report := proto.ReportBody{Commit: traceCommit, Files: 3, Added: 84, Removed: 12}
-	submitted := proto.TaskSubmitted{TaskCommand: r.taskCmd("submitted", 160000), Commit: traceCommit, Stats: proto.DiffStats{Added: 84, Removed: 12}}
-	if r.remote {
-		report.PR, submitted.PR, submitted.PRURL = new(tracePR), tracePR, tracePRURL
-	}
-	r.send(r.ha, proto.Post[proto.ReportBody]{HomeCommand: r.cmd("post", "trace report", 150000, r.mX), Kind: "report",
-		Thread: r.thread(), Text: "Path changes are emitted with transport kind and round-trip time.", Mentions: []proto.ID{}, Body: report})
-	r.send(r.ha, submitted)
-	if r.remote {
-		r.send(r.ha, proto.TaskChecked{TaskCommand: r.taskCmd("cloud", 190000), OK: true, Commit: traceCommit,
-			Items: []proto.CheckItem{{Name: "ci / test", OK: true}}})
-	}
 }
 
 // traceGolden writes the transcript under -update, and holds the file to it.
@@ -308,11 +260,7 @@ func traceGolden(t *testing.T, name string, tr proto.TaskTrace) {
 }
 
 func TestTaskTraces(t *testing.T) {
-	for name, remote := range map[string]bool{"trace-remote": true, "trace-local": false} {
-		t.Run(name, func(t *testing.T) {
-			r := newTraceRun(t, remote)
-			r.steps()
-			traceGolden(t, name, r.tr)
-		})
-	}
+	r := newTraceRun(t)
+	r.steps()
+	traceGolden(t, "trace-local", r.tr)
 }

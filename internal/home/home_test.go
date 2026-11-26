@@ -82,8 +82,10 @@ func person(id string, user identity.Key, role string) proto.HumanMemberRow {
 	return proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id}, User: user.ID()}, Role: role}
 }
 
+// ai is an AI member with a folder of its own on its host.
 func ai(id string, host identity.Key) proto.AIMemberRow {
-	return proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id}, User: browser.ID()}, Host: host.ID()}
+	return proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id}, User: browser.ID()},
+		Host: host.ID(), Workspace: "/work/" + id}
 }
 
 // group is the state of a group with its owner and one AI on the laptop,

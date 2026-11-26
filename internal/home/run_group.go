@@ -269,7 +269,7 @@ func (g *runGroup) putItems(tx *store.Tx, res Result, now int64) error {
 			return fmt.Errorf("an item %q is for %q, which is no AI of the group", it.Why, it.AI)
 		}
 		stored := store.Item{Group: g.state.ID, AI: it.AI, Host: host, Why: it.Why, Msg: runText(it.Msg), Task: runText(it.Task),
-			Commit: runText(it.Commit), NotBefore: it.NotBefore, Created: now}
+			NotBefore: it.NotBefore, Created: now}
 		seal := func(id int64) (json.RawMessage, error) { return inboxSeal(it, id) }
 		if _, err := tx.Enqueue(stored, seal); err != nil {
 			return err

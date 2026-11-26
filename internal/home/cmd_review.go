@@ -8,74 +8,38 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-// Checks, submissions and reviews of tasks: task checked, submitted and cloud,
-// and post of kind review (planning/contracts/commands.md 1.3, 1.5 and 1.8;
-// planning/contracts/messages.md 2.8, 2.9 and 2.11;
-// planning/contracts/task-machine.md rows 4 to 7 and 14).
+// Submissions and reviews of tasks: post of kinds report and review
+// (planning/contracts/commands.md 1.3 and 1.8; planning/contracts/messages.md
+// 2.7, 2.9 and 2.11; planning/contracts/task-machine.md rows 5, 7 and 14).
 
 func init() {
-	Commands.Add("task/checked", revChecked)
-	Commands.Add("task/submitted", revSubmitted)
-	Commands.Add("task/cloud", revCloud)
+	Commands.Add("post/report", revReport)
 	Commands.Add("post/review", revPost)
 }
 
-const (
-	revStageLocal = "local"
-	revStageCloud = "cloud"
-	revKindChecks = "checks"
-	revKindReview = "review"
-)
+const revKindReview = "review"
 
-// revChecked records local check results through row 4 of the task machine and
-// writes a checks message in the task's thread.
-func revChecked(s *State, c Command) (Result, *Refusal) {
-	return s.revRunChecks(c, revStageLocal, OnChecked)
-}
-
-// revCloud records hosted check results through row 6 of the task machine,
-// writes a checks message in the task's thread, and writes task_failed when
-// the failure limit stops the task (row 14).
-func revCloud(s *State, c Command) (Result, *Refusal) {
-	return s.revRunChecks(c, revStageCloud, OnCloud)
-}
-
-func (s *State) revRunChecks(c Command, stage string, kind EventKind) (Result, *Refusal) {
-	var p proto.TaskChecked
-	if refusal := c.Decode(&p); refusal != nil {
-		return Result{}, refusal
-	}
-	moved, fx, refusal := s.tskStep(c, p.ID, Event{Kind: kind, Commit: p.Commit, OK: p.OK})
+// revReport is post of kind report, the submission of its task: row 5 of the
+// task machine makes the message the report under review and retires any
+// queued review item for an earlier one.
+func revReport(s *State, c Command) (Result, *Refusal) {
+	_, msg, refusal := postWrite(s, c, postKindReport, true, true)
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	body := proto.ChecksBody{Stage: stage, OK: p.OK, Commit: p.Commit, Items: p.Items}
-	msg := s.tskThreadSystem(c, string(c.Nonce), revKindChecks, &moved, []string{}, body)
-	return s.revFinishThread(c, moved, fx, msg, store.Outcome{}), nil
-}
-
-// revSubmitted records a submitted commit, pull request and diff line counts
-// through row 5 of the task machine, retiring any queued review item for an
-// earlier commit.
-func revSubmitted(s *State, c Command) (Result, *Refusal) {
-	var p proto.TaskSubmitted
-	if refusal := c.Decode(&p); refusal != nil {
-		return Result{}, refusal
-	}
-	moved, fx, refusal := s.tskStep(c, p.ID, Event{Kind: OnSubmitted, Commit: p.Commit})
+	moved, fx, refusal := s.tskStep(c, proto.ID(*msg.Thread), Event{Kind: OnReport, Report: msg.ID})
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	moved.PR, moved.PRURL = p.PR, p.PRURL
-	moved.Stats.Added, moved.Stats.Removed = p.Stats.Added, p.Stats.Removed
 	retire, _ := tskSettleQueue(c.Disk.Queued(), moved.ID, fx.Retire)
 	items := tskItemCtx{taskID: moved.ID, secretary: s.Group.Secretary}.items(fx.Items)
-	return Result{Rows: []Row{RowOf(moved)}, Items: items, Retire: retire}, nil
+	return Result{Rows: []Row{RowOf(msg), RowOf(postAdvanceThread(moved, msg))}, Items: items, Retire: retire}, nil
 }
 
 // revPost is post of kind review: computes the review outcome, steps the task
 // through row 7 (and row 14 on the sixth failed review), writes the completed
-// review row in the thread, and answers with passed and round.
+// review row in the thread, and answers with passed and round. A review that
+// passes ends the task: nothing is merged and no host acts.
 func revPost(s *State, c Command) (Result, *Refusal) {
 	var p proto.Post[proto.ReviewSigned]
 	if refusal := c.Decode(&p); refusal != nil {
@@ -89,7 +53,7 @@ func revPost(s *State, c Command) (Result, *Refusal) {
 
 func (s *State) revApplyReview(c Command, p proto.Post[proto.ReviewSigned]) (Result, *Refusal) {
 	score, passed := revOutcome(p.Body, s.Tasks[string(p.Body.Task)].Pass)
-	ev := Event{Kind: OnReview, Member: c.Who.AI, Commit: p.Body.Commit, OK: passed, Score: score}
+	ev := Event{Kind: OnReview, Report: string(p.Body.Report), OK: passed, Score: score}
 	moved, fx, refusal := s.tskStep(c, p.Body.Task, ev)
 	if refusal != nil {
 		return Result{}, refusal
@@ -100,7 +64,7 @@ func (s *State) revApplyReview(c Command, p proto.Post[proto.ReviewSigned]) (Res
 	}
 	msg := s.revBuildMsg(c, p, moved, mentions, score, passed)
 	moved = postAdvanceThread(moved, msg)
-	return s.revFinishThread(c, moved, fx, msg, store.Outcome{Passed: &passed, Round: moved.Review.Round}), nil
+	return s.revFinish(c, moved, fx, msg, store.Outcome{Passed: &passed, Round: moved.Review.Round}), nil
 }
 
 func revOutcome(b proto.ReviewSigned, pass int) (score int, ok bool) {
@@ -115,7 +79,7 @@ func revOutcome(b proto.ReviewSigned, pass int) (score int, ok bool) {
 func (s *State) revBuildMsg(c Command, p proto.Post[proto.ReviewSigned], task proto.TaskRow, mentions []string, score int, ok bool) proto.MsgRow {
 	tid := task.ID
 	body := proto.ReviewBody{
-		Task: task.ID, Num: task.Num, Title: task.Title, Commit: p.Body.Commit,
+		Task: task.ID, Num: task.Num, Title: task.Title, Report: string(p.Body.Report),
 		Round: task.Review.Round, Score: score, Pass: task.Pass, OK: ok, Items: p.Body.Items,
 	}
 	return proto.MsgRow{
@@ -125,23 +89,29 @@ func (s *State) revBuildMsg(c Command, p proto.Post[proto.ReviewSigned], task pr
 	}
 }
 
-func (s *State) revFinishThread(c Command, moved proto.TaskRow, fx Effects, primary proto.MsgRow, answer store.Outcome) Result {
-	rows := []Row{RowOf(primary)}
-	var noticeMsg string
+// revFinish is what a review leaves: its message; the system message of a
+// task that is done or stopped, which the secretary's notice names; the task;
+// the cards a done task expires; and the queued tasks that start now.
+func (s *State) revFinish(c Command, moved proto.TaskRow, fx Effects, review proto.MsgRow, answer store.Outcome) Result {
+	rows := []Row{RowOf(review)}
+	ctx := tskItemCtx{taskID: moved.ID, secretary: s.Group.Secretary, feedbackMsg: review.ID}
 	if fx.System != "" {
-		failed := s.tskFailedSystem(c, revDerivedID("SoloDawn task failed ", c.Nonce), &moved, fx)
-		rows = append(rows, RowOf(failed))
-		noticeMsg = failed.ID
+		sys := s.revSystem(c, &moved, fx)
+		rows, ctx.noticeMsg = append(rows, RowOf(sys)), sys.ID
 	}
-	rows = append(rows, RowOf(moved))
-	var pr int
-	if s.Group.Forge != "none" {
-		pr = moved.PR
+	rows = append(append(rows, RowOf(moved)), tskCardRows(c, moved.ID, fx.Cards)...)
+	return s.tskRelease(c, Result{Rows: rows, Items: ctx.items(fx.Items), Answer: answer})
+}
+
+// revSystem is the task_done or task_failed message of a review, in the
+// task's thread.
+func (s *State) revSystem(c Command, task *proto.TaskRow, fx Effects) proto.MsgRow {
+	id := revDerivedID("SoloDawn "+fx.System+" ", c.Nonce)
+	if fx.Reason != "" {
+		return s.tskFailedSystem(c, id, task, fx)
 	}
-	items := tskItemCtx{
-		taskID: moved.ID, secretary: s.Group.Secretary, feedbackMsg: primary.ID, noticeMsg: noticeMsg, pr: pr,
-	}.items(fx.Items)
-	return Result{Rows: rows, Items: items, Answer: answer}
+	body := proto.TaskDoneBody{SystemCode: proto.SystemCode{Code: fx.System}, Task: task.ID}
+	return s.tskThreadSystem(c, id, "system", task, []string{}, body)
 }
 
 // revDerivedID derives a 16-byte id from prefix and nonce when that nonce

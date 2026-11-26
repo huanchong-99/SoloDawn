@@ -63,8 +63,8 @@ func cardState(t *testing.T) *home.State {
 	s.People[cardGuest] = person(cardGuest, guest, "member")
 	s.Tasks[cardTaskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: cardTaskID, Seq: 9}, Group: groupID, Num: 5,
-		Title: "Install chromium", Slug: "install-chromium", Origin: "brief",
-		State: "active", Step: "local_check", Assignee: cardA, Reviewer: cardB,
+		Title: "Install chromium", Origin: "brief",
+		State: "active", Step: "work", Assignee: cardA, Reviewer: cardB,
 		Pass: 90, Depends: []string{}, Thread: proto.ThreadSummary{Count: 2, Rounds: 1},
 		Created: clock - 5000, Stats: proto.TaskStats{Started: clock - 5000},
 	}
@@ -521,7 +521,7 @@ func TestCardPostDecisionRefusals(t *testing.T) {
 		"duplicate mention":                 {task: &cardTaskID, post: func(p *proto.Post[proto.DecisionBody]) { p.Mentions = []proto.ID{proto.ID(ownerID), proto.ID(ownerID)} }, code: "bad_request"},
 		"mentioning non-member":             {task: &cardTaskID, post: func(p *proto.Post[proto.DecisionBody]) { p.Mentions = []proto.ID{proto.ID(id(99))} }, code: "conflict"},
 		"missing task":                      {task: &cardTaskID, state: func(s *home.State) { delete(s.Tasks, cardTaskID) }, code: "not_found"},
-		"merged task":                       {task: &cardTaskID, state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "merged"; s.Tasks[cardTaskID] = t }, code: "conflict"},
+		"done task":                         {task: &cardTaskID, state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "done"; s.Tasks[cardTaskID] = t }, code: "conflict"},
 		"cancelled task":                    {task: &cardTaskID, state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "cancelled"; s.Tasks[cardTaskID] = t }, code: "conflict"},
 		"existing id on main-line decision": {task: nil, disk: cardDisk{id(65): existing}, code: "conflict"},
 		"existing id on task decision":      {task: &cardTaskID, disk: cardDisk{id(65): existing}, code: "conflict"},

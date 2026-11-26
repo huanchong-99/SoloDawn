@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -263,12 +264,14 @@ func (s *State) briefTasks(c Command, d briefDecision) (Result, *Refusal) {
 		return Result{}, refusal
 	}
 	res := Result{Rows: []Row{RowOf(briefDecided(d.card, c, briefConfirmed, nil))}}
+	tasks := maps.Clone(s.Tasks)
 	for i := range d.body.Tasks {
-		rows, items, refusal := s.briefCreate(c, d, ids, i)
+		task, items, refusal := s.briefCreate(c, d, ids, i, tasks)
 		if refusal != nil {
 			return Result{}, refusal
 		}
-		res.Rows, res.Items = append(res.Rows, rows...), append(res.Items, items...)
+		tasks[task.ID] = task
+		res.Rows, res.Items = append(res.Rows, RowOf(task), RowOf(briefTaskMsg(s, c, task.ID))), append(res.Items, items...)
 	}
 	res.Items = append(res.Items, s.briefTold(d.card.ID)...)
 	return res, nil
@@ -298,9 +301,10 @@ func briefTaskID(act proto.ID, entry int) string {
 }
 
 // briefCreate makes the task of entry i through row 1 of the task machine,
-// and its task message. A task with a dependency is queued: every dependency
-// is an earlier entry of the same brief, created now, and so not merged.
-func (s *State) briefCreate(c Command, d briefDecision, ids []string, i int) ([]Row, []Item, *Refusal) {
+// judged against tasks: the group's, with the entries before it. A task with
+// a dependency is queued: every dependency is an earlier entry of the same
+// brief, created now, and so not done. So is one whose folder is busy.
+func (s *State) briefCreate(c Command, d briefDecision, ids []string, i int, tasks map[string]proto.TaskRow) (proto.TaskRow, []Item, *Refusal) {
 	entry := d.body.Tasks[i]
 	pass := d.body.Pass
 	if entry.Foundation {
@@ -312,15 +316,16 @@ func (s *State) briefCreate(c Command, d briefDecision, ids []string, i int) ([]
 	}
 	task := proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: ids[i]}, Group: s.ID, Num: s.Num + i + 1, Title: entry.Title,
-		Slug: proto.MakeSlug(entry.Title), Origin: briefKind, Brief: d.card.ID, Assignee: entry.Assignee, Reviewer: entry.Reviewer,
+		Origin: briefKind, Brief: d.card.ID, Assignee: entry.Assignee, Reviewer: entry.Reviewer,
 		Foundation: entry.Foundation, Pass: pass, Depends: depends, Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
 	}
 	// Row 1 takes a person and an admin alike; briefMay let only a person confirm.
-	task, fx, err := Step(task, Event{Kind: OnConfirm, By: ByPerson, Now: c.Now, Blocked: len(entry.Depends) > 0})
+	ev := Event{Kind: OnConfirm, By: ByPerson, Now: c.Now, Blocked: len(entry.Depends) > 0, Busy: s.tskBusy(tasks, ids[i], entry.Assignee)}
+	task, fx, err := Step(task, ev)
 	if err != nil {
-		return nil, nil, &Refusal{err.Error(), "the task machine refused a task of the brief"}
+		return task, nil, &Refusal{err.Error(), "the task machine refused a task of the brief"}
 	}
-	return []Row{RowOf(task), RowOf(briefTaskMsg(s, c, task.ID))}, briefItems(fx.Items, task.ID), nil
+	return task, briefItems(fx.Items, task.ID), nil
 }
 
 // briefItems completes the items of row 1: each is about the task and names its

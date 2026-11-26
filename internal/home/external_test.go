@@ -19,7 +19,7 @@ func TestExternalToolAddEditAndClear(t *testing.T) {
 	want := proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: member, Seq: 11},
 			Group: groupID, Kind: "ai", User: browser.ID(), Name: "Scout", LastSeen: clock},
-		CLI: "external", Tool: "ZCode", Host: laptop.ID(), HostName: "a device",
+		CLI: "external", Tool: "ZCode", Host: laptop.ID(), HostName: "a device", Workspace: "/home/dev/website",
 		Account: "api_key", Allow: []string{}, Approvers: []string{browser.ID()},
 		State: "dormant", Since: clock, Path: "direct", Profile: proto.Profile{Tier: "standard"},
 	}

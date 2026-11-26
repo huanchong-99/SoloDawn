@@ -20,16 +20,13 @@ states, the transactions, the clock and the connections ("The run loop" below).
 
 ## Use this capability
 
-`templates.go` validates custom forge argument lists on group creation and
-settings changes. Only custom forges carry templates, with all four commands
-required. Program names cannot name repository paths or contain places;
-AI-authored title and summary places require a literal argument prefix.
-
-`team.go` restricts team groups to people, main-line text and bulletins, and
-notes. Team creation omits the repository and uses an empty base, forge `none`
-and no checks. Project settings, tasks, threaded or AI posts and AI admission
-are refused. A bulletin preserves its signed project and secretary labels;
-the home does not verify those labels. Team posts queue no AI inbox items.
+There is one kind of group: people and AIs, with no repository, branch, forge
+or check command on its row. The home creates no branch, runs no check and
+merges nothing: a task is work, then a scored review, then done (the owner's
+decision of 2026-11-26). Each AI member has a `workspace`, the folder on its
+host that its host resolved when it was added; the home stores the path as
+sent and reads it for one rule, that one folder takes one task at a time
+("Task commands" below).
 
 `profile.go` validates the four optional AI profile fields. New AIs start
 with the CLI default model and effort, tier `standard` and empty skills
@@ -43,12 +40,12 @@ joining host may supply it on `member/add_ai`; only the AI's owner may
 change it with `member/set`, where an empty string removes it. Managed
 AIs do not carry a tool label.
 
-The task machine keeps `stuck` for consecutive failed hosted checks or
-reviews. A second or later failure blocks submission if a stronger AI
-exists, even if it is offline or is the secretary. An answer from a stronger
-AI to the assignee's call in that task's thread unblocks submission without
-resetting the count. Passing the relevant gate or resetting the assignment
-can clear the counter; local checks and crashes do not count.
+The task machine keeps `stuck` for consecutive failed reviews. A second or
+later failure blocks submission, the assignee's `post` of kind `report`, if a
+stronger AI exists, even if it is offline or is the secretary. An answer from
+a stronger AI to the assignee's call in that task's thread unblocks submission
+without resetting the count. A passed review or a reset of the assignment
+clears the counter; crashes do not count.
 
 | Need | Entry |
 | --- | --- |
@@ -242,9 +239,9 @@ and `fetch` for moved groups with `moved` and the destination device ID from the
 loaded by `StartLoop`. In the import's transaction the home writes the `device` rows that the group
 lacks of its people's logs in `device_log` (`importDevices`): this node may have accepted entries that
 the file does not hold.
-The checks and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too, and
-their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
-names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
+The submissions and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too,
+and their test functions start with `TestReviewCmd`. The summaries (`cmd_summary.go`) take the
+names that start with `sum`, their tests too, and their test functions start with `TestSummary`.
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
 Group pause and resume (`cmd_pause.go`) take the names that start with `pau`, their tests too, and
@@ -355,7 +352,7 @@ queues the `fetched` or error answer on `conn`.
 due, which is the home's time when its result was committed, or its `NotBefore` when that is
 later. Once an AI has `limits.wakes_per_hour` due times after `now - 3600000`, each further item
 gets `NotBefore` at least one hour after the oldest of the last `wakes_per_hour` times. A
-`merge` or `watch` item is for the AI's host rather than a session, and a `reply` answers a call
+`watch` item is for the AI's host rather than a session, and a `reply` answers a call
 that may be waiting, so they neither wait on nor count toward `wakes_per_hour`. Neither do the
 items of a person's command: `seamCommand` sets `Result.byPerson` when the signing device hosts no
 AI of the group (`inboxByPerson`), so a message, a decided card, a confirmed brief, a resume or a
@@ -447,30 +444,38 @@ function, `Step(task, event)`: one `proto.TaskRow` and one `Event` in, the row a
 it and its `Effects` out. It is pure and reads no other row, no `State` and no `Disk`. Every
 function that moves a task calls it and adds nothing to its rules.
 
-- **The event.** `Kind` names the row of the table (`OnPause`, `OnSubmitted`, …). `By` is the
+- **The event.** `Kind` names the row of the table (`OnPause`, `OnReport`, …). `By` is the
   sender as the function has established it from `c.Who`: `ByHost` for the host of the task's
   assignee, `BySecretary`, `ByAdmin`, `ByPerson`, `ByAI` for a working AI and never for the
   secretary, `ByHome` for a timer or for what follows from another task's row. `Member` is the
-  `as` of the command; the machine itself sees whether that AI is the task's assignee or reviewer.
-  `Now`, `Limits` and `Remote` come from the command and the group row. `Pending` is the task's
-  pending cards, oldest first: every row that sets or clears a card wait reads it.
+  member the command is by, its `as` or else the person: the machine itself sees whether it is the
+  task's assignee or reviewer, and writes it into the wait of a manual pause (row 12, `wait.by`).
+  `Now` and `Limits` come from the command and the group row. `Pending` is the task's pending
+  cards, oldest first: every row that sets or clears a card wait reads it. `Report` is the report
+  message of a submission (row 5) and the one a review names (row 7). `Blocked` and `Busy` are
+  what a task that may start needs to know of the other tasks: a dependency is not done, and
+  another started task has the folder of its assignee.
 - **The effects**, in the order to apply them. `Retire` selects queued items of the task to
   withdraw; an empty field selects every value. `Items` are the items to queue. Each is a
   `TaskItem`, which the function completes into an `Item`: the task and the message its
-  row names, the pull request, and the secretary as the AI of a `notice`. A `review` item with
-  `IfNone` is queued only if none is queued for that AI and commit. `Cards` says what the task's
+  row names, and the secretary as the AI of a `notice`. A `review` item carries its `Report`,
+  which becomes its `msg`; with `IfNone` it is queued only if none is queued for that AI and
+  report. `Cards` says what the task's
   pending cards become. `System` is the code of the system message to write, in the main line when
   `Main` is set and in the task's thread otherwise.
 - **A refusal** is a `TaskRefusal`; its text is the code of the answer: `conflict`, `paused` or
   `forbidden`. The row comes back unchanged.
-- **Other tasks.** One call moves one row. After `OnMerged` the function sends `OnReleased` to each
-  queued task that depends on the merged one, with `Blocked` set while another of its dependencies
-  is not merged. After `OnCancel` it sends `OnOrphaned` to each queued task that depends on the
-  cancelled one. For `group resume` it sends `OnGroupResume` to every task.
+- **Other tasks.** One call moves one row. When a row may have freed a dependency or a folder (a
+  passed review, a cancel, another assignee) the function sends `OnReleased` to each queued task,
+  in the order of `num`, with `Blocked` and `Busy` as the tasks before it left them (`tskRelease`,
+  "Task commands" below): the task starts, or its wait says what holds it now. After `OnCancel` it
+  sends `OnOrphaned` to each queued task that depends on the cancelled one. For `group resume` it
+  sends `OnGroupResume` to every task.
 - **Left to the function.** The checks its row makes on a card or on the group; the fields a
-  command only copies into the row (`branch`, `pr`, `pr_url`, `stats.added`, `stats.removed`,
-  `thread.count`, `thread.last`); the bodies of the messages; for row 23, the timer and telling the
-  secretary once per quiet period. The machine sets `stats.ended`.
+  command only copies into the row (`thread.count`, `thread.last`); the bodies of the messages;
+  who reassigned, which goes into the `reassigned` cards; for row 23, the timer and telling the
+  secretary once per quiet period. The machine sets `stats.started` of a task that starts and
+  `stats.ended`.
 
 ## Groups and members
 
@@ -482,15 +487,14 @@ function that moves a task calls it and adds nothing to its rules.
 (unit HM-16). Where the contracts are silent, they do this:
 
 - **`group/create`.** Only a person of this node's owner (`c.Who.AI` empty, `c.Who.User ==
-  s.Owner`) may create a group, else `forbidden`. A `g` that differs from `n`, a `kind` other than
-  `project`, a `forge` other than `github` or `none`, or an empty `name`, `repo`, `base` or
-  `member_name` is `bad_request`. A group that already exists (`s.Group.ID` not empty) is answered
+  s.Owner`) may create a group, else `forbidden`. A `g` that differs from `n`, or an empty `name` or
+  `member_name`, is `bad_request`. A group that already exists (`s.Group.ID` not empty) is answered
   `conflict`. It writes the `group` row (`pass` 90, `pass_foundation` 70, default `limits`,
   `created` `c.Now`) and the owner's `human` `member` row (`role` `owner`, `online` true,
   `last_seen` `c.Now`), and one `device` row per entry of the owner's log, with `GroupsChanged` true. The owner's member id is the first 16 bytes of
   the SHA-256 of `SoloDawn group owner <n>` in base64url, so the function stays pure
   ([issues](../../issues.md)).
-- **`group/set`.** By an admin, else `forbidden`. Sending none of `name`, `checks`, `pass`,
+- **`group/set`.** By an admin, else `forbidden`. Sending none of `name`, `pass`,
   `pass_foundation`, `limits` and `secretary`, or an empty `name`, is `bad_request`. `secretary`,
   when sent, must name an AI in `State.AIs` that is neither assignee nor reviewer of an open task
   (`queued`, `active`, `paused`, `failed`), else `conflict`; any previous secretary's member row
@@ -498,8 +502,10 @@ function that moves a task calls it and adds nothing to its rules.
   `name` changes, because `groups` carries each group's name.
 - **`member/add_ai`.** By a host of a member: `c.Who.AI` must be empty, else `forbidden`; the
   `name` of the latest `add` entry for `c.Who.Device` in `State.Logs[c.Who.User]` becomes
-  `host_name`. An empty `name`, a `cli` outside `claude` and `codex`, or an `account` outside
-  `personal`, `team` and `api_key` is `bad_request`. `secretary: true` when the group already has a
+  `host_name`. An empty `name` or `workspace`, a `cli` that is not made of `a` to `z`, `0` to `9`
+  and `_`, or an `account` outside `personal`, `team` and `api_key` is `bad_request`. `workspace`
+  is stored as sent: the host checked and resolved the path, which may be one of another operating
+  system than the home's, so the home judges nothing else about it. `secretary: true` when the group already has a
   secretary requires an admin, else `forbidden`. An `id` or `name` already held by a human or AI
   member of the group is `conflict`. The new `ai` `member` row starts with `state` `dormant`,
   `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home` and `direct`
@@ -576,10 +582,13 @@ Watch admission checks `body.what`, target ownership and empty `mentions`, not `
   that fails one is answered `conflict`. Two are left: the brief it replaces has been superseded
   since the post, and the task machine refuses an entry whose assignee is its reviewer
   ([issues](../../issues.md)). Then each entry becomes a task through `Step` with `OnConfirm`,
-  `By` `ByPerson` (row 1 takes a person and an admin alike), and `Blocked` when the entry has a dependency: a dependency is an
-  earlier entry, created by the same confirm, so it is not merged. The row has `num` from
-  `State.Num + 1` in the order of the entries, `origin` `brief`, `brief` the card's id, `slug`
-  from `proto.MakeSlug`, `pass` the brief's or, for a foundation task, the group's
+  `By` `ByPerson` (row 1 takes a person and an admin alike), `Blocked` when the entry has a dependency (a dependency is an
+  earlier entry, created by the same confirm, so it is not done), and `Busy` when a started task
+  has the folder of its assignee: one the group has, or an earlier entry that this confirm
+  started. So of two entries for one AI, or for two AIs that share a folder, the second is queued
+  with wait `busy`. The row has `num` from
+  `State.Num + 1` in the order of the entries, `origin` `brief`, `brief` the card's id,
+  `pass` the brief's or, for a foundation task, the group's
   `pass_foundation`, `depends` as task ids, and `created` and `stats.started` the home's time.
   Each task has a `task` message in the main line, with the task's own id.
 - **Ids.** The id of the task of entry `i` is the first 16 bytes of the SHA-256 of
@@ -588,55 +597,73 @@ Watch admission checks `body.what`, target ownership and empty `mentions`, not `
   answered `conflict`.
 - **Items.** Each item of row 1 (`assign` for a task that starts) names the task and its task
   message. Then the secretary gets `confirmed`, naming the brief, after a `confirm` and after a
-  `revise`; a group without a secretary gets none. A queued task gets its `assign` when the merge
-  of its last dependency releases it (unit HM-12).
+  `revise`; a group without a secretary gets none. A queued task gets its `assign` when it starts
+  ("Task commands" below).
 
-## Merges and summaries
+## Summaries
 
-`cmd_merge.go` holds `task` `merged` and `conflict` and `post` of kind `summary`
-([commands](../../planning/contracts/commands.md) 1.3 and 1.5;
-[messages](../../planning/contracts/messages.md) 2.5, 2.8 and 2.11;
-[task-machine](../../planning/contracts/task-machine.md) rows 8 and 9), under the keys
-`task/merged`, `task/conflict` and `post/summary`.
-
-When `task/merged` steps queued dependents through `OnReleased` (in sorted task id order), each
-task that becomes `active` gets `stats.started` set to `c.Now`
-([rows](../../planning/contracts/rows.md), section 4) so summary minutes count active work rather
-than dependency wait, and its `assign` item names its `task` message (`msg` equal to the task id).
+`cmd_summary.go` holds `post` of kind `summary`
+([commands](../../planning/contracts/commands.md) 1.3;
+[messages](../../planning/contracts/messages.md) 2.5), under the key `post/summary`: by the
+secretary, in the thread of a `done` task, else `conflict`. The home fills the body from the task
+row: `score` and `rounds` of its last review, and `minutes` from `stats.started` to `stats.ended`.
 
 ## Task commands
 
-`cmd_task.go` holds `task` `start`, `branch`, `assign`, `pause`, `resume`, `cancel`, `fail` and
+`cmd_task.go` holds `task` `start`, `assign`, `pause`, `resume`, `cancel`, `fail` and
 `preempted` ([commands](../../planning/contracts/commands.md) 1.5;
-[task-machine](../../planning/contracts/task-machine.md) rows 2, 3 and 10 to 16), under the keys
-`task/start`, `task/branch`, `task/assign`, `task/pause`, `task/resume`, `task/cancel`, `task/fail`
-and `task/preempted`. Checks, submissions and reviews live in `cmd_review.go` (unit HM-11), and
-merges in `cmd_merge.go` (unit HM-12). Where the contracts are silent, it does this:
+[task-machine](../../planning/contracts/task-machine.md) rows 2 and 10 to 16), under the keys
+`task/start`, `task/assign`, `task/pause`, `task/resume`, `task/cancel`, `task/fail`
+and `task/preempted`, and the rule that one folder takes one task at a time (section 2 of the task
+machine). Submissions and reviews live in `cmd_review.go`. Where the contracts are silent, it does
+this:
 
-- **Start.** Only a working AI starts a task, else `forbidden`. An `origin` other than `direct` or
-  `takeover` is `bad_request`. An `id` already held by a task or a message is `conflict`. The row
-  gets `num` `State.Num + 1`, `slug` from `proto.MakeSlug`, `pass` `group.pass`, `depends` `[]`,
+- **Start.** Only a working AI starts a task, else `forbidden`. An `origin` other than `direct`
+  is `bad_request`. An `id` already held by a task or a message is `conflict`. The row
+  gets `num` `State.Num + 1`, `pass` `group.pass`, `depends` `[]`,
   and `created` and `stats.started` the home's time; its `task` message in the main line has the
-  task's own `id`. The answer carries `num`.
-- **Branch.** After `Step` checks the task and sender (`not_found`, `forbidden`, `conflict`), a
-  `branch` other than `task/<num>-<slug>` is answered `bad_request`.
+  task's own `id`. The answer carries `num`, and nothing else: a host learns from the task row
+  whether the task is `active` or `queued` behind another one.
+- **The folder.** The folder of a task is the pair `host` and `workspace` of its assignee's member
+  row (`tskFolder`). `tskBusy` says whether a started task (`active`, `paused` or `failed`) other
+  than the one asked about has the folder of an AI; two AIs with one path on one host share it,
+  and one path on two hosts is two folders. Rows 1 and 2 read it for the task they create, and
+  row 11 for the assignee it is to set.
+- **Starting queued tasks.** `tskRelease` runs after every row that may let a queued task start: a
+  passed review (`cmd_review.go`), a cancel and every `task assign`. It takes the group's tasks as
+  the result leaves them, goes through the queued ones in the order of `num` and steps each with
+  `OnReleased`, `Blocked` and `Busy` judged against the tasks as the ones before it left them. So
+  a task it starts holds its folder against the ones after it, and of two tasks behind one folder
+  one starts. A row that changed (a task that started, or whose wait went from `depends` to
+  `busy`) is put into the result, in place of the row a `task assign` wrote for the same task; a
+  task that started gets `assign` with its `task` message as `msg`. A dependency that is not among
+  the tasks in memory counts as not done: that is one whose row retention removed before a
+  restart, while the task that depends on it was still queued.
 - **Sender.** For an existing task, `s.Secretary` maps to `BySecretary`, any other `as` to `ByAI`,
   `s.Hosts` for the task's assignee to `ByHost`, `s.Admin` to `ByAdmin`, and anything else to
   `ByPerson`. Checking `s.Hosts` before `s.Admin` gives the assignee's host row 13b on `task resume`
   and the host rules on `pause`, `assign` and `cancel`.
 - **Assign.** Sending neither `assignee` nor `reviewer` is `bad_request`. After `Step` checks the
-  sender, the state and that the two roles differ, each role sent must name a working AI of the
-  group, else `conflict`. When `Step` queues an `assign` item (an active task whose assignee
-  changed, or that was `failed` or waiting on `conflict`), its `msg` is the newest `checks` or
+  sender, the state, that the two roles differ and that a started task does not go to an assignee
+  whose folder is busy with another task (`conflict`), each role sent must name a working AI of
+  the group, else `conflict`. When `Step` queues an `assign` item (an active task whose assignee
+  changed, or that was `failed`), its `msg` is the newest
   `review` message in the task's thread, paged through `c.Disk.Thread`, or absent when there is
-  none. On a `queued` or `paused` task `Step` queues no work item.
+  none. On a `queued` or `paused` task `Step` queues no work item. Then the queued tasks are looked
+  at: giving a started task to an AI in another folder starts the task that was queued behind it,
+  and a queued task that got another assignee starts when its new folder is free.
 - **Cards and queue.** Every step over an existing task passes the task's pending `approval` and
   `decision` cards from `c.Disk.Pending()`, oldest first. `Retire` withdraws matching items of that
   task from `c.Disk.Queued()` before `IfNone` checks what remains. `Cards` `reassigned` updates the
-  task's pending `approval` cards; `expired` updates its pending `approval` and `decision` cards.
-- **Cancel.** After `OnCancel`, each `queued` task whose `depends` names the cancelled task is
-  stepped with `OnOrphaned`, in sorted task id order, queuing `dependency_cancelled` notices when
-  the group has a secretary.
+  task's pending `approval` cards, whose state gets `at` and `by`, the member id of the sender of
+  the `task assign`; `expired` updates its pending `approval` and `decision` cards, with `at`
+  alone.
+- **Pause.** The `manual` wait of row 12 gets `by`, the member id of the sender: the secretary's,
+  or the person's.
+- **Cancel.** By the secretary or an admin; a host cancels nothing. After `OnCancel`, each `queued`
+  task whose `depends` names the cancelled task is stepped with `OnOrphaned`, in sorted task id
+  order, queuing `dependency_cancelled` notices when the group has a secretary. Then the queued
+  tasks are looked at: the first one behind the cancelled task's folder starts.
 - **System messages.** `task fail` refuses a `reason` other than `crash` or `timeout` with
   `bad_request`. At `limits.failures` (row 14) it writes `system` `task_failed` under id `n` in the
   task's thread (or answers `conflict` if `n` is taken), mentioning the brief's requester when still
@@ -647,21 +674,23 @@ merges in `cmd_merge.go` (unit HM-12). Where the contracts are silent, it does t
 
 ## Posts, notes and forget
 
-`cmd_post.go` holds `post` of kinds `text`, `progress`, `question`, `report` and `handback`
+`cmd_post.go` holds `post` of kinds `text`, `progress`, `question` and `handback`
 ([commands](../../planning/contracts/commands.md) 1.3;
-[messages](../../planning/contracts/messages.md) 1, 2.7 and 2.10;
+[messages](../../planning/contracts/messages.md) 1 and 2.10;
 [rows](../../planning/contracts/rows.md) sections 4 and 5), under `post/<kind>`. `cmd_note.go`
 holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
 [rows](../../planning/contracts/rows.md) sections 5 and 6). Where the contracts are silent, they do
 this:
 
-- **Who and placement.** `text` is by a person or an AI; `progress`, `question`, `report` and
-  `handback` are by an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread`
-  not `null`), else `bad_request`; `handback` belongs in a thread unless `as` is the group's
-  secretary, else `bad_request`. None of the five is
-  raised from a thread, and the row is written with `main` `false`.
-- **Thread and mentions.** A non-null `thread` must name a task in `State.Tasks`, else `not_found`;
-  for `report`, `as` must be that task's `assignee`, else `forbidden`. `(*State).postMentions`,
+- **Who and placement.** `text` is by a person or an AI; `progress`, `question` and
+  `handback` are by an AI, else `forbidden`. `progress` belongs in a thread (`thread`
+  not `null`), else `bad_request`; `handback` is in the thread of the AI's task, or in the main
+  line for a session without one, which the home cannot tell apart and so takes either. None of
+  the four is
+  raised from a thread, and the row is written with `main` `false`. The body of each is `{}`:
+  whatever a `post` carries there is not read, and the row's `body` is `{}`.
+- **Thread and mentions.** A non-null `thread` must name a task in `State.Tasks`, else `not_found`.
+  `(*State).postMentions`,
   shared with `cmd_brief.go`, checks the `mentions` rule of
   [commands](../../planning/contracts/commands.md) 1.3. `re` is kept as signed without looking up
   the answered message, which retention or `forget` may have removed.
@@ -711,22 +740,32 @@ the node for one person ([envelope](../../planning/contracts/envelope.md), secti
 and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
 served and unserved.
 
-## Checks and reviews
+## Submissions and reviews
 
-`cmd_review.go` holds `task` `checked`, `submitted` and `cloud`, and `post` of kind `review`
-([commands](../../planning/contracts/commands.md) 1.3, 1.5 and 1.8;
-[messages](../../planning/contracts/messages.md) 2.8, 2.9 and 2.11;
-[task-machine](../../planning/contracts/task-machine.md) rows 4 to 7 and 14), under the keys
-`task/checked`, `task/submitted`, `task/cloud` and `post/review`. Where the contracts are silent,
-it does this:
+`cmd_review.go` holds `post` of kinds `report` and `review`
+([commands](../../planning/contracts/commands.md) 1.3 and 1.8;
+[messages](../../planning/contracts/messages.md) 2.7, 2.9 and 2.11;
+[task-machine](../../planning/contracts/task-machine.md) rows 5, 7 and 14), under the keys
+`post/report` and `post/review`. Where the contracts are silent, it does this:
 
-- **Passed hosted checks.** `task/cloud` writes a `checks` message (`by` `"system"`, `stage`
-  `"cloud"`, `ts` `c.Now`) under id `n` in the task's thread on passed runs as well as failed ones,
-  so the `items` of a passing `task cloud` payload are recorded ([issues](../../issues.md)).
-- **Derived `task_failed` id.** When `task/cloud` or `post/review` triggers row 14, `n` already
-  names the `checks` or `review` row, so the `task_failed` row gets the first 16 bytes of the
-  SHA-256 of `SoloDawn task failed <n>` in base64url ([issues](../../issues.md)), and mentions the
+- **A report is the submission.** `post/report` is by an AI (`forbidden`), in a thread
+  (`bad_request`) of a task (`not_found`), with the `mentions` rule of every post. Then row 5
+  judges it: `forbidden` unless `as` is the task's assignee, `conflict` for a task that is not
+  `active` or `paused`, and `conflict`, with a `msg` that says to ask a stronger AI first, while
+  `stuck.ask` is `true`. The message id, `n`, becomes the task's `report`; a queued `review` item
+  of the task is retired, and the reviewer's new one has the report as `msg`. A refused report
+  writes no row. A report that mentions an AI counts a round like every post in a thread.
+- **A passed review ends the task.** `post/review` writes, in this order: the `review` message;
+  the `system` message `task_done` in the task's thread; the task row, `done`, with
+  `stats.ended`; the task's pending cards, `expired`; and the rows of the queued tasks that start
+  now or wait for something else now (`tskRelease`). The secretary's `notice` (`task_done`) names
+  the `system` message; each task that started gets `assign`.
+- **Derived ids.** `n` names the `review` row, so the `system` row a review writes gets the first
+  16 bytes of the SHA-256 of `SoloDawn <code> <n>` in base64url, `<code>` being `task_done` or
+  `task_failed` ([issues](../../issues.md)). `task_failed` (row 14) mentions the
   brief's requester when still a member and the assignee's owner without duplicates.
+- **Rounds.** `post/review` and `post/report` are posts, so `rounds.go` wraps them: a round is
+  counted on the task of the post's thread, whichever other task rows the result holds.
 
 ## Host events
 
@@ -801,9 +840,9 @@ and `group/resume`:
   `system` message `group_resumed` with the same fields.
 - **Waking tasks.** On `group/resume` of a paused group, `Step` runs with `OnGroupResume` (`ByHome`)
   over `State.Tasks` in sorted task-id order and completes items through `tskItemCtx`: `resume` goes
-  to each `active` task with `wait` `null` before step `merge`, and `review` goes to each `active`
+  to each `active` task with `wait` `null`, and `review` goes to each `active`
   task at step `review` that has a reviewer unless `c.Disk.Queued` already holds an unacknowledged
-  `review` item for that reviewer, task and commit.
+  `review` item for that reviewer, task and report.
 
 ## Rounds, jumps and quiet tasks
 
@@ -822,7 +861,7 @@ row 23), and the thread round transitions (rows 21 and 22, and section 4 "Held b
   order: if the task has had no thread message for at least `limits.idle_notice_minutes`
   (measured from `thread.last.ts`, else `stats.started` when non-zero, else `created`), has not already notified
   the secretary at that last-activity timestamp, and passes `Step` with `OnQuiet` (`ByHome`:
-  `active`, `wait` `null`, `step` not `merge`), it queues one `notice` (`code: "quiet"`) for
+  `active`, `wait` `null`), it queues one `notice` (`code: "quiet"`) for
   `group.secretary`. `After["quiet"]` records the task's last-activity timestamp in the group's
   `State` (in memory) once the transaction commits, so any new thread message starts a new quiet
   period ([issues](../../issues.md)).
@@ -867,7 +906,7 @@ Where the contracts are silent, it does this:
 
 - **What remains.** In one transaction the store raises `grp.purged` to the highest `seq` among
   aged-out `gone` markers before deleting those markers, keeps `pending` cards, keeps `note` and
-  `review` rows (`keep = 1`), and deletes older messages and final (`merged` and `cancelled`) task
+  `review` rows (`keep = 1`), and deletes older messages and final (`done` and `cancelled`) task
   rows whose `mt` is before the cutoff.
 - **In-memory tasks.** After retention deletes rows from the store, finished tasks stay in the
   in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
@@ -902,8 +941,8 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
 ## Known limitations
 
 - The table of commands holds the groups, group pause and resume, members, briefs, the task
-  commands of HM-9, the four kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and
-  reviews, the merges and summaries, the host events, `push`, the calls, and `jump` and thread rounds
+  commands of HM-9, the four kinds of `post` of HM-6, `note` and `forget`, the cards, the
+  submissions and reviews, the summaries, the host events, `push`, the calls, and `jump` and thread rounds
   of HM-13, and no node starts a loop yet: the remaining command files and the wiring of the node
   are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
@@ -939,9 +978,9 @@ a restart, with commands of its own. The choices behind the loop are in
 release, with what it does not hold. `features/home_inbox.feature` holds the home half of A3.10 and the hourly wake-up cap.
 
 `machine_test.go` has a case for every row of the task machine, for every rule of its section 2
-and for the refusals, and covers every statement of `machine.go`. `features/home_machine.feature`
-holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
-while a task is paused and a reviewer named while it is paused.
+and for the refusals, holds every event from every sender against a task that is final, and covers
+every statement of `machine.go`. `features/home_machine.feature` holds the two points of the third
+review, a card decided while a task is paused and a reviewer named while it is paused.
 
 `cmd_group_test.go` and `cmd_member_test.go` send `group/create`, `group/set`, `member/add_ai`,
 `member/set` and `member/remove` through `Commands.Apply` with fakes of `Receipts` and `Disk`,
@@ -951,12 +990,14 @@ home command part of A2.1 and the member-removal part of A5.18.
 `cmd_brief_test.go` sends every command of the briefs through `Commands.Apply` with fakes of
 `Receipts` and `Disk`, with a case for every refusal and branch. `features/home_brief.feature`
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
-`Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
-commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+`Commands.Apply` with a `Disk` in memory. `TestBriefConfirmQueuesTasksBehindABusyFolder` holds
+the brief half of A5.20.
 
-`cmd_task_test.go` sends `task` `start`, `branch`, `assign`, `pause`, `resume`, `cancel`, `fail`
+`cmd_task_test.go` sends `task` `start`, `assign`, `pause`, `resume`, `cancel`, `fail`
 and `preempted` through `Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every refusal,
-card transition, retirement filter, thread-feedback page boundary and system message, and
+card transition, retirement filter, thread-feedback page boundary and system message, and the
+home half of A5.20: a task queued behind a busy folder, what counts as one folder, the refusal of
+a started task for a busy folder, the tasks that start when a folder is free, and their order; and
 `cmd_task_internal_test.go` pins `tskSender`. `features/home_task.feature` holds acceptance tests
 A5.5, A5.7 (home half), A5.15 (`task fail` twice) and A5.18 (home commands) through `Commands.Apply`.
 
@@ -973,18 +1014,17 @@ task cards, wait recomputation and refusals, and `cmd_card_internal_test.go` cov
 `cardChoiceOK`, `cardPoster` and `cardItems`. `features/home_card.feature` holds the home half of
 acceptance tests A4.1 and A4.2, decision priority and free-text override.
 
-`cmd_merge_test.go` sends `task/merged`, `task/conflict` and `post/summary` through
-`Commands.Apply` with fakes of `Receipts` and `Disk`, covering every refusal, boundary, card
-expiration and dependent task release. `features/home_merge.feature` holds the home half of
-acceptance tests A5.10 and A5.12 and dependent task release with `stats.started`.
+`cmd_summary_test.go` sends `post/summary` through `Commands.Apply` with fakes of `Receipts` and
+`Disk`, covering the body the home fills, every refusal and the thread preview.
 
 `ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
 types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
 
-`cmd_review_test.go` sends `task/checked`, `task/submitted`, `task/cloud` and `post/review` through
+`cmd_review_test.go` sends `post/report` and `post/review` through
 `Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every refusal, boundary, retirement,
-card-wait recomputation, veto and row-14 stop, and checking `proto.UnexpectedNulls` on the rows
-written. `features/home_review.feature` holds the home half of acceptance tests A5.3 and A5.4.
+veto and row-14 stop, the rows of a passed review (A5.12) with the tasks it starts, and checking
+`proto.UnexpectedNulls` on the rows written. `features/home_review.feature` holds the home half
+of acceptance test A5.4.
 
 `cmd_hostev_test.go` checks `member/status` against the wire golden files, state and `since`
 transitions, the four host event codes, the owner's mention of `login_invalid`, `login_invalid` and `rate_limited` secretary notices, refusals, and
@@ -999,12 +1039,13 @@ refusals, detached connections and store failures; `run_internal_test.go` covers
 `runErr`. `features/home_sync.feature` holds acceptance test A2.2 (delta, 1,500-row reset with
 newest 50 and an older pending card, purge-mark reset, `state_only`) and the first-read cut of A2.7.
 
-`trace_test.go` produces the two signed task transcripts of
-[trace-task.md](../../planning/flows/trace-task.md), `internal/proto/testdata/trace-remote.json` and
-`trace-local.json`: it sends their commands through `Commands.Apply` at each command's `ts`, writes
+`trace_test.go` produces the signed task transcript of
+[trace-task.md](../../planning/flows/trace-task.md), `internal/proto/testdata/trace-local.json`:
+it sends its seven commands through `Commands.Apply` at each command's `ts`, writes
 each result to a store in memory, commits it, and records the answer, the `rows` frame and the
-`inbox` frames that `runLotOf` makes, acknowledging each item. It fails when a file differs from
-that; `go test ./internal/home -run TestTaskTraces -update` writes them.
+`inbox` frames that `runLotOf` makes, acknowledging each item. It fails when the file differs from
+that; `go test ./internal/home -run TestTaskTraces -update` writes it, and
+`go test ./internal/proto -update` then writes the facts of that example into `wire.json`.
 
 `fetch_test.go` exercises `Loop.Fetch` across thread pages, `note` and `review` pages, single-row
 reads, exact 61,440-byte boundaries, page bounds checks, group access checks, detached connections
@@ -1012,13 +1053,13 @@ and store failures. `features/home_fetch.feature` holds the scroll-back scenario
 deleted-row scenario of A2.7.
 
 `cmd_pause_test.go` covers `group/pause` and `group/resume` through `Commands.Apply`: the admin
-check, both repeats, the rows, and row 24 over tasks with and without waits, at step `merge`, and
-with a review already queued. `features/home_pause.feature` holds the home half of acceptance test
+check, both repeats, the rows, and row 24 over tasks with and without waits, a task that is done,
+and one with a review already queued. `features/home_pause.feature` holds the home half of acceptance test
 A4.7 on `StartLoop` over an in-memory store.
 
 `rounds_test.go` covers `jump`, the `quiet` timer, `After["quiet"]`, and rows 21 and 22 through
-`Commands.Apply`, `Table.Add` and `StartLoop`, including delivery after a rounds-paused task fails
-and is resumed and wake-up cap ageing. `features/home_rounds.feature` holds acceptance tests A5.8,
+`Commands.Apply`, `Table.Add` and `StartLoop`, including delivery after a rounds-paused task is
+resumed, stops and is resumed again, and wake-up cap ageing. `features/home_rounds.feature` holds acceptance tests A5.8,
 A5.11 (home half) and A5.16 over `StartLoop`.
 
 `cmd_call_test.go` sends `post/call` and `post/reply` through `Commands.Apply` with fakes of

@@ -11,7 +11,7 @@ func cftFixture() (*State, cftDisk, proto.TaskRow, proto.MsgRow, Command) {
 	s.AIs["a"] = proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{ID: "a"}, User: "q"}}
 	s.AIs["r"] = proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{ID: "r"}, User: "q"}}
 	s.Group.Secretary = "sec"
-	task := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: "t"}, State: taskActive, Step: stepBranch, Assignee: "a", Reviewer: "r", Asked: []string{"a", "r"}, Brief: "b"}
+	task := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: "t"}, State: taskActive, Step: stepWork, Assignee: "a", Reviewer: "r", Asked: []string{"a", "r"}, Brief: "b"}
 	s.Tasks["t"] = task
 	req := "b"
 	card := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: cfmCardID("b", "a")}, Kind: cfmKind, Re: &req,
@@ -56,8 +56,29 @@ func TestRoleGateWaitsActivationAndExpiry(t *testing.T) {
 	cardTestSame(t, s.cftTasksFor("missing", "a"), []proto.TaskRow(nil))
 	cardTestSame(t, cftActivation(d, task, "r"), []Item(nil))
 	task.Step = stepReview
-	task.Commit = "c"
-	cardTestSame(t, cftActivation(d, task, "r"), []Item{{AI: "r", Why: itemReview, Task: "t", Commit: "c"}})
+	task.Report = "c"
+	cardTestSame(t, cftActivation(d, task, "r"), []Item{{AI: "r", Why: itemReview, Task: "t", Msg: "c"}})
+}
+
+// cftThreadDisk is a disk whose task threads hold these messages, newest first.
+type cftThreadDisk struct {
+	cardTestDisk
+	thread []proto.MsgRow
+}
+
+func (d cftThreadDisk) Thread(*string, int64, int) []proto.MsgRow { return d.thread }
+
+// An assignee whose owner gives the word after a review gets the task with
+// the latest review; before any review, with the task message.
+func TestRoleActivationNamesTheLatestReview(t *testing.T) {
+	_, _, task, _, _ := cftFixture()
+	msg := func(id, kind string) proto.MsgRow {
+		return proto.MsgRow{RowHeader: proto.RowHeader{ID: id}, Kind: kind}
+	}
+	d := cftThreadDisk{thread: []proto.MsgRow{msg("p", "progress"), msg("late", "review"), msg("early", "review")}}
+	cardTestSame(t, cftActivation(d, task, "a"), []Item{{AI: "a", Why: itemAssign, Task: "t", Msg: "late"}})
+	d.thread = d.thread[:1]
+	cardTestSame(t, cftActivation(d, task, "a"), []Item{{AI: "a", Why: itemAssign, Task: "t", Msg: "t"}})
 }
 
 func TestRoleHeldByAssigneeAndReviewerOnly(t *testing.T) {
@@ -65,7 +86,7 @@ func TestRoleHeldByAssigneeAndReviewerOnly(t *testing.T) {
 	for ai, want := range map[string]bool{"a": true, "r": true, "other": false} {
 		cardTestSame(t, s.cftHasRole("b", ai), want)
 	}
-	task.State = taskMerged
+	task.State = taskDone
 	s.Tasks["t"] = task
 	cardTestSame(t, s.cftHasRole("b", "a"), false)
 }
@@ -88,7 +109,7 @@ func TestRoleCardOverlayAndOrdinaryWaits(t *testing.T) {
 	cardTestSame(t, cftWait(d, task), &proto.TaskWait{Kind: waitDecision, Msg: "dec", Who: []string{"p"}})
 	d.Disk = cardTestDisk{}
 	cardTestSame(t, cftWait(d, task), (*proto.TaskWait)(nil))
-	task.Wait = &proto.TaskWait{Kind: waitConflict}
+	task.Wait = &proto.TaskWait{Kind: waitReviewer}
 	cardTestSame(t, cftWait(d, task), task.Wait)
 	task.Step = stepReview
 	rcard := s.cfmNewCard(c, cfmWhatDirect, d.msgs["b"], s.AIs["r"])
@@ -97,7 +118,7 @@ func TestRoleCardOverlayAndOrdinaryWaits(t *testing.T) {
 	out := Result{Rows: []Row{RowOf(card)}}
 	cftPutTask(&out, task)
 	cardTestSame(t, len(out.Rows), 2)
-	task.Commit = "new"
+	task.Report = "new"
 	cftPutTask(&out, task)
 	cardTestSame(t, len(out.Rows), 2)
 	cardTestSame(t, out.Rows[1].Value(), task)
@@ -125,7 +146,7 @@ func TestRoleDecisionsAndItemsLeaveUnchangedTasksAlone(t *testing.T) {
 	res = s.cftDecide(c, rcard, proto.ConfirmBody{AI: "r"})
 	cardTestSame(t, res.Rows, []Row{RowOf(rcard)})
 	cardTestSame(t, res.Items, []Item(nil))
-	for _, state := range []string{taskQueued, taskPaused, taskMerged} {
+	for _, state := range []string{taskQueued, taskPaused, taskDone} {
 		task.State = state
 		s.Tasks[task.ID] = task
 		res = s.cftDecide(c, rcard, proto.ConfirmBody{AI: "r"})
@@ -162,7 +183,7 @@ func TestNewRoleAuthorityAndDuplicates(t *testing.T) {
 // deleted, asks nobody again.
 func TestFinishedTaskWritesNoCardAgain(t *testing.T) {
 	s, d, task, card, c := cftFixture()
-	task.State = taskMerged
+	task.State = taskDone
 	s.Tasks[task.ID] = task
 	delete(d.msgs, card.ID)
 	task.Thread.Count++
@@ -197,9 +218,8 @@ func TestRoleGrantOnDependencyActivationAndMultipleActiveTasks(t *testing.T) {
 		task.State, task.Depends = taskQueued, []string{"dependency"}
 		task.Wait = &proto.TaskWait{Kind: waitDepends}
 		s.Tasks[task.ID] = task
-		row, items, ok := s.mrgReleaseOne(d, task, "dependency", 10)
-		cardTestSame(t, ok, true)
-		res := s.cftFinish(c, Result{Rows: []Row{row}, Items: items})
+		s.Tasks["dependency"] = proto.TaskRow{RowHeader: proto.RowHeader{ID: "dependency"}, State: taskDone}
+		res := s.cftFinish(c, s.tskRelease(c, Result{}))
 		active := res.Rows[0].Value().(proto.TaskRow)
 		cardTestSame(t, active.State, taskActive)
 		cardTestSame(t, active.Stats.Started, int64(10))
@@ -216,9 +236,9 @@ func TestRoleGrantOnDependencyActivationAndMultipleActiveTasks(t *testing.T) {
 	card.State = &proto.CardState{Status: briefConfirmed}
 	res := s.cftDecide(c, card, proto.ConfirmBody{AI: "a"})
 	cardTestSame(t, res.Items, []Item{{AI: "a", Why: itemAssign, Task: "second", Msg: "second"}, {AI: "a", Why: itemAssign, Task: "t", Msg: "t"}})
-	task.Step, task.Commit = stepReview, "c"
+	task.Step, task.Report = stepReview, "c"
 	s.Tasks[task.ID] = task
 	d.msgs[cfmCardID("b", "r")] = proto.MsgRow{State: &proto.CardState{Status: briefConfirmed}}
-	item := Item{AI: "r", Task: task.ID, Why: itemReview, Commit: "c"}
+	item := Item{AI: "r", Task: task.ID, Why: itemReview, Msg: "c"}
 	cardTestSame(t, s.cftFinish(c, Result{Items: []Item{item}}).Items, []Item{item})
 }

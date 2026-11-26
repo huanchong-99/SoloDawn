@@ -3,7 +3,6 @@ package home
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"slices"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -18,31 +17,24 @@ func init() {
 }
 
 const (
-	grpKind           = "project"
 	grpPass           = 90
 	grpPassFoundation = 70
 )
 
-var (
-	grpForges = []string{"github", "none", "custom"}
-	grpLimits = proto.Limits{
-		Rounds: 10, WakesPerHour: 20, TurnMinutes: 60, Failures: 3, ReviewRounds: 5,
-		AskDepth: 4, AskWaitS: 45, ApprovalWaitS: 600, IdleNoticeMinutes: 30,
-	}
-)
+var grpLimits = proto.Limits{
+	Rounds: 10, WakesPerHour: 20, TurnMinutes: 60, Failures: 3, ReviewRounds: 5,
+	AskDepth: 4, AskWaitS: 45, ApprovalWaitS: 600, IdleNoticeMinutes: 30,
+}
 
-// grpCreate makes this node the home of a new project group whose id is both g
-// and n, writes the group row and the owner's member and device rows, and asks
-// for a groups push to connected peers.
+// grpCreate makes this node the home of a new group whose id is both g and n,
+// writes the group row and the owner's member and device rows, and asks for a
+// groups push to connected peers. People and AIs are added by later commands.
 func grpCreate(s *State, c Command) (Result, *Refusal) {
 	if !s.grpMayCreate(c.Who) {
 		return Result{}, &Refusal{"forbidden", "only a device of this node's owner creates a group"}
 	}
 	var p proto.GroupCreate
 	if refusal := c.Decode(&p); refusal != nil {
-		return Result{}, refusal
-	}
-	if refusal := templatesCreate(p.Forge, p.Templates); refusal != nil {
 		return Result{}, refusal
 	}
 	if refusal := grpCreateValid(p); refusal != nil {
@@ -62,22 +54,15 @@ func grpCreateValid(p proto.GroupCreate) *Refusal {
 	if p.Group != p.Nonce {
 		return &Refusal{"bad_request", "group create names a group other than its nonce"}
 	}
-	if p.Kind == "team" {
-		return teamCreateValid(p)
-	}
-	if p.Kind != grpKind || !slices.Contains(grpForges, p.Forge) {
-		return &Refusal{"bad_request", "group create has a kind or forge outside step 1"}
-	}
-	if slices.Contains([]string{p.Name, p.Repo, p.Base, p.MemberName}, "") {
-		return &Refusal{"bad_request", "group create requires name, repo, base and member_name"}
+	if p.Name == "" || p.MemberName == "" {
+		return &Refusal{"bad_request", "group create requires name and member_name"}
 	}
 	return nil
 }
 
 func grpFounded(s *State, c Command, p proto.GroupCreate) Result {
 	group := proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: p.Name, Kind: p.Kind,
-		Repo: p.Repo, Base: p.Base, Forge: p.Forge, Templates: p.Templates, Home: s.Home, Checks: p.Checks,
+		RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: p.Name, Home: s.Home,
 		Pass: grpPass, PassFoundation: grpPassFoundation, Limits: grpLimits, Created: c.Now,
 	}
 	owner := proto.HumanMemberRow{
@@ -114,8 +99,8 @@ func grpSet(s *State, c Command) (Result, *Refusal) {
 }
 
 func grpSetValid(p proto.GroupSet) *Refusal {
-	present := [7]bool{p.Name != nil, p.Checks != nil, p.Pass != nil, p.PassFoundation != nil, p.Limits != nil, p.Secretary != "", p.Templates != nil}
-	if present == [7]bool{} {
+	present := [5]bool{p.Name != nil, p.Pass != nil, p.PassFoundation != nil, p.Limits != nil, p.Secretary != ""}
+	if present == [5]bool{} {
 		return &Refusal{"bad_request", "group set carries no field to change"}
 	}
 	if p.Name != nil && *p.Name == "" {
@@ -125,14 +110,6 @@ func grpSetValid(p proto.GroupSet) *Refusal {
 }
 
 func (s *State) grpApplySet(p proto.GroupSet) (Result, *Refusal) {
-	if refusal := templatesSet(s.Group.Forge, p.Templates); refusal != nil {
-		return Result{}, refusal
-	}
-	if s.Group.Kind == "team" {
-		if refusal := teamSetValid(p); refusal != nil {
-			return Result{}, refusal
-		}
-	}
 	group := grpUpdated(s.Group, p)
 	var extra []Row
 	if p.Secretary != "" {
@@ -149,13 +126,9 @@ func (s *State) grpApplySet(p proto.GroupSet) (Result, *Refusal) {
 
 func grpUpdated(group proto.GroupRow, p proto.GroupSet) proto.GroupRow {
 	grpSetOpt(&group.Name, p.Name)
-	grpSetOpt(&group.Checks, p.Checks)
 	grpSetOpt(&group.Pass, p.Pass)
 	grpSetOpt(&group.PassFoundation, p.PassFoundation)
 	grpSetOpt(&group.Limits, p.Limits)
-	if p.Templates != nil {
-		group.Templates = p.Templates
-	}
 	return group
 }
 

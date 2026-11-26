@@ -25,22 +25,22 @@ func inboxDecode(t *testing.T, raw string) proto.Inbox {
 func inboxCleanTask(id string, seq int64, title string) proto.TaskRow {
 	return proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: id, Seq: seq}, Group: groupID, Num: 1,
-		Title: title, Slug: "task-one", Origin: "brief", State: "active", Step: "review",
-		Commit: "c1", Assignee: aiID, Depends: []string{}, Created: clock,
+		Title: title, Origin: "brief", State: "active", Step: "review",
+		Report: "m1", Assignee: aiID, Depends: []string{}, Created: clock,
 	}
 }
 
 func inboxGoldenToHome(want proto.Item) home.Item {
 	return home.Item{
 		AI: string(want.AI), Why: want.Why, Task: string(want.Task), Msg: string(want.Msg),
-		Commit: want.Commit, PR: want.PR, Code: want.Code, Detail: want.Detail,
+		Code: want.Code, Detail: want.Detail,
 	}
 }
 
 func inboxGoldenNames() []string {
 	return []string{
 		"item-mention", "item-reply", "item-assign", "item-review", "item-reviewed",
-		"item-checks", "item-resume", "item-decided", "item-confirmed", "item-notice", "item-merge",
+		"item-resume", "item-decided", "item-confirmed", "item-notice",
 	}
 }
 
@@ -115,7 +115,7 @@ func inboxCheckRowCopies(t *testing.T) {
 	})
 	tables.Commands["push"] = runFixed(func(s *home.State, c home.Command) home.Result {
 		updated := inboxCleanTask(taskID, 0, "Updated title")
-		updated.Step = "merge"
+		updated.Step = "work"
 		return home.Result{Rows: []home.Row{home.RowOf(updated)}}
 	})
 	w, p := runFounded(t, tables)
@@ -137,7 +137,7 @@ func inboxCheckRowCopies(t *testing.T) {
 	p.does(groupID, "push", ``)
 	w.loop.Inbox(host.conn)
 	resent := inboxDecode(t, host.next())
-	equal(t, []any{resent.Items[0].Item, resent.Items[0].Task.Step, resent.Items[0].Task.Seq}, []any{frame.Items[0].Item, "merge", int64(8)})
+	equal(t, []any{resent.Items[0].Item, resent.Items[0].Task.Step, resent.Items[0].Task.Seq}, []any{frame.Items[0].Item, "work", int64(8)})
 }
 
 // Multiple due items for one host are packed into the fewest inbox frames that
@@ -250,7 +250,7 @@ func TestInboxAckDeletesOnlyTheHostsOwnItem(t *testing.T) {
 // The hourly wake-up cap holds items past wakes_per_hour until the oldest
 // counted wake ages out, per AI, without holding or counting merge items.
 func TestInboxWakeUpCapHoldsAndReleasesItems(t *testing.T) {
-	t.Run("cap holds excess items and exempts merge", inboxCheckCapAndMerge)
+	t.Run("cap holds excess items and exempts merge", inboxCheckCapAndWatch)
 	t.Run("exact hour expiry and unsorted holds", inboxCheckHourBoundary)
 	t.Run("rollback and restart", inboxCheckCapRollbackAndRestart)
 	t.Run("people and replies are not held", inboxCheckCapSparesPeopleAndReplies)
@@ -285,16 +285,16 @@ func inboxCappedTables(capPerHour int, ai2 string) home.Tables {
 	return tables
 }
 
-func inboxCheckCapAndMerge(t *testing.T) {
+func inboxCheckCapAndWatch(t *testing.T) {
 	ai2, taskID := id(81), id(82)
 	w, p := runFounded(t, inboxCappedTables(2, ai2))
 	p.does(groupID, "enroll", ``)
 	host := w.attach(laptop)
 	w.loop.Inbox(host.conn)
 
-	// Merge before reaching the cap does not consume a wake slot: two mentions after it still go at once.
-	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"merge","Task":%q,"Commit":"c1"}]`, aiID, taskID))
-	equal(t, inboxDecode(t, host.next()).Items[0].Item.Why, "merge")
+	// A watch item before reaching the cap does not consume a wake slot: two mentions after it still go at once.
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"watch","Task":%q}]`, aiID, taskID))
+	equal(t, inboxDecode(t, host.next()).Items[0].Item.Why, "watch")
 	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"mention","Msg":%q}]`, aiID, id(1)))
 	equal(t, inboxDecode(t, host.next()).Items[0].Item.Item, int64(2))
 
@@ -302,9 +302,9 @@ func inboxCheckCapAndMerge(t *testing.T) {
 	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"mention","Msg":%q}]`, aiID, id(2)))
 	equal(t, inboxDecode(t, host.next()).Items[0].Item.Item, int64(3))
 
-	// At the cap: merge and another AI still go immediately; two mentions for aiID wait in turn.
+	// At the cap: a watch item and another AI still go immediately; two mentions for aiID wait in turn.
 	w.clock.Store(clock + 2000)
-	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"merge","Task":%q,"Commit":"c2"},{"AI":%q,"Why":"mention","Msg":%q},{"AI":%q,"Why":"mention","Msg":%q},{"AI":%q,"Why":"mention","Msg":%q}]`,
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"watch","Task":%q},{"AI":%q,"Why":"mention","Msg":%q},{"AI":%q,"Why":"mention","Msg":%q},{"AI":%q,"Why":"mention","Msg":%q}]`,
 		aiID, taskID, ai2, id(3), aiID, id(4), aiID, id(5)))
 	immediate := inboxDecode(t, host.next())
 	equal(t, []any{len(immediate.Items), immediate.Items[0].Item.Item, immediate.Items[1].Item.Item}, []any{2, int64(4), int64(5)})

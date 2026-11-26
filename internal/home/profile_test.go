@@ -64,7 +64,7 @@ func TestProfileAssignmentAndRowFive(t *testing.T) {
 	})
 	machineRun(t, []machineCase{
 		{name: "row 5 refuses while asking",
-			in: base, ev: machineEvent(home.OnSubmitted, home.ByHost, home.Event{Commit: "c1"}), err: home.RefusedConflict},
+			in: base, ev: machineEvent(home.OnReport, home.ByAI, home.Event{Member: mcA, Report: "m2"}), err: home.RefusedConflict},
 		{name: "row 11 clears on reassignment",
 			in:  base,
 			ev:  machineEvent(home.OnAssign, home.ByAdmin, home.Event{Assignee: mcB}),
@@ -77,7 +77,7 @@ func TestProfileCountSameFailures(t *testing.T) {
 	base := machineTask().at("active", "review").set(func(t *proto.TaskRow) {
 		t.Stuck = &proto.Stuck{Kind: "review", N: 1}
 	})
-	without := machineEvent(home.OnReview, home.ByAI, home.Event{Member: mcR, Commit: "c1", Score: 85})
+	without := machineEvent(home.OnReview, home.ByAI, home.Event{Member: mcR, Report: "m1", Score: 85})
 	with := without
 	with.Stronger = true
 	tasks, _ := mcPlay(t, base.TaskRow, without)
@@ -87,24 +87,21 @@ func TestProfileCountSameFailures(t *testing.T) {
 }
 
 func TestProfileHomeRefusesSubmission(t *testing.T) {
-	s, d := revState(t, "github")
+	s, d := revState(t)
 	c := s.AIs[aiID]
 	c.Tier, c.State, c.Secretary = "strong", "offline", true
 	s.AIs[aiID] = c
-	res := revApply(t, s, d, laptop, revCheckedPayload(120, "checked", true, "c1", []proto.CheckItem{}))
-	equal(t, res.Answer, store.Outcome{OK: true})
-	s.Commit(res)
-	for n := byte(121); n <= 124; n += 3 {
-		res = revApply(t, s, d, laptop, revSubmittedPayload(n, "c1", 0, "", 0, 0))
+	for n := byte(121); n <= 123; n += 2 {
+		res := revApply(t, s, d, laptop, revReportPayload(n, revAssignee, "Done."))
 		equal(t, res.Answer, store.Outcome{OK: true})
 		s.Commit(res)
-		res = revApply(t, s, d, laptop, revCheckedPayload(n+1, "cloud", false, "c1", []proto.CheckItem{}))
-		equal(t, res.Answer, store.Outcome{OK: true})
+		res = revApply(t, s, d, revReviewBox, revReviewPayload(n+1, revReviewer, id(n), 10, []proto.ReviewItem{}))
+		equal(t, res.Answer.OK, true)
 		s.Commit(res)
 	}
 	stuck := s.Tasks[revTaskID].Stuck
-	equal(t, stuck, &proto.Stuck{Kind: "checks", N: 2, Ask: true})
-	res = revApply(t, s, d, laptop, revSubmittedPayload(127, "c1", 0, "", 0, 0))
+	equal(t, stuck, &proto.Stuck{Kind: "review", N: 2, Ask: true})
+	res := revApply(t, s, d, laptop, revReportPayload(127, revAssignee, "Done."))
 	briefRefused(t, res, "conflict")
 	equal(t, res.Msg, "ask a stronger AI before submitting again")
 	equal(t, len(res.Rows), 0)
@@ -156,7 +153,7 @@ func TestProfileEditSurvivesHomeRestart(t *testing.T) {
 
 	w, owner := runFounded(t, tables)
 	host := w.attach(laptop)
-	host.does(groupID, "member", fmt.Sprintf(`,"op":"add_ai","id":%q,"cli":"claude","name":"Opus","account":"personal","secretary":false,"approvers":[],"model":"opus","tier":"strong"`, id(120)))
+	host.does(groupID, "member", fmt.Sprintf(`,"op":"add_ai","id":%q,"cli":"claude","name":"Opus","workspace":"/home/dev/website","account":"personal","secretary":false,"approvers":[],"model":"opus","tier":"strong"`, id(120)))
 	owner.does(groupID, "member", fmt.Sprintf(`,"op":"set","id":%q,"tier":"light","skills":"docs"`, id(120)))
 	const query = "SELECT data FROM row WHERE g=? AND r='member' AND id=? AND gone=0 ORDER BY seq DESC LIMIT 1"
 	before := runQuery[string](t, w.db, query, groupID, id(120))

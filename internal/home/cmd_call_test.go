@@ -45,8 +45,8 @@ func calState(t *testing.T) *home.State {
 func calMakeTask(taskID string, num int) proto.TaskRow {
 	return proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: taskID, Seq: int64(num + 5)},
-		Group:     groupID, Num: num, Title: "Path events", Slug: proto.MakeSlug("Path events"),
-		Origin: "brief", Brief: id(86), State: "active", Step: "local_check",
+		Group:     groupID, Num: num, Title: "Path events",
+		Origin: "brief", Brief: id(86), State: "active", Step: "work",
 		Assignee: calA, Reviewer: calB, Pass: 90, Depends: []string{},
 		Thread: proto.ThreadSummary{Count: 2, Rounds: 1},
 		Stats:  proto.TaskStats{Started: clock - 100_000}, Created: clock - 100_000,

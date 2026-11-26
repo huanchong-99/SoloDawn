@@ -42,7 +42,7 @@ func calCall(s *State, c Command) (Result, *Refusal) {
 }
 
 func (s *State) calApplyCall(c Command, p proto.Post[proto.CallBody]) (Result, *Refusal) {
-	mentions, refusal := s.postCheck(c.Who, calKindCall, false, p.Thread, p.Mentions)
+	mentions, refusal := s.postCheck(false, p.Thread, p.Mentions)
 	if refusal != nil {
 		return Result{}, refusal
 	}
@@ -95,7 +95,7 @@ func (s *State) calApplyReply(c Command, p proto.Post[proto.EmptyBody]) (Result,
 	if postTaskID((*string)(p.Thread)) != postTaskID(target.Thread) {
 		return Result{}, &Refusal{Code: "bad_request", Msg: "a reply belongs in the same thread or main line as its call"}
 	}
-	mentions, refusal := s.postCheck(c.Who, calKindReply, false, p.Thread, p.Mentions)
+	mentions, refusal := s.postCheck(false, p.Thread, p.Mentions)
 	if refusal != nil {
 		return Result{}, refusal
 	}

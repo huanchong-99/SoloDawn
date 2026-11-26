@@ -181,12 +181,10 @@ func sizeLimit(row any) int {
 // numbers it: the fields that planning/contracts/datachannel.md section 6
 // gives its why. A field the why does not have stays at its zero value.
 type Item struct {
-	AI     string // the member it is for; for merge, the assignee whose host merges
+	AI     string // the member it is for
 	Why    string
 	Task   string
-	Msg    string
-	Commit string // review, merge
-	PR     int    // merge, when the group has a remote
+	Msg    string // for review, the report under review
 	Code   string // notice
 	Detail string // notice, where its case has one
 

@@ -205,7 +205,7 @@ func TestPeopleRemovalBusyAndLeaving(t *testing.T) {
 	a := s.AIs[grpWorkerA]
 	a.User = device(6).ID()
 	s.AIs[grpWorkerA] = a
-	for _, state := range []string{"active", "merged"} {
+	for _, state := range []string{"active", "done"} {
 		s.Tasks[id(190)] = proto.TaskRow{State: state, Reviewer: a.ID}
 		res := peopleApply(t, s, disk{}, device(6), nil, "member", fmt.Sprintf(`,"op":"remove","id":%q`, grpMember))
 		if state == "active" {

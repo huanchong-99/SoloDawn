@@ -177,7 +177,7 @@ func runWake(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return home.Result{}, refusal
 	}
-	item := home.Item{AI: aiID, Why: p.Why, Task: "t1", Msg: string(c.Nonce), Commit: "9f2c1ab", PR: 7, Code: "c", Detail: "d"}
+	item := home.Item{AI: aiID, Why: p.Why, Task: "t1", Msg: string(c.Nonce), Code: "c", Detail: "d"}
 	if p.Hold != 0 {
 		item.NotBefore = c.Now + p.Hold
 	}
@@ -209,7 +209,7 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 		n := int64(len(items) + 1)
 		items[n] = proto.Item{
 			Item: n, AI: proto.ID(aiID), Why: "mention", Task: "t1", Msg: proto.ID(runID(w.nonce.Load())),
-			Commit: "9f2c1ab", PR: 7, Code: "c", Detail: "d",
+			Code: "c", Detail: "d",
 		}
 		return inbox(seq, n)
 	}
@@ -218,8 +218,9 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	wake(0, 4)
 	host.gets(runRows(groupID, runTask("t1", 4)))
 	var stored struct {
-		g, ai, host, why, msg, task, commit string
-		notBefore, created                  int64
+		g, ai, host, why, msg, task string
+		commit                      *string
+		notBefore, created          int64
 	}
 	err := w.db.Write(func(tx *store.Tx) error {
 		return tx.QueryRow("SELECT g,ai,host,why,msg,task,commit_id,not_before,created FROM inbox WHERE id=1").Scan(
@@ -227,7 +228,7 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	})
 	equal(t, err, nil)
 	equal(t, []any{stored.g, stored.ai, stored.host, stored.why, stored.msg, stored.task, stored.commit, stored.notBefore, stored.created},
-		[]any{groupID, aiID, laptop.ID(), "mention", runID(w.nonce.Load()), "t1", "9f2c1ab", int64(0), int64(clock)})
+		[]any{groupID, aiID, laptop.ID(), "mention", runID(w.nonce.Load()), "t1", (*string)(nil), int64(0), int64(clock)})
 	host.quiet()
 
 	// The host says hello: it is sent what waits, and from then on each item

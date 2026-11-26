@@ -32,8 +32,7 @@ const hevStatusTS = clock - 400
 func hevState(t *testing.T) *home.State {
 	t.Helper()
 	s := group(t)
-	s.Group.Name, s.Group.Kind, s.Group.Base, s.Group.Forge, s.Group.Home = "Website", "project", "main", "none", node.ID()
-	s.Group.Checks = []string{}
+	s.Group.Name, s.Group.Home = "Website", node.ID()
 	owner := s.People[ownerID]
 	owner.Group, owner.Kind, owner.Name = groupID, "human", "owner"
 	s.People[ownerID] = owner
@@ -58,14 +57,14 @@ func hevState(t *testing.T) *home.State {
 
 	s.Tasks[hevTaskA] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: hevTaskA, Seq: 8}, Group: groupID, Num: 1,
-		Title: "Report path changes", Slug: "report-path-changes", Origin: "brief",
-		State: "active", Step: "local_check", Assignee: hevWorker, Reviewer: hevPeer,
+		Title: "Report path changes", Origin: "brief",
+		State: "active", Step: "work", Assignee: hevWorker, Reviewer: hevPeer,
 		Depends: []string{}, Thread: proto.ThreadSummary{Count: 2, Rounds: 1},
 	}
 	s.Tasks[hevTaskB] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: hevTaskB, Seq: 9}, Group: groupID, Num: 2,
-		Title: "Show the path", Slug: "show-the-path", Origin: "brief",
-		State: "active", Step: "branch", Assignee: hevPeer, Reviewer: hevWorker, Depends: []string{},
+		Title: "Show the path", Origin: "brief",
+		State: "active", Step: "work", Assignee: hevPeer, Reviewer: hevWorker, Depends: []string{},
 	}
 	return s
 }
@@ -123,8 +122,8 @@ func TestHostEvGoldenWireExamples(t *testing.T) {
 		s.AIs[goldenAI] = member
 		s.Tasks[goldenTask] = proto.TaskRow{
 			RowHeader: proto.RowHeader{Type: "task", ID: goldenTask, Seq: 1}, Group: goldenGroup,
-			Num: 1, Title: "Golden task", Slug: "golden-task", Origin: "brief",
-			State: "active", Step: "local_check", Assignee: goldenAI, Depends: []string{},
+			Num: 1, Title: "Golden task", Origin: "brief",
+			State: "active", Step: "work", Assignee: goldenAI, Depends: []string{},
 		}
 		s.Seq = seq
 		return s

@@ -9,20 +9,20 @@ import (
 type Item struct {
 	ID                   int64
 	Group, AI, Host, Why string
-	Msg, Task, Commit    *string
+	Msg, Task            *string
 	Env                  json.RawMessage
 	NotBefore, Created   int64
 }
 
-const selectInbox = "SELECT id,g,ai,host,why,msg,task,commit_id,env,not_before,created FROM inbox "
+const selectInbox = "SELECT id,g,ai,host,why,msg,task,env,not_before,created FROM inbox "
 
 // Enqueue allocates the item id so encode can put it into the stored item JSON
 // before the transaction commits.
 func (tx *Tx) Enqueue(item Item, encode func(int64) (json.RawMessage, error)) (int64, error) {
 	var id int64
-	err := tx.QueryRow(`INSERT INTO inbox(g,ai,host,why,msg,task,commit_id,env,not_before,created)
-		VALUES(?,?,?,?,?,?,?,'',?,?) RETURNING id`,
-		item.Group, item.AI, item.Host, item.Why, item.Msg, item.Task, item.Commit, item.NotBefore, item.Created).Scan(&id)
+	err := tx.QueryRow(`INSERT INTO inbox(g,ai,host,why,msg,task,env,not_before,created)
+		VALUES(?,?,?,?,?,?,'',?,?) RETURNING id`,
+		item.Group, item.AI, item.Host, item.Why, item.Msg, item.Task, item.NotBefore, item.Created).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -41,7 +41,7 @@ func (s *Store) Inbox(host string, now int64) ([]Item, error) {
 }
 
 func scanItem(rows *sql.Rows) (i Item, err error) {
-	err = rows.Scan(&i.ID, &i.Group, &i.AI, &i.Host, &i.Why, &i.Msg, &i.Task, &i.Commit,
+	err = rows.Scan(&i.ID, &i.Group, &i.AI, &i.Host, &i.Why, &i.Msg, &i.Task,
 		(*[]byte)(&i.Env), &i.NotBefore, &i.Created)
 	return i, err
 }

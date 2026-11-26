@@ -2,7 +2,6 @@ package home
 
 import (
 	"encoding/json"
-	"fmt"
 	"maps"
 	"slices"
 
@@ -10,13 +9,13 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-// Task commands: start, branch, assign, pause, resume, cancel, fail and
-// preempted (planning/contracts/commands.md section 1.5;
-// planning/contracts/task-machine.md rows 2, 3 and 10 to 16).
+// Task commands: start, assign, pause, resume, cancel, fail and preempted
+// (planning/contracts/commands.md section 1.5;
+// planning/contracts/task-machine.md rows 2 and 10 to 16), and the rule that
+// one folder takes one task at a time (section 2 of that file).
 
 func init() {
 	Commands.Add("task/start", tskStart)
-	Commands.Add("task/branch", tskBranch)
 	Commands.Add("task/assign", tskAssign)
 	Commands.Add("task/pause", tskPause)
 	Commands.Add("task/resume", tskResume)
@@ -27,14 +26,11 @@ func init() {
 
 const tskPage = 50
 
-var (
-	tskOrigins = []string{"direct", "takeover"}
-	tskReasons = []string{"crash", "timeout"}
-)
+var tskReasons = []string{"crash", "timeout"}
 
-// tskStart creates a direct or takeover task for a working AI through row 2 of
-// the task machine, writes its task message in the main line, and answers with
-// its group task number.
+// tskStart creates a direct task for a working AI through row 2 of the task
+// machine, queued while the AI's folder is busy, writes its task message in
+// the main line, and answers with its group task number.
 func tskStart(s *State, c Command) (Result, *Refusal) {
 	if !s.briefWorking(c.Who.AI) {
 		return Result{}, &Refusal{"forbidden", "only a working AI starts a task"}
@@ -43,8 +39,8 @@ func tskStart(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	if !slices.Contains(tskOrigins, p.Origin) {
-		return Result{}, &Refusal{"bad_request", "task start origin must be direct or takeover"}
+	if p.Origin != "direct" {
+		return Result{}, &Refusal{"bad_request", "task start origin must be direct"}
 	}
 	return s.tskCreate(c, p)
 }
@@ -58,10 +54,10 @@ func (s *State) tskCreate(c Command, p proto.TaskStart) (Result, *Refusal) {
 	}
 	task := proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: id}, Group: s.ID, Num: s.Num + 1,
-		Title: p.Title, Slug: proto.MakeSlug(p.Title), Origin: p.Origin, Plan: p.Plan,
+		Title: p.Title, Origin: p.Origin, Plan: p.Plan,
 		Pass: s.Group.Pass, Depends: []string{}, Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
 	}
-	task, fx, _ := Step(task, Event{Kind: OnStart, By: ByAI, Member: c.Who.AI, Now: c.Now})
+	task, fx, _ := Step(task, Event{Kind: OnStart, By: ByAI, Member: c.Who.AI, Now: c.Now, Busy: s.tskBusy(s.Tasks, id, c.Who.AI)})
 	var re string
 	if p.Re != nil {
 		re = string(*p.Re)
@@ -71,26 +67,9 @@ func (s *State) tskCreate(c Command, p proto.TaskStart) (Result, *Refusal) {
 	return Result{Rows: rows, Items: items, Answer: store.Outcome{Num: task.Num}}, nil
 }
 
-// tskBranch records the task's branch and advances its step to local_check
-// through row 3 of the task machine.
-func tskBranch(s *State, c Command) (Result, *Refusal) {
-	var p proto.TaskBranch
-	if refusal := c.Decode(&p); refusal != nil {
-		return Result{}, refusal
-	}
-	task, _, refusal := s.tskStep(c, p.ID, Event{Kind: OnBranch})
-	if refusal != nil {
-		return Result{}, refusal
-	}
-	if p.Branch != fmt.Sprintf("task/%d-%s", task.Num, task.Slug) {
-		return Result{}, &Refusal{"bad_request", "task branch must name task/<num>-<slug>"}
-	}
-	task.Branch = p.Branch
-	return Result{Rows: []Row{RowOf(task)}}, nil
-}
-
 // tskAssign sets a task's assignee, reviewer, or both through row 11 of the
-// task machine.
+// task machine, and looks at the queued tasks: another assignee may free a
+// folder, or take a queued task to a folder that is free.
 func tskAssign(s *State, c Command) (Result, *Refusal) {
 	var p proto.TaskAssign
 	if refusal := c.Decode(&p); refusal != nil {
@@ -99,14 +78,15 @@ func tskAssign(s *State, c Command) (Result, *Refusal) {
 	if p.Assignee == "" && p.Reviewer == "" {
 		return Result{}, &Refusal{"bad_request", "task assign requires at least one of assignee and reviewer"}
 	}
-	task, fx, refusal := s.tskStep(c, p.ID, Event{Kind: OnAssign, Assignee: string(p.Assignee), Reviewer: string(p.Reviewer)})
+	busy := s.tskBusy(s.Tasks, string(p.ID), string(p.Assignee))
+	task, fx, refusal := s.tskStep(c, p.ID, Event{Kind: OnAssign, Assignee: string(p.Assignee), Reviewer: string(p.Reviewer), Busy: busy})
 	if refusal != nil {
 		return Result{}, refusal
 	}
 	if !s.tskRolesOK(p) {
 		return Result{}, &Refusal{"conflict", "assignee and reviewer must be working AIs of the group"}
 	}
-	return s.tskAssigned(c, task, fx), nil
+	return s.tskRelease(c, s.tskAssigned(c, task, fx)), nil
 }
 
 func (s *State) tskRolesOK(p proto.TaskAssign) bool {
@@ -118,11 +98,66 @@ func (s *State) tskRolesOK(p proto.TaskAssign) bool {
 
 func (s *State) tskAssigned(c Command, task proto.TaskRow, fx Effects) Result {
 	retire, kept := tskSettleQueue(c.Disk.Queued(), task.ID, fx.Retire)
-	rows := append([]Row{RowOf(task)}, tskCardRows(c.Disk, task.ID, fx.Cards, c.Now)...)
+	rows := append([]Row{RowOf(task)}, tskCardRows(c, task.ID, fx.Cards)...)
 	items := tskItemCtx{
-		taskID: task.ID, secretary: s.Group.Secretary, assignMsg: tskLatestFeedback(c.Disk, task.ID), kept: kept,
+		taskID: task.ID, secretary: s.Group.Secretary, assignMsg: tskLatestReview(c.Disk, task.ID), kept: kept,
 	}.items(fx.Items)
 	return Result{Rows: rows, Items: items, Retire: retire}
+}
+
+// tskRelease is "Starting a queued task" (task-machine.md section 2), after
+// res made a task final or gave one another assignee. It judges the queued
+// tasks in the order of num, each against the tasks as res and the ones
+// before it leave them, so that a task it starts keeps its folder from the
+// ones after it. It adds to res the rows that changed and the assign item of
+// each task that started, which names its task message.
+func (s *State) tskRelease(c Command, res Result) Result {
+	tasks := tskAfter(s.Tasks, res.Rows)
+	queued := slices.DeleteFunc(slices.Collect(maps.Values(tasks)), func(t proto.TaskRow) bool { return t.State != taskQueued })
+	slices.SortFunc(queued, func(a, b proto.TaskRow) int { return a.Num - b.Num })
+	for _, t := range queued {
+		ev := Event{Kind: OnReleased, By: ByHome, Now: c.Now, Pending: tskPending(c.Disk, t.ID),
+			Blocked: tskBlocked(tasks, t.Depends), Busy: s.tskBusy(tasks, t.ID, t.Assignee)}
+		moved, fx, _ := Step(t, ev)
+		if moved.Wait != t.Wait {
+			tasks[t.ID] = moved
+			cftPutTask(&res, moved)
+			res.Items = append(res.Items, tskItemCtx{taskID: t.ID, assignMsg: t.ID}.items(fx.Items)...)
+		}
+	}
+	return res
+}
+
+// tskAfter is the group's tasks as rows leave them.
+func tskAfter(tasks map[string]proto.TaskRow, rows []Row) map[string]proto.TaskRow {
+	after := maps.Clone(tasks)
+	for _, row := range rows {
+		if t, ok := row.Value().(proto.TaskRow); ok {
+			after[t.ID] = t
+		}
+	}
+	return after
+}
+
+// tskBlocked says whether a dependency is not done.
+func tskBlocked(tasks map[string]proto.TaskRow, depends []string) bool {
+	return slices.ContainsFunc(depends, func(id string) bool { return tasks[id].State != taskDone })
+}
+
+// tskBusy says whether the folder of that AI, the pair of its host and its
+// workspace, is that of the assignee of a started task other than the one
+// with that id.
+func (s *State) tskBusy(tasks map[string]proto.TaskRow, id, ai string) bool {
+	for _, t := range tasks {
+		if t.ID != id && slices.Contains(statesStarted, t.State) && s.tskFolder(t.Assignee) == s.tskFolder(ai) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *State) tskFolder(ai string) [2]string {
+	return [2]string{s.AIs[ai].Host, s.AIs[ai].Workspace}
 }
 
 // tskPause pauses an active task through row 12 of the task machine.
@@ -153,8 +188,9 @@ func tskResume(s *State, c Command) (Result, *Refusal) {
 	return Result{Rows: []Row{RowOf(task)}, Items: items}, nil
 }
 
-// tskCancel cancels an unfinished task through row 15 of the task machine and
-// notifies the secretary of each queued task that depended on it.
+// tskCancel cancels an unfinished task through row 15 of the task machine,
+// notifies the secretary of each queued task that depended on it, and looks
+// at the queued tasks: the folder may be free now.
 func tskCancel(s *State, c Command) (Result, *Refusal) {
 	var p proto.TaskCommand
 	if refusal := c.Decode(&p); refusal != nil {
@@ -165,8 +201,8 @@ func tskCancel(s *State, c Command) (Result, *Refusal) {
 		return Result{}, refusal
 	}
 	retire, _ := tskSettleQueue(c.Disk.Queued(), task.ID, fx.Retire)
-	rows := append([]Row{RowOf(task)}, tskCardRows(c.Disk, task.ID, fx.Cards, c.Now)...)
-	return Result{Rows: rows, Items: s.tskOrphaned(task.ID), Retire: retire}, nil
+	rows := append([]Row{RowOf(task)}, tskCardRows(c, task.ID, fx.Cards)...)
+	return s.tskRelease(c, Result{Rows: rows, Items: s.tskOrphaned(task.ID), Retire: retire}), nil
 }
 
 func (s *State) tskOrphaned(cancelled string) []Item {
@@ -255,9 +291,9 @@ func (s *State) tskStep(c Command, id proto.ID, ev Event) (proto.TaskRow, Effect
 		return proto.TaskRow{}, Effects{}, &Refusal{"not_found", "the group has no such task"}
 	}
 	ev.By = s.tskSender(c.Who, task.Assignee)
+	ev.Member = c.Who.Member()
 	ev.Now = c.Now
 	ev.Limits = s.Group.Limits
-	ev.Remote = s.Group.Forge != "none"
 	ev.Pending = tskPending(c.Disk, task.ID)
 	ev.Stronger = s.profileHasStronger(task, ev)
 	moved, fx, err := Step(task, ev)
@@ -346,15 +382,21 @@ func tskPending(d Disk, taskID string) []PendingCard {
 	return out
 }
 
-func tskCardRows(d Disk, taskID, status string, now int64) []Row {
+// tskCardRows ends the pending cards of a task: all of them as expired, or its
+// approval cards as reassigned, by the sender of the command.
+func tskCardRows(c Command, taskID, status string) []Row {
 	if status == "" {
 		return nil
 	}
+	state := proto.CardState{Status: status, At: &c.Now}
+	if status == "reassigned" {
+		by := c.Who.Member()
+		state.By = &by
+	}
 	var rows []Row
-	for _, card := range d.Pending() {
+	for _, card := range c.Disk.Pending() {
 		if tskCardChanges(card, taskID, status) {
-			at := now
-			card.State = &proto.CardState{Status: status, At: &at}
+			card.State = &state
 			rows = append(rows, RowOf(card))
 		}
 	}
@@ -368,27 +410,19 @@ func tskCardChanges(card proto.MsgRow, taskID, status string) bool {
 	return status == "expired" || card.Kind == waitApproval
 }
 
-func tskLatestFeedback(d Disk, taskID string) string {
+// tskLatestReview is the latest review message of a task, or "".
+func tskLatestReview(d Disk, taskID string) string {
 	var before int64
 	for {
 		page := d.Thread(&taskID, before, tskPage)
-		if id := tskFeedbackIn(page); id != "" {
-			return id
+		if i := slices.IndexFunc(page, func(m proto.MsgRow) bool { return m.Kind == revKindReview }); i >= 0 {
+			return page[i].ID
 		}
 		if len(page) < tskPage {
 			return ""
 		}
 		before = page[len(page)-1].Pos
 	}
-}
-
-func tskFeedbackIn(page []proto.MsgRow) string {
-	for _, m := range page {
-		if m.Kind == "checks" || m.Kind == "review" {
-			return m.ID
-		}
-	}
-	return ""
 }
 
 func tskSettleQueue(queued []store.Item, taskID string, filters []ItemFilter) (retire []int64, kept []store.Item) {
@@ -432,7 +466,7 @@ func tskSameReview(q store.Item, taskID string, it TaskItem) bool {
 	if !tskForTask(q, taskID) || q.Why != it.Why {
 		return false
 	}
-	return q.AI == it.AI && q.Commit != nil && *q.Commit == it.Commit
+	return q.AI == it.AI && postTaskID(q.Msg) == it.Report
 }
 
 type tskItemCtx struct {
@@ -442,7 +476,6 @@ type tskItemCtx struct {
 	feedbackMsg string
 	noticeMsg   string
 	detail      string
-	pr          int
 	kept        []store.Item
 }
 
@@ -467,14 +500,12 @@ func (x tskItemCtx) one(it TaskItem) (Item, bool) {
 }
 
 func (x tskItemCtx) work(it TaskItem) Item {
-	item := Item{AI: it.AI, Why: it.Why, Task: x.taskID, Commit: it.Commit}
+	item := Item{AI: it.AI, Why: it.Why, Task: x.taskID, Msg: it.Report}
 	switch it.Why {
 	case itemAssign:
 		item.Msg = x.assignMsg
-	case itemChecks, itemReviewed:
+	case itemReviewed:
 		item.Msg = x.feedbackMsg
-	case itemMerge:
-		item.PR = x.pr
 	}
 	return item
 }

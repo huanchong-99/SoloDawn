@@ -38,8 +38,6 @@ func inboxSeal(it Item, id int64) (json.RawMessage, error) {
 		Why:    it.Why,
 		Task:   proto.ID(it.Task),
 		Msg:    proto.ID(it.Msg),
-		Commit: it.Commit,
-		PR:     it.PR,
 		Code:   it.Code,
 		Detail: it.Detail,
 	})
@@ -115,11 +113,11 @@ func inboxPace(s *State, items []Item, now int64) []Item {
 }
 
 // inboxWake records one item in wakes and, when limit > 0, holds it once the AI
-// has limit due times in the last hour. Merge and watch items are for the AI's
-// host rather than a session, and a reply answers a call that may be waiting, so
+// has limit due times in the last hour. A watch item is for the AI's host
+// rather than a session, and a reply answers a call that may be waiting, so
 // they neither wait on nor count toward the cap.
 func inboxWake(wakes map[string][]int64, it Item, limit int, now int64) Item {
-	if it.Why == itemMerge || it.Why == cfmWhatWatch || it.Why == calWhyReply {
+	if it.Why == cfmWhatWatch || it.Why == calWhyReply {
 		return it
 	}
 	recent := runRecent(wakes[it.AI], now)

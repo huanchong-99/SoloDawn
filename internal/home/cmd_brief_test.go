@@ -264,10 +264,10 @@ func briefConfirmedRows(t *testing.T, card proto.MsgRow, act proto.Envelope, by 
 	at := int64(clock)
 	card.Seq, card.State = from, &proto.CardState{Status: "confirmed", By: &by, At: &at, Act: &act}
 	one, two := briefTaskID(n, 0), briefTaskID(n, 1)
-	task := func(id string, seq int64, num int, entry proto.BriefTask, slug string, pass int, depends []string) proto.TaskRow {
+	task := func(id string, seq int64, num int, entry proto.BriefTask, pass int, depends []string) proto.TaskRow {
 		return proto.TaskRow{
 			RowHeader: proto.RowHeader{Type: "task", ID: id, Seq: seq}, Group: groupID, Num: num, Title: entry.Title,
-			Slug: proto.Slug(slug), Origin: "brief", Brief: card.ID, State: "active", Step: "branch",
+			Origin: "brief", Brief: card.ID, State: "active", Step: "work",
 			Assignee: entry.Assignee, Reviewer: entry.Reviewer, Foundation: entry.Foundation, Pass: pass, Depends: depends,
 			Created: clock, Stats: proto.TaskStats{Started: clock},
 		}
@@ -279,9 +279,9 @@ func briefConfirmedRows(t *testing.T, card proto.MsgRow, act proto.Envelope, by 
 		}
 	}
 	entries := briefBody().Tasks
-	queued := task(two, from+3, 6, entries[1], "show-the-path", 95, []string{one})
+	queued := task(two, from+3, 6, entries[1], 95, []string{one})
 	queued.State, queued.Wait = "queued", &proto.TaskWait{Kind: "depends", Since: clock}
-	return []any{card, task(one, from+1, 5, entries[0], "report-path-changes", 70, []string{}), msg(one, from+2), queued, msg(two, from+4)}
+	return []any{card, task(one, from+1, 5, entries[0], 70, []string{}), msg(one, from+2), queued, msg(two, from+4)}
 }
 
 // Row 1: confirming creates every task of the brief through the task
@@ -298,6 +298,66 @@ func TestBriefConfirmCreatesTheTasks(t *testing.T) {
 	equal(t, res.Items, []home.Item{
 		{AI: briefA, Why: "assign", Task: one, Msg: one},
 		{AI: aiID, Why: "confirmed", Msg: card.ID},
+	})
+}
+
+// A5.20 and row 1: one folder takes one task at a time, and the entries are
+// judged in their order. Of two tasks for one AI the second waits for the
+// folder, and so does a task for an AI that shares the folder of an earlier
+// entry; a task in another folder starts at once. A started task that the
+// group already has holds its folder against every entry.
+func TestBriefConfirmQueuesTasksBehindABusyFolder(t *testing.T) {
+	entry := func(title, assignee, reviewer string) proto.BriefTask {
+		return proto.BriefTask{Title: title, Assignee: assignee, Reviewer: reviewer, Depends: []int{}}
+	}
+	confirm := func(t *testing.T, s *home.State) ([]string, []home.Item) {
+		t.Helper()
+		shared := s.AIs[briefC]
+		shared.Workspace = s.AIs[briefB].Workspace
+		s.AIs[briefC] = shared
+		body := briefBody()
+		body.Tasks = []proto.BriefTask{entry("One", briefA, briefB), entry("Two", briefA, briefB), entry("Three", briefB, briefA), entry("Four", briefC, briefA)}
+		card, d := briefPosted(t, s, body)
+		res := briefApply(t, s, d, receipts{}, browser, briefAct(browser, 50, "confirm", card.ID, ""))
+		equal(t, res.Answer, store.Outcome{OK: true})
+		var states []string
+		for _, row := range briefRows(res) {
+			if task, ok := row.(proto.TaskRow); ok {
+				states = append(states, mcState(task))
+				equal(t, task.Wait == nil || task.Wait.Since == clock, true)
+			}
+		}
+		return states, res.Items
+	}
+	one, three := briefTaskID(50, 0), briefTaskID(50, 2)
+
+	t.Run("within the brief", func(t *testing.T) {
+		states, items := confirm(t, briefState(t))
+		equal(t, states, []string{"active", "queued busy", "active", "queued busy"})
+		equal(t, items, []home.Item{
+			{AI: briefA, Why: "assign", Task: one, Msg: one},
+			{AI: briefB, Why: "assign", Task: three, Msg: three},
+			{AI: aiID, Why: "confirmed", Msg: id(40)},
+		})
+	})
+
+	t.Run("behind a task the group already has, whatever stopped it", func(t *testing.T) {
+		for _, state := range []string{"active", "paused", "failed"} {
+			s := briefState(t)
+			s.Tasks[id(60)] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(60)}, State: state, Assignee: briefA, Reviewer: briefB}
+			states, items := confirm(t, s)
+			equal(t, states, []string{"queued busy", "queued busy", "active", "queued busy"})
+			equal(t, items, []home.Item{{AI: briefB, Why: "assign", Task: three, Msg: three}, {AI: aiID, Why: "confirmed", Msg: id(40)}})
+		}
+	})
+
+	t.Run("not behind a task that is queued or final", func(t *testing.T) {
+		for _, state := range []string{"queued", "done", "cancelled"} {
+			s := briefState(t)
+			s.Tasks[id(60)] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(60)}, State: state, Assignee: briefA, Reviewer: briefB}
+			states, _ := confirm(t, s)
+			equal(t, states, []string{"active", "queued busy", "active", "queued busy"})
+		}
 	})
 }
 
