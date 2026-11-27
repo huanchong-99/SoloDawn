@@ -38,12 +38,15 @@ AI, always present. A person's row has none of them.
 ```
 
 - `tier` and `skills` are the **profile**. The tier says how much work
-  the owner wants the AI given: `strong` more, and the hard tasks first;
-  `standard` a normal share; `light` less, and only simple tasks
-  (2026-11-27, the owner: it is the share of work, not a thinking level).
-  The order is `light` < `standard` < `strong`; an AI is **stronger**
-  than another when its tier is higher. Nothing in the product reads a tier but section 4, and
-  nothing reads `skills` but the turn text of section 3.
+  the owner wants the AI given: `strong` more, `standard` a normal share,
+  `light` fewer (2026-11-27, the owner: it is the share of work, not a
+  thinking level). Who gets the hard and special tasks comes from
+  `skills`, and by the higher tier when skills say nothing (2026-11-27,
+  R-165 updated). For escalation (section 4), the order is
+  `light` < `standard` < `strong`; an AI is **stronger** than another when
+  its tier is higher (`issues.md`, open limitation). Nothing in the product
+  reads a tier but section 4, and nothing reads `skills` but the turn text
+  of section 3.
 - The home stores `model` and `effort` and checks only the bounds of the
   table: it knows no CLI and no model. The host passes them to the CLI at
   each start and checks nothing either: a value the CLI refuses is handled
@@ -152,23 +155,30 @@ AI members (CLI on computer · folder · tier · state · skills):
 - An AI whose member row's `usage` has `window_pct` gets
   `window <pct>% used, resets in <n> h` after its state, `n` being the
   hours until `window_resets`, rounded up; without `window_resets` the
-  "resets" part is left out. There is no clock time and no date. A
+  "resets" part is left out. When `window_resets` is present and not in
+  the future (`<= now`), the whole `usage` part is left out because the
+  window has ended. There is no clock time and no date. A
   managed AI's `usage` comes from its CLI's events, an external AI's from
   `report_usage`. No caps.
 - The host reads the rows it holds when it composes the turn.
 
-**The secretary's instructions** gain the four rules of assignment. When
-choosing assignee and reviewer:
+**The secretary's instructions** gain the five rules of assignment,
+applied task by task (not by the request the task came from). When
+choosing assignee and reviewer, in order:
 
-1. follow the tier, the share of work the owner wants each AI given:
-   more tasks and the hard ones to `strong` AIs, fewer and simple ones to
-   `light` ones, a normal share to `standard` ones;
-2. match the work to `skills`;
-3. spread tasks that do not depend on each other over different AIs, so
-   that several subscriptions work at the same time; members with the
-   same CLI on the same computer share one subscription (not two
-   external AIs); prefer AIs with more of their window left;
-4. do not choose an AI that is `limited` or `offline`.
+1. never choose an AI that is `limited` or `offline`;
+2. the window first: give an AI with little of its window left for the
+   hours until the reset only the tasks that need that AI, and the
+   others to AIs with room; do not use up one subscription while another
+   has room (members with the same CLI on the same computer share one
+   subscription, not two external AIs);
+3. the tier is the share of tasks its owner wants each AI given
+   (`strong` more, `standard` a normal share, `light` fewer);
+4. `skills` say which tasks: the hard and the special ones go to the AIs
+   whose skills name them, and when skills say nothing, to the higher
+   tier;
+5. spread independent tasks over different AIs, so several subscriptions
+   work at the same time.
 
 The secretary decides; `propose_brief` and `set_task` accept any working
 AI, as before.
@@ -286,6 +296,7 @@ Decided by the coordinator on 2026-11-22; the choices made in writing
 this file and their answers are in `steps/parallel-plan-step-2-3.md`
 section 5, and only there.
 
-`[unverified]` That a model follows the added line and the four rules; the
+`[unverified]` That a model follows the added line and the rules of assignment,
+the boundary and the announcements; the
 home's refusal holds whether it does or not. What was run of the CLIs is
 marked in `contracts/step-3/drivers.md` section 10.

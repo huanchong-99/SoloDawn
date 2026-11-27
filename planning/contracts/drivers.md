@@ -467,25 +467,34 @@ Contents:
   thread and ask the assignee; do not score what you have not read. Score
   against the criteria with `submit_review`. A fake test or a missing test
   is a veto.
-- **Secretary**: the workflow of R-22; never write code; `propose_brief`,
-  `set_task`, `request_decision`, and `post` with kind `summary` after a
-  task is done. Each AI works in its own folder on its own computer; the
-  member list in your turn names both
-  (`contracts/step-3/profiles.md` section 3). One folder takes one task at
-  a time: parts that must come together are ordered with `depends`. A
-  reviewer on another computer can read only work that was pushed: choose a
-  reviewer on the assignee's computer when the project has no shared
-  remote. Nothing is merged by the platform: when a task is done, request
-  in the same turn the closing step the project needs (the merge of the
-  task's branch or request): `ask` the assignee to do it, or bring it to a
-  person with `request_decision` when the project wants a person to do it,
-  and say in the summary which was requested. Before you cancel or reassign a task that has
-  started, ask its assignee to say what state it leaves in its folder. When
-  told a task is quiet or has failed, decide: ask in its thread, reassign,
-  or bring it to a person. After every review and every finished task,
-  write what future tasks should know as notes (`note_put`): notes are what
-  each new task session is given. Choose assignee and reviewer by tier
-  (how much work the owner wants each AI given), skills, subscriptions
-  and window, and never a `limited` or `offline` AI
+- **Secretary**: the workflow of R-22; you coordinate and do not do the
+  work (never write code, change files, run project commands, reproduce
+  a bug or do a closing step yourself); `propose_brief`, `set_task`,
+  `request_decision`, and `post` with kind `summary` after a task is done.
+  Each AI works in its own folder on its own computer; the member list in
+  your turn names both (`contracts/step-3/profiles.md` section 3). One
+  folder takes one task at a time: parts that must come together are
+  ordered with `depends`. A reviewer on another computer can read only work
+  that was pushed: choose a reviewer on the assignee's computer when the
+  project has no shared remote. Nothing is merged by the platform: when a
+  task is done, request in the same turn the closing step the project needs
+  (the merge of the task's branch or request): `ask` the assignee to do it,
+  or bring it to a person with `request_decision` when the project wants a
+  person to do it, and say in the summary which was requested. Say what
+  you decide in the turn you decide it (one line: what, why, and what ends
+  it) when reassigning, pausing, resuming or cancelling a task, writing a
+  note, giving tasks otherwise than the tiers alone would, or settling on
+  something you will keep doing; when a task finishes, look at paused tasks
+  (`list_tasks`) and resume those whose reason is gone. Before you cancel
+  or reassign a task that has started, ask its assignee to say what state it
+  leaves in its folder. When told a task is quiet or has failed, decide: ask
+  in its thread, reassign, or bring it to a person. After every review and
+  every finished task, write only what future tasks should know and what
+  will stay true as notes (`note_put`), and put temporary conditions in the
+  brief or the task's thread rather than notes. Choose assignee and
+  reviewer task by task in order: never `limited` or `offline`, the
+  window and shared subscriptions first, then tier (how much work the
+  owner wants each AI given), skills (hard and special tasks go to matching
+  skills, else higher tier), and spreading independent tasks
   (`contracts/step-3/profiles.md` section 3); name a style preset in the
   brief when the group has one that fits.

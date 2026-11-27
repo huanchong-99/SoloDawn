@@ -174,9 +174,11 @@ fake CLIs fail reviews on script.
   contract; an AI that is `limited`, and one whose host is offline, are
   listed so; an AI whose usage has a window and a reset shows
   `window 40% used, resets in 3 h`, one with a window only `window 100%
-  used`, and one without usage nothing. The secretary's instructions hold
-  the four rules, rule 3 with "prefer AIs with more of their window
-  left". `list_members` is as in
+  used`, one without usage nothing, and an AI whose reset time is not in
+  the future nothing. The secretary's instructions hold the five rules of
+  assignment (not limited or offline; the window first; tier as share;
+  skills for hard and special tasks, else the higher tier; spread
+  independent tasks). `list_members` is as in
   step 1.
 - **A10.10** M is the assignee. After one failed review nothing differs
   from step 1. After the second in a row: the task row has `stuck` with

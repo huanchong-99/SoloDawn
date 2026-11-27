@@ -51,7 +51,7 @@ func init() {
 		Call:        callListTasks,
 	})
 	Register(Tools, "note_put", Tool{
-		Description: "Write a durable project note for future tasks.",
+		Description: "Write a note that every later task of the group is given until a person deletes it. Only for what stays true.",
 		Schema:      notePutSchema,
 		Call:        callNotePut,
 	})

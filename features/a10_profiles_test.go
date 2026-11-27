@@ -48,7 +48,7 @@ func a10ProfilesSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^C takes its next turn$`, w.secretaryTurn)
 	sc.Step(`^the turn lists every AI member with its folder, tier, state and skills as in section 3 of the profiles contract$`, w.roster)
 	sc.Step(`^the turn lists L as "limited" and S as "offline"$`, w.roster)
-	sc.Step(`^C's instructions hold the four rules of assignment$`, func() error { return w.turn.checkAssignmentRules() })
+	sc.Step(`^C's instructions hold the rules of assignment$`, func() error { return w.turn.checkAssignmentRules() })
 	sc.Step(`^list_members answers as in step 1, with each AI's folder$`, w.listMembers)
 	sc.Step(`^(M|S) (fails|passes) a review$`, w.reviewTask)
 	sc.Step(`^task T has stuck kind "([^"]*)", n (\d+) and ask (true|false)$`, w.stuck)

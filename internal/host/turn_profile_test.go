@@ -3,6 +3,7 @@ package host
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -36,7 +37,7 @@ func TestSecretaryProfileRosterOnReplacement(t *testing.T) {
 AI members (CLI on computer · folder · tier · state · skills):
 - "Claude Code" · claude on workstation · /home/dev/website · strong · working on T-12 · window 40% used, resets in 3 h · Go backend
 - "Codex" · external (ZCode) on laptop · /srv/work/website · light · limited · window 62.5% used
-- "Secretary" · claude on workstation · /home/dev/website · standard · offline · window 100% used, resets in 0 h
+- "Secretary" · claude on workstation · /home/dev/website · standard · offline
 == context · instruction`
 	assertComposed(t, r.h, r.session(GroupSession, true, ""), ReplacedTurn, nil, want, Turn{Kind: ReplacedTurn})
 }
@@ -92,5 +93,18 @@ func TestSubmitTaskRequiresAnswerBeforeCheckingCommit(t *testing.T) {
 	want := &Error{Code: "conflict", Message: "Ask a stronger AI before submitting again. Candidates: \"Secretary\" (strong)."}
 	if refusal, ok := err.(*Error); got != nil || !ok || *refusal != *want {
 		t.Fatalf("got %v, %v; want nil, %v", got, err, want)
+	}
+}
+
+func TestProfileUsageBoundaries(t *testing.T) {
+	now := time.UnixMilli(seamStart)
+	if got := profileUsage(proto.Usage{WindowPct: new(50.0), WindowResets: new(int64(seamStart))}, now); got != "" {
+		t.Fatalf("WindowResets == now gave %q, want empty", got)
+	}
+	if got := profileUsage(proto.Usage{WindowPct: new(50.0), WindowResets: new(int64(seamStart + 1))}, now); got != " · window 50% used, resets in 1 h" {
+		t.Fatalf("WindowResets == now+1 gave %q", got)
+	}
+	if got := profileUsage(proto.Usage{WindowPct: new(50.0)}, now); got != " · window 50% used" {
+		t.Fatalf("WindowResets == nil gave %q", got)
 	}
 }

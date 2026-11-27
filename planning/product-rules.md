@@ -236,14 +236,18 @@ By the owner's decision of 2026-11-26
   owner asks. The owner chooses model and level for each AI member, may
   add several members from one CLI, and gives each a profile: how much
   work it should be given and what it is good at. The node suggests the
-  share from the model's name; what the owner set is never overwritten. The secretary is shown every AI's
-  profile and state and chooses assignee and reviewer by them: more work,
-  and the hard tasks, to AIs set to more, less and simple work to AIs set
-  to less, independent tasks spread over
-  different AIs, none to an AI that is limited or offline. An assignee
-  whose task fails twice in a row in the same way (review) must ask a
-  stronger AI and get an answer before it submits
-  again; with no stronger AI in the group nothing changes. Contracts:
+  share from the model's name; what the owner set is never overwritten.
+  The secretary is shown every AI's profile, skills and live quota window,
+  and chooses assignee and reviewer task by task: never to an AI that is
+  limited or offline, respecting quota headroom and shared subscriptions
+  first, giving AIs set to more a larger share and AIs set to less a
+  smaller share, assigning hard and special tasks to AIs whose skills name
+  them (and to the higher tier when skills say nothing), and spreading
+  independent tasks over different AIs (updated 2026-11-27,
+  docs/decisions/implemented/feature/2026-11-27-r165-assignment-by-skills.md).
+  An assignee whose task fails twice in a row in the same way (review)
+  must ask a stronger AI and get an answer before it submits again; with
+  no stronger AI in the group nothing changes. Contracts:
   `contracts/step-3/profiles.md`, `contracts/step-3/drivers.md` section
   10.
 - **R-166** `[S3]` Any agent that speaks MCP joins a group as an external

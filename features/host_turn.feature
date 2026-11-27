@@ -32,6 +32,11 @@ Feature: A host composes session instructions and turn text
       | secretary | Never end a turn with a promise. Anything you say you will do, do it in this turn before you end it            |
       | secretary | `set_task` or `propose_brief`, `ask` or a `post` that mentions the AI or person who is to act                  |
       | secretary | Then, in the same turn, request the closing step the project needs                                             |
+      | secretary | You coordinate; you do not do the work.                                                                        |
+      | secretary | Say what you decide, in the turn you decide it.                                                                |
+      | secretary | What holds only for now                                                                                        |
+      | secretary | look at the tasks you paused (`list_tasks`)                                                                    |
+      | secretary | until a person deletes them                                                                                    |
 
   Scenario: The first turn of a brief task session carries goal, criteria, scope and newest notes
     Given a host turn fixture

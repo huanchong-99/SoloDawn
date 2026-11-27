@@ -230,6 +230,7 @@ func TestTalkToolsSchemasAndVisibilityMatchToolsJSON(t *testing.T) {
 	for _, name := range talkNames {
 		checkRegisteredTalkTool(t, lists.Secretary, name)
 	}
+	assertEqual(t, Tools["note_put"].Description, "Write a note that every later task of the group is given until a person deletes it. Only for what stays true.")
 	checkInvariantSchemas(t, lists)
 
 	callers := []Caller{
