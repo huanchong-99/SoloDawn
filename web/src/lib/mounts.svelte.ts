@@ -79,6 +79,26 @@ export type Mounts = { [P in Point]?: Entry<Points[P]>[] } & {
 type Placed<P extends Points[Point]> = Entry<P> & { area: string };
 type Any = { order: number; component: unknown; area: string };
 
+const byOrder = (a: Any, b: Any) => a.order - b.order || a.area.localeCompare(b.area);
+
+function takeCards(
+  cards: Map<string, { area: string; component: unknown }>,
+  area: string,
+  mounts: Mounts,
+) {
+  for (const [kind, component] of Object.entries(mounts.cards ?? {})) {
+    const taken = cards.get(kind);
+    if (taken) throw new Error(`the card ${kind} is mounted by ${taken.area} and by ${area}`);
+    cards.set(kind, { area, component });
+  }
+}
+
+function placeEntries(at: Record<string, Any[]>, area: string, mounts: Mounts) {
+  for (const point of points) {
+    at[point].push(...(mounts[point] ?? []).map((entry) => ({ ...entry, area })));
+  }
+}
+
 /** Gathers the mounts of every area, by file path (`../components/<area>/mounts.ts`): the entries
  *  of each point in order, and the card of each kind of message with its area. A kind of card
  *  that two areas mount throws, naming both. */
@@ -87,18 +107,10 @@ export function gather(files: Record<string, Mounts>) {
   const cards = new Map<string, { area: string; component: unknown }>();
   for (const [path, mounts] of Object.entries(files)) {
     const area = path.split('/').at(-2)!;
-    for (const [kind, component] of Object.entries(mounts.cards ?? {})) {
-      const taken = cards.get(kind);
-      if (taken) throw new Error(`the card ${kind} is mounted by ${taken.area} and by ${area}`);
-      cards.set(kind, { area, component });
-    }
-    for (const point of points) {
-      at[point].push(...(mounts[point] ?? []).map((entry) => ({ ...entry, area })));
-    }
+    takeCards(cards, area, mounts);
+    placeEntries(at, area, mounts);
   }
-  for (const point of points) {
-    at[point].sort((a, b) => a.order - b.order || a.area.localeCompare(b.area));
-  }
+  for (const point of points) at[point].sort(byOrder);
   return {
     at: at as unknown as { [P in Point]: Placed<Points[P]>[] },
     cards: cards as ReadonlyMap<string, { area: string }>,

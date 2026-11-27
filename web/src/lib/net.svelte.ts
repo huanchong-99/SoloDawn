@@ -98,7 +98,6 @@ function startLive(
   setWatchHost: (watch: WatchHost | undefined) => void,
 ) {
   const activeTab = (device: Device, signal: AbortSignal) => {
-    if (signal.aborted) return Promise.resolve();
     let session: Session | undefined;
     let joining: AbortController | undefined;
     let epoch = 0;
@@ -291,7 +290,10 @@ function startLive(
   loadDevice({ crypto, idb: () => indexedDB }).then(
     (device) => {
       if (stopSignal.aborted) return;
-      const run = (sig: AbortSignal) => activeTab(device, AbortSignal.any([sig, stopSignal]));
+      const run = (sig: AbortSignal) => {
+        const both = AbortSignal.any([sig, stopSignal]);
+        return both.aborted ? Promise.resolve() : activeTab(device, both);
+      };
       void runTab(device.id, run, waitForUseHere);
     },
     () => {},

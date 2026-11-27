@@ -131,18 +131,26 @@ export function taskSteps(group: Group, task: TaskRow, status: string) {
 }
 
 /** Formats the review line of `<dl class="kv">` from `task.review`, `task.reviewer` and `task.pass`. */
-export function reviewLine(group: Group, task: TaskRow) {
+export function reviewLine(
+  group: Group,
+  task: TaskRow,
+): { meta: string; verdict?: string; tone?: 'ok' | 'danger' } {
   const pass = `${task.pass}`;
-  if (task.review) {
-    const verdict = t(task.review.ok ? 'task.review.ok' : 'task.review.fail')
-      .replace('{round}', `${task.review.round}`)
-      .replace('{score}', `${task.review.score}`);
-    const who = group.member(task.review.by)?.name;
-    const meta = who
-      ? t('task.review.by').replace('{who}', who).replace('{pass}', pass)
-      : t('task.review.pass').replace('{pass}', pass);
-    return { verdict, tone: (task.review.ok ? 'ok' : 'danger') as 'ok' | 'danger', meta };
-  }
+  return task.review ? reviewed(group, task.review, pass) : pending(group, task, pass);
+}
+
+function reviewed(group: Group, review: NonNullable<TaskRow['review']>, pass: string) {
+  const verdict = t(review.ok ? 'task.review.ok' : 'task.review.fail')
+    .replace('{round}', `${review.round}`)
+    .replace('{score}', `${review.score}`);
+  const who = group.member(review.by)?.name;
+  const meta = who
+    ? t('task.review.by').replace('{who}', who).replace('{pass}', pass)
+    : t('task.review.pass').replace('{pass}', pass);
+  return { verdict, tone: (review.ok ? 'ok' : 'danger') as 'ok' | 'danger', meta };
+}
+
+function pending(group: Group, task: TaskRow, pass: string) {
   const who = task.reviewer ? group.member(task.reviewer)?.name : undefined;
   const meta = who
     ? t('task.review.pending').replace('{who}', who).replace('{pass}', pass)
