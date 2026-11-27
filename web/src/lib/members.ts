@@ -42,6 +42,10 @@ export function aiMembers(group: Group): AIMemberRow[] {
 /** Whether the group has an AI member. */
 export const hasAI = (group: Group): boolean => group.members.some((m) => m.kind === 'ai');
 
+/** Whether `group` already has an AI member running `agent` on `device`. */
+export const hasHostAgent = (group: Group, device: string, agent: string): boolean =>
+  aiMembers(group).some((m) => m.host === device && m.cli === agent);
+
 /** Human members of the group, in name order. */
 export const humanMembers = (group: Group): HumanMemberRow[] =>
   group.members.filter((m): m is HumanMemberRow => m.kind === 'human');
@@ -265,8 +269,7 @@ export function candidatesOf(
       loginOk: entry.login_ok,
       inGroup:
         entry.groups.some((g) => g.g === group?.g) ||
-        (group !== undefined &&
-          aiMembers(group).some((m) => m.host === info.device && m.cli === entry.agent)),
+        (group !== undefined && hasHostAgent(group, info.device, entry.agent)),
     }));
   });
 }
@@ -325,24 +328,32 @@ export function joinError({ code, msg }: Refusal): string | undefined {
 }
 
 /** An AI to add to a group: the CLI on one of the person's computers, its name and folder there,
- *  whether it is the secretary, and its profile. */
+ *  whether it is the secretary, whether it follows its CLI's defaults, and its profile. */
 export interface NewAI {
   candidate: Candidate;
   name: string;
   secretary: boolean;
   /** The folder it works in, from `Nodes.folders` or typed by the person. */
   workspace: string;
+  follow: boolean;
   draft: Draft;
 }
+
+const joinProfile = (external: boolean, follow: boolean, draft: Draft) => {
+  const { account, tool, ...profile } = draft;
+  return {
+    ...(follow ? { follow: true } : profile),
+    ...(external && { account, tool: tool || undefined }),
+  };
+};
 
 /** Signs and sends `host.join` to the computer of the AI, for group `g` homed on the device
  *  `home`; the refusal, or nothing on ok (contracts/commands.md section 2). */
 export async function joinGroup(g: string, home: string, ai: NewAI) {
-  const { candidate, name, secretary, workspace, draft } = ai;
+  const { candidate, name, secretary, workspace, follow, draft } = ai;
   const target = candidate.home;
   if (!target.ctl) return lost().err;
   const external = candidate.agent === 'external';
-  const { account, tool, ...profile } = draft;
   const env = await target.me.sign(
     JSON.stringify({
       t: 'host.join',
@@ -355,8 +366,7 @@ export async function joinGroup(g: string, home: string, ai: NewAI) {
       name,
       secretary: !external && secretary,
       workspace,
-      ...profile,
-      ...(external && { account, tool: tool || undefined }),
+      ...joinProfile(external, follow, draft),
     }),
   );
   const answer = await target.ctl.request({ t: 'cmd', env }).catch(lost);

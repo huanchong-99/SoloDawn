@@ -3,6 +3,7 @@ import { flushSync } from 'svelte';
 import { expect, vi } from 'vitest';
 import { homes, type Group } from '../src/lib/groups.svelte';
 import { goldens } from '../src/lib/mock';
+import { nodes } from '../src/lib/nodes.svelte';
 import * as p from '../src/lib/proto';
 import { browser, example, ownedNode, owner, TestHome, user, type OwnedNode } from './home';
 import CreateGroup from '../src/components/groups/CreateGroup.svelte';
@@ -16,6 +17,7 @@ import {
   one,
   openPage,
   otherBrowser,
+  read as readText,
   show,
   text,
   texts,
@@ -65,7 +67,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     await read();
   }
 
-  AfterEachScenario(closePage);
+  AfterEachScenario(async () => {
+    await closePage();
+    nodes.infos.clear();
+  });
 
   Background(({ Given }) => {
     Given(
@@ -880,4 +885,108 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       });
     },
   );
+
+  Scenario('The create-group dialog follows by default', ({ Given, When, Then }) => {
+    let rig: OwnedNode;
+    const aiSection = (cli: string) =>
+      all('dialog div.ai').find((row) => readText(row.querySelector('b')!) === cli)!;
+
+    Given('the owner\'s computer "desk" has Claude Code and Codex with defaults', async () => {
+      const base = p.decode(p.HostInfo, goldens['host-info-answer']);
+      rig = ownedNode('desk', 'desk-device', {
+        homes: [],
+        agents: [
+          { ...base.agents[0], groups: [] },
+          {
+            ...base.agents[1],
+            account: 'api_key',
+            login_ok: true,
+            models: [
+              { model: 'gpt-5.4', name: 'GPT-5.4', efforts: ['low', 'high'], tier: 'strong' },
+            ],
+            defaults: {
+              model: 'gpt-5.4',
+              effort: 'high',
+              tier: 'strong',
+              skills: 'Review',
+            },
+            groups: [],
+          },
+        ],
+      });
+      rig.home.reply = (payload) => (payload.t === 'host.join' ? { ok: true } : {});
+      homes.push(rig.store);
+      await rig.connect();
+    });
+
+    When('the owner ticks Claude Code and Codex in the create-group dialog', async () => {
+      openPage();
+      one('.head button').click();
+      flushSync();
+      await vi.waitFor(() => expect(all('dialog div.ai')).toHaveLength(2));
+      for (const cli of ['Claude Code', 'Codex']) {
+        aiSection(cli).querySelector<HTMLInputElement>('input[type=checkbox]')!.click();
+        flushSync();
+      }
+      await vi.waitFor(() =>
+        expect(texts('dialog .ai-fields .path-row code')).toEqual([
+          '/home/dev/website',
+          '/home/dev/website',
+        ]),
+      );
+    });
+
+    Then('each has the switch on', () => {
+      const switches = all<HTMLButtonElement>('dialog .ai-fields [role="switch"]');
+      expect(switches).toHaveLength(2);
+      expect(switches.map((sw) => sw.getAttribute('aria-checked'))).toEqual(['true', 'true']);
+      expect(all('dialog .ai-fields select, dialog .ai-fields .tiers')).toEqual([]);
+    });
+
+    When("the owner turns Codex's switch off and creates the group", async () => {
+      const codexRow = aiSection('Codex');
+      codexRow.querySelector<HTMLButtonElement>('[role="switch"]')!.click();
+      flushSync();
+      expect(codexRow.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('false');
+      const [model, effort] = codexRow.querySelectorAll<HTMLSelectElement>('select');
+      expect(model.value).toBe('gpt-5.4');
+      expect(effort.value).toBe('high');
+      expect(codexRow.querySelector<HTMLInputElement>('.tiers input:checked')!.value).toBe(
+        'strong',
+      );
+      const [name, member] = all<HTMLInputElement>('dialog .two input');
+      fill(name, 'Studio');
+      fill(member, 'Alex');
+      create();
+      await vi.waitFor(() => expect(location.hash).toMatch(/^#\/groups\/.{22}$/));
+    });
+
+    Then(
+      "Claude Code's host.join carries follow, and Codex's carries its four fields and no follow",
+      () => {
+        const joins = rig.home.asked
+          .filter((req) => req.t === 'cmd')
+          .map(signed)
+          .filter((cmd) => cmd.t === 'host.join') as Record<string, unknown>[];
+        expect(joins).toHaveLength(2);
+        const claudeJoin = joins.find((j) => j.agent === 'claude')!;
+        const codexJoin = joins.find((j) => j.agent === 'codex')!;
+        expect(claudeJoin.follow).toBe(true);
+        expect(
+          'model' in claudeJoin ||
+            'effort' in claudeJoin ||
+            'tier' in claudeJoin ||
+            'skills' in claudeJoin,
+        ).toBe(false);
+        expect(codexJoin).toMatchObject({
+          agent: 'codex',
+          model: 'gpt-5.4',
+          effort: 'high',
+          tier: 'strong',
+          skills: 'Review',
+        });
+        expect('follow' in codexJoin).toBe(false);
+      },
+    );
+  });
 });

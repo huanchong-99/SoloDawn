@@ -116,3 +116,19 @@ Feature: Member panel and adding an AI to a group
     Then the member adds an AI from their connected computer
     When the group home disconnects
     Then the "Add AI" button is disabled with reason "Cannot reach the group home."
+
+  Scenario: A new AI follows the computer's defaults
+    Given on "workstation" Claude Code has defaults "Opus", "high", More and "Go backend" and is not in the group yet
+    When the owner opens "Add AI" and chooses "Claude Code · workstation"
+    Then the switch "Use this computer's defaults" is on, with "Opus · high · Work share More · Go backend" under it
+    And no model, level or work share field is shown
+    When the owner submits the add-AI dialog
+    Then "workstation" receives a signed "host.join" with follow and no model, effort, tier or skills
+
+  Scenario: A second Claude Code in the group starts with its own setting
+    Given on "workstation" Claude Code has defaults "Opus", "high", More and "Go backend" and the group already has a Claude Code member from "workstation"
+    When the owner opens "Add AI" and chooses "Claude Code · workstation"
+    Then the switch is off, with the note that a second one usually runs another model
+    And the model field shows "Opus" and the work share More
+    When the owner chooses model "Haiku" and submits the add-AI dialog
+    Then "workstation" receives a signed "host.join" with model "haiku" and no follow

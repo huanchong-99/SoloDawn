@@ -12,6 +12,7 @@ import {
   found,
   freeName,
   hasAI,
+  hasHostAgent,
   invitationText,
   isAdmin,
   joinError,
@@ -167,11 +168,23 @@ describe('member lists, roles and addDisabledReason', () => {
     expect(aiMembers(g2).map((m) => m.name)).toEqual(['AAA Sec', 'ZZZ Worker']);
   });
 
-  it('says whether a group has an AI member', () => {
+  it('says whether a group has an AI member and whether a device/CLI pair is already in it', () => {
     const { group } = makeGroup();
     expect(hasAI(group)).toBe(false);
-    group.apply([row<p.AIMemberRow>('row-member-ai', { id: 'ai-a', g: gid, name: 'Alpha AI' })]);
+    expect(hasHostAgent(group, 'dev-1', 'claude')).toBe(false);
+    group.apply([
+      row<p.AIMemberRow>('row-member-ai', {
+        id: 'ai-a',
+        g: gid,
+        name: 'Alpha AI',
+        host: 'dev-1',
+        cli: 'claude',
+      }),
+    ]);
     expect(hasAI(group)).toBe(true);
+    expect(hasHostAgent(group, 'dev-1', 'claude')).toBe(true);
+    expect(hasHostAgent(group, 'dev-1', 'codex')).toBe(false);
+    expect(hasHostAgent(group, 'dev-2', 'claude')).toBe(false);
   });
 
   it('checks isAdmin across owner, admin, regular member and missing me', () => {
@@ -986,6 +999,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
       name: 'Lead',
       secretary: true,
       workspace,
+      follow: false,
       draft,
       ...changes,
     });
@@ -1065,10 +1079,27 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
     });
     expect(await joinGroup(gid, homeDev, scout('team', ''))).toBeUndefined();
     expect(fields(3)).toEqual({ ...fields(2), account: 'team', tool: undefined });
-    const other = ai({ draft: { ...draft, account: 'team', tool: 'other' } });
+    const other = ai({ follow: false, draft: { ...draft, account: 'team', tool: 'other' } });
     expect(await joinGroup(gid, homeDev, other)).toBeUndefined();
     expect(fields(4)).toEqual({
       ...fields(0),
+    });
+
+    const following = ai({ name: 'Follower', secretary: false, follow: true });
+    expect(await joinGroup(gid, homeDev, following)).toBeUndefined();
+    const followPayload = p.decode(p.HostJoin, (sent[5] as { env: p.Envelope }).env.p);
+    expect(followPayload).toEqual({
+      t: 'host.join',
+      n: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
+      ts: 1763600000123,
+      to: 'dev-2',
+      g: gid,
+      home: homeDev,
+      agent: 'codex',
+      name: 'Follower',
+      secretary: false,
+      workspace,
+      follow: true,
     });
 
     target.ctl = makeOnlineCtl(async () => ({
@@ -1176,6 +1207,7 @@ describe('people and groups made with them', () => {
       name,
       secretary: false,
       workspace: '/x',
+      follow: false,
       draft: newDraft(),
     });
     const founding = {

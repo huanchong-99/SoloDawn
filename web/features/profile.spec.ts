@@ -329,6 +329,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       all<HTMLInputElement>('dialog .choice input')[1].click();
       flushSync();
       await vi.waitFor(() => expect(one('dialog .path-row code').textContent).toContain('/'));
+      one<HTMLButtonElement>('dialog [role="switch"]').click();
+      flushSync();
       one<HTMLInputElement>('dialog input[value="light"]').click();
       const input = one<HTMLInputElement>(
         'dialog input[placeholder="What this AI is good at, in one line"]',

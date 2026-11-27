@@ -331,6 +331,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         pickOpus();
         all<HTMLInputElement>('dialog .choice input')[1].click();
         flushSync();
+        one<HTMLButtonElement>('dialog [role="switch"]').click();
+        flushSync();
       });
       Then('the model and level draft return to the CLI defaults', () => {
         expect(selects(one('dialog'))[0].value).toBe('');
