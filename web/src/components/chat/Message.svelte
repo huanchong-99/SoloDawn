@@ -10,8 +10,14 @@
   import Waits from '../queue/Waits.svelte';
 
   /** One message of the main line. `joined`: it follows a message of the same author closely, and
-   *  is drawn under it without a head of its own. */
-  let { group, msg, joined }: { group: Group; msg: MsgRow; joined: boolean } = $props();
+   *  is drawn under it without a head of its own. `above`: it stands above an unclosed gap, so
+   *  scroll anchoring skips it. */
+  let {
+    group,
+    msg,
+    joined,
+    above = false,
+  }: { group: Group; msg: MsgRow; joined: boolean; above?: boolean } = $props();
 
   const author = $derived(group.member(msg.by));
   const time = $derived(clock(msg.ts, prefs.lang));
@@ -52,10 +58,10 @@
 
 {#if msg.by === 'system' && Card}
   <!-- Written by the home, and drawn whole by the component mounted for its kind. -->
-  <div class="msg sys" id={`m-${msg.id}`}><Card {group} {msg} /></div>
+  <div class="msg sys" class:above id={`m-${msg.id}`}><Card {group} {msg} /></div>
 {:else if msg.by === 'system'}
   <!-- Written by the home: a quiet line, with no author. -->
-  <p class="msg note" id={`m-${msg.id}`}>
+  <p class="msg note" class:above id={`m-${msg.id}`}>
     <span class="badge">{t(`chat.kind.${msg.kind}`)}</span>
     {#if msg.kind === 'system'}
       <code>{msg.body.code}</code>
@@ -68,7 +74,7 @@
     <time datetime={new Date(msg.ts).toISOString()}>{time}</time>
   </p>
 {:else}
-  <article class="msg" class:joined class:mine class:live id={`m-${msg.id}`}>
+  <article class="msg" class:joined class:mine class:live class:above id={`m-${msg.id}`}>
     {#if !joined}
       {#if !mine}
         <Avatar
@@ -108,6 +114,9 @@
     row-gap: 4px;
     margin-top: var(--sp-4);
     scroll-margin-top: var(--sp-12);
+  }
+  .above {
+    overflow-anchor: none;
   }
   /* A message that arrives while the chat is open comes in from its own side. */
   .live {

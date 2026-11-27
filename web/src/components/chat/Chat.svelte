@@ -163,14 +163,14 @@
         {/if}
       </p>
       {#each line as day (day.key)}
-        <section class="day">
+        <section class="day" class:above={day.msgs.at(-1)!.msg.pos < group.gap}>
           <p class="sep">
             <time datetime={new Date(day.day).toISOString()}>
               {dayLabel(day.day, now(), prefs.lang)}
             </time>
           </p>
           {#each day.msgs as { msg, joined } (msg.id)}
-            <Message {group} {msg} {joined} />
+            <Message {group} {msg} {joined} above={msg.pos < group.gap} />
           {/each}
         </section>
       {:else}
@@ -341,6 +341,12 @@
     min-height: 40px;
     color: var(--text-3);
     font-size: var(--fs-xs);
+  }
+  /* Scroll anchoring skips the top edge always, and messages and whole days above a gap, so a
+     page landing above or in the gap leaves what is read below in place. */
+  .edge,
+  .above {
+    overflow-anchor: none;
   }
   /* Three dots that breathe in turn while a page is on its way. */
   .dots {

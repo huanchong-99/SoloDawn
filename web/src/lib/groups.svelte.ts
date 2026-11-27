@@ -37,7 +37,7 @@ const pageSize = 50;
 /** Where the reading of one thread, or of the main line, has got to. */
 export class Paging {
   /** The `before` of the next page, once a page was read: the lowest `pos` received. */
-  before: number | undefined;
+  before = $state<number>();
   /** Whether the home has older messages. Unknown, so true, until a page says. */
   more = $state(true);
   /** A page is on its way. */
@@ -122,6 +122,15 @@ export class Group {
   info = $derived.by(() => this.rows.get(key('group', this.g)) as p.GroupRow | undefined);
   /** When the main line last got a message; before the first one, when the group was made. */
   latest = $derived(this.main.at(-1)?.ts ?? this.info?.created ?? 0);
+  /** Where the first page of the main line starts, fixed when its read ends so arriving
+   *  messages do not move the gap. */
+  #floor = $state(0);
+  /** The `pos` where the next page of the main line starts; 0 once its last page is in. A
+   *  message of the main line with a lower `pos` stands above a gap. */
+  gap = $derived.by(() => {
+    const paging = this.paging();
+    return paging.more ? (paging.before ?? this.#floor) : 0;
+  });
 
   /** The messages of one task's thread, in the order of creation. */
   thread(task: string) {
@@ -193,6 +202,7 @@ export class Group {
    *  that overtook it will. Paging starts again at `synced`, from what the read brought. */
   async sync(ctl: p.Ctl) {
     const read = (this.#read = {});
+    const cold = this.cursor === 0;
     this.live = false;
     const answer = await ctl
       .request({ t: 'sync', g: this.g, since: this.cursor, state_only: false })
@@ -207,7 +217,8 @@ export class Group {
     this.home.answered(this);
     this.cursor = answer.seq;
     this.live = true;
-    this.#paging = new Map();
+    this.#paging = new Map([[null, new Paging()]]);
+    this.#floor = cold ? this.#start(null) : 0;
     for (const row of this.#requests()) void this.#fetchRow(read, ctl, row);
   }
 

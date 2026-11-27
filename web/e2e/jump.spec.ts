@@ -97,9 +97,18 @@ test.each(['no-preference', 'reduce'] as const)(
     // The jump has landed: the line is at its top, and its scroll has been seen.
     await expect.poll(() => atTop(page), { timeout: 8_000 }).toBe(true);
     await page.evaluate(() => new Promise(requestAnimationFrame));
-    // A scroll that is not the jump's: Space, a scrollbar, focus, a screen reader or find.
-    await page.evaluate(() =>
-      document.querySelector('.scroller')!.scrollBy({ top: 400, behavior: 'instant' }),
+    const readId = await page.evaluate(() => {
+      const all = [...document.querySelectorAll('.msg')];
+      return all[all.findIndex((el) => el.id === 'm-far-card') + 1].id;
+    });
+    const motions = (el: Element) => Promise.all(el.getAnimations().map((each) => each.finished));
+    await page.locator('#m-far-card').evaluate(motions);
+    await page.locator(`#${readId}`).evaluate(motions);
+    const step = 170;
+    // A scroll that is not the jump's, leaving the card partly in view as a short step does.
+    await page.evaluate(
+      (by) => document.querySelector('.scroller')!.scrollBy({ top: by, behavior: 'instant' }),
+      step,
     );
     await expect
       .poll(() =>
@@ -108,14 +117,48 @@ test.each(['no-preference', 'reduce'] as const)(
       .toBe('');
     const card = () =>
       page.evaluate(() => document.getElementById('m-far-card')!.getBoundingClientRect().top);
+    const cardBottom = () =>
+      page.evaluate(() => document.getElementById('m-far-card')!.getBoundingClientRect().bottom);
+    const reading = () =>
+      page.evaluate(
+        (id) => document.querySelector(`#${id} .text`)!.getBoundingClientRect().top,
+        readId,
+      );
+    expect(await cardBottom()).toBeGreaterThan(0);
     const scrolledTo = await card();
+    const readAt = await reading();
     await expect.poll(() => page.evaluate(() => window.jumpCast.waiting())).toBe(1);
     const oldest = await page.evaluate(() => window.jumpCast.release());
     await page.locator(`#m-${oldest}`).waitFor({ state: 'attached' });
-    // The page below the card does not bring the card back to where the jump put it, 400 px down.
-    expect(Math.abs((await card()) - (scrolledTo + 400))).toBeGreaterThan(100);
+    // The page below the card does not bring the card back to where the jump put it, nor move
+    // what the person is reading below it.
+    expect(Math.abs((await card()) - (scrolledTo + step))).toBeGreaterThan(100);
+    expect(Math.abs((await reading()) - readAt)).toBeLessThanOrEqual(1);
   },
 );
+
+test('keeps the reader in place when a page lands at the top edge in ordinary reading', async () => {
+  const page = await open('reduce', '');
+  await page.locator('.scroller .msg').last().waitFor();
+  const motions = (el: Element) => Promise.all(el.getAnimations().map((each) => each.finished));
+  await page.evaluate(() => {
+    const scroller = document.querySelector('.scroller')!;
+    scroller.scrollTo({ top: scroller.clientHeight - scroller.scrollHeight, behavior: 'instant' });
+  });
+  await expect.poll(() => atTop(page), { timeout: 8_000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.jumpCast.waiting())).toBe(1);
+  const readId = await page.evaluate(() => document.querySelectorAll('.scroller .msg')[1].id);
+  await page.locator(`#${readId}`).evaluate(motions);
+  const reading = () =>
+    page.evaluate(
+      (id) => document.querySelector(`#${id} .text`)!.getBoundingClientRect().top,
+      readId,
+    );
+  const readAt = await reading();
+  const oldest = await page.evaluate(() => window.jumpCast.release());
+  await page.locator(`#m-${oldest}`).waitFor({ state: 'attached' });
+  expect(Math.abs((await reading()) - readAt)).toBeLessThanOrEqual(1);
+});
 
 test('follows new messages after a jump to one at the end of the line', async () => {
   const page = await open('reduce', '');
