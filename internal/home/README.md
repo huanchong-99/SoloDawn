@@ -30,9 +30,10 @@ sent and reads it for one rule, that one folder takes one task at a time
 
 `profile.go` validates the four optional AI profile fields. New AIs start
 with the CLI default model and effort, tier `standard` and empty skills
-unless the join supplies values. Only the AI's owner can edit these fields;
-the AI's host cannot send a profile edit. The home checks bounds, not which
-models or efforts a CLI offers.
+unless the join supplies values, and store `follow` as sent. The home
+checks bounds, not which models or efforts a CLI offers; see
+[profiles](../../planning/contracts/step-3/profiles.md) sections 1a and 2
+for who may change profile fields and `follow`.
 
 `external.go` validates the optional `tool` label for `cli: external`.
 The label has 1–32 Unicode code points without control characters. The
@@ -534,16 +535,21 @@ function that moves a task calls it and adds nothing to its rules.
   secretary requires an admin, else `forbidden`. An `id` or `name` already held by a human or AI
   member of the group is `conflict`. The new `ai` `member` row starts with `state` `dormant`,
   `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home` and `direct`
-  otherwise, `allow` `[]` and `usage` `{}`; when `secretary` is true, any previous secretary loses
+  otherwise, `allow` `[]`, `usage` `{}`, and `follow` as sent; when `secretary` is true, any previous secretary loses
   the flag and `group.secretary` becomes `id`.
 - **`member/set`.** Handles both a person's `role` (`peopleSet`, `cmd_people.go:136-145`: only the
   group owner changes another person's `role`, to `admin` or `member`, else `forbidden` or
   `bad_request`; the owner's own row cannot be changed) and AI settings: sending none of `name`,
-  `account`, `allow`, `approvers`, `tool` and `ProfileSet` (`model`, `effort`, `tier`, `skills`),
-  an empty `name`, or an unknown `account` is `bad_request`. An unknown `id` is `not_found`. For an
-  AI, the signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User == ai.User`) or, when
-  `approvers` is the only field sent, the AI's host (`s.Hosts`), else `forbidden`. A `name` held
-  by another member in the group is `conflict`; keeping the AI's own `name` is accepted.
+  `account`, `allow`, `approvers`, `tool`, `follow` and `ProfileSet` (`model`, `effort`, `tier`,
+  `skills`), an empty `name`, an unknown `account`, or a non-`true` `follow` is `bad_request`. An
+  unknown `id` is `not_found`. For an AI, the rules of [profiles](../../planning/contracts/step-3/profiles.md)
+  section 2 apply: the signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User == ai.User`),
+  its host (`s.Hosts`) sending `approvers` alone when no profile field or `follow` is set, or its
+  host sending `follow` together with all four profile fields and no other field on a row that has
+  `follow` (`conflict` when the row has its own profile, `forbidden` for any other host
+  profile/`follow` combination). Any edit with `follow` or a profile field writes `follow` from
+  the command (setting `true` or clearing it); other edits keep `follow` as it is. A `name` held by
+  another member in the group is `conflict`; keeping the AI's own `name` is accepted.
 - **`member/remove`.** An unknown `id` is `not_found`. Removes either a human member
   (`peopleMayRemove`, `peopleRemove` in `cmd_people.go:147-167`: an owner is never removed; the
   person themselves or the group owner may remove anyone else, and an admin removes only a person
@@ -1016,8 +1022,8 @@ review, a card decided while a task is paused and a reviewer named while it is p
 
 `cmd_group_test.go` and `cmd_member_test.go` send `group/create`, `group/set`, `member/add_ai`,
 `member/set` and `member/remove` through `Commands.Apply` with fakes of `Receipts` and `Disk`,
-covering every refusal, boundary and secretary transition. `features/home_group.feature` holds the
-home command part of A2.1 and the member-removal part of A5.18.
+covering every refusal, boundary, follow rule and secretary transition. `features/home_group.feature` holds the
+home command part of A2.1 and the member-removal part of A5.18, and `features/home_profile.feature` holds the home rules of A10.8, A10.10–A10.12 and A10.29–A10.31.
 
 `cmd_brief_test.go` sends every command of the briefs through `Commands.Apply` with fakes of
 `Receipts` and `Disk`, with a case for every refusal and branch. `features/home_brief.feature`

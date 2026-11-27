@@ -103,6 +103,21 @@ func TestMemberAddAIHostAndPath(t *testing.T) {
 	equal(t, briefRows(res), []any{wantLocal})
 }
 
+func TestMemberAddAIFollow(t *testing.T) {
+	s := grpState(t)
+	cmd := memAddCmd(97, id(97), "claude", "Following AI", "personal", false)
+	cmd.Follow = true
+	cmd.ProfileSet = proto.ProfileSet{
+		Model: new("opus"), Effort: new("high"), Tier: new("strong"), Skills: new("Go backend"),
+	}
+	res := grpApply(t, s, memDisk{}, receipts{}, laptop, cmd)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	got := res.Rows[0].Value().(proto.AIMemberRow)
+	equal(t, got.Follow, proto.True(true))
+	equal(t, got.Profile, proto.Profile{Model: "opus", Effort: "high", Tier: "strong", Skills: "Go backend"})
+	grpNoNulls(t, got)
+}
+
 func TestMemberAddAISecretaryRules(t *testing.T) {
 	t.Run("a non-admin adds a working AI while the group has a secretary", func(t *testing.T) {
 		s := grpState(t)
@@ -202,6 +217,14 @@ func TestMemberAddAIRefusals(t *testing.T) {
 			change: func(p *proto.MemberAddAI) { p.Name = "Codex" },
 			code:   "conflict",
 		},
+		"with follow false": {
+			raw:  `{"t":"member","n":"` + id(98) + `","ts":1763600000000,"g":"` + groupID + `","op":"add_ai","id":"` + id(98) + `","cli":"claude","name":"Bad Follow","workspace":"/home/dev/website","account":"personal","secretary":false,"approvers":[],"follow":false}`,
+			code: "bad_request",
+		},
+		"with follow null": {
+			raw:  `{"t":"member","n":"` + id(99) + `","ts":1763600000000,"g":"` + groupID + `","op":"add_ai","id":"` + id(99) + `","cli":"claude","name":"Null Follow","workspace":"/home/dev/website","account":"personal","secretary":false,"approvers":[],"follow":null}`,
+			code: "bad_request",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := grpState(t)
@@ -300,6 +323,16 @@ func TestMemberSetHostOnlyForApprovers(t *testing.T) {
 	equal(t, res.Answer, store.Outcome{OK: true})
 	equal(t, res.Rows[0].Value().(proto.AIMemberRow).Approvers, []string{device(6).ID(), guest.ID()})
 
+	t.Run("host also sets role", func(t *testing.T) {
+		st := makeHostState(t)
+		withRole := memSetCmd(102, grpWorkerA)
+		withRole.Approvers = &approvers
+		withRole.Role = new("admin")
+		res := grpApply(t, st, memDisk{}, receipts{}, guest, withRole)
+		equal(t, res.Answer, store.Outcome{OK: true})
+		equal(t, res.Rows[0].Value().(proto.AIMemberRow).Approvers, []string{device(6).ID(), guest.ID()})
+	})
+
 	for name, addField := range map[string]func(*proto.MemberSet){
 		"host also sets name":    func(p *proto.MemberSet) { v := "Renamed"; p.Name = &v },
 		"host also sets account": func(p *proto.MemberSet) { v := "team"; p.Account = &v },
@@ -368,6 +401,19 @@ func TestMemberSetRefusals(t *testing.T) {
 			set:  func(p *proto.MemberSet) { v := "Helper"; p.Name = &v },
 			code: "conflict",
 		},
+		"with follow false": {
+			raw:  `{"t":"member","n":"` + id(105) + `","ts":1763600000000,"g":"` + groupID + `","op":"set","id":"` + grpWorkerA + `","follow":false}`,
+			code: "bad_request",
+		},
+		"with follow null": {
+			raw:  `{"t":"member","n":"` + id(106) + `","ts":1763600000000,"g":"` + groupID + `","op":"set","id":"` + grpWorkerA + `","follow":null}`,
+			code: "bad_request",
+		},
+		"with follow for an unknown member": {
+			target: id(99),
+			set:    func(p *proto.MemberSet) { p.Follow = true },
+			code:   "not_found",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := grpState(t)
@@ -386,6 +432,261 @@ func TestMemberSetRefusals(t *testing.T) {
 			cmd := memSetCmd(104, target)
 			c.set(&cmd)
 			briefRefused(t, grpApply(t, s, memDisk{}, receipts{}, by, cmd), c.code)
+		})
+	}
+}
+
+func memFullProfile() proto.ProfileSet {
+	return proto.ProfileSet{Model: new("opus"), Effort: new("high"), Tier: new("strong"), Skills: new("Go backend")}
+}
+
+func TestMemberSetFollowTransitions(t *testing.T) {
+	// Owner restores follow alone, keeping current profile; host then writes all four fields.
+	s := grpState(t)
+	ai := s.AIs[grpWorkerA]
+	ai.Profile = proto.Profile{Model: "haiku", Effort: "", Tier: "light", Skills: "docs"}
+	s.AIs[grpWorkerA] = ai
+
+	restore := memSetCmd(120, grpWorkerA)
+	restore.Follow = true
+	res := grpApply(t, s, memDisk{}, receipts{}, browser, restore)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	got := res.Rows[0].Value().(proto.AIMemberRow)
+	equal(t, got.Follow, proto.True(true))
+	equal(t, got.Profile, proto.Profile{Model: "haiku", Effort: "", Tier: "light", Skills: "docs"})
+	s.Commit(res)
+
+	// Non-profile owner edits preserve follow.
+	rename := memSetCmd(121, grpWorkerA)
+	rename.Name = new("Codex Follow")
+	res = grpApply(t, s, memDisk{}, receipts{}, browser, rename)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, res.Rows[0].Value().(proto.AIMemberRow).Follow, proto.True(true))
+	s.Commit(res)
+
+	// Host non-profile edits when host belongs to owner also preserve follow.
+	reaccount := memSetCmd(122, grpWorkerA)
+	reaccount.Account = new("team")
+	res = grpApply(t, s, memDisk{}, receipts{}, laptop, reaccount)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, res.Rows[0].Value().(proto.AIMemberRow).Follow, proto.True(true))
+	s.Commit(res)
+
+	// Host updates all four fields when follow is true.
+	hostSync := memSetCmd(123, grpWorkerA)
+	hostSync.Follow = true
+	hostSync.ProfileSet = memFullProfile()
+	res = grpApply(t, s, memDisk{}, receipts{}, laptop, hostSync)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	got = res.Rows[0].Value().(proto.AIMemberRow)
+	equal(t, got.Follow, proto.True(true))
+	equal(t, got.Profile, proto.Profile{Model: "opus", Effort: "high", Tier: "strong", Skills: "Go backend"})
+	s.Commit(res)
+
+	// Host of another user can update all four fields when follow is true, and approvers alone keeps follow.
+	foreign := s.AIs[grpWorkerB]
+	foreign.User, foreign.Host, foreign.Follow = device(6).ID(), guest.ID(), true
+	foreign.Profile = proto.Profile{Tier: "standard"}
+	s.AIs[grpWorkerB] = foreign
+	approversOnly := memSetCmd(124, grpWorkerB)
+	approversOnly.Approvers = &[]string{guest.ID()}
+	res = grpApply(t, s, memDisk{}, receipts{}, guest, approversOnly)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, res.Rows[0].Value().(proto.AIMemberRow).Follow, proto.True(true))
+	s.Commit(res)
+	foreignSync := memSetCmd(125, grpWorkerB)
+	foreignSync.Follow = true
+	foreignSync.ProfileSet = proto.ProfileSet{Model: new(""), Effort: new(""), Tier: new("standard"), Skills: new("")}
+	res = grpApply(t, s, memDisk{}, receipts{}, guest, foreignSync)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, res.Rows[0].Value().(proto.AIMemberRow).Follow, proto.True(true))
+	s.Commit(res)
+
+	// Owner profile edit without follow ends following while keeping unmentioned fields.
+	edit := memSetCmd(126, grpWorkerA)
+	edit.Tier = new("light")
+	res = grpApply(t, s, memDisk{}, receipts{}, browser, edit)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	got = res.Rows[0].Value().(proto.AIMemberRow)
+	equal(t, got.Follow, proto.True(false))
+	equal(t, got.Profile, proto.Profile{Model: "opus", Effort: "high", Tier: "light", Skills: "Go backend"})
+	s.Commit(res)
+
+	// Owner profile edit with follow keeps following.
+	editFollow := memSetCmd(127, grpWorkerA)
+	editFollow.Follow = true
+	editFollow.Tier = new("strong")
+	res = grpApply(t, s, memDisk{}, receipts{}, browser, editFollow)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	got = res.Rows[0].Value().(proto.AIMemberRow)
+	equal(t, got.Follow, proto.True(true))
+	equal(t, got.Tier, "strong")
+	s.Commit(res)
+
+	// Host updates follow and all four fields even when role is sent; role is ignored.
+	hostWithRole := memSetCmd(128, grpWorkerA)
+	hostWithRole.Follow = true
+	hostWithRole.ProfileSet = proto.ProfileSet{Model: new("sonnet"), Effort: new("medium"), Tier: new("standard"), Skills: new("tests")}
+	hostWithRole.Role = new("admin")
+	res = grpApply(t, s, memDisk{}, receipts{}, laptop, hostWithRole)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	got = res.Rows[0].Value().(proto.AIMemberRow)
+	equal(t, got.Follow, proto.True(true))
+	equal(t, got.Profile, proto.Profile{Model: "sonnet", Effort: "medium", Tier: "standard", Skills: "tests"})
+}
+
+func TestMemberSetFollowRefusals(t *testing.T) {
+	for name, tc := range map[string]struct {
+		following bool
+		by        identity.Key
+		set       func(*proto.MemberSet)
+		code      string
+		msg       string
+	}{
+		"host sets follow with all four on own-profile row": {
+			following: false,
+			by:        laptop,
+			set:       func(p *proto.MemberSet) { p.Follow = true; p.ProfileSet = memFullProfile() },
+			code:      "conflict",
+			msg:       "the member has its own profile",
+		},
+		"host sets follow alone on following row": {
+			following: true,
+			by:        laptop,
+			set:       func(p *proto.MemberSet) { p.Follow = true },
+			code:      "forbidden",
+		},
+		"host sets follow alone on own-profile row": {
+			following: false,
+			by:        laptop,
+			set:       func(p *proto.MemberSet) { p.Follow = true },
+			code:      "forbidden",
+		},
+		"host sets follow missing model": {
+			following: true,
+			by:        laptop,
+			set: func(p *proto.MemberSet) {
+				p.Follow = true
+				p.ProfileSet = memFullProfile()
+				p.Model = nil
+			},
+			code: "forbidden",
+		},
+		"host sets follow missing effort": {
+			following: true,
+			by:        laptop,
+			set: func(p *proto.MemberSet) {
+				p.Follow = true
+				p.ProfileSet = memFullProfile()
+				p.Effort = nil
+			},
+			code: "forbidden",
+		},
+		"host sets follow missing tier": {
+			following: true,
+			by:        laptop,
+			set: func(p *proto.MemberSet) {
+				p.Follow = true
+				p.ProfileSet = memFullProfile()
+				p.Tier = nil
+			},
+			code: "forbidden",
+		},
+		"host sets follow missing skills": {
+			following: true,
+			by:        laptop,
+			set: func(p *proto.MemberSet) {
+				p.Follow = true
+				p.ProfileSet = memFullProfile()
+				p.Skills = nil
+			},
+			code: "forbidden",
+		},
+		"host sets follow and four with name": {
+			following: true,
+			by:        laptop,
+			set:       func(p *proto.MemberSet) { p.Follow = true; p.ProfileSet = memFullProfile(); p.Name = new("Other") },
+			code:      "forbidden",
+		},
+		"host sets follow and four with account": {
+			following: true,
+			by:        laptop,
+			set:       func(p *proto.MemberSet) { p.Follow = true; p.ProfileSet = memFullProfile(); p.Account = new("team") },
+			code:      "forbidden",
+		},
+		"host sets follow and four with allow": {
+			following: true,
+			by:        laptop,
+			set:       func(p *proto.MemberSet) { p.Follow = true; p.ProfileSet = memFullProfile(); p.Allow = &[]string{} },
+			code:      "forbidden",
+		},
+		"host sets follow and four with tool": {
+			following: true,
+			by:        laptop,
+			set:       func(p *proto.MemberSet) { p.Follow = true; p.ProfileSet = memFullProfile(); p.Tool = new("ZCode") },
+			code:      "forbidden",
+		},
+		"host sets follow and four with approvers": {
+			following: true,
+			by:        laptop,
+			set: func(p *proto.MemberSet) {
+				p.Follow = true
+				p.ProfileSet = memFullProfile()
+				p.Approvers = &[]string{browser.ID()}
+			},
+			code: "forbidden",
+		},
+		"host sets follow with name only": {
+			following: true,
+			by:        laptop,
+			set:       func(p *proto.MemberSet) { p.Follow = true; p.Name = new("Opus") },
+			code:      "forbidden",
+		},
+		"host sets tier without follow on following row": {
+			following: true,
+			by:        laptop,
+			set:       func(p *proto.MemberSet) { p.Tier = new("light") },
+			code:      "forbidden",
+		},
+		"AI sends follow and four on following row": {
+			following: true,
+			by:        laptop,
+			set: func(p *proto.MemberSet) {
+				p.As = proto.ID(grpWorkerA)
+				p.Follow = true
+				p.ProfileSet = memFullProfile()
+			},
+			code: "forbidden",
+		},
+		"AI sends follow and four on own-profile row": {
+			following: false,
+			by:        laptop,
+			set: func(p *proto.MemberSet) {
+				p.As = proto.ID(grpWorkerA)
+				p.Follow = true
+				p.ProfileSet = memFullProfile()
+			},
+			code: "forbidden",
+		},
+		"another person sets follow": {
+			following: false,
+			by:        guest,
+			set:       func(p *proto.MemberSet) { p.Follow = true },
+			code:      "forbidden",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := grpState(t)
+			ai := s.AIs[grpWorkerA]
+			ai.Follow = proto.True(tc.following)
+			s.AIs[grpWorkerA] = ai
+			cmd := memSetCmd(128, grpWorkerA)
+			tc.set(&cmd)
+			res := grpApply(t, s, memDisk{}, receipts{}, tc.by, cmd)
+			briefRefused(t, res, tc.code)
+			if tc.msg != "" {
+				equal(t, res.Msg, tc.msg)
+			}
 		})
 	}
 }
