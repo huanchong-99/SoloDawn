@@ -1,14 +1,26 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Home } from '../../lib/groups.svelte';
 import { goldens } from '../../lib/mock';
 import { nodes } from '../../lib/nodes.svelte';
 import { AIMemberRow, decode, HostInfoPush } from '../../lib/proto';
-import { newDraft, profileChanges, suggestedTier, tiers, tooLong } from './profile';
+import {
+  memberSetting,
+  newDraft,
+  profileChanges,
+  profileSet,
+  restoreDefaults,
+  suggestedTier,
+  tiers,
+  tooLong,
+} from './profile';
 
 const ai = decode(AIMemberRow, goldens['row-member-ai']);
 const home = new Home({ user: ai.user, sign: () => new Promise(() => {}) });
 
-afterEach(() => nodes.infos.clear());
+afterEach(() => {
+  nodes.infos.clear();
+  vi.restoreAllMocks();
+});
 
 describe('profile helpers', () => {
   it('lists the tiers and creates independent default drafts', () => {
@@ -20,7 +32,9 @@ describe('profile helpers', () => {
   });
 
   it('has no suggestion without a host, host info, matching CLI or listed model', () => {
+    const get = vi.spyOn(nodes.infos, 'get');
     expect(suggestedTier(undefined, ai)).toBeUndefined();
+    expect(get).not.toHaveBeenCalled();
     expect(suggestedTier(home, ai)).toBeUndefined();
     const info = decode(HostInfoPush, goldens['host-info-push']);
     nodes.infos.set(home, { ...info, agents: [] });
@@ -71,5 +85,51 @@ describe('profile helpers', () => {
       skills: 'Documentation',
     });
     expect(profileChanges(member, { ...member, model: 'different', effort: 'high' })).toEqual({});
+  });
+
+  it('derives the defaults setting state for external, following and own members', () => {
+    expect(memberSetting({ ...ai, cli: 'external', follow: true }, true)).toEqual({
+      shown: false,
+    });
+    expect(memberSetting({ ...ai, cli: 'external', follow: undefined }, false)).toEqual({
+      shown: false,
+    });
+    expect(memberSetting({ ...ai, cli: 'claude', follow: true }, true)).toEqual({
+      shown: true,
+      follow: true,
+    });
+    expect(memberSetting({ ...ai, cli: 'claude', follow: true }, false)).toEqual({
+      shown: true,
+      follow: true,
+    });
+    expect(memberSetting({ ...ai, cli: 'claude', follow: undefined }, true)).toEqual({
+      shown: true,
+      follow: false,
+      restore: true,
+    });
+    expect(memberSetting({ ...ai, cli: 'claude', follow: undefined }, false)).toEqual({
+      shown: true,
+      follow: false,
+      restore: false,
+    });
+  });
+
+  it('builds member.set payloads for restoring defaults and saving own profile changes', () => {
+    expect(restoreDefaults()).toEqual({ follow: true });
+    expect(profileSet('group-1', 'ai-1', restoreDefaults())).toEqual({
+      t: 'member',
+      g: 'group-1',
+      op: 'set',
+      id: 'ai-1',
+      follow: true,
+    });
+    expect(profileSet('group-1', 'ai-1', { tier: 'light', skills: 'Docs' })).toEqual({
+      t: 'member',
+      g: 'group-1',
+      op: 'set',
+      id: 'ai-1',
+      tier: 'light',
+      skills: 'Docs',
+    });
   });
 });

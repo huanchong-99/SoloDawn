@@ -414,4 +414,155 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect(one<HTMLButtonElement>('.suggest').disabled).toBe(true);
     });
   });
+
+  Scenario(
+    'The card says whether the group follows, and restores the defaults',
+    ({ Given, Then, When, And }) => {
+      Given('the owner\'s Claude Code in "Website" follows the defaults', () => {
+        writeAI({ follow: true });
+      });
+      Then('its card says "Follows the defaults on "workstation""', () => {
+        expect([...card().querySelectorAll('dt')].map(read)).toContain('Setting');
+        const row = card().querySelector('.setting')!;
+        expect(read(row)).toBe('Follows the defaults on "workstation"');
+        expect(row.classList.contains('muted')).toBe(true);
+        expect(row.querySelector('.badge')).toBeNull();
+        expect(button('Restore defaults')).toBeUndefined();
+      });
+      When('the owner opens the profile editor', openEditor);
+      Then('the editor says saving gives this group its own setting', () => {
+        expect(read(form().querySelector('.hint')!)).toBe(
+          'Saving gives this group its own setting; it stops following the defaults.',
+        );
+      });
+      When('the owner chooses Less and saves the profile', async () => {
+        one<HTMLInputElement>('.editor input[value="light"]').click();
+        flushSync();
+        submit(form());
+        await vi.waitFor(() => {
+          flushSync();
+          expect(all('.editor')).toHaveLength(0);
+        });
+      });
+      Then('exactly one member set sends tier "light" and no follow', () => {
+        const sent = commands(node).map(withoutEnvelope);
+        expect(sent).toEqual([{ t: 'member', g, op: 'set', id: aiId, tier: 'light' }]);
+        expect('follow' in sent[0]).toBe(false);
+      });
+      When('the row comes back without follow', () => {
+        writeAI({ tier: 'light' });
+      });
+      Then('the card shows "Own setting in this group" and "Restore defaults"', () => {
+        const row = card().querySelector('.setting')!;
+        expect(row.hasAttribute('data-changed')).toBe(true);
+        expect(row.classList.contains('muted')).toBe(false);
+        expect(read(row.querySelector('.badge')!)).toBe('Own setting in this group');
+        expect(button('Restore defaults').disabled).toBe(false);
+      });
+      When('the owner restores the defaults', async () => {
+        button('Restore defaults').click();
+        await vi.waitFor(() => expect(commands(node)).toHaveLength(2));
+      });
+      Then('exactly one member set sends follow alone', () => {
+        expect(commands(node).map(withoutEnvelope).slice(1)).toEqual([
+          { t: 'member', g, op: 'set', id: aiId, follow: true },
+        ]);
+      });
+      And('another person\'s card shows the setting line but no "Restore defaults"', () => {
+        const row = other().querySelector('.setting')!;
+        expect(row.hasAttribute('data-changed')).toBe(false);
+        expect(read(row.querySelector('.badge')!)).toBe('Own setting in this group');
+        expect(button('Restore defaults', other())).toBeUndefined();
+        node.home.write(
+          g,
+          example('row-member-ai', {
+            id: 'other-ai',
+            user: 'other-user',
+            name: 'Other AI',
+            host: device,
+            cli: 'claude',
+            model: 'listed',
+            tier: 'strong',
+            skills: '',
+            secretary: false,
+            follow: true,
+          }),
+        );
+        flushSync();
+        expect(read(other().querySelector('.setting')!)).toBe(
+          'Follows the defaults on "workstation"',
+        );
+        expect(other().querySelector('.setting')!.hasAttribute('data-changed')).toBe(true);
+      });
+      And("an external AI's card has no setting line", () => {
+        node.home.write(
+          g,
+          example('row-member-ai-external', { id: 'external-ai', user, name: 'External AI' }),
+        );
+        flushSync();
+        const ext = cardOf('External AI');
+        expect([...ext.querySelectorAll('dt')].map(read)).not.toContain('Setting');
+        expect(ext.querySelector('.setting')).toBeNull();
+      });
+    },
+  );
+
+  Scenario(
+    'Restoring defaults handles busy state, refusal, offline state and Chinese labels',
+    ({ Given, Then, When }) => {
+      Given('the owner\'s Claude Code in "Website" has its own setting', () => {});
+      Then('the setting row starts without a change marker', () => {
+        expect(card().querySelector('.setting')!.hasAttribute('data-changed')).toBe(false);
+      });
+      When('the owner restores the defaults while the home holds its answer', () => {
+        vi.spyOn(node.store, 'command').mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              resolveAnswer = resolve;
+            }),
+        );
+        button('Restore defaults').click();
+        flushSync();
+      });
+      Then('Restore defaults is disabled while sending', () => {
+        expect(button('Restore defaults').disabled).toBe(true);
+      });
+      When('the home refuses the restore', async () => {
+        resolveAnswer({ re: 1, err: { code: 'forbidden', msg: 'refused' } });
+        await tick();
+        flushSync();
+      });
+      Then('the profile error is visible and Restore defaults is enabled again', () => {
+        expect(all('.member [role="alert"]')).toHaveLength(1);
+        expect(button('Restore defaults').disabled).toBe(false);
+      });
+      When('the browser switches to Chinese', () => {
+        prefs.lang = 'zh-CN';
+        flushSync();
+      });
+      Then('the setting row and follow note use the Chinese labels', async () => {
+        expect([...card().querySelectorAll('dt')].map(read)).toContain('设置');
+        expect(read(card().querySelector('.setting .badge')!)).toBe('本群单独设置');
+        expect(read(card().querySelector('.setting button')!)).toBe('恢复默认');
+        writeAI({ follow: true });
+        expect(read(card().querySelector('.setting')!)).toBe('跟随「workstation」上的默认设置');
+        button('编辑档案').click();
+        await tick();
+        flushSync();
+        expect(read(form().querySelector('.hint')!)).toBe(
+          '保存后，这个群用自己的设置，不再跟随默认。',
+        );
+        button('取消').click();
+        await tick();
+        writeAI();
+      });
+      When('the group home disconnects', () => {
+        node.drop();
+        flushSync();
+      });
+      Then('Restore defaults is disabled offline', () => {
+        expect(one<HTMLButtonElement>('.setting button').disabled).toBe(true);
+      });
+    },
+  );
 });

@@ -217,6 +217,7 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
         'Model',
         'Thinking level',
         'Skills',
+        'Setting',
         'Allow list',
         'Approval delegates',
         'Computer',
@@ -225,6 +226,7 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
         'Model',
         'Thinking level',
         'Skills',
+        'Setting',
         'Allow list',
         'Approval delegates',
       ]);
