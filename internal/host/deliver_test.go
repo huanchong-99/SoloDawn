@@ -1799,6 +1799,9 @@ func TestSessionsEndWithTheirTaskRoleAndMember(t *testing.T) {
 func TestAfterGroupStateFollowsDefaultsOnlyWhenLive(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
+	// The attach's sync starts an afterGroupState of its own after the group
+	// is live; it ends here, before the follower row it would also follow.
+	settleDelivery(r.h)
 	r.setSetting("defaults", map[string]proto.Profile{
 		"claude": {Model: "opus", Effort: "high", Tier: "strong", Skills: "Go backend"},
 	})
@@ -1857,4 +1860,78 @@ func memberSetPayloads(all []string) []string {
 		}
 	}
 	return out
+}
+
+// replayHome answers each request with what the test sends on that request's
+// own channel, so a test picks which of two syncs ends first.
+type replayHome struct {
+	*fakeDeliverHome
+	calls chan chan json.RawMessage // single reader: the test
+}
+
+func (f *replayHome) Request(ctx context.Context, _ func(int64) any) (json.RawMessage, error) {
+	answer := make(chan json.RawMessage, 1)
+	f.calls <- answer
+	select {
+	case raw := <-answer:
+		return raw, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+type fetchedGroup struct {
+	grp proto.GroupRow
+	err error
+}
+
+// A join whose sync the attach of its home replaced reads the group after the
+// later sync, whose reset can empty the rows before or after the first sync's
+// answer reaches the join.
+func TestJoinReadsTheGroupAfterTheSyncThatReplacedItsOwn(t *testing.T) {
+	for name, resetFirst := range map[string]bool{"reset before the answer": true, "reset after the answer": false} {
+		t.Run(name, func(t *testing.T) { joinAfterReplacedSync(t, resetFirst) })
+	}
+}
+
+func joinAfterReplacedSync(t *testing.T, resetFirst bool) {
+	r := newDeliverRig(t, false)
+	device := r.homeKey.ID()
+	home := &replayHome{fakeDeliverHome: newFakeDeliverHome(), calls: make(chan chan json.RawMessage, 2)}
+	r.h.Attach(device, home)
+	done := make(chan fetchedGroup, 1)
+	go func() {
+		grp, err := joinFetchGroup(t.Context(), r.h, home, device, testGroup1)
+		done <- fetchedGroup{grp, err}
+	}()
+	first := <-home.calls
+	attachHome(r.h, device)
+	second := <-home.calls
+	group := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 9}, Name: "Alpha", Home: device}))
+	rows := json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{group}}))
+	reset := json.RawMessage(marshalWire(proto.Reset{Type: "reset", Group: testGroup1}))
+	synced := json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 9}))
+	r.h.Push(device, rows)
+	if resetFirst {
+		r.h.Push(device, reset)
+	}
+	first <- synced
+	d := deliv(r.h)
+	r.waitUntil("the join answered or waits for the later sync", func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return len(done) == 1 || len(d.groups[testGroup1].waiters) == 1
+	})
+	if len(done) == 1 {
+		early := <-done
+		t.Fatalf("the join answered group %q, error %v, before the later sync ended", early.grp.Name, early.err)
+	}
+	if !resetFirst {
+		r.h.Push(device, reset)
+	}
+	r.h.Push(device, rows)
+	second <- synced
+	got := <-done
+	joinAssertEqual(t, "join error", got.err, nil)
+	joinAssertEqual(t, "group name", got.grp.Name, "Alpha")
 }
