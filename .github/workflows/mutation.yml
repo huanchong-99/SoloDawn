@@ -21,26 +21,27 @@ jobs:
     strategy:
       fail-fast: false
       # Largest first, so they start first. `own` is a regex on the file path relative to the package
-      # (default: every file); the shard excludes the package's other files. The summary job checks that
+      # (default: every file); the shard excludes the package's other files. `workers` (default 8) is
+      # gremlins' --workers, explained at the Mutate step. The summary job checks that
       # each product file of the module belongs to exactly one shard.
       matrix:
         include:
           - { name: host-run, pkg: internal/host, own: '^run\.go' }
           - { name: host-deliver, pkg: internal/host, own: '^d' }
-          - { name: node-node, pkg: internal/node, own: '^node\.go' }
+          - { name: node-node, pkg: internal/node, own: '^node\.go', workers: 4 }
           - { name: host-a-checks, pkg: internal/host, own: '^(a|ca|checks)' }
           - { name: host-f-l, pkg: internal/host, own: '^(f|j|l)' }
           - { name: host-turn, pkg: internal/host, own: '^turn\.go' }
           - { name: host-s-takeover, pkg: internal/host, own: '^(s|ta|ti|tools_[abk])' }
           - { name: host-tools-talk-task, pkg: internal/host, own: '^tools_ta' }
           - { name: host-models-opencode, pkg: internal/host, own: '^(mo|o)' }
-          - { name: host-mcp-merge, pkg: internal/host, own: '^(mc|me)' }
+          - { name: host-mcp-merge, pkg: internal/host, own: '^(mc|me|tr|tools_w)' }
           - { name: host-pty-qwen, pkg: internal/host, own: '^[pq]' }
           - { name: host-claude-codex, pkg: internal/host, own: '^c[lo]' }
           - { name: host-tools-sec-turn-info, pkg: internal/host, own: '^(tools_s|turn_)' }
           - { name: host-h-w, pkg: internal/host, own: '^(h|w)' }
           - { name: host-external, pkg: internal/host, own: '^(external|tools_external)' }
-          - { name: home-cmd-task-ev, pkg: internal/home, own: '^(cmd_t|e)' }
+          - { name: home-cmd-task-ev, pkg: internal/home, own: '^(cmd_[st]|e)' }
           - { name: home-fetch-kb, pkg: internal/home, own: '^(f|h|i|k)' }
           - { name: home-machine-profile, pkg: internal/home, own: '^[m-p]' }
           - { name: home-run-rounds, pkg: internal/home, own: '^r' }
@@ -49,10 +50,11 @@ jobs:
           - { name: home-check-card, pkg: internal/home, own: '^(check|cmd_b|cmd_ca)' }
           - { name: home-sync-webpush, pkg: internal/home, own: '^[s-w]' }
           - { name: home-diag, pkg: internal/home, own: '^d' }
-          - { name: node-pair, pkg: internal/node, own: '^pair' }
+          - { name: node-pair, pkg: internal/node, own: '^pair', workers: 4 }
           - { name: node-service-session, pkg: internal/node, own: '^(r|sc|se)' }
-          - { name: node-socket-update, pkg: internal/node, own: '^(so|su|t|u|v)' }
-          - { name: node-admit-local, pkg: internal/node, own: '^[a-l]' }
+          - { name: node-socket-update, pkg: internal/node, own: '^(so|su|t|u|v)', workers: 4 }
+          - { name: node-admit-dir, pkg: internal/node, own: '^[acd]', workers: 4 }
+          - { name: node-export-local, pkg: internal/node, own: '^[el]', workers: 4 }
           - { name: node-misc, pkg: internal/node, own: '^(ne|nodetest|proc)' }
           - { name: rendezvous-limits-room, pkg: internal/rendezvous, own: '^(l|q|r)' }
           - { name: rendezvous-server-tls, pkg: internal/rendezvous, own: '^(s|t)' }
@@ -66,6 +68,7 @@ jobs:
     env:
       PKG: ${{ matrix.pkg }}
       OWN: ${{ matrix.own || '.' }}
+      WORKERS: ${{ matrix.workers || 8 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -108,11 +111,13 @@ jobs:
           # A mutant can turn a timer or a loop into a runaway that allocates until the VM is out of memory
           # (path.go:200 `10 * time.Second` becomes 0 in internal/peer: every ask re-arms the timer at once and
           # starts another goroutine that waits for the pacer). The address-space limit, per process, makes the
-          # runaway test binary die by itself; the mutant then counts as killed. Four workers at 4 GiB each fit
-          # the runner's 16 GiB, and the tests of the shards need a small fraction of it.
+          # runaway test binary die by itself; the mutant then counts as killed. Four runaways at 4 GiB each
+          # fill the runner's 16 GiB: go node-admit-local of run 45905182817, whose local.go mutants time out
+          # one after another, took the VM down that way. The node shards whose timed-out mutants come in
+          # runs take --workers 4, two mutants at once, at most 8 GiB.
           for attempt in 1 2 3; do
             echo "attempt $attempt"
-            (ulimit -v 4194304; GOFLAGS=-count=1 exec nice -n 10 gremlins unleash -i --timeout-coefficient 10 --workers 8 "${exclude[@]}" "./$PKG") 2>&1 | tee gremlins.log
+            (ulimit -v 4194304; GOFLAGS=-count=1 exec nice -n 10 gremlins unleash -i --timeout-coefficient 10 --workers "$WORKERS" "${exclude[@]}" "./$PKG") 2>&1 | tee gremlins.log
             s=${PIPESTATUS[0]}
             grep -q 'failed to gather coverage' gremlins.log || break
           done

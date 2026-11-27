@@ -10,7 +10,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: CONDITIONALS_NEGATION at `internal/host/takeover.go:210:58` lived in mutation run 45905182817 (shard host-s-takeover).
 - Cause: `target.kind` is read only by `createSession` (`internal/host/deliver.go:1312,1315`), which runs only when `Sessions.Get(target.key)` misses (`prepareTargetSession`, `deliver.go:1276-1278`). With no task the key is the group session's, and its absence returns `not_found` at `deliver.go:1306-1309` before `kind` is read; with a task, `lastTask` has just read that task session from `Sessions.All()`, so it exists. Only a session ended between those two calls on another goroutine could tell the mutant apart.
-- Status: resolved by the commit "Host: a takeover without a task leaves the session kind alone; node mutation shards stay inside the runner's memory": `takeoverTarget` sets only the task from `lastTask`. The one difference left is under a race, a group session that appears between `followMember` and `createSession`: `createSession` then also runs `cleanupTaskSessions`, which ends only sessions of done, cancelled or reassigned tasks, before `Create` refuses the existing key.
+- Status: resolved by the commits "Mutation: tests kill the batch's survivors; guards and a takeover branch that could never matter go" and "CI: every product file is mutated; node shards stay within the runner's memory": `takeoverTarget` sets only the task from `lastTask`. The one difference left is under a race, a group session that appears between `followMember` and `createSession`: `createSession` then also runs `cleanupTaskSessions`, which ends only sessions of done, cancelled or reassigned tasks, before `Create` refuses the existing key.
 
 ### 2026-11-27 · bug · The node-admit-local mutation shard ran the runner out of memory
 
@@ -21,13 +21,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-27 · limitation · Equivalent web mutants of the model batch, and a gremlins blind spot
 
 - Symptom: Stryker survivors that no test can kill: `groups.svelte.ts:143` (`id === undefined` guard; `member(undefined)` and `#former.get(undefined)` find nothing), `members.ts:254,381` (the `[]` of a missing group is only read through `m.host` and `p.user`), `nodes.svelte.ts:110` (`group.home !== node`: `infos` holds owner homes only, `#read` via `activeCtl`, and `unheard` keeps groups of non-owner homes), `taskops.ts:66` (`other !== task`: a `busy` wait is only on a queued task, which `hasSession` excludes, `planning/contracts/rows.md` section 4) and `taskops.ts:88` (`task.wait?.by`: the manual hold exists only when `task.wait.kind` is `manual`). gremlins reported `internal/home/cmd_task.go:418:99` NOT COVERED: Go's cover tool ends a block at a function literal, so the condition after it in an `if` init had no block.
-- Status: resolved by the commit "Web and home: drop the guards whose mutants are equivalent": the guards are gone with no change of behaviour, and the `IndexFunc` call is its own statement (as `internal/node/schedule.go` in b4e9fda48).
+- Status: resolved by the commit "Mutation: tests kill the batch's survivors; guards and a takeover branch that could never matter go": the guards are gone with no change of behaviour, and the `IndexFunc` call is its own statement (as `internal/node/schedule.go` in b4e9fda48).
 
 ### 2026-11-27 · bug · Four files of the model batch belonged to no mutation shard
 
 - Symptom: mutation run 45905182817 failed "Files in exactly one shard": `internal/home/cmd_summary.go`, `internal/host/tools_workspaces.go`, `internal/host/tree_unix.go` and `tree_windows.go` were never mutated.
 - Cause: the `own` regexes of `.github/workflows/mutation.yml` did not match their names.
-- Status: resolved by the commit "ci: mutation shards own the files the model batch added" (home-cmd-task-ev `^(cmd_[st]|e)`, host-mcp-merge `^(mc|me|tr|tools_w)`). Their mutants are first seen in the next run.
+- Status: resolved by the commit "CI: every product file is mutated; node shards stay within the runner's memory" (home-cmd-task-ev `^(cmd_[st]|e)`, host-mcp-merge `^(mc|me|tr|tools_w)`). Their mutants are first seen in the next run.
 
 ### 2026-11-27 · deviation · The onboarding prompt still tells the AI to check the Git identity
 
@@ -2207,4 +2207,4 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 
 - Symptom: on Linux CI (PR #424, run 45906913476) the step "a browser of Q that connects to P1 later lists \"Beta\"" failed after 10 s with `timed out after 3m0s waiting for ctl to <P1>; saw 1: connection ended before it was ready`; locally 4 of 64 runs failed the same way with eight runs in parallel.
 - Cause: `laterBrowserLists` (`features/s2_people_groups_test.go:93`) enrolled the browser with `AddBrowser`, which sends Q's new device entry as a `devlog` push and does not wait, then offered a ctl connection to P1 at once. The offer travels through the rendezvous and can reach P1 before P1 has applied the entry from Q's connected browser; `identity.OpenSignal` (`internal/peer/signal.go:110`) then drops it as `unknown_device` (`planning/contracts/envelope.md` section 3), as the contract requires, and the browser's offer ends unanswered after 10 s. P1's log shows the browser's ICE candidates received but no offer, and the entry's device rows sent just after the offer arrived. Not a product race: a device is admitted only once the home holds its entry. The "3m0s" in the message is `openS2PeopleCtl`'s budget, not the time waited.
-- Status: resolved by the commit "Acceptance: A9.46's later browser connects once P1 holds its device entry". The step waits for the entry's device row on Q's connected browser (`awaitQJoinedOnView`), as `s2_confirm_test.go` `awaitSecondBrowser` does, before it connects.
+- Status: resolved by the commit "Acceptance: a later browser connects only once its device is known (A9.46)". The step waits for the entry's device row on Q's connected browser (`awaitQJoinedOnView`), as `s2_confirm_test.go` `awaitSecondBrowser` does, before it connects.
