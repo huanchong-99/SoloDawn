@@ -11,6 +11,7 @@ Feature: A host composes session instructions and turn text
       | task      | submit_task                                                                                                    |
       | task      | Work only in this folder; it is your workspace in this group.                                                  |
       | task      | with Git, `git pull --ff-only`                                                                                 |
+      | task      | when the current branch has an upstream (without one there is nothing to bring in)                             |
       | task      | never stash, reset, clean, `git add -A`, `git add .`, `git commit -a`, check out over files, rebase            |
       | task      | stage and commit only your own files, by path. Never rewrite history that was published.                       |
       | task      | never push to a branch that others use (such as `main`) before the review has passed                           |
