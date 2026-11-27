@@ -2421,3 +2421,37 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: a browser types a group's invitation code and sends no `join`; within 10 minutes an admin adds its person to a group on the same home with `member add_person`. Until the 10 minutes end, each new connection of that device to the home is a joining connection: its `welcome` has `groups: []` and `join`, and `sync` is answered `forbidden`. A `join` for the code's group on it is answered `ok` and ends it; so does the end of the 10 minutes, which closes the connection, and the next one is a member's.
 - Cause: `Pairer.attach` (`internal/node/pair.go:175`) serves a device that has a `codePeer` as a joining peer whether or not its person is a member, because a member who types the code must get a joining connection too: only its `welcome` tells the browser the group (`planning/contracts/step-2/people.md` 2.2, point 3, and 4.1). The record ends when the home admits a joining connection of the device, by a code or by a one-time link (`admitted`, `internal/node/admit.go:150`), at the end of the 10 minutes or with the code (`dropPeer`); `add_person` admits no connection, so nothing tells the node.
 - Status: open, accepted.
+
+### 2026-11-28 · limitation · `agent.defaults` and `agent.set` do not push `host.info`
+
+- Symptom: changing CLI defaults via `agent.defaults` or account type via `agent.set` updates node state without pushing `host.info` to connected browsers.
+- Cause: `planning/contracts/datachannel.md` section 7 states `host.info` is pushed whenever a field changes, yet `pushHostInfo` is triggered only from `WatchersChanged` (`internal/node/node.go:273-274`). Neither `agent.set` nor `handleAgentDefaults` (`internal/host/defaults.go:50`) emits a `host.info` push.
+- Status: open, accepted. The saving browser re-reads `host.info` after `agent.defaults` (`web/src/lib/nodes.svelte.ts:145`); other browsers pick up the change on their next read.
+
+### 2026-11-28 · limitation · `connectHome` dials untracked and can dispatch after `settleDelivery` waits
+
+- Symptom: during node shutdown, a `rows` frame arriving from a remote home right as `closeNet` runs could call `d.wg.Go` after `settleDelivery`'s `Wait` begins.
+- Cause: pre-existing shutdown gap in `internal/node/teams.go:17`: `connectHome` launches `go dial(ctx, device, run)` outside the tracked shutdown wait group.
+- Status: open, accepted (affects any store-touching `group_state` background work on teardown, not only `followDefaults`).
+
+### 2026-11-28 · note · `godog` `TestFeatures` subtests match scenario titles, not feature titles
+
+- Symptom: running `go test -tags acceptance -run 'TestFeatures/<feature title>' ./features/` matches zero subtests and still exits `0`.
+- Cause: `TestFeatures` (`features/acceptance_test.go:64`) names `godog` subtests after individual scenario titles rather than feature titles.
+- Status: open, noted. Acceptance filters must match scenario titles.
+
+### 2026-11-28 · limitation · Collapsed guide pill overlaps chat text or side details at `768-1279 px`
+
+- Symptom: on a chat page (`route.page === 'chat'`), at `768-1023 px` the collapsed guide pill overlaps the end of an empty group's help text; at `1024-1279 px` it sits over `"Group details"` in the side column and covers its two `"Change"` links.
+- Cause: `web/src/components/guide/GuideDock.svelte:279,593` lifts `.guide-pill.over-chat` to fixed `bottom: 124px` between `768 px` and `1279 px` so it stays clear of `.composer .send`.
+- Status: open, cosmetic. The pill can be collapsed/closed by the user; tying offset dynamically to composer height is left for later.
+
+### 2026-11-28 · deviation · `web_guide.feature` B.5 duplicate step wording and guide UI structure
+
+- Symptom: `@amiceli/vitest-cucumber@8.0.1` throws `ItemAlreadyExistsError` when two steps within the same `Scenario:` have identical keyword and text.
+- Cause: `DESIGN-1127` B.5 repeats `Then the dock is open` in G.5 and `When it opens the client` in G.6.
+- Status: open deviation (`features/web_guide.feature:51` uses `Then the dock is open again`; `features/web_guide.feature:58` uses `When the joined browser opens the client`). Also note: `Welcome` and phone `guide-sheet` dialogs mount conditionally with shared `modal` (`web/src/lib/guide.svelte.ts:79`) so closed dialogs never match un-scoped `dialog` queries; `beacon.ts:106` listens on `animationend` so rings settle flush after entrance keyframes; step 3 uses `data-unset` (`web/src/components/defaults/AgentDefaults.svelte:90`); `createAnnouncer` (`guide.svelte.ts:230`) stays quiet on load and offline->online reconnect until every owned computer's first `host.info` arrives (leaving initial step-1 pairing unannounced); step 1–5 live strings add a 4th Settings arrival part (`web/features/web.spec.ts:472`).
+
+### 2026-11-28 · note · Defaults follow switch, narrow card wrap, SQLite storage, mock parity, and static mockup
+
+- Detail: Computer CLI defaults live in SQLite `setting` row `'defaults'` with no `audit` row, and `followDefaults` checks in-memory sessions/rows before opening `h.Store` (`internal/host/defaults.go:16-17,123`). `FollowSwitch` uses `<button type="button" role="switch">` (`web/src/components/defaults/FollowSwitch.svelte:41`) so checkbox queries keep targeting the secretary toggle, and reads `defaults.switch.second` (`web/src/messages/defaults.en.json:18`). `Nodes.svelte:326` places `.perm-def` on its own wrapped line inside `.perm`. On the `340 px` English `MemberPanel`, `"Own setting in this group"` and `"Restore defaults"` (`web/src/components/profile/Profile.svelte:106`, `profile.ts:48,55`) wrap onto two lines without clipping, and restoring waits for the host's asynchronous `member set` with the four fields. `web/src/lib/mock.ts:26` adds the 6 new golden keys to `schemaOf` to keep 1:1 parity in `web/src/lib/proto.test.ts:51`, while superseded static mockup `web/design/onboarding.html:264-265` retains pre-update text.
