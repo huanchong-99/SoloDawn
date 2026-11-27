@@ -23,8 +23,13 @@ func hostProfileSteps(sc *godog.ScenarioContext, f fixtures) {
 	cleanup := afterScenario(sc)
 	w := &profileTurnWorld{}
 	sc.Step(`^the host has the secretary's synced AI profiles$`, func() error { return w.setupRoster(cleanup) })
+	sc.Step(`^the secretary's group has a claude member that follows defaults with tier "([^"]*)" and skills "([^"]*)"$`, func(tier, skills string) error {
+		return w.setupFollowingMember(cleanup, tier, skills)
+	})
 	sc.Step(`^the secretary takes its next turn$`, w.composeConfirmedBrief)
 	sc.Step(`^the turn begins with:$`, w.checkRoster)
+	sc.Step(`^its roster line for that member shows "([^"]*)" and "([^"]*)"$`, w.checkFollowerRosterLine)
+	sc.Step(`^no turn text and no list_members answer contains "([^"]*)"$`, w.checkTurnAndListExclude)
 	sc.Step(`^the secretary instructions contain the assignment rules$`, w.checkAssignmentRules)
 	sc.Step(`^list_members still returns:$`, w.checkListMembers)
 	sc.Step(`^the host has a standard assignee and an offline strong secretary$`, func() error { return w.setupEscalation(cleanup) })
@@ -56,24 +61,65 @@ func (w *profileTurnWorld) setupRoster(cleanup func(func())) error {
 	return nil
 }
 
-func (w *profileTurnWorld) putUsage(id string, usage proto.Usage) {
+func (w *profileTurnWorld) setupFollowingMember(cleanup func(func()), tier, skills string) error {
+	if err := w.turnStepWorld.setup(cleanup); err != nil {
+		return err
+	}
+	w.editMember(turnAIID, func(ai *proto.AIMemberRow) {
+		ai.Follow = true
+		ai.Tier, ai.Skills = tier, skills
+	})
+	return nil
+}
+
+func (w *profileTurnWorld) editMember(id string, edit func(*proto.AIMemberRow)) {
 	raw, _ := w.h.Rows.Get(turnGroupID, "member", id)
 	var ai proto.AIMemberRow
 	if err := proto.Decode(raw, &ai); err != nil {
 		panic(err)
 	}
-	ai.Usage = usage
+	edit(&ai)
 	w.h.Rows.Put(turnGroupID, "member", id, turnMustJSON(ai))
 }
 
+func (w *profileTurnWorld) putUsage(id string, usage proto.Usage) {
+	w.editMember(id, func(ai *proto.AIMemberRow) {
+		ai.Usage = usage
+	})
+}
+
 func (w *profileTurnWorld) putProfile(id, tier, state, task, skills string) {
-	raw, _ := w.h.Rows.Get(turnGroupID, "member", id)
-	var ai proto.AIMemberRow
-	if err := proto.Decode(raw, &ai); err != nil {
-		panic(err)
+	w.editMember(id, func(ai *proto.AIMemberRow) {
+		ai.Tier, ai.State, ai.Task, ai.Skills = tier, state, task, skills
+	})
+}
+
+func (w *profileTurnWorld) checkFollowerRosterLine(tier, skills string) error {
+	for _, line := range strings.Split(w.text, "\n") {
+		if strings.HasPrefix(line, `- "Claude Code" `) {
+			if !strings.Contains(line, tier) || !strings.Contains(line, skills) {
+				return fmt.Errorf("member roster line = %q, want %q and %q", line, tier, skills)
+			}
+			return nil
+		}
 	}
-	ai.Tier, ai.State, ai.Task, ai.Skills = tier, state, task, skills
-	w.h.Rows.Put(turnGroupID, "member", id, turnMustJSON(ai))
+	return fmt.Errorf("member roster line missing from turn:\n%s", w.text)
+}
+
+func (w *profileTurnWorld) checkTurnAndListExclude(ctx context.Context, word string) error {
+	if strings.Contains(w.text, word) {
+		return fmt.Errorf("turn text contains %q:\n%s", word, w.text)
+	}
+	caller := host.Caller{Session: w.sessionFor("secretary")}
+	result, err := host.Tools["list_members"].Call(ctx, w.h, caller, json.RawMessage(`{}`))
+	if err != nil {
+		return err
+	}
+	got := turnMustJSON(result)
+	if strings.Contains(string(got), word) {
+		return fmt.Errorf("list_members contains %q: %s", word, got)
+	}
+	return nil
 }
 
 func (w *profileTurnWorld) checkRoster(doc *godog.DocString) error {

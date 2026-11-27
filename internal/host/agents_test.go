@@ -585,3 +585,36 @@ func TestAgentsConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestAgentsDefaultsInHostInfo(t *testing.T) {
+	newAgtStandIns(t, map[string]agtStandInSpec{
+		"claude": {Stdout: "2.1.311 (Claude Code)\n"},
+		"codex":  {Stdout: "codex-cli 0.164.0\n"},
+	})
+	db := seamStore(t)
+	h, _ := seamHost(t, db)
+
+	before := agtReadAgents(t, h)
+	agtEqual(t, before[0].Defaults, (*proto.Profile)(nil))
+	agtEqual(t, before[1].Defaults, (*proto.Profile)(nil))
+	agtEqual(t, before[2].Defaults, (*proto.Profile)(nil))
+	if strings.Contains(string(agtVal(json.Marshal(before))), `"defaults"`) {
+		t.Fatalf("unexpected defaults field before agent.defaults: %s", agtVal(json.Marshal(before)))
+	}
+
+	_, err := Surface["agent.defaults"](t.Context(), h, nil, "owner-dev", defPayload(t, "claude", "opus", "high", "strong", "Go backend"))
+	agtCheck(t, err)
+
+	// Even if setting contains an external entry manually, externalHostAgent never shows Defaults.
+	seamSQL(t, db, `UPDATE setting SET value = json_set(value, '$.external', json('{"model":"m","effort":"","tier":"strong","skills":""}')) WHERE key = 'defaults'`)
+	after := agtReadAgents(t, h)
+	want := &proto.Profile{Model: "opus", Effort: "high", Tier: "strong", Skills: "Go backend"}
+	agtEqual(t, after[0].Defaults, want)
+	agtEqual(t, after[1].Defaults, (*proto.Profile)(nil))
+	agtEqual(t, after[2].Defaults, (*proto.Profile)(nil))
+
+	seamSQL(t, db, `INSERT OR REPLACE INTO setting(key, value) VALUES('defaults', '{')`)
+	if _, err := h.Agents(t.Context(), false); err == nil {
+		t.Fatal("expected error for corrupt defaults JSON")
+	}
+}

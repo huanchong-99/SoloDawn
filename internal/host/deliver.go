@@ -447,6 +447,9 @@ func afterGroupState(h *Host, d *delivery, group string) {
 			deliverPair(h, d, aiGroupKey{group: group, member: s.Member})
 		}
 	}
+	if !d.groupSyncActive(group) {
+		followDefaults(h, group)
+	}
 }
 
 func interruptPausedTurns(h *Host, d *delivery, group string) {

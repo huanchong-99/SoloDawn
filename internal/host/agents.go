@@ -170,8 +170,12 @@ func agtPersistFound(db *store.Store, found []agtFound) error {
 func agtLoadAgents(db *store.Store, part *agtPart, found []agtFound) ([]proto.HostAgent, error) {
 	agents := make([]proto.HostAgent, 0, len(found))
 	read := func(tx *store.Tx) error {
+		defaults, err := readDefaultsTx(tx)
+		if err != nil {
+			return err
+		}
 		for _, f := range found {
-			item, err := agtReadRow(tx, f, part.loginOK(f.agent))
+			item, err := agtReadRow(tx, f, part.loginOK(f.agent), defaults)
 			if err != nil {
 				return err
 			}
@@ -185,7 +189,7 @@ func agtLoadAgents(db *store.Store, part *agtPart, found []agtFound) ([]proto.Ho
 	return agents, nil
 }
 
-func agtReadRow(tx *store.Tx, f agtFound, loginOK bool) (proto.HostAgent, error) {
+func agtReadRow(tx *store.Tx, f agtFound, loginOK bool, defaults map[string]proto.Profile) (proto.HostAgent, error) {
 	var account *string
 	var capsJSON string
 	if err := tx.QueryRow(agtSelectAgentSQL, f.agent).Scan(&account, &capsJSON); err != nil {
@@ -194,6 +198,10 @@ func agtReadRow(tx *store.Tx, f agtFound, loginOK bool) (proto.HostAgent, error)
 	var caps proto.Caps
 	if err := json.Unmarshal([]byte(capsJSON), &caps); err != nil {
 		return proto.HostAgent{}, err
+	}
+	var def *proto.Profile
+	if p, ok := defaults[f.agent]; ok {
+		def = &p
 	}
 	return proto.HostAgent{
 		Agent:      f.agent,
@@ -204,6 +212,7 @@ func agtReadRow(tx *store.Tx, f agtFound, loginOK bool) (proto.HostAgent, error)
 		Driver:     agtDriverProto(f.agent),
 		Groups:     []proto.AgentGroup{},
 		Models:     f.models,
+		Defaults:   def,
 	}, nil
 }
 
