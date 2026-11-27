@@ -283,7 +283,12 @@
                 suggest
                 disabled={Boolean(outcome)}
               />
-              <ProfileFields bind:draft={ai.draft} skills={false} disabled={Boolean(outcome)} />
+              <ProfileFields
+                bind:draft={ai.draft}
+                skills={false}
+                share={secretary !== candidate.key}
+                disabled={Boolean(outcome)}
+              />
               <label class="check">
                 <input
                   type="radio"

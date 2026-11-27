@@ -39,9 +39,10 @@ Feature: Member panel and adding an AI to a group
     When the owner opens "Add AI"
     Then "Claude Code · workstation" says "In this group · adds another member" and is selectable again and "Codex · workstation" is disabled as "Choose an account type on the Computers page first"
     And "Claude Code · workstation" is initially chosen with name "Claude Code 2" and the owner chooses "Codex · laptop"
-    When the owner toggles "Make this AI the group's secretary" on and off, then checks it and names the AI "Lead Secretary"
-    And the owner submits the add-AI dialog
-    Then "laptop" receives a signed "host.join" for "codex" named "Lead Secretary" with secretary true
+    When the owner sets the work share to "Less", toggles "Make this AI the group's secretary" on and off, then checks it and names the AI "Lead Secretary"
+    Then the work share is offered only while the AI is not the secretary, and keeps "Less"
+    When the owner submits the add-AI dialog
+    Then "laptop" receives a signed "host.join" for "codex" named "Lead Secretary" with secretary true and the work share kept
     And the dialog closes and the new AI card "Lead Secretary" appears in the panel
 
   Scenario: The folder list says which AI of the group has a folder, and a folder of another group cannot be chosen
@@ -59,7 +60,12 @@ Feature: Member panel and adding an AI to a group
     Then the dialog offers "Mina" and the four AIs, with "Codex · workstation" and "Claude Code · laptop" disabled and their computers before their reasons
     When the owner ticks "Mina", "Claude Code · workstation" and "Codex · laptop"
     Then "Claude Code" is the secretary, "Codex" is not, each secretary choice is named for its AI, and each AI has the newest folder that no other group has
-    When the owner makes "Codex" the secretary, chooses "GPT-5.4" with the level "high" for it, names the group "Studio" and themself "Alex", and creates it
+    And only "Codex", not the secretary, offers a work share, at "Normal"
+    When the owner chooses "GPT-5.4" with the level "high" for "Codex"
+    Then the work share of "Codex" becomes the model's suggestion "More"
+    When the owner makes "Codex" the secretary
+    Then "Codex" offers no work share and "Claude Code" offers its own again, at "Normal"
+    When the owner names the group "Studio" and themself "Alex", and creates it
     Then the home makes "Studio", adds Mina, and each computer receives a signed "host.join" with the AI's folder, model, level and work share, "Codex" as the secretary
     And the chat of "Studio" opens with Mina and the two AIs
 

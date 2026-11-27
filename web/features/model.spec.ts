@@ -378,7 +378,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         choose(selects(one('form[aria-label="编辑档案"]'))[0], 'Opus');
         flushSync();
         expect(texts('form[aria-label="编辑档案"] .fast')).toEqual(['快速模式']);
-        expect(read(one('form[aria-label="编辑档案"] .work legend'))).toBe('派活');
+        // The owner's AI is the secretary, which takes no tasks: no work share.
+        expect(all('form[aria-label="编辑档案"] .work')).toEqual([]);
         setModels([]);
         expect(one<HTMLInputElement>('input[placeholder="如 opus"]').placeholder).toBe('如 opus');
         expect(one<HTMLInputElement>('input[placeholder="如 high"]').placeholder).toBe('如 high');

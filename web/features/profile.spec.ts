@@ -30,8 +30,11 @@ vi.mock('../src/lib/net.svelte', async (actual) => ({
   start: (source: Source) => ({ net: { source, homes, path: () => undefined }, stop: () => {} }),
 }));
 
-const card = () => one<HTMLElement>('.member');
-const other = () => all('.member')[1];
+/** The card of the AI named `name`: the members are ordered by name, the secretary first. */
+const cardOf = (name: string) => all('.member').find((m) => read(m.querySelector('h3')!) === name)!;
+const card = () => cardOf('Owner AI');
+const other = () => cardOf('Other AI');
+const both = (selector: string) => [card(), other()].map((m) => read(m.querySelector(selector)!));
 const button = (label: string, within: ParentNode = card()) =>
   [...within.querySelectorAll<HTMLButtonElement>('button')].find((b) => read(b) === label)!;
 const form = () => one<HTMLFormElement>('.member form.editor');
@@ -76,7 +79,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         host: device,
         cli: 'claude',
         state: 'dormant',
-        secretary: true,
+        secretary: false,
         model: 'listed',
         effort: '',
         tier: 'standard',
@@ -135,8 +138,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
   Scenario('Everyone sees profiles but only the owner can edit', ({ Then, And, When }) => {
     Then('the cards show exact tier and skills values with an empty-skills fallback', () => {
-      expect(texts('.member .tier')).toEqual(['Normal', 'More']);
-      expect(texts('.member .skills')).toEqual(['Protocol design', 'Not set']);
+      expect(both('.tier')).toEqual(['Normal', 'More']);
+      expect(both('.skills')).toEqual(['Protocol design', 'Not set']);
       expect([...card().querySelectorAll('dt')].map(read)).toContain('Work share');
       expect([...card().querySelectorAll('dt')].map(read)).toContain('Skills');
       expect(card().querySelectorAll('.tier .bars b.on')).toHaveLength(2);
@@ -152,7 +155,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     Then(
       'the profile labels are 派活 and 擅长, the strong tier is 多, and the share sits with the quota',
       () => {
-        expect(texts('.member .tier')).toEqual(['适中', '多']);
+        expect(both('.tier')).toEqual(['适中', '多']);
         expect(texts('.member .work dt')).toEqual(['派活', '派活']);
         expect(all('.member .work .meter, .member .work .quota-none')).toHaveLength(2);
         expect(other().querySelector('.work')!.getAttribute('aria-label')).toBe('派活与额度');
@@ -166,6 +169,44 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       },
     );
   });
+
+  Scenario(
+    "The secretary's card and editor offer no work share, and it comes back with its stored value",
+    ({ Given, Then, When }) => {
+      Given("the owner's AI is the group's secretary", () => writeAI({ secretary: true }));
+      Then(
+        'its card shows only the quota in its block, with no work share and no suggestion',
+        () => {
+          const block = card().querySelector('.work')!;
+          expect(block.getAttribute('aria-label')).toBe('Quota');
+          expect(block.querySelectorAll('dt, .tier, .suggest')).toHaveLength(0);
+          expect(block.querySelectorAll('.meter, .quota-none')).toHaveLength(1);
+          expect(other().querySelector('.work .tier')).not.toBeNull();
+        },
+      );
+      When('the owner opens the profile editor', openEditor);
+      Then('the editor offers model, thinking level and skills and no work share', () => {
+        expect(form().querySelectorAll('select')).toHaveLength(2);
+        expect(skills().value).toBe('Protocol design');
+        expect(form().querySelectorAll('fieldset, .tiers, input[type=radio]')).toHaveLength(0);
+      });
+      When(
+        'the owner cancels the profile editor and the AI is no longer the secretary',
+        async () => {
+          button('Cancel').click();
+          await tick();
+          writeAI({ secretary: false });
+        },
+      );
+      Then('its card shows its stored work share Normal and the suggestion More again', () => {
+        expect(card().querySelector('.work')!.getAttribute('aria-label')).toBe(
+          'Work share and quota',
+        );
+        expect(read(card().querySelector('.work .tier')!)).toBe('Normal');
+        expect(read(card().querySelector('.suggest')!)).toBe('More Use');
+      });
+    },
+  );
 
   Scenario('The owner edits a profile and cancels without losing focus', ({ When, Then, And }) => {
     When('the owner opens the profile editor', openEditor);

@@ -12,6 +12,14 @@ Feature: AI profiles and stronger-AI escalation
     When the browser switches to Chinese
     Then the profile labels are 派活 and 擅长, the strong tier is 多, and the share sits with the quota
 
+  Scenario: The secretary's card and editor offer no work share, and it comes back with its stored value
+    Given the owner's AI is the group's secretary
+    Then its card shows only the quota in its block, with no work share and no suggestion
+    When the owner opens the profile editor
+    Then the editor offers model, thinking level and skills and no work share
+    When the owner cancels the profile editor and the AI is no longer the secretary
+    Then its card shows its stored work share Normal and the suggestion More again
+
   Scenario: The owner edits a profile and cancels without losing focus
     When the owner opens the profile editor
     Then Save is disabled until something changes

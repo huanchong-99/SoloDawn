@@ -90,3 +90,16 @@ it('shows the window used in the work block, and no quota without an AI', async 
   show(ProfileFields, { draft });
   expect(all('[role=meter], .quota-none')).toEqual([]);
 });
+
+it('offers no work share for a secretary, keeps the draft value, and offers it again after', async () => {
+  const draft = $state({ ...newDraft(), tier: 'light', skills: 'Coordination' });
+  const props = $state({ draft, ai: { ...ai, usage: {} }, share: false });
+  show(ProfileFields, props);
+  expect(all('fieldset, .tiers, input[type=radio], .quota-none')).toEqual([]);
+  expect(one<HTMLInputElement>('input.input').value).toBe('Coordination');
+  props.share = true;
+  flushSync();
+  expect(texts('legend')).toEqual(['Work share']);
+  expect(one<HTMLInputElement>('.tiers input:checked').value).toBe('light');
+  expect(draft.tier).toBe('light');
+});

@@ -94,8 +94,12 @@
       </header>
       <Profile {group} {ai} suggested={suggestedTier(host, ai)}>
         {#snippet children(share, skillsRow, editProfile)}
-          <div class="work" role="group" aria-label={t('profile.work')}>
-            <dl class="share">{@render share()}</dl>
+          <div
+            class="work"
+            role="group"
+            aria-label={t(ai.secretary ? 'profile.quota' : 'profile.work')}
+          >
+            {#if !ai.secretary}<dl class="share">{@render share()}</dl>{/if}
             <Quota {ai} />
           </div>
           <AllowEditor {group} {ai} {humans}>
@@ -334,7 +338,7 @@
     line-height: calc(var(--fs-sm) * 1.5);
   }
   /* How much work the AI is given, beside how much of its quota is used: the first thing under
-     its name. */
+     its name. A secretary takes no tasks: its block holds the quota alone. */
   .work {
     display: grid;
     gap: var(--sp-2);
