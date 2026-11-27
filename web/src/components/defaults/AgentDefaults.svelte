@@ -87,6 +87,7 @@
       bind:this={toggleBtn}
       type="button"
       data-guide="defaults"
+      data-unset={!agent.defaults ? '' : undefined}
       class={['btn', 'btn-sm', agent.defaults && 'btn-ghost turn']}
       aria-expanded={editing}
       aria-controls={editing ? `${uid}-editor` : undefined}

@@ -28,6 +28,7 @@ let engine: Browser;
 async function open(as: 'P' | 'Q', hash: string) {
   const page = await engine.newPage({ viewport: { width: 1440, height: 900 } });
   await page.goto(`${server.resolvedUrls!.local[0]}?nomock`);
+  await page.getByRole('button', { name: /^(Look around first|先随便看看)$/ }).click();
   await page.addScriptTag({ type: 'module', url: '/features/s2_cast.ts' });
   await page.waitForFunction(() => window.s2);
   await page.evaluate((as) => window.s2.cast(as), as);
