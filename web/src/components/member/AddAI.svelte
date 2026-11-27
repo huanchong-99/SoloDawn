@@ -236,7 +236,7 @@
       />
     </label>
 
-    <ProfileFields bind:draft />
+    <ProfileFields bind:draft share={!secretary} />
 
     {#if canSecretary}
       <div class="sec-opt">

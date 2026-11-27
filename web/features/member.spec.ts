@@ -813,31 +813,42 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When(
-        'the owner toggles "Make this AI the group\'s secretary" on and off, then checks it and names the AI "Lead Secretary"',
+        'the owner sets the work share to "Less", toggles "Make this AI the group\'s secretary" on and off, then checks it and names the AI "Lead Secretary"',
         () => {
           const secCheck = one<HTMLInputElement>('dialog .check input');
           const nameInput = one<HTMLInputElement>('dialog input[required]');
+          shareSeen.length = 0;
+          one<HTMLInputElement>('dialog .tiers input[value="light"]').click();
+          flushSync();
+          shareSeen.push(dialogShare());
           secCheck.click();
           flushSync();
+          shareSeen.push(dialogShare());
           expect(nameInput.value).toBe('Secretary');
           secCheck.click();
           flushSync();
+          shareSeen.push(dialogShare());
           expect(nameInput.value).toBe('Codex');
           secCheck.click();
           flushSync();
+          shareSeen.push(dialogShare());
           expect(nameInput.value).toBe('Secretary');
           fill(nameInput, '  Lead Secretary  ');
           flushSync();
         },
       );
-      And('the owner submits the add-AI dialog', async () => {
+      Then(
+        'the work share is offered only while the AI is not the secretary, and keeps "Less"',
+        () => expect(shareSeen).toEqual([['light'], [], ['light'], []]),
+      );
+      When('the owner submits the add-AI dialog', async () => {
         one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
         await vi.waitFor(() => expect(laptop.joins).toHaveLength(1));
         await new Promise((later) => setTimeout(later, 5));
         flushSync();
       });
       Then(
-        '"laptop" receives a signed "host.join" for "codex" named "Lead Secretary" with secretary true',
+        '"laptop" receives a signed "host.join" for "codex" named "Lead Secretary" with secretary true and the work share kept',
         () => {
           expect(laptop.joins[0]).toEqual({
             t: 'host.join',
@@ -852,7 +863,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             workspace: '/home/dev/website',
             model: '',
             effort: '',
-            tier: 'standard',
+            tier: 'light',
             skills: '',
           });
           expect(workstation.joins).toEqual([]);
@@ -886,6 +897,16 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     }));
 
   const aiRows = () => all('dialog div.ai');
+  const shareSeen: string[][] = [];
+  /** The checked work share of the add-AI dialog, none while it offers no chooser. */
+  const dialogShare = () =>
+    all<HTMLInputElement>('dialog .tiers input:checked').map((input) => input.value);
+  const codexAI = () => aiRow('Codex', 'laptop').closest('.ai')!;
+  /** The checked work share of each ticked AI, none for one that offers no chooser. */
+  const shares = () =>
+    all('dialog div.ai.on').map((row) =>
+      [...row.querySelectorAll<HTMLInputElement>('.tiers input:checked')].map((i) => i.value),
+    );
   const aiRow = (name: string, computer: string) =>
     aiRows().find(
       (row) =>
@@ -1085,31 +1106,40 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           ).toEqual(['Claude Code', 'Codex']);
         },
       );
-      When(
-        'the owner makes "Codex" the secretary, chooses "GPT-5.4" with the level "high" for it, names the group "Studio" and themself "Alex", and creates it',
-        async () => {
-          all<HTMLInputElement>('dialog .ai-fields .check input[type=radio]')[1].click();
-          const codex = aiRow('Codex', 'laptop').closest('.ai')!;
-          const [model, level] = codex.querySelectorAll('select');
-          expect(level.disabled).toBe(true);
-          choose(model, 'GPT-5.4');
-          flushSync();
-          expect([...level.options].map((option) => option.value)).toEqual(['', 'low', 'high']);
-          choose(level, 'high');
-          flushSync();
-          expect(codex.querySelector<HTMLInputElement>('input[value="strong"]')!.checked).toBe(
-            true,
-          );
-          const [name, member] = all<HTMLInputElement>('dialog .two input');
-          fill(name, 'Studio');
-          fill(member, 'Alex');
-          one('dialog form').dispatchEvent(
-            new Event('submit', { bubbles: true, cancelable: true }),
-          );
-          await vi.waitFor(() => expect(location.hash).toMatch(/^#\/groups\/.{22}$/));
-          studio = location.hash.split('/')[2];
+      And('only "Codex", not the secretary, offers a work share, at "Normal"', () =>
+        expect(shares()).toEqual([[], ['standard']]),
+      );
+      When('the owner chooses "GPT-5.4" with the level "high" for "Codex"', () => {
+        const [model, level] = codexAI().querySelectorAll('select');
+        expect(level.disabled).toBe(true);
+        choose(model, 'GPT-5.4');
+        flushSync();
+        expect([...level.options].map((option) => option.value)).toEqual(['', 'low', 'high']);
+        choose(level, 'high');
+        flushSync();
+      });
+      Then('the work share of "Codex" becomes the model\'s suggestion "More"', () =>
+        expect(shares()).toEqual([[], ['strong']]),
+      );
+      When('the owner makes "Codex" the secretary', () => {
+        all<HTMLInputElement>('dialog .ai-fields .check input[type=radio]')[1].click();
+        flushSync();
+      });
+      Then(
+        '"Codex" offers no work share and "Claude Code" offers its own again, at "Normal"',
+        () => {
+          expect(shares()).toEqual([['standard'], []]);
+          expect(texts('dialog .ai-fields legend')).toEqual(['Work share']);
         },
       );
+      When('the owner names the group "Studio" and themself "Alex", and creates it', async () => {
+        const [name, member] = all<HTMLInputElement>('dialog .two input');
+        fill(name, 'Studio');
+        fill(member, 'Alex');
+        one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await vi.waitFor(() => expect(location.hash).toMatch(/^#\/groups\/.{22}$/));
+        studio = location.hash.split('/')[2];
+      });
       Then(
         'the home makes "Studio", adds Mina, and each computer receives a signed "host.join" with the AI\'s folder, model, level and work share, "Codex" as the secretary',
         () => {

@@ -5,6 +5,7 @@
   "profile.tier.strong": "More",
   "profile.tier.hint": "How much work the secretary gives this AI: More gets more tasks and the hard ones first, Less fewer and only simple ones.",
   "profile.work": "Work share and quota",
+  "profile.quota": "Quota",
   "profile.skills": "Skills",
   "profile.skills.none": "Not set",
   "profile.skills.hint": "What this AI is good at, in one line",

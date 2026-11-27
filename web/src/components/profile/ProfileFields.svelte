@@ -6,29 +6,39 @@
   import { tiers, tooLong, type Draft } from './profile';
 
   /** Tier and skills of a draft profile, for the add-AI and create-group dialogs and the owner's
-   *  editor; with `ai`, its usage line under the tier; without `skills`, the tier alone. */
+   *  editor; with `ai`, its usage line under the tier; without `skills`, the tier alone; without
+   *  `share` (a secretary, which takes no tasks), no tier: the draft keeps its value. */
   let {
     draft = $bindable(),
     ai,
     skills = true,
+    share = true,
     disabled = false,
-  }: { draft: Draft; ai?: AIMemberRow; skills?: boolean; disabled?: boolean } = $props();
+  }: {
+    draft: Draft;
+    ai?: AIMemberRow;
+    skills?: boolean;
+    share?: boolean;
+    disabled?: boolean;
+  } = $props();
   const uid = $props.id();
 </script>
 
-<fieldset class="field work" {disabled} aria-describedby={`${uid}-tier-hint`}>
-  <legend>{t('profile.tier')}</legend>
-  <p id={`${uid}-tier-hint`} class="tier-hint">{t('profile.tier.hint')}</p>
-  <div class="seg tiers" style:--at={(tiers as readonly string[]).indexOf(draft.tier)}>
-    {#each tiers as tier (tier)}
-      <label>
-        <input type="radio" name={`${uid}-tier`} value={tier} bind:group={draft.tier} />
-        <span><Bars {tier} />{t(`profile.tier.${tier}`)}</span>
-      </label>
-    {/each}
-  </div>
-  {#if ai}<Quota {ai} />{/if}
-</fieldset>
+{#if share}
+  <fieldset class="field work" {disabled} aria-describedby={`${uid}-tier-hint`}>
+    <legend>{t('profile.tier')}</legend>
+    <p id={`${uid}-tier-hint`} class="tier-hint">{t('profile.tier.hint')}</p>
+    <div class="seg tiers" style:--at={(tiers as readonly string[]).indexOf(draft.tier)}>
+      {#each tiers as tier (tier)}
+        <label>
+          <input type="radio" name={`${uid}-tier`} value={tier} bind:group={draft.tier} />
+          <span><Bars {tier} />{t(`profile.tier.${tier}`)}</span>
+        </label>
+      {/each}
+    </div>
+    {#if ai}<Quota {ai} />{/if}
+  </fieldset>
+{/if}
 {#if skills}
   <label class="field">
     <span class="row">

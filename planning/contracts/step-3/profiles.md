@@ -103,6 +103,10 @@ owner's `member set`.
   chosen model's `efforts` and "the CLI's default". Beside the tier it
   shows the suggestion for the chosen model when the two differ; taking
   it is the owner's click.
+- **The secretary.** No view shows or offers the secretary's tier (its
+  card, its editor, the add-AI and create-group dialogs once it is chosen
+  as secretary), because it takes no tasks; its stored tier stays as set,
+  and only orders it among the candidates of section 4.
 - **Refresh.** A button on the panel sends `host.info` with `refresh`.
   A discovery changes `host.info` only. It never changes a member row,
   so what the owner set stays, whatever is found later.

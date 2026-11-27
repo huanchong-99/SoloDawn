@@ -12,7 +12,8 @@
   import { newDraft, profileChanges, tooLong, type Draft, type Tier } from './profile';
 
   /** Tier and skills of an AI member card, with the suggestion, and its owner's editor of model,
-   *  level, tier and skills (contracts/step-3/profiles.md section 2a). */
+   *  level, tier and skills (contracts/step-3/profiles.md section 2a). A secretary takes no tasks:
+   *  its editor has no tier. */
   let {
     group,
     ai,
@@ -120,7 +121,7 @@
     {#if ai.cli !== 'external'}
       <ModelFields bind:draft {models} disabled={busy || offline} />
     {/if}
-    <ProfileFields bind:draft {ai} disabled={busy || offline} />
+    <ProfileFields bind:draft {ai} share={!ai.secretary} disabled={busy || offline} />
     <footer class="row">
       <span class="grow"></span>
       <button type="button" class="btn btn-sm btn-ghost" onclick={close}>
