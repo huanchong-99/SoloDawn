@@ -561,15 +561,23 @@ export async function pairPrimaryBrowser(
   await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 }
 
-/** Presses the onboarding's last button, which opens the group list with the create-group dialog
- *  open. `keep` leaves the dialog to the test; otherwise Escape closes it, for the plain list. */
+/** Presses the onboarding's last button ("Next: set your AIs' defaults"), waits for `#/nodes`,
+ *  then navigates to `#/groups` and opens "New group" when `keep` is true (or leaves the plain
+ *  group list when `keep` is false). */
 export async function finishOnboarding(page: Page, keep = false): Promise<void> {
   await poll(() => page.locator('a.done-btn').count()).toBe(1);
   await page.locator('a.done-btn').click();
+  await poll(() => page.url()).toContain('#/nodes');
+  await page
+    .locator('.rail .tabs a[href="#/groups"], nav a[href="#/groups"]:visible')
+    .first()
+    .click();
   await poll(() => page.url()).toContain('#/groups');
-  await poll(() => page.locator('dialog.dlg[open]').count()).toBe(1);
-  if (keep) return;
-  await page.keyboard.press('Escape');
+  if (keep) {
+    await page.locator('button', { hasText: 'New group' }).first().click();
+    await poll(() => page.locator('dialog.dlg[open]').count()).toBe(1);
+    return;
+  }
   await poll(() => page.locator('dialog.dlg[open]').count()).toBe(0);
 }
 

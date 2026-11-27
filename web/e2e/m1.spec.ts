@@ -103,7 +103,7 @@ describe('E-M1: onboarding, pairing, account declaration, and two computers', ()
       );
 
       await poll(() => page.locator('a.done-btn').textContent()).toContain(
-        'Create your first group',
+        "Next: set your AIs' defaults",
       );
       await finishOnboarding(page);
 
