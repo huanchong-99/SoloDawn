@@ -742,6 +742,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | ----------------------------- | --------------------------------------------------------------------------------- |
 | `index.html`, `src/main.ts`   | entry: styles, then `boot` with the page's crypto, CSS, storage                   |
 | `src/lib/boot.ts`             | browser check, device key; mounts `App` or `Notice`                               |
+| `src/lib/idbtx.ts`            | IndexedDB open, transaction and close for `solodawn` store `device`               |
 | `src/lib/identity.ts`         | device key in IndexedDB, base64url, sign, verify, open                            |
 | `src/lib/devlog.ts`           | `DeviceLog`: apply, replay, valid devices, adoption                               |
 | `src/lib/pairing.ts`          | pairing secret, room id, mac, pair message check                                  |

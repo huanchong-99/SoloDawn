@@ -1,6 +1,7 @@
 // Persistence of the owner's device log and node signalling addresses in IndexedDB (`solodawn`
 // version 1, store `device`, key `owner`, beside the device key of identity.ts).
 import { DeviceLog } from './devlog';
+import { runTx } from './idbtx';
 import type { Envelope } from './proto';
 
 const ownerKey = 'owner';
@@ -12,33 +13,6 @@ export interface StoredOwner {
   user: string;
   entries: Envelope[];
   addrs: Record<string, string[]>;
-}
-
-function runTx<T>(
-  idb: () => IDBFactory,
-  mode: IDBTransactionMode,
-  options: IDBTransactionOptions | undefined,
-  work: (store: IDBObjectStore, set: (value: T) => void) => void,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const opening = idb().open('solodawn', 1);
-    opening.onupgradeneeded = () => opening.result.createObjectStore('device');
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-      const db = opening.result;
-      const tx = db.transaction('device', mode, options);
-      let value!: T;
-      work(tx.objectStore('device'), (v) => (value = v));
-      tx.oncomplete = () => {
-        db.close();
-        resolve(value);
-      };
-      tx.onabort = () => {
-        db.close();
-        reject(tx.error);
-      };
-    };
-  });
 }
 
 /** Loads and verifies the stored owner log, if this browser already belongs to a person. */

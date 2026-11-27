@@ -1,6 +1,7 @@
 // The browser half of contracts/envelope.md: this device's key, signed envelopes and the
 // rendezvous answer. internal/identity is the reference; both are held to
 // internal/proto/testdata/crypto.json. The device log is in devlog.ts, pairing in pairing.ts.
+import { runTx } from './idbtx';
 import { readHeader, type Header } from './payload';
 import type { Envelope } from './proto';
 
@@ -250,29 +251,12 @@ export async function loadDevice({ crypto, idb }: KeyStore): Promise<Device> {
 /** Stores `fresh` in IndexedDB (`solodawn`, store `device`) under `name` when absent and returns
  *  whichever value is kept, in one durable transaction. */
 export function keep<T>(idb: () => IDBFactory, name: string, fresh: T): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const opening = idb().open('solodawn', 1);
-    opening.onupgradeneeded = () => opening.result.createObjectStore('device');
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-      const db = opening.result;
-      // A browser without the durability option ignores it.
-      const tx = db.transaction('device', 'readwrite', { durability: 'strict' });
-      const store = tx.objectStore('device');
-      const stored = store.get(name);
-      let kept = fresh;
-      stored.onsuccess = () => {
-        if (stored.result) kept = stored.result as T;
-        else store.add(fresh, name);
-      };
-      tx.oncomplete = () => {
-        db.close();
-        resolve(kept);
-      };
-      tx.onabort = () => {
-        db.close();
-        reject(tx.error);
-      };
+  return runTx<T>(idb, 'readwrite', { durability: 'strict' }, (store, set) => {
+    set(fresh);
+    const stored = store.get(name);
+    stored.onsuccess = () => {
+      if (stored.result) set(stored.result as T);
+      else store.add(fresh, name);
     };
   });
 }
