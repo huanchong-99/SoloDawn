@@ -615,9 +615,9 @@ describe('web client connections against real nodes (I-8)', () => {
     await page.locator('.done-btn').waitFor({ state: 'visible' });
 
     expect(((await page.locator('.done-btn').textContent()) ?? '').trim()).toBe(
-      'Create your first group',
+      "Next: set your AIs' defaults",
     );
-    expect(await page.locator('.done-btn').getAttribute('href')).toBe('#/groups');
+    expect(await page.locator('.done-btn').getAttribute('href')).toBe('#/nodes');
   });
 
   test('A1.3: indicator reports direct and relay within 1 s and host.info succeeds throughout', async () => {

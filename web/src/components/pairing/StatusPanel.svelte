@@ -1,7 +1,6 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
   import { offeredAccounts } from '../driver/driver';
-  import { creating } from '../../lib/groups.svelte';
   import { accountLabel, cliName, type PairingSession, type Stage } from '../../lib/onboard.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
@@ -177,7 +176,7 @@
 {/each}
 
 {#if session.stage === 'ready'}
-  <a class="btn btn-dawn done-btn" href={href('groups')} onclick={() => (creating.open = true)}>
+  <a class="btn btn-dawn done-btn" href={href('nodes')}>
     {t('pairing.done')}
   </a>
 {/if}

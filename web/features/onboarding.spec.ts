@@ -3,6 +3,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { flushSync, tick } from 'svelte';
 import { expect, vi } from 'vitest';
 import { DeviceLog } from '../src/lib/devlog';
+import { creating, takeCreate } from '../src/lib/groups.svelte';
 import { Device, ed25519, encode, loadDevice, verifyEnvelope } from '../src/lib/identity';
 import { loadOwner } from '../src/lib/owner';
 import { mac, newSecret, parseSecret, room, shown, verifyPair } from '../src/lib/pairing';
@@ -385,17 +386,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         });
       });
 
-      And('"Create your first group" leads to "#/groups" and opens the create-group dialog', () => {
+      And('"Next: set your AIs\' defaults" leads to "#/nodes"', () => {
         const done = one<HTMLAnchorElement>('.done-btn');
-        expect(done.textContent!.trim()).toBe('Create your first group');
-        expect(done.getAttribute('href')).toBe('#/groups');
+        expect(done.textContent!.trim()).toBe("Next: set your AIs' defaults");
+        expect(done.getAttribute('href')).toBe('#/nodes');
         done.click();
+        expect(creating.open).toBe(false);
+        expect(takeCreate()).toBe(false);
         // The browser tells the page that the address changed; the test DOM does not.
-        go('#/groups');
-        flushSync();
-        const dialog = one<HTMLDialogElement>('dialog');
-        expect(dialog.open).toBe(true);
-        dialog.close();
+        go('#/nodes');
+        expect(location.hash).toBe('#/nodes');
+        expect(one('#page-title').textContent).toBe('My computers and AIs');
       });
     },
   );
