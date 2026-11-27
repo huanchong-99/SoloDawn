@@ -15,14 +15,17 @@ import (
 )
 
 func TestMoveIsRememberedAndCanBeImportedBack(t *testing.T) {
-	w, p := runFounded(t, runTables())
+	var changed []string // a move ends the group's code (export.md section 3), and the node is told
+	w, p := runFounded(t, runTables(), func(cfg *home.LoopConfig) { cfg.CodeChanged = func(g string) { changed = append(changed, g) } })
 	file := filepath.Join(t.TempDir(), "move.db")
 	exportStoreLogs(t, w.db, logOf(t, browser, node, laptop))
 	equal(t, w.loop.ExportGroup(runOther, file, laptop.ID()).Error(), "this node is not home to the group")
 	equal(t, w.loop.ExportGroup(groupID, file, ""), nil)
 	equal(t, len(w.loop.Groups(p.conn)), 1)
+	equal(t, len(changed), 0)
 
 	equal(t, w.loop.ExportGroup(groupID, file, laptop.ID()), nil)
+	equal(t, changed, []string{groupID})
 	p.gets(runGroupsFrame())
 	w.loop.Close()
 	reopened := runStart(t, w.db, runTables())

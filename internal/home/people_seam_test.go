@@ -2,6 +2,7 @@ package home_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -280,4 +281,128 @@ func TestLoopForgetsRemovedPersonBeforeGroups(t *testing.T) {
 	equal(t, <-client, any("forgot visitor"))
 	equal(t, (<-client).(proto.CmdResult).OK, proto.True(true))
 	equal(t, (<-client).(proto.Groups).Type, "groups")
+}
+
+// A9.47 to A9.50, home half on StartLoop: the loop reads the group's code
+// in the transaction of each command, from the setting invites that the
+// commands write, and tells the node after the commit whenever the code was
+// made or may have ended. The code is read again after a restart, and no
+// receipt and no row holds it.
+func TestLoopKeepsTheCodeAndTellsTheNode(t *testing.T) {
+	db := runOpen(t)
+	changed := make(chan string, 16)
+	tell := func(cfg *home.LoopConfig) { cfg.CodeChanged = func(g string) { changed <- g } }
+	told := func(times int) {
+		t.Helper()
+		for range times {
+			select {
+			case g := <-changed:
+				equal(t, g, groupID)
+			case <-time.After(5 * time.Second):
+				t.Fatal("the node was not told that the code changed")
+			}
+		}
+		equal(t, len(changed), 0)
+	}
+	w := runStart(t, db, home.NodeTables(), tell)
+	owner := w.attach(browser)
+	owner.re++
+	w.loop.Cmd(owner.conn, owner.re, browser.Sign(fmt.Sprintf(`{"t":"group","n":%q,"ts":%d,"g":%q,"op":"create","name":"G","member_name":"owner"}`, groupID, clock, groupID)))
+	owner.gets(fmt.Sprintf(`{"re":%d,"ok":true}`, owner.re))
+	owner.next()
+	code := func(p *runPeer, env proto.Envelope) proto.CmdResult {
+		t.Helper()
+		p.re++
+		p.w.loop.Cmd(p.conn, p.re, env)
+		var res proto.CmdResult
+		equal(t, proto.Decode([]byte(p.next()), &res), nil)
+		equal(t, res.Re, p.re)
+		return res
+	}
+	show := func(p *runPeer) proto.CmdResult { return code(p, p.w.cmd(browser, groupID, "code", `,"op":"show"`)) }
+
+	newCode := w.cmd(browser, groupID, "code", `,"op":"new","hours":24`)
+	made := code(owner, newCode)
+	secret, err := identity.ParseSecret(made.Code)
+	equal(t, err, nil)
+	equal(t, []any{made.Code, made.Expires}, []any{secret.String(), int64(clock + 86_400_000)})
+	told(1)
+	const stored = "SELECT value FROM setting WHERE key='invites'"
+	entry := fmt.Sprintf(`{%q:{"code":%q,"by":%q,"expires":%d}}`, groupID, string(secret), grpOwnerID(groupID), clock+86_400_000)
+	equal(t, runQuery[string](t, db, stored), entry)
+	// A repeat is answered from the receipt, which holds no code: ok with no
+	// field, and no second code.
+	equal(t, code(owner, newCode), proto.CmdResult{Success: proto.Success{Re: owner.re, OK: true}})
+	told(0)
+	equal(t, runQuery[string](t, db, stored), entry)
+	var hdr proto.PayloadHeader
+	equal(t, proto.Decode([]byte(newCode.Payload), &hdr), nil)
+	equal(t, runQuery[string](t, db, "SELECT answer FROM receipt WHERE n=?", string(hdr.Nonce)), `{"ok":true}`)
+	equal(t, show(owner), proto.CmdResult{Success: proto.Success{Re: owner.re, OK: true}, Code: made.Code, Expires: made.Expires})
+
+	// People who type the code join; member_joined names the admin who made
+	// it, and the code is not used up.
+	joins := func(key identity.Key, name string, open bool) {
+		t.Helper()
+		p, log := w.attach(key), logOf(t, key)
+		var used []bool
+		p.conn.SetJoining(func() *home.Joining {
+			return &home.Joining{Group: groupID, Code: secret, Log: log, Admit: func(u bool) { used = append(used, u) }}
+		})
+		defer p.conn.SetJoining(nil)
+		if !open {
+			p.fails(groupID, "join", `,"name":"`+name+`"`, "forbidden")
+			return
+		}
+		p.does(groupID, "join", `,"name":"`+name+`"`)
+		equal(t, used, []bool{false})
+		owner.next()
+		const joined = "SELECT data->>'$.body.by' FROM row WHERE r='msg' AND data->>'$.body.code'='member_joined' ORDER BY seq DESC LIMIT 1"
+		equal(t, runQuery[string](t, db, joined), grpOwnerID(groupID))
+	}
+	joins(guest, "Q", true)
+	told(0)
+
+	// After a restart the code is read again from the store.
+	w.loop.Close()
+	nonce := w.nonce.Load()
+	w = runStart(t, db, home.NodeTables(), tell)
+	w.nonce.Store(nonce)
+	owner = w.attach(browser)
+	equal(t, show(owner), proto.CmdResult{Success: proto.Success{Re: owner.re, OK: true}, Code: made.Code, Expires: made.Expires})
+	joins(device(7), "R", true)
+
+	// At its end the code counts as none.
+	w.clock.Store(made.Expires)
+	equal(t, show(owner), proto.CmdResult{Success: proto.Success{Re: owner.re, OK: true}})
+	joins(nobody, "S", false)
+
+	// A person who leaves leaves the code open; a removal by another ends it.
+	again := code(owner, w.cmd(browser, groupID, "code", `,"op":"new","hours":1`))
+	secret, _ = identity.ParseSecret(again.Code)
+	told(1)
+	member := func(key identity.Key) string {
+		return runQuery[string](t, db, "SELECT id FROM row WHERE r='member' AND gone=0 AND data->>'user'=?", key.ID())
+	}
+	q := w.attach(guest)
+	q.does(groupID, "member", fmt.Sprintf(`,"op":"remove","id":%q`, member(guest)))
+	owner.next()
+	told(0)
+	equal(t, show(owner), proto.CmdResult{Success: proto.Success{Re: owner.re, OK: true}, Code: again.Code, Expires: again.Expires})
+	owner.does(groupID, "member", fmt.Sprintf(`,"op":"remove","id":%q`, member(device(7))))
+	told(1)
+	owner.next()
+	equal(t, show(owner), proto.CmdResult{Success: proto.Success{Re: owner.re, OK: true}})
+	joins(nobody, "S", false)
+
+	// off ends it too.
+	code(owner, w.cmd(browser, groupID, "code", `,"op":"new","hours":24`))
+	equal(t, code(owner, w.cmd(browser, groupID, "code", `,"op":"off"`)), proto.CmdResult{Success: proto.Success{Re: owner.re, OK: true}})
+	told(2)
+	equal(t, runQuery[string](t, db, stored), "{}")
+	for _, table := range []string{"receipt", "row"} {
+		const holds = "SELECT count(*) FROM %s WHERE instr(%s, ?) OR instr(%s, ?)"
+		column := map[string]string{"receipt": "answer", "row": "data"}[table]
+		equal(t, runQuery[int](t, db, fmt.Sprintf(holds, table, column, column), made.Code, string(secret)), 0)
+	}
 }

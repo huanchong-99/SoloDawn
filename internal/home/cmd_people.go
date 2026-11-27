@@ -7,17 +7,21 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-// People in a group: invite, join, member add_person, and member set and
-// remove on a person's row (planning/contracts/step-2/people.md section 2).
+// People in a group: invite, join, code, member add_person, and member set
+// and remove on a person's row (planning/contracts/step-2/people.md section 2).
 
 func init() {
 	Commands.Add(keyInvite, peopleInvite)
 	Commands.Add(keyJoin, peopleJoin)
 	Commands.Add("member/add_person", peopleAdd)
+	for _, op := range []string{"new", "off", "show"} {
+		Commands.Add("code/"+op, peopleCode)
+	}
 }
 
 func peopleInvite(s *State, c Command) (Result, *Refusal) {
@@ -28,8 +32,9 @@ func peopleInvite(s *State, c Command) (Result, *Refusal) {
 }
 
 func peopleJoin(s *State, c Command) (Result, *Refusal) {
-	if c.Joining == nil || !c.Joining.Open || c.Who.User == "" {
-		return Result{}, &Refusal{"forbidden", "join requires an open invitation and a device log"}
+	by, open := peopleInvitation(c)
+	if !open || c.Who.User == "" {
+		return Result{}, &Refusal{"forbidden", "join requires an open invitation or code and a device log"}
 	}
 	var p proto.Join
 	if refusal := c.Decode(&p); refusal != nil {
@@ -38,18 +43,31 @@ func peopleJoin(s *State, c Command) (Result, *Refusal) {
 	if c.Who.Human != "" {
 		return Result{GroupsChanged: true}, nil
 	}
-	return peopleNewJoin(s, c, p.Name)
+	return peopleNewJoin(s, c, p.Name, by)
 }
 
-// peopleNewJoin lets the person of a joining connection in, uses the
+// peopleInvitation returns the admin of a joining connection's invitation or
+// code and whether it is open: a code is open while it is the group's open
+// code, whose admin made it (people.md 2.2, point 1, and section 6).
+func peopleInvitation(c Command) (by string, open bool) {
+	switch {
+	case c.Joining == nil:
+		return "", false
+	case c.Joining.Code == "":
+		return c.Joining.By, c.Joining.Open
+	}
+	return c.Code.By, string(c.Joining.Code) == c.Code.Secret
+}
+
+// peopleNewJoin lets the person of a joining connection in, uses an
 // invitation up and stores the log they presented.
-func peopleNewJoin(s *State, c Command, name string) (Result, *Refusal) {
+func peopleNewJoin(s *State, c Command, name, by string) (Result, *Refusal) {
 	log := c.Joining.Log.Entries
-	res, refusal := peopleEnter(s, c, c.Who.User, name, c.Joining.By, log)
+	res, refusal := peopleEnter(s, c, c.Who.User, name, by, log)
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	res.InviteUsed = true
+	res.InviteUsed = c.Joining.Code == ""
 	for _, env := range log {
 		res.Writes = append(res.Writes, peopleLog{peopleDevice(env)})
 	}
@@ -70,7 +88,7 @@ func peopleAdd(s *State, c Command) (Result, *Refusal) {
 	}
 	log := c.Disk.DeviceLog(p.User)
 	if len(log) == 0 {
-		return Result{}, &Refusal{"not_found", "this home knows no such person; invite them by a link"}
+		return Result{}, &Refusal{"not_found", "this home knows no such person; invite them by a code or a link"}
 	}
 	if s.human(p.User) != "" {
 		return Result{}, &Refusal{"conflict", "the person is a member of the group already"}
@@ -177,6 +195,7 @@ func peopleRemoved(s *State, c Command, person proto.HumanMemberRow) Result {
 	body := proto.MemberRemovedBody{SystemCode: proto.SystemCode{Code: "member_removed"}, User: person.User, Name: person.Name}
 	if c.Who.User != person.User {
 		body.By = &c.Who.Human
+		res.Writes, res.CodeChanged = append(res.Writes, peopleCodeEnd(s, c)), true
 	}
 	res.Rows = append(res.Rows, peopleMessage(s, c, body))
 	return res
@@ -212,3 +231,55 @@ func (w peopleForget) Put(tx *store.Tx) error {
 		func() error { _, err := tx.Exec("DELETE FROM push_sub WHERE user=?", w.user); return err },
 	)
 }
+
+// peopleCode is code new, off and show (people.md 2.6), by an admin. The
+// code lives in the setting invites; the result carries it beside the
+// receipt, which records only that the command succeeded.
+func peopleCode(s *State, c Command) (Result, *Refusal) {
+	if !s.Admin(c.Who) {
+		return Result{}, &Refusal{"forbidden", "only an admin handles the invitation code"}
+	}
+	var p proto.Code
+	if refusal := c.Decode(&p); refusal != nil {
+		return Result{}, refusal
+	}
+	switch p.Op {
+	case "new":
+		return peopleCodeNew(s, c, p.Hours)
+	case "off":
+		return Result{Writes: []Write{peopleCodeEnd(s, c)}, CodeChanged: true}, nil
+	}
+	return peopleCodeShown(c.Code), nil
+}
+
+// peopleCodeNew replaces the group's code with a new secret that ends hours
+// from now.
+func peopleCodeNew(s *State, c Command, hours *int) (Result, *Refusal) {
+	if hours == nil || *hours < 1 || *hours > 168 {
+		return Result{}, &Refusal{"bad_request", "hours is an integer from 1 to 168"}
+	}
+	code := store.Invite{Secret: string(identity.NewSecret()), By: c.Who.Human, Expires: c.Now + int64(*hours)*3_600_000}
+	res := peopleCodeShown(code)
+	res.Writes, res.CodeChanged = []Write{peopleCodeWrite{s.ID, code, c.Now}}, true
+	return res, nil
+}
+
+func peopleCodeShown(code store.Invite) Result {
+	if code.Secret == "" {
+		return Result{}
+	}
+	return Result{Code: identity.Secret(code.Secret).String(), Expires: code.Expires}
+}
+
+// peopleCodeEnd ends the group's code, if one is open.
+func peopleCodeEnd(s *State, c Command) Write { return peopleCodeWrite{s.ID, store.Invite{}, c.Now} }
+
+// peopleCodeWrite stores the code of a group, or ends it with the zero
+// Invite (storage.md section 2, invites).
+type peopleCodeWrite struct {
+	group string
+	code  store.Invite
+	now   int64
+}
+
+func (w peopleCodeWrite) Put(tx *store.Tx) error { return tx.SetInvite(w.group, w.code, w.now) }

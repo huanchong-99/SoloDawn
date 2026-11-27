@@ -124,15 +124,18 @@ func exportRows(out *Tx, table string, rows *sql.Rows) error {
 	return rows.Err()
 }
 
+// moveGroup deletes the group's rows, ends its invitation code and records
+// where it went (planning/contracts/step-2/export.md section 3).
 func (tx *Tx) moveGroup(group, to string) error {
 	for _, table := range []string{"row", "grp", "inbox", "kb"} {
 		if _, err := tx.Exec("DELETE FROM "+table+" WHERE g=?", group); err != nil {
 			return err
 		}
 	}
-	_, err := tx.Exec(`INSERT INTO setting(key,value) VALUES('moved',json_object(?,?))
+	_, err := tx.Exec(`UPDATE setting SET value=json_remove(value,'$."'||?||'"') WHERE key='invites'`, group)
+	_, movedErr := tx.Exec(`INSERT INTO setting(key,value) VALUES('moved',json_object(?,?))
 		ON CONFLICT(key) DO UPDATE SET value=json_patch(value,excluded.value)`, group, to)
-	return err
+	return errors.Join(err, movedErr)
 }
 
 // MovedGroups returns the destinations recorded by completed exports.

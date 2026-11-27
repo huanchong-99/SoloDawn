@@ -27,8 +27,15 @@ func TestGroupExportTransfer(t *testing.T) {
 	equal(t, target.ImportGroup("a", path, "owner", "P2", func(*Tx) error { return errors.New("load failed") }).Error(), "load failed")
 	equal(t, scalar[int](t, target.db, "SELECT count(*) FROM row"), 0)
 
+	// The file holds no invitation code, and a move ends the group's code.
+	check(t, source.Write(func(tx *Tx) error {
+		return errors.Join(tx.SetInvite("a", Invite{"7K2M9QXD4F8TWB3N", "m1", 9}, 0), tx.SetInvite("b", Invite{"0123456789ABCDEF", "m3", 9}, 0))
+	}))
+	check(t, source.ExportGroup("a", path, ""))
+	verifyExportFile(t, path)
 	check(t, source.ExportGroup("a", path, "P2"))
 	equal(t, scalar[string](t, source.db, "SELECT value FROM setting WHERE key='moved'"), `{"a":"P2"}`)
+	equal(t, scalar[string](t, source.db, "SELECT value FROM setting WHERE key='invites'"), `{"b":{"code":"0123456789ABCDEF","by":"m3","expires":9}}`)
 	check(t, source.Write(func(tx *Tx) error {
 		raw, err := tx.MovedGroups()
 		equal(t, string(raw), `{"a":"P2"}`)

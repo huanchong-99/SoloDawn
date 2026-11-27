@@ -59,9 +59,10 @@ clears the counter; crashes do not count.
 | show the group an accepted device-log entry | a `proto.DeviceRow` in `Result.Rows`; `Commit` applies its entry to the state's log |
 | do after a commit what a pure function cannot, such as a Web Push | a function `func(s *State, res Result)` and `After.Add(name, f)` in its file's `init` |
 | know in a hook which devices are connected | `s.Online[device]` |
-| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, `.ID`, `.Replaced`, and for `invite`, `Result.Link` and `Result.Expires` |
+| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, `.ID`, `.Replaced`, for `invite` `Result.Link` and `Result.Expires`, and for `code` `Result.Code` and `Result.Expires` |
 | create or replay an invitation | `Result.InviteBy` (the inviting admin's member id) with `LoopConfig.Invite` (`Inviter`) |
-| handle a joining connection | `c.Joining`, attached with `conn.SetJoining(fn)` on `Loop`; `Result.InviteUsed` marks consumption |
+| make, end or show the group's invitation code | `cmd_people.go`: `code/new`, `code/off`, `code/show`; `c.Code`, the open code that the loop reads in the command's transaction; `Result.CodeChanged` with `LoopConfig.CodeChanged`, called after the commit |
+| handle a joining connection | `c.Joining`, attached with `conn.SetJoining(fn)` on `Loop`, with `Joining.Code` on a connection that came by a code; `Result.InviteUsed` marks consumption |
 | admit or remove a person, or change their role | `cmd_people.go`: `join`, `member/add_person`, human `member/set` and `member/remove` |
 | have the node drop a removed person's device log | `Result.Forget` (their user id) with `LoopConfig.Forget`, called after the commit and before the `groups` push |
 | check another group's membership in a transaction | `Disk.OtherMember(user)` excludes the current group |
@@ -95,7 +96,7 @@ last local membership deletes the node-wide device log and push subscriptions.
 ## Contract
 
 **Keys.** The table holds one function per key: the payload's `t`, followed by `/` and its `op` for
-`group`, `member` and `task`, its `kind` for `post`, its `action` for `act`. `note`, `note_edit`, `forget`,
+`group`, `member`, `task` and `code`, its `kind` for `post`, its `action` for `act`. `note`, `note_edit`, `forget`,
 `jump` and `push` are keys by themselves. The `/` of a key is made by the seam and by nothing in
 a payload: a `t`, or an `op`, `kind` or `action`, that holds a `/` names no command, and neither
 does one of those five types without its field. `Add` panics when a key is given twice.
@@ -134,6 +135,22 @@ never deadlocks `Store.Write`), and carries `Link` and `Expires` on `Result` wit
 the receipt. On a joining connection, when an accepted command commits on `Loop`,
 `Joining.Admit(res.InviteUsed)` runs before the `ok` answer frame is queued. A repeated refusal
 is answered with its code and a fixed `msg`, because a receipt holds no sentence.
+
+**The invitation code** ([people](../../planning/contracts/step-2/people.md) 2.6). `code` is by an
+admin, else `forbidden`. `new` takes `hours` from 1 to 168 (`bad_request` otherwise), creates a
+secret (`identity.NewSecret`), and writes it with the admin's member id and its end to the group's
+entry of the setting `invites` (`store.Tx.SetInvite`), which replaces the code that was open;
+`off` writes the end of the entry; `show` reads `c.Code`. `new` and `show` answer `code` (with
+hyphens) and `expires` in `Result.Code` and `Result.Expires`, which the receipt does not hold, so
+a repeat is `ok` with no field. On a `Loop`, every command's transaction reads
+`store.Tx.Invites(now)` into `c.Code`, so an entry whose end is reached counts as none. A `join`
+on a connection whose `Joining.Code` is set is open while that secret is `c.Code.Secret`, and
+`member_joined` names `c.Code.By`; `Joining.Open` and `Joining.By` are not read for it, and
+`Result.InviteUsed` is false: a code is not used up. A `member remove` by another than the person
+removed also ends the code. `new`, `off`, that removal, and a move (`Loop.ExportGroup` with a
+destination) set `Result.CodeChanged` or call `LoopConfig.CodeChanged(group)` after the commit, on
+the group's goroutine and outside `Store.Write`: the node reads the entry and hosts or leaves the
+code's room. A call when nothing changed is harmless.
 
 **Who.** `Who` carries the signer, the person whose log holds it, that person's member id and the
 AI of `as`. A signer without `as` is a person and, where a command's table names a host, also that
@@ -237,7 +254,9 @@ and `Loop.Fetch`, takes the names that start with `fet`, its tests too, and its 
 start with `TestFetch`.
 `export.go` exports `Loop.ExportGroup` and `Loop.ImportGroup`. The home answers `cmd`, `sync`,
 and `fetch` for moved groups with `moved` and the destination device ID from the `moved` map
-loaded by `StartLoop`. In the import's transaction the home writes the `device` rows that the group
+loaded by `StartLoop`. A move ends the group's invitation code: the store deletes its entry of
+`invites` in the move's transaction, and the loop calls `LoopConfig.CodeChanged`; a copy does
+neither. In the import's transaction the home writes the `device` rows that the group
 lacks of its people's logs in `device_log` (`importDevices`): this node may have accepted entries that
 the file does not hold.
 The submissions and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too,
@@ -252,7 +271,7 @@ start with `rnd`, their tests too, and their test functions start with `TestRoun
 (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test functions
 start with `TestRetention`.
 The step-2 people seam (`people_seam.go`) takes the unexported names that start with `seam` and
-`keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining`, `InviteLink`,
+`keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining` (with `Code`), `InviteLink`,
 `Inviter` and `(*Conn).SetJoining`. Web Push (`webpush.go`) takes the names that start with
 `wpush`, its tests too, and its test functions start with `TestWebPush`.
 Style presets (`preset.go`) take the names that start with `preset`, their tests too, and their test
@@ -381,8 +400,8 @@ for that device. A client's `Send` must return once the client is done or closed
 **For the node and the local link.** A loop is started with a `LoopConfig`: the store, the node's
 device id, its owner's user id, the tables, and `Logs`, which returns the node's verified log of a
 person as a value of its own (a second `identity.Replay` of the entries, not the log the node
-keeps), or nil. `Now`, `Report`, `Forget` and `Every` may be left out: the machine's clock, the standard
-logger, nothing, and no ticks but `Tick`. A connection goes through four entries, the same for a
+keeps), or nil. `Now`, `Report`, `Forget`, `CodeChanged` and `Every` may be left out: the machine's clock, the standard
+logger, nothing, nothing, and no ticks but `Tick`. A connection goes through four entries, the same for a
 `peer.Connection` and for the local link of a host on the same node:
 
 1. `conn := loop.Attach(device, client)`, once the device is authenticated.
@@ -404,8 +423,8 @@ of the loop: it only puts the frame together from the list of groups and from va
 worked out before it called `Welcome`, such as `time` and `addrs`. It takes no lock, waits for
 nothing and calls nothing, the loop least of all; a `build` that waits for a lock of the node
 which another goroutine holds while it calls `Cmd` waits for ever. The loop calls `LoopConfig.Logs`, `Now`,
-`Report` and `Forget` on the goroutines of its groups, and `Logs` and `Now` also on the caller of `Cmd`:
-none of the four may wait for a lock that is held around a call of `Attach`, `Sync`, `Fetch`,
+`Report`, `Forget` and `CodeChanged` on the goroutines of its groups, and `Logs` and `Now` also on the caller of `Cmd`:
+none of the five may wait for a lock that is held around a call of `Attach`, `Sync`, `Fetch`,
 `Close` or `Cmd`, and none may call those. `Attach`, `Sync`, `Fetch` and `Close` wait for the
 groups: they must not be called on the goroutine of a group, which is where a hook runs, or on the
 store's writer, which is where the function of a command, a timer, a handler, a `Disk` and a
@@ -1090,7 +1109,12 @@ among them. `cmd_people_test.go` covers both commands with every refusal, and
 
 `people_seam_internal_test.go` covers joining dispatch. `people_seam_test.go` covers
 `LoopConfig.Invite` (including `Store.Write` re-entrancy freedom on `Invite` and `ReplayInvite`),
-and `(*Conn).SetJoining` admission callbacks.
+`(*Conn).SetJoining` admission callbacks, and the code on `StartLoop`: the read of `invites` in each
+command's transaction, after a restart and at the code's end, and the calls of
+`LoopConfig.CodeChanged` (`TestLoopKeepsTheCodeAndTellsTheNode`). `cmd_people_test.go` covers `code`
+and a `join` by code with every refusal; `features/home_people.feature` holds the home halves of
+A9.47, A9.48, A9.50 and A9.52, reading `c.Code` from a store's `invites` by hand, as it fills in
+`c.Joining`.
 `webpush_test.go` covers `push`, `After["push"]`, `StartLoop` subscription loading and `Close`
 drain, RFC 8291 decryption, per-browser eligibility and revocation, and `404`/`410` eviction in
 memory and `push_sub`. `features/home_webpush.feature` holds the backend half of acceptance test

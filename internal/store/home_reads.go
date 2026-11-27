@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"maps"
 )
 
 // What the run loop of a home (internal/home/run.go) reads and writes in a
@@ -94,6 +96,41 @@ func (tx *Tx) Retire(group string, id int64) error {
 func (tx *Tx) Jump(group string, id int64) error {
 	_, err := tx.Exec("UPDATE inbox SET env=json_set(env,'$.jump',json('true')), not_before=0 WHERE g=? AND id=?", group, id)
 	return err
+}
+
+// Invite is the open invitation code of a group, an entry of the setting
+// invites (planning/contracts/storage.md section 2): the secret in its
+// canonical form, the member id of the admin who made it, and when it ends,
+// in Unix milliseconds.
+type Invite struct {
+	Secret  string `json:"code"`
+	By      string `json:"by"`
+	Expires int64  `json:"expires"`
+}
+
+// Invites returns the open invitation codes by group id. An entry whose
+// expires is not after now has ended and counts as none.
+func (tx *Tx) Invites(now int64) (map[string]Invite, error) {
+	var raw string
+	err := tx.QueryRow("SELECT coalesce((SELECT value FROM setting WHERE key='invites'),'{}')").Scan(&raw)
+	codes := map[string]Invite{}
+	err = errors.Join(err, json.Unmarshal([]byte(raw), &codes))
+	return openInvites(codes, now), err
+}
+
+// SetInvite stores the open code of a group, or ends it with the zero Invite,
+// and deletes every entry that has ended by now.
+func (tx *Tx) SetInvite(group string, code Invite, now int64) error {
+	codes, err := tx.Invites(now)
+	codes[group] = code
+	value, _ := json.Marshal(openInvites(codes, now))
+	_, putErr := tx.Exec("INSERT OR REPLACE INTO setting(key, value) VALUES('invites', ?)", string(value))
+	return errors.Join(err, putErr)
+}
+
+func openInvites(codes map[string]Invite, now int64) map[string]Invite {
+	maps.DeleteFunc(codes, func(_ string, code Invite) bool { return code.Expires <= now })
+	return codes
 }
 
 // data reads the one JSON column of a query on the row table.

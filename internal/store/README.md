@@ -2,8 +2,9 @@
 
 `export.go` writes a standalone SQLite snapshot containing one group's rows
 (including markers), counters, unacknowledged inbox and its people's device
-logs and push subscriptions. A move removes the group's data and records its
-new device in the `moved` setting. Import binds the group to the receiving node,
+logs and push subscriptions; no `setting`, so no invitation code. A move removes the group's
+data, deletes its entry of the `invites` setting (its invitation code ends) and records its new
+device in the `moved` setting. Import binds the group to the receiving node,
 rebuilds the knowledge-base index and assigns destination-local inbox IDs.
 Receipts and session rows are not copied. The file's `PRAGMA user_version` is the node's schema
 version; `ExportedGroup` and `ImportGroup` refuse a file of another version in one line (a file of
@@ -41,7 +42,12 @@ before another transaction can run.
 `home_reads.go` holds what the run loop of a home needs inside a `Write`: `Groups`,
 `StateRows` and `Counters` to load a group, `LackingEntries` for an import, `Row`, `Thread`, `Pending` and `Queued` for
 what a rule reads from disk, and `RaiseNum`, `Retire` and `Jump`. A read there sees what its
-own transaction wrote, and never waits for the writer, which it runs on.
+own transaction wrote, and never waits for the writer, which it runs on. `Invites(now)` returns
+the open invitation codes by group from the `invites` setting
+([people](../../planning/contracts/step-2/people.md) 2.6), each an `Invite` (`code`, `by`,
+`expires`); an entry whose `expires` is not after `now` counts as none. The home reads it in every
+command's transaction and the node at its start. `SetInvite(group, code, now)` stores a group's
+code, or ends it with the zero `Invite`, and deletes every entry that has ended by `now`.
 
 `offers.go` remembers applied signalling offers across restarts: `RememberOffer(signer, conn, ts, now)`
 claims one offer and reports false when it was already claimed, and `HasOffer` asks. A claim

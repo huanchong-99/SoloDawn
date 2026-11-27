@@ -217,10 +217,16 @@ type Result struct {
 	Msg    string        // of a refusal: the sentence for logs
 
 	Link       string // invite answer link, omitted from receipt
-	Expires    int64  // invite answer expiry in Unix ms, omitted from receipt
+	Code       string // code answer, the invitation code with hyphens, omitted from receipt
+	Expires    int64  // invite and code answer expiry in Unix ms, omitted from receipt
 	InviteBy   string // member id of the inviting admin when an invite is accepted
-	InviteUsed bool   // true when an accepted join consumes its invitation
+	InviteUsed bool   // true when an accepted join consumes its invitation; a code is never consumed
 	Forget     string // user id of a removed person whose device log leaves the node
+
+	// CodeChanged says that the group's invitation code was made or may have
+	// ended: once the result is committed, LoopConfig.CodeChanged is called
+	// (planning/contracts/step-2/people.md 2.6).
+	CodeChanged bool
 
 	// GroupsChanged says that the list of groups a peer may read has changed:
 	// once the result is committed, every connected peer is pushed its
@@ -239,7 +245,7 @@ func (r Result) Frame(re int64) any {
 	return proto.CmdResult{
 		Success: proto.Success{Re: re, OK: true}, Num: r.Answer.Num,
 		Passed: r.Answer.Passed, Round: r.Answer.Round, ID: r.Answer.ID,
-		Replaced: r.Answer.Replaced, Link: r.Link, Expires: r.Expires,
+		Replaced: r.Answer.Replaced, Link: r.Link, Code: r.Code, Expires: r.Expires,
 	}
 }
 
@@ -269,6 +275,9 @@ type Command struct {
 	Now                 int64    // the home's clock, in Unix milliseconds
 	Disk                Disk     // the reads of this command's transaction
 	Joining             *Joining // non-nil on a joining connection
+	// Code is the group's open invitation code, read in the command's
+	// transaction; its Secret is empty when none is open.
+	Code store.Invite
 }
 
 // Decode reads the payload into v, the wire type of the command.
