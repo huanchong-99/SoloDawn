@@ -76,7 +76,9 @@ ones:
 - in `push`: either `sub`, `vapid` and `on`, or `off` alone (1.7);
 - in `takeover.start`: `task`;
 - in `note_edit`: `name`, there exactly when the note has a `type`;
-- in `code`: `hours`, there with `op` `new` alone.
+- in `code`: `hours`, there with `op` `new` alone;
+- in `member add_ai`, `host.join` and as one of the "any of" of `member set`: `follow`, which is
+  only ever `true` (`contracts/step-3/profiles.md` section 1a).
 
 A `post` always carries `kind`, `text`, `thread` (or `null`), `main`,
 `mentions`, `re` (or `null`) and `body`; what `body` must hold for each
@@ -112,10 +114,10 @@ those same commands.
 
 | `op` | Fields | By | Effect |
 | --- | --- | --- | --- |
-| `add_ai` | `id`, `cli` (one of `[a-z0-9_]+`, an agent the host runs), `name`, `workspace`, `account`, `secretary`, `approvers`, `profile`, `tool` | a host whose owner is a member | member row with `host` = the signer and `workspace` as sent: the absolute path of the AI's folder on that host, which the host checked and resolved (`host.join`, section 2). The home stores it and never changes it. `name` must be unused in the group, else `conflict`. `secretary: true` is accepted when the group has none or the owner is an admin, and sets `group.secretary`; a previous secretary's member row loses the flag |
+| `add_ai` | `id`, `cli` (one of `[a-z0-9_]+`, an agent the host runs), `name`, `workspace`, `account`, `secretary`, `approvers`, `profile`, `follow`, `tool` | a host whose owner is a member | member row with `host` = the signer and `workspace` as sent: the absolute path of the AI's folder on that host, which the host checked and resolved (`host.join`, section 2). The home stores it and never changes it. `name` must be unused in the group, else `conflict`. `secretary: true` is accepted when the group has none or the owner is an admin, and sets `group.secretary`; a previous secretary's member row loses the flag |
 | `add_person` | `user`, `name` | an admin | a person who is already a member of another group homed on this node becomes a member of this one, with no invitation (`contracts/step-2/people.md` section 2.5) |
 | `status` | `id`, `state`, `task`, `path`, `usage`, `event` | the member's host | member row updated; `event`, when present, becomes a `system` row (1.9) |
-| `set` | `id`, any of `name`, `account`, `allow`, `approvers`, `profile`, `tool` | the AI's owner; for `approvers` alone, also the AI's host | member row updated. A new `name` must be unused in the group, else `conflict`. On a person's row, `set` takes `role` alone, by the owner (`contracts/step-2/people.md` section 2.3) |
+| `set` | `id`, any of `name`, `account`, `allow`, `approvers`, `profile`, `follow`, `tool` | the AI's owner; for `approvers` alone, also the AI's host; for `follow` with the four profile fields, also the AI's host (`contracts/step-3/profiles.md` section 2) | member row updated. A new `name` must be unused in the group, else `conflict`. On a person's row, `set` takes `role` alone, by the owner (`contracts/step-2/people.md` section 2.3) |
 | `remove` | `id` | the AI's owner, or an admin; for a person's row, `contracts/step-2/people.md` section 2.4 | refused with `conflict` while the AI is assignee or reviewer of a task that is not final: reassign or cancel first. Otherwise the member row is replaced by a `gone` marker. Removing the secretary clears `group.secretary` and writes `system` `no_secretary` |
 
 On `add_ai` and on `set` with `approvers`, the home adds the owner's user id
@@ -127,8 +129,8 @@ Step 2 adds people: `invite`, `join`, `code` and `add_person`
 person's row. `member set` never takes `workspace`: to move an AI to another
 folder its owner removes it and adds it again.
 
-Step 3 adds the member's profile to `add_ai` and `set`
-(`contracts/step-3/profiles.md` section 2), and `tool` for an external AI
+Step 3 adds the member's profile to `add_ai` and `set`, and `follow`
+(`contracts/step-3/profiles.md` sections 1a and 2), and `tool` for an external AI
 (`contracts/step-3/external.md` section 2).
 
 ### 1.3 `post`
@@ -311,9 +313,10 @@ device id. Receipts apply as for home commands.
 | `t` | Fields | Effect |
 | --- | --- | --- |
 | `agent.set` | `agent`, `account` | declares the account type (`personal`, `team` or `api_key`, else `bad_request`) of a CLI found on this machine (one of the agents of `contracts/step-3/drivers.md`, else `bad_request`; `conflict` when not found here; R-50); sets `login_ok` back to `true` in `host.info` (`flows/agent-turn.md` E) and writes audit `setting` (`account <account>`); required before the AI can join a group |
+| `agent.defaults` | `agent`, `model`, `effort`, `tier`, `skills` | sets the defaults of that CLI on this node (`contracts/step-3/profiles.md` section 1a). `agent` is one of the agents of `contracts/step-3/drivers.md`, else `bad_request` (`external` included); the four are all sent and within the bounds of `profiles.md` section 1, with `tier` one of the three values, else `bad_request`. The node keeps them in its setting `defaults`, shows them in `host.info`, and brings every member of that CLI here that follows them up to date. A CLI that is not found here may have defaults: they show once it is found |
 | `perm.set` | `agent`, `g`, `level` (1, 2, 3) | postponed after 1.0 (no level control in 1.0): permission level for that AI's sessions in that group (R-40); takes effect the next time a session's process starts |
 | `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | postponed after 1.0 (with `U-12`): node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
-| `host.join` | `g`, `home`, `agent`, `name`, `secretary`, `workspace` | adds that AI to the group with `workspace` as its folder (R-11; the rules are below the table): the node checks and resolves the folder, connects to `home`, sends `member add_ai` with the resolved path, and records the folder with the AI's group session. It clones nothing and creates no folder |
+| `host.join` | `g`, `home`, `agent`, `name`, `secretary`, `workspace`, `follow` | adds that AI to the group with `workspace` as its folder (R-11; the rules are below the table): the node checks and resolves the folder, connects to `home`, sends `member add_ai` with the resolved path, and records the folder with the AI's group session. It clones nothing and creates no folder |
 | `host.leave` | `g`, `agent`, `member` (needed when the node has several members of that CLI in `g`) | the node sends `member remove`; if the home accepts it, the AI's sessions in that group are closed (it is refused while the AI has unfinished tasks) |
 | `home.add` | `g`, `home`, `name`, `addrs` | records the home of a group on this node before any AI of its owner joins it (`contracts/step-2/people.md` section 7, point 2) |
 | `watch.end` | `g`, `member`, `user` | drops a person's watch grant (`contracts/step-2/watch-team.md` section 5) |

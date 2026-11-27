@@ -79,6 +79,7 @@ type AIMemberRow struct {
 	Path      string   `json:"path"`
 	Usage     Usage    `json:"usage"`
 	Profile
+	Follow True `json:"follow,omitempty"`
 }
 
 // Profile is what the owner chose for an AI member: the CLI's model and

@@ -1,0 +1,13 @@
+{
+  "t": "host.join",
+  "n": "H46nb5YsBesaWbHkHmZLow",
+  "ts": 1763600000000,
+  "to": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "home": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "agent": "codex",
+  "name": "Codex",
+  "secretary": false,
+  "workspace": "/home/dev/website",
+  "follow": true
+}

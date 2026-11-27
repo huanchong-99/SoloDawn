@@ -178,7 +178,10 @@ the type does not name, not with `Decode`.
 - Member profiles and escalation (`step-3/profiles.md`) add `Profile` (`model`, `effort`,
   `tier`, `skills`) to AI member rows and `ProfileSet` to `member add_ai`, `member set` and
   `host.join`, `member` on `HostLeave`, `refresh` on `HostInfoRequest`, `models` (`Model`) on each
-  agent of `host.info`, and `stuck` (`Stuck`) on `TaskRow`.
+  agent of `host.info`, and `stuck` (`Stuck`) on `TaskRow`. AI defaults (`step-3/profiles.md`
+  section 1a) add `follow` (`True`) to `AIMemberRow`, `MemberAddAI`, `MemberSet` and `HostJoin`,
+  `defaults` (`*Profile`) on each agent of `host.info`, `AgentDefaults` (`agent.defaults`), and
+  `ValidProfile` in [`profile.go`](profile.go).
 - `True` is a boolean that decodes only `true`: `ok` of a success (`Success`), `off` of a push
   and `jump` of an item.
 - In `SettingsSet`, `caps` is `AgentCaps`: a member per agent being changed, its

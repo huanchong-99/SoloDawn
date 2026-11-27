@@ -80,7 +80,13 @@
           "efforts": [],
           "tier": "light"
         }
-      ]
+      ],
+      "defaults": {
+        "model": "opus",
+        "effort": "high",
+        "tier": "strong",
+        "skills": "Go backend"
+      }
     },
     {
       "agent": "codex",

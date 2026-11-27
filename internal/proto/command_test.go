@@ -42,9 +42,10 @@ func TestMemberCommandGoldens(t *testing.T) {
 		c.ID = ID(id("scout"))
 		return c
 	}
-	golden(t, "member-add_ai", MemberAddAI{member("add_ai"), "codex", nil, "Codex", workspace, "personal", false, []string{user}, ProfileSet{}})
-	golden(t, "member-add_ai-profile", MemberAddAI{member("add_ai"), "codex", nil, "Codex", workspace, "personal", false, []string{user}, profile()})
-	golden(t, "member-add_ai-external", MemberAddAI{scout("add_ai"), "external", new("ZCode"), "Scout", workspace, "api_key", false, []string{user}, ProfileSet{}})
+	golden(t, "member-add_ai", MemberAddAI{member("add_ai"), "codex", nil, "Codex", workspace, "personal", false, []string{user}, ProfileSet{}, false})
+	golden(t, "member-add_ai-profile", MemberAddAI{member("add_ai"), "codex", nil, "Codex", workspace, "personal", false, []string{user}, profile(), false})
+	golden(t, "member-add_ai-follow", MemberAddAI{member("add_ai"), "codex", nil, "Codex", workspace, "personal", false, []string{user}, profile(), true})
+	golden(t, "member-add_ai-external", MemberAddAI{scout("add_ai"), "external", new("ZCode"), "Scout", workspace, "api_key", false, []string{user}, ProfileSet{}, false})
 	// An admin adds a person who is in another group homed on this node; the new member's id is n.
 	golden(t, "member-add_person", MemberAddPerson{command("member", "member add_person"), "add_person", device(signer("other browser")), "Mina"})
 	golden(t, "member-status", MemberStatus[SystemCode]{MemberCommand: member("status"), State: "working", Task: ID(taskID), Path: "local",
@@ -56,6 +57,8 @@ func TestMemberCommandGoldens(t *testing.T) {
 		Role:          new("admin"),
 	})
 	golden(t, "member-set-profile", MemberSet{MemberCommand: member("set"), ProfileSet: ProfileSet{new(""), new(""), new("light"), new("")}})
+	golden(t, "member-set-follow", MemberSet{MemberCommand: MemberCommand{command("member", "member set follow"), "set", ID(agent)}, Follow: true})
+	golden(t, "member-set-follow-host", MemberSet{MemberCommand: MemberCommand{command("member", "member set follow host"), "set", ID(agent)}, ProfileSet: profile(), Follow: true})
 	golden(t, "member-set-tool", MemberSet{MemberCommand: scout("set"), Tool: new("")})
 	golden(t, "member-remove", member("remove"))
 }
@@ -224,8 +227,9 @@ func TestHostCommandGoldens(t *testing.T) {
 	to := func(kind string) HostCommand { return HostCommand{kind, ID(id(kind)), ts, host} }
 	golden(t, "home-add", HomeAdd{to("home.add"), ID(group), device(signer("other home")), "Website",
 		[]string{"ws://192.0.2.10:47800/rv", "wss://rv.example/rv"}})
-	golden(t, "host-join", HostJoin{to("host.join"), ID(group), host, "codex", "Codex", false, workspace, "", nil, profile()})
-	golden(t, "host-join-external", HostJoin{to("host.join"), ID(group), host, "external", "Scout", false, workspace, "api_key", new("ZCode"), ProfileSet{}})
+	golden(t, "host-join", HostJoin{to("host.join"), ID(group), host, "codex", "Codex", false, workspace, "", nil, profile(), false})
+	golden(t, "host-join-follow", HostJoin{to("host.join"), ID(group), host, "codex", "Codex", false, workspace, "", nil, ProfileSet{}, true})
+	golden(t, "host-join-external", HostJoin{to("host.join"), ID(group), host, "external", "Scout", false, workspace, "api_key", new("ZCode"), ProfileSet{}, false})
 	golden(t, "host-leave", HostLeave{to("host.leave"), ID(group), "codex", ID(agent)})
 }
 
@@ -245,7 +249,9 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 			if _, there := fields["role"]; there {
 				want += "-role"
 			}
-			if _, there := fields["tier"]; there {
+			if _, there := fields["follow"]; there {
+				want += "-follow"
+			} else if _, there := fields["tier"]; there {
 				want += "-profile"
 			}
 		case "post":
@@ -264,9 +270,12 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 				continue
 			}
 			want = kind
-		case "home.add", "host.join", "host.leave", "host.offline", "host.online", "settings.set", "pair.browser", "agent.set", "perm.set",
+		case "home.add", "host.join", "host.leave", "host.offline", "host.online", "settings.set", "pair.browser", "agent.set", "agent.defaults", "perm.set",
 			"takeover.start", "takeover.end", "pty.resize", "watch.start", "watch.end":
 			want = strings.ReplaceAll(kind, ".", "-")
+			if _, there := fields["follow"]; there && kind == "host.join" {
+				want += "-follow"
+			}
 		case "groups", "beacon":
 			want = kind
 		case "host.info", "host.workspaces": // a request, its answer, a push
@@ -276,7 +285,7 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 		default:
 			continue
 		}
-		name = strings.TrimSuffix(strings.TrimSuffix(name, "-external"), "-tool")
+		name = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(name, "-external"), "-tool"), "-host")
 		if name != want {
 			t.Errorf("%s holds the example of %s", name, want)
 		}

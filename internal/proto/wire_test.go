@@ -121,6 +121,7 @@ func wireCases() []wireCase {
 		cases = append(cases, wireCase{name, file, at, encoded, ok})
 	}
 	add("fast that is false", "host-info-answer", false, false, "agents", "0", "models", "0", "fast")
+	add("follow that is false", "member-set-follow", false, false, "follow")
 	add("refresh that is false", "host-info-request", true, false, "refresh")
 	add("ask that is false", "row-task-stuck", true, false, "stuck", "ask")
 

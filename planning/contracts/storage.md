@@ -159,7 +159,10 @@ CREATE TABLE setting (
   `offline` (false), `homes` (the list `host.info` shows,
   `contracts/datachannel.md` section 7), `invites` (an object from group id
   to that group's open invitation code: `code`, `by`, `expires`;
-  `contracts/step-2/people.md` 2.6), `moved` (an object from the id of a
+  `contracts/step-2/people.md` 2.6), `defaults` (an object from agent to
+  the defaults of that CLI: `model`, `effort`, `tier`, `skills`; an agent
+  that is not there has none; `contracts/step-3/profiles.md` section 1a),
+  `moved` (an object from the id of a
   group moved away to the device id of its new home;
   `contracts/step-2/export.md` section 3).
 

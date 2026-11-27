@@ -651,6 +651,35 @@ describe('host surface', () => {
       [],
       [],
     ]);
+    expect(p.decode(p.HostInfo, goldens['host-info-answer']).agents.map((a) => a.defaults)).toEqual(
+      [
+        { model: 'opus', effort: 'high', tier: 'strong', skills: 'Go backend' },
+        undefined,
+        undefined,
+      ],
+    );
+    expect(p.decode(p.AIMemberRow, goldens['row-member-ai-follow']).follow).toBe(true);
+    expect(p.decode(p.MemberAddAI, goldens['member-add_ai-follow']).follow).toBe(true);
+    expect(p.decode(p.MemberSet, goldens['member-set-follow']).follow).toBe(true);
+    expect(p.decode(p.MemberSet, goldens['member-set-follow-host']).follow).toBe(true);
+    expect(p.decode(p.HostJoin, goldens['host-join-follow']).follow).toBe(true);
+    expect(p.decode(p.AgentDefaults, goldens['agent-defaults'])).toMatchObject({
+      t: 'agent.defaults',
+      agent: 'claude',
+      model: 'opus',
+      effort: 'high',
+      tier: 'strong',
+      skills: 'Go backend, protocol design',
+    });
+    for (const [name, schema] of [
+      ['row-member-ai-follow', p.AIMemberRow],
+      ['member-add_ai-follow', p.MemberAddAI],
+      ['member-set-follow', p.MemberSet],
+      ['host-join-follow', p.HostJoin],
+    ] as const) {
+      const bad = { ...JSON.parse(goldens[name]), follow: false };
+      expect(v.safeParse(schema, bad).success, name).toBe(false);
+    }
   });
 
   // A host command has `to` and a `t` with a dot; the frames of the host surface have no `to`.
@@ -661,7 +690,7 @@ describe('host surface', () => {
 
   it.each(hostCommands)('%s is named by its t, and is for one node', (name) => {
     const command = JSON.parse(goldens[name]);
-    expect(name.replace(/-external$/, '')).toBe(command.t.replace('.', '-'));
+    expect(name.replace(/-(external|follow)$/, '')).toBe(command.t.replace('.', '-'));
     expect(command.to).toBe(p.decode(p.Welcome, goldens.welcome).device);
     expect(accepts(name, { ...command, t: 'host.unknown' })).toBe(false);
   });

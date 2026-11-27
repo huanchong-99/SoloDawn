@@ -234,3 +234,9 @@ fake CLIs fail reviews on script.
   a restart of the node, the four profile fields are unchanged byte for byte.
   In the browser: the panel shows the owner's tier, with the suggestion beside
   it while the model is listed, and "not listed" with no suggestion once it is gone.
+- **A10.29** An edit in the group ends following: after `member set` by the AI's owner with a profile field and no `follow`, the AI row keeps the effective fields and loses `follow`, and neither the secretary's turn text nor `list_members` ever contains `"follow"`.
+- **A10.30** Restoring defaults: the owner's `member set` with `follow` sets `follow` on the AI row while keeping its current four fields until the host sends one `member set` with `follow` and the CLI's current defaults.
+- **A10.31** Host bounds on `member set`: the AI's host may send `follow` together with the four profile fields only for a row that has `follow`, and any other host profile/follow combination returns `conflict` or `forbidden`, while `follow: false` returns `bad_request`.
+- **A10.32** Node CLI defaults: `agent.defaults` stores `model`, `effort`, `tier` and `skills` per managed CLI in setting `defaults` (refusing `external`, invalid tiers, or missing fields with `bad_request`) and exposes them under that agent in `host.info`.
+- **A10.33** Joining with defaults: `host.join` with `follow` sends `member add_ai` carrying `follow` and the CLI's current defaults (ignoring any four fields on `host.join`), while joining without `follow` gives the new AI its own profile.
+- **A10.34** Propagating changed defaults: updating `agent.defaults` pushes the new four fields via `member set` with `follow` to every following member of that CLI across online and reconnecting homes, leaving own-profile members and other CLIs untouched.
