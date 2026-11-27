@@ -161,6 +161,19 @@ func (r *tkRig) interactive(l Launch) ([]string, string, error) {
 	return ptyHelperArgv(r.t, "pty-echo"), cmp.Or(l.Session, "new-session"), nil
 }
 
+// removeFolderAtHandBack removes the folder when the hand-back composes its
+// turn. The terminal's CLI has the folder as its working directory, which
+// Windows will not delete, so it goes only once the CLI has exited.
+func (r *tkRig) removeFolderAtHandBack() {
+	compose := Compose
+	Compose = func(h *Host, s Session, kind TurnKind, items []json.RawMessage) (string, Turn, error) {
+		if err := os.Remove(r.folder); err != nil {
+			r.t.Error(err)
+		}
+		return compose(h, s, kind, items)
+	}
+}
+
 func (r *tkRig) lastOpened() Launch {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -504,9 +517,7 @@ func TestTakeoverHandBackInAFolderThatIsGoneFailsTheTask(t *testing.T) {
 	if err := r.start(runAI1, tkTask); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(r.folder); err != nil {
-		t.Fatal(err)
-	}
+	r.removeFolderAtHandBack()
 	r.end(runAI1)
 	r.waitReleased(runAI1)
 	key := SessionKey{Group: runGroup1, Member: runAI1, Task: tkTask}
