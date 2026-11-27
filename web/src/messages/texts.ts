@@ -60,6 +60,18 @@ export function merge<L extends string>(
   return merged;
 }
 
+/** What is wrong with the keys and texts of one file of an area, if anything. */
+function textProblem(area: string, texts: Record<string, unknown>) {
+  const keys = Object.keys(texts);
+  const stray = keys.find((key) => head(key) !== area);
+  if (stray !== undefined) return `${stray} is not a key of the area ${area}`;
+  const odd = keys.find((key) => typeof texts[key] !== 'string');
+  if (odd !== undefined) return `${odd} is not text`;
+  const empty = keys.find((key) => !(texts[key] as string).trim());
+  if (empty !== undefined) return `${empty} is empty`;
+  return undefined;
+}
+
 /** What is wrong with one file of an area, if anything. `known` is the keys of the area's file
  *  in another language, when one was read before. */
 function rule(
@@ -72,13 +84,8 @@ function rule(
 ) {
   if (!langs.includes(lang)) return `no language ${lang}`;
   if (reserved.has(area)) return `the shell has the namespace ${area}`;
-  const keys = Object.keys(texts);
-  const stray = keys.find((key) => head(key) !== area);
-  if (stray !== undefined) return `${stray} is not a key of the area ${area}`;
-  const odd = keys.find((key) => typeof texts[key] !== 'string');
-  if (odd !== undefined) return `${odd} is not text`;
-  const empty = keys.find((key) => !(texts[key] as string).trim());
-  if (empty !== undefined) return `${empty} is empty`;
+  const bad = textProblem(area, texts);
+  if (bad !== undefined) return bad;
   if (known !== undefined && known !== keysOf(texts)) return 'the keys differ between languages';
   return undefined;
 }
