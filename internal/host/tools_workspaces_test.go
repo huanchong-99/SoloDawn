@@ -107,6 +107,90 @@ func TestWorkspacesStopAtTheSizeOfACtlMessage(t *testing.T) {
 	}
 }
 
+// workspaceAnswerSize is the size of the answer to host.workspaces that holds
+// list, with the largest request id.
+func workspaceAnswerSize(list []proto.Workspace) int {
+	return len(marshalWire(proto.HostWorkspaces{Success: proto.Success{Re: math.MaxInt64}, Workspaces: list}))
+}
+
+// workspaceFolders returns the folders a list of that size is made of, none of
+// them on disk yet: the first ones, which are alike and short, and one last folder with
+// a name of pad letters.
+func workspaceFolders(root string, count, pad int) []workspaces.Folder {
+	var found []workspaces.Folder
+	for i := range count + 1 {
+		letters := 1
+		if i == count {
+			letters = pad
+		}
+		found = append(found, workspaces.Folder{
+			Path: filepath.Join(root, fmt.Sprintf("%03d-%s", i, strings.Repeat("a", letters))),
+			Used: time.UnixMilli(int64(1763600000000 - i)),
+		})
+	}
+	return found
+}
+
+func workspaceFoldersSize(found []workspaces.Folder) int {
+	list := []proto.Workspace{}
+	for _, f := range found {
+		list = append(list, proto.Workspace{Path: f.Path, Used: f.Used.UnixMilli()})
+	}
+	return workspaceAnswerSize(list)
+}
+
+// workspacesFillingACtlMessage returns, for the same root, the folders whose
+// answer is exactly ctlLimit bytes, and those of one byte more.
+func workspacesFillingACtlMessage(root string) (fits, over []workspaces.Folder) {
+	count := 0
+	for workspaceFoldersSize(workspaceFolders(root, count+1, 0)) <= ctlLimit {
+		count++
+	}
+	pad := 0
+	for workspaceFoldersSize(workspaceFolders(root, count, pad)) < ctlLimit {
+		pad++
+	}
+	return workspaceFolders(root, count, pad), workspaceFolders(root, count, pad+1)
+}
+
+// listedWorkspacePaths makes the folders and returns the paths that
+// listWorkspaces keeps of them.
+func listedWorkspacePaths(t *testing.T, found []workspaces.Folder) []string {
+	t.Helper()
+	var paths []string
+	for _, f := range found {
+		codexNoErr(t, os.MkdirAll(f.Path, 0o700))
+	}
+	for _, w := range listWorkspaces(slices.Values(found), "") {
+		paths = append(paths, w.Path)
+	}
+	return paths
+}
+
+func workspacePaths(found []workspaces.Folder) []string {
+	var paths []string
+	for _, f := range found {
+		paths = append(paths, f.Path)
+	}
+	return paths
+}
+
+// An answer of exactly 61,440 bytes keeps its last folder; one byte more cuts
+// that folder off (contracts/conventions.md section 4).
+func TestWorkspacesCutAtExactlyTheSizeOfACtlMessage(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	fits, over := workspacesFillingACtlMessage(root)
+	if got := []int{ctlLimit, workspaceFoldersSize(fits), workspaceFoldersSize(over)}; !slices.Equal(got, []int{61440, 61440, 61441}) {
+		t.Fatalf("limit, fitting answer and answer one byte over = %v", got)
+	}
+	if got := listedWorkspacePaths(t, fits); !slices.Equal(got, workspacePaths(fits)) {
+		t.Fatalf("an answer of 61440 bytes kept %d of %d folders", len(got), len(fits))
+	}
+	if got := listedWorkspacePaths(t, over); !slices.Equal(got, workspacePaths(over[:len(over)-1])) {
+		t.Fatalf("an answer of 61441 bytes kept %d of %d folders", len(got), len(over))
+	}
+}
+
 // Codex lists its threads through its app server, as its models are listed.
 func TestCodexWorkspacesComeFromThreadList(t *testing.T) {
 	modelBinaries(t)
