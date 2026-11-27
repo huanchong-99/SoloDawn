@@ -9,7 +9,7 @@ import type { Refusal } from '../src/lib/members';
 import { nodes } from '../src/lib/nodes.svelte';
 import * as p from '../src/lib/proto';
 import { example, owner, TestHome, user } from './home';
-import { all, closePage, fill, go, one, read, openPage, texts } from './page';
+import { all, choose, closePage, fill, go, one, read, openPage, texts } from './page';
 
 const feature = await loadFeature('../features/web_member.feature');
 
@@ -344,7 +344,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               body: { question: 'Which port?', options: [], to: [user] },
             }),
           );
-          const resetAt = new Date(2026, 10, 20, 15, 0).getTime();
+          const resetAt = new Date().setHours(15, 0, 0, 0);
           h.write(
             website,
             example('row-member-ai', {
@@ -554,7 +554,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           true,
           false,
         ]);
-        expect(texts('.member .meter span')).toEqual(['Window used', 'Window used', 'Window used']);
+        expect(texts('.member .meter span')).toEqual([
+          'Quota used this window',
+          'Quota used this window',
+          'Quota used this window',
+        ]);
         expect(texts('.member .meter b')).toEqual(['18%', '62%', '100%']);
         expect(all('.member .meter').map((m) => m.getAttribute('style'))).toEqual([
           '--v: 18%;',
@@ -1019,6 +1023,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             }),
           );
           await addLaptop();
+          laptop.agents[0].models = [
+            { model: 'gpt-5.4', name: 'GPT-5.4', efforts: ['low', 'high'], tier: 'strong' },
+          ];
         },
       );
       When('the owner opens "New group" from the group list', async () => {
@@ -1066,7 +1073,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         '"Claude Code" is the secretary, "Codex" is not, each secretary choice is named for its AI, and each AI has the newest folder that no other group has',
         () => {
-          const radios = all<HTMLInputElement>('dialog .ai-fields input[type=radio]');
+          const radios = all<HTMLInputElement>('dialog .ai-fields .check input[type=radio]');
           expect(radios.map((radio) => radio.checked)).toEqual([true, false]);
           expect(new Set(radios.map((radio) => radio.name)).size).toBe(1);
           expect(texts('dialog .ai-fields .check')).toEqual([
@@ -1074,14 +1081,25 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             'Make Codex the secretary',
           ]);
           expect(
-            all<HTMLInputElement>('dialog .ai-fields input.input').map((input) => input.value),
+            all<HTMLInputElement>('dialog .ai-fields input[required]').map((input) => input.value),
           ).toEqual(['Claude Code', 'Codex']);
         },
       );
       When(
-        'the owner makes "Codex" the secretary, names the group "Studio" and themself "Alex", and creates it',
+        'the owner makes "Codex" the secretary, chooses "GPT-5.4" with the level "high" for it, names the group "Studio" and themself "Alex", and creates it',
         async () => {
-          all<HTMLInputElement>('dialog .ai-fields input[type=radio]')[1].click();
+          all<HTMLInputElement>('dialog .ai-fields .check input[type=radio]')[1].click();
+          const codex = aiRow('Codex', 'laptop').closest('.ai')!;
+          const [model, level] = codex.querySelectorAll('select');
+          expect(level.disabled).toBe(true);
+          choose(model, 'GPT-5.4');
+          flushSync();
+          expect([...level.options].map((option) => option.value)).toEqual(['', 'low', 'high']);
+          choose(level, 'high');
+          flushSync();
+          expect(codex.querySelector<HTMLInputElement>('input[value="strong"]')!.checked).toBe(
+            true,
+          );
           const [name, member] = all<HTMLInputElement>('dialog .two input');
           fill(name, 'Studio');
           fill(member, 'Alex');
@@ -1093,7 +1111,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the home makes "Studio", adds Mina, and each computer receives a signed "host.join" with the AI\'s folder, "Codex" as the secretary',
+        'the home makes "Studio", adds Mina, and each computer receives a signed "host.join" with the AI\'s folder, model, level and work share, "Codex" as the secretary',
         () => {
           const sent = workstation.home.asked
             .filter((req) => req.t === 'cmd')
@@ -1109,12 +1127,35 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             join.name,
             join.workspace,
             join.secretary,
+            join.model,
+            join.effort,
+            join.tier,
           ];
           expect(workstation.joins.map(joined)).toEqual([
-            [workstationId, studio, 'claude', 'Claude Code', '/home/dev/notes', false],
+            [
+              workstationId,
+              studio,
+              'claude',
+              'Claude Code',
+              '/home/dev/notes',
+              false,
+              '',
+              '',
+              'standard',
+            ],
           ]);
           expect(laptop.joins.map(joined)).toEqual([
-            [laptopId, studio, 'codex', 'Codex', '/home/dev/website', true],
+            [
+              laptopId,
+              studio,
+              'codex',
+              'Codex',
+              '/home/dev/website',
+              true,
+              'gpt-5.4',
+              'high',
+              'strong',
+            ],
           ]);
         },
       );

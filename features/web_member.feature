@@ -59,8 +59,8 @@ Feature: Member panel and adding an AI to a group
     Then the dialog offers "Mina" and the four AIs, with "Codex · workstation" and "Claude Code · laptop" disabled and their computers before their reasons
     When the owner ticks "Mina", "Claude Code · workstation" and "Codex · laptop"
     Then "Claude Code" is the secretary, "Codex" is not, each secretary choice is named for its AI, and each AI has the newest folder that no other group has
-    When the owner makes "Codex" the secretary, names the group "Studio" and themself "Alex", and creates it
-    Then the home makes "Studio", adds Mina, and each computer receives a signed "host.join" with the AI's folder, "Codex" as the secretary
+    When the owner makes "Codex" the secretary, chooses "GPT-5.4" with the level "high" for it, names the group "Studio" and themself "Alex", and creates it
+    Then the home makes "Studio", adds Mina, and each computer receives a signed "host.join" with the AI's folder, model, level and work share, "Codex" as the secretary
     And the chat of "Studio" opens with Mina and the two AIs
 
   Scenario: A folder that is another group's, refused by the AI's computer, is reported with that group

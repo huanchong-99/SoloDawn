@@ -78,6 +78,7 @@
   "member.terminal.relay": "终端画面只走直连",
   "member.usage.resets": "{time} 重置",
   "member.usage.window": "这一轮额度已用",
+  "member.usage.none": "还没有额度数据",
   "member.remove": "移除 AI",
   "member.remove.busy": "{name} 手上还有 {tasks}，先改派或者取消再移除。",
   "member.remove.confirm": "确认移除",

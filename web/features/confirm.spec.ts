@@ -209,13 +209,13 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
     });
     Then('a different member sees the access lists without edit controls', () => {
       expect(all('.member > dl')).toHaveLength(2);
+      expect(texts('.member .work dt')).toEqual(['Work share', 'Work share']);
       expect(texts('.member > dl dt')).toEqual([
         'Computer',
         'Folder',
         'Account',
         'Model',
-        'Level',
-        'Tier',
+        'Thinking level',
         'Skills',
         'Allow list',
         'Approval delegates',
@@ -223,8 +223,7 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
         'Folder',
         'Account',
         'Model',
-        'Level',
-        'Tier',
+        'Thinking level',
         'Skills',
         'Allow list',
         'Approval delegates',

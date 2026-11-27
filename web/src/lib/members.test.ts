@@ -603,7 +603,7 @@ describe('AI status and path projections', () => {
     const meter = (usage: p.AIMemberRow['usage'], lang = 'en', last_seen = at) =>
       usageMeter(row<p.AIMemberRow>('row-member-ai', { usage, last_seen }), lang);
     const bar = (value: string, fill: number, tone?: 'danger', note?: string) => ({
-      label: 'Window used',
+      label: 'Quota used this window',
       value,
       fill,
       tone,
@@ -617,6 +617,11 @@ describe('AI status and path projections', () => {
     expect(meter({ window_pct: 62.5, window_resets: resetAt })).toEqual(
       bar('63%', 63, undefined, 'Resets 15:00'),
     );
+    // A window that resets on another day says the date.
+    const later = new Date(2026, 10, 23, 3, 0).getTime();
+    expect(meter({ window_pct: 40, window_resets: later })).toEqual(
+      bar('40%', 40, undefined, 'Resets Nov 23, 03:00'),
+    );
     expect(meter({ window_pct: 99.9 })).toEqual(bar('100%', 100));
     expect(meter({ window_pct: 100 })).toEqual(bar('100%', 100, 'danger'));
     expect(meter({ window_pct: 125 })).toEqual(bar('125%', 100, 'danger'));
@@ -626,6 +631,7 @@ describe('AI status and path projections', () => {
     vi.setSystemTime(new Date(2026, 10, 21, 0, 0));
     expect(meter({ turns_today: 14 })).toBeUndefined();
 
+    vi.setSystemTime(new Date(2026, 10, 20, 23, 59));
     prefs.lang = 'zh-CN';
     expect(meter({ window_pct: 62, window_resets: resetAt }, 'zh-CN')).toEqual({
       label: '这一轮额度已用',
@@ -634,6 +640,9 @@ describe('AI status and path projections', () => {
       tone: undefined,
       note: '15:00 重置',
     });
+    expect(meter({ window_pct: 62, window_resets: later }, 'zh-CN')?.note).toBe(
+      '11月23日 03:00 重置',
+    );
     vi.useRealTimers();
   });
 

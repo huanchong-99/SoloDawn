@@ -37,9 +37,12 @@ AI, always present. A person's row has none of them.
  "skills":"Go backend, protocol design, hard debugging", …}
 ```
 
-- `tier` and `skills` are the **profile**. The order is `light` <
-  `standard` < `strong`; an AI is **stronger** than another when its tier
-  is higher. Nothing in the product reads a tier but section 4, and
+- `tier` and `skills` are the **profile**. The tier says how much work
+  the owner wants the AI given: `strong` more, and the hard tasks first;
+  `standard` a normal share; `light` less, and only simple tasks
+  (2026-11-27, the owner: it is the share of work, not a thinking level).
+  The order is `light` < `standard` < `strong`; an AI is **stronger**
+  than another when its tier is higher. Nothing in the product reads a tier but section 4, and
   nothing reads `skills` but the turn text of section 3.
 - The home stores `model` and `effort` and checks only the bounds of the
   table: it knows no CLI and no model. The host passes them to the CLI at
@@ -86,20 +89,25 @@ AI, always present. A person's row has none of them.
 The node lists and suggests; the owner chooses; rows change only by the
 owner's `member set`.
 
-- **Adding.** The dialog of `host.join` offers the models of that CLI
-  from `host.info` (`contracts/step-3/drivers.md` section 10), for the
-  chosen model its levels, and "the CLI's default" for both. Choosing a
+- **Adding.** The dialog of `host.join`, and each AI ticked in the
+  create-group dialog, offers the models of that CLI from `host.info`
+  (`contracts/step-3/drivers.md` section 10), for the chosen model its
+  levels, and "the CLI's default" for both; what is chosen goes in that
+  AI's `host.join`. Choosing a
   model fills the tier with that model's suggestion; the owner may change
   it, and write skills, before sending.
-- **Editing.** The AI member panel shows model, level, tier and skills.
-  The owner changes any of them with `member set`. Beside the tier it
+- **Editing.** The AI member panel shows model, level, tier and skills,
+  the tier in one block with the usage line of section 3 (`window_pct`
+  and when it resets). The owner changes any of the four in one editor
+  with `member set`; its level is a choice of its own, offered from the
+  chosen model's `efforts` and "the CLI's default". Beside the tier it
   shows the suggestion for the chosen model when the two differ; taking
   it is the owner's click.
 - **Refresh.** A button on the panel sends `host.info` with `refresh`.
   A discovery changes `host.info` only. It never changes a member row,
   so what the owner set stays, whatever is found later.
 - **No list.** When `models` is empty, model and level are text fields.
-  A listed model whose `efforts` is empty is offered no level. A stored model that the list no longer holds is shown as "not
+  A listed model whose `efforts` is empty, and no model chosen, give a level choice that holds only "the CLI's default", disabled, with the reason (the model has no levels; choose a model first). A stored model that the list no longer holds is shown as "not
   listed" and kept.
 
 ## 3. Turn text (adds to `contracts/drivers.md` sections 3 and 4)
@@ -144,7 +152,9 @@ AI members (CLI on computer · folder · tier · state · skills):
 **The secretary's instructions** gain the four rules of assignment. When
 choosing assignee and reviewer:
 
-1. give hard work to `strong` AIs and simple work to `light` ones;
+1. follow the tier, the share of work the owner wants each AI given:
+   more tasks and the hard ones to `strong` AIs, fewer and simple ones to
+   `light` ones, a normal share to `standard` ones;
 2. match the work to `skills`;
 3. spread tasks that do not depend on each other over different AIs, so
    that several subscriptions work at the same time; members with the

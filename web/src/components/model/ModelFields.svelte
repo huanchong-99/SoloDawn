@@ -4,7 +4,9 @@
   import type { Listed } from './model';
 
   /** Model and level of a draft: chosen from what the CLI lists, or typed when it lists nothing
-   *  (contracts/step-3/profiles.md section 2a). With `suggest`, choosing a model sets its tier. */
+   *  (contracts/step-3/profiles.md section 2a). The level is always shown, offering the chosen
+   *  model's levels, and a stored level that is not among them. With `suggest`, choosing a model
+   *  sets its tier. */
   let {
     draft = $bindable(),
     models,
@@ -14,6 +16,9 @@
   const uid = $props.id();
 
   const chosen = $derived(models.find((model) => model.model === draft.model));
+  const efforts = $derived(chosen?.efforts ?? []);
+  const stray = $derived(draft.effort && !efforts.includes(draft.effort) ? draft.effort : '');
+  const why = $derived(chosen ? 'model.effort.none' : draft.model ? '' : 'model.effort.pick');
 
   function pick() {
     if (!chosen?.efforts.includes(draft.effort)) draft.effort = '';
@@ -44,15 +49,22 @@
         {/if}
       </select>
     </label>
-    {#if chosen?.efforts.length}
-      <label class="field">
-        <span>{t('model.effort')}</span>
-        <select class="input" bind:value={draft.effort} {disabled}>
-          <option value="">{t('model.default')}</option>
-          {#each chosen.efforts as effort (effort)}<option value={effort}>{effort}</option>{/each}
-        </select>
-      </label>
-    {/if}
+    <label class="field">
+      <span>{t('model.effort')}</span>
+      <select
+        class="input"
+        bind:value={draft.effort}
+        disabled={disabled || (!efforts.length && !stray)}
+        aria-describedby={why && !efforts.length ? `${uid}-why` : undefined}
+      >
+        <option value="">{t('model.default')}</option>
+        {#each efforts as effort (effort)}<option value={effort}>{effort}</option>{/each}
+        {#if stray}<option value={stray}>{stray} · {t('model.notlisted')}</option>{/if}
+      </select>
+      {#if why && !efforts.length}
+        <small id={`${uid}-why`} class="why">{t(why)}</small>
+      {/if}
+    </label>
   </div>
 {:else}
   <div class="pair">
@@ -84,7 +96,12 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: var(--sp-3);
+    align-items: start;
     animation: -global-appear var(--dur-2) var(--ease-out);
+  }
+  .why {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
   .fast {
     height: 18px;

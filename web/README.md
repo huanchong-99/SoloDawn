@@ -559,21 +559,27 @@ file in `src/routes/`. It edits neither the shell nor another area:
     the AI works in (`FolderPicker.svelte`: the folders its CLI has used there, or one typed), signs
     `host.join` for the chosen computer, and words `home_unreachable`, `conflict` and a lost computer directly
     before falling back to `Failure`.
-  - AI profiles (`src/components/profile/`) show a tier badge and skills on every AI card.
-    Only the AI's owner can open the inline tier/skills editor or accept a differing model-tier
-    suggestion from `host.info`; accepting sends only the tier, and saving sends only changed
-    tier/skills. The add-AI dialog uses the same fields and sends tier and skills with the CLI
-    model/effort defaults. The skills counter counts code points; over 200, Save and Add are disabled.
+  - AI profiles (`src/components/profile/`) show on every AI card, first under its name, the tier
+    worded as the work share ("Less / Normal / More": how much work the secretary gives it) in one
+    block with its usage line (`Quota.svelte`: window used and its reset, turns today, or none
+    reported), and its skills. Only the AI's owner can open the inline editor of model, thinking
+    level, work share (with the usage line) and skills, or accept a differing model-tier
+    suggestion from `host.info`; accepting sends only the tier, and saving sends only what changed.
+    The add-AI dialog uses the same fields and sends tier and skills with the chosen model and
+    level, and the create-group dialog gives each ticked AI model, level and work share, sent in its
+    `host.join`. The skills counter counts code points; over 200, Save and Add are disabled.
   - Model choices (`src/components/model/`) show the CLI's model names, levels and fast-mode
-    capability. Empty catalogs offer model and level text inputs; stored models absent from a
+    capability. The thinking level is always shown beside the model: the chosen model's levels and
+    "The CLI's default", disabled with its reason when the model lists none or none is chosen, and
+    a stored level the list does not hold as "Not listed". Empty catalogs offer model and level text inputs; stored models absent from a
     catalog remain visible as "Not listed". Choosing a model in Add AI fills its suggested tier,
     which the owner can override. The same CLI can be selected repeatedly with distinct member
     names; the candidate reads "In this group · adds another member". Computers lists each hosted
     member separately. Add AI passes the draft through the mount with a getter/setter, and the
     model fields bind it back to the dialog. Empty-catalog text inputs use native pattern validation
     for the model's 100-code-point and level's 32-code-point limits, including astral characters.
-    The card's Change and refresh actions sit below the model value. Only the AI's owner can edit model/level
-    or refresh its catalog. Refresh sends `host.info` with `refresh: true`, updates the live list
+    The card's refresh action sits beside the model value. Only the AI's owner can edit model/level
+    (in the profile editor) or refresh its catalog. Refresh sends `host.info` with `refresh: true`, updates the live list
     without restarting, and never changes the stored model, level, tier or skills.
   - Task cards (`src/components/task/`, `src/lib/task.ts`) show "Must ask a stronger AI" in dawn
     when an active task has `stuck.ask` true, after wait badges and before a rejected-review
@@ -758,7 +764,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/confirm/`     | `ConfirmCard.svelte`, mounted for kind `confirm`                                  |
 | `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
-| `src/components/profile/`     | tier badge, owner editor, model-tier suggestion and shared add-AI profile fields  |
+| `src/components/profile/`     | work share and usage block, owner editor, model-tier suggestion, profile fields   |
 | `src/components/model/`       | model/level fields, owner editor and catalog refresh                              |
 | `src/components/people/`      | invitation dialog, role/removal actions and join form                             |
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |

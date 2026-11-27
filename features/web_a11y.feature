@@ -43,7 +43,7 @@ Feature: Accessibility across the pages and design widths
   Scenario: Usage bars, calls, project memory and notifications name their parts and keep the keyboard's place
     Given two groups "Website" and "Docs" with waiting brief, approval and decision cards, a locked approval, a task and a summary
     And a waiting call in task 12's thread and a note, with the chat of "Website" open on a 1280 px desktop
-    Then each usage bar is a meter named "Window used" whose value text is its percentage, with its reset time when one is known
+    Then each usage bar is a meter named "Quota used this window" whose value text is its percentage, with its reset date and time when one is known
     And the call's waiting line stands in no live region and keeps "Depth 1" in one piece
     And each delete action of the project memory names its entry
     When a decision and two mentions arrive in task 12's thread

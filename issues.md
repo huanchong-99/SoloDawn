@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · deviation · The tier read as a thinking setting, the quota was hard to find, and new groups took no model
+
+- Symptom: the owner, clicking the demo, read "档位: 轻量 / 标准 / 强" in "编辑档案" as a thinking setting, could not find the AI's quota, found no thinking level in that editor, and could choose an AI's model and level only after the group was made.
+- Cause: the tier was worded as a strength although the secretary uses it to share out work (`internal/host/instructions/secretary.md:18`); the usage meter sat at the bottom of the card, apart from the tier; model and level had their own "更改" editor, and `web/src/components/model/ModelFields.svelte` hid the level whenever the chosen model listed none, which includes "the CLI's default", every new AI's model; `web/src/components/groups/CreateGroup.svelte` sent `newDraft()` for every AI.
+- Status: resolved on branch `m/ai-settings`: the tier is worded "派活: 少 / 适中 / 多" ("Work share: Less / Normal / More") in the client, the secretary's instructions and the contracts (stored values unchanged); it sits first on the card in one block with the usage line; "编辑档案" edits model, thinking level, work share and skills; the level is always shown, with its reason when there is none to choose; the create-group dialog gives each ticked AI model, level and work share, sent in its `host.join`.
+
 ### 2026-11-27 · bug · The demo panel refused a typed or pasted pairing code on the first try
 
 - Symptom: in `?demo=fresh`, a reviewer typed the onboarding page's code into the demo panel's pairing field and pressed **交给 MacBook Pro**; the panel said 「这不是配对码」. The same code paired on the second try. Reproduced on 47ae57c1e in 3 of 3 runs that click into the field and then type or paste the code (one of them after clearing the field and clicking on the page for 3 s); 0 of 4 runs that hand over the prefilled field as it is or select it before typing.

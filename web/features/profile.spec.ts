@@ -135,9 +135,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
   Scenario('Everyone sees profiles but only the owner can edit', ({ Then, And, When }) => {
     Then('the cards show exact tier and skills values with an empty-skills fallback', () => {
-      expect(texts('.member .tier')).toEqual(['Standard', 'Strong']);
+      expect(texts('.member .tier')).toEqual(['Normal', 'More']);
       expect(texts('.member .skills')).toEqual(['Protocol design', 'Not set']);
-      expect([...card().querySelectorAll('dt')].map(read)).toContain('Tier');
+      expect([...card().querySelectorAll('dt')].map(read)).toContain('Work share');
       expect([...card().querySelectorAll('dt')].map(read)).toContain('Skills');
       expect(card().querySelectorAll('.tier .bars b.on')).toHaveLength(2);
       expect(other().querySelectorAll('.tier .bars b.on')).toHaveLength(3);
@@ -149,16 +149,22 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       prefs.lang = 'zh-CN';
       flushSync();
     });
-    Then('the profile labels are 档位 and 擅长 and the strong tier is 强', () => {
-      expect(texts('.member .tier')).toEqual(['标准', '强']);
-      expect([...other().querySelectorAll('dt')].map(read)).toContain('档位');
-      expect([...other().querySelectorAll('dt')].map(read)).toContain('擅长');
-      expect(read(other().querySelector('.skills')!)).toBe('未填写');
-      const suggestion = card().querySelector('.suggest')!;
-      expect(read(suggestion)).toBe('强 采用');
-      expect(suggestion.getAttribute('aria-label')).toBeNull();
-      expect(suggestion.getAttribute('title')).toBe('建议：强');
-    });
+    Then(
+      'the profile labels are 派活 and 擅长, the strong tier is 多, and the share sits with the quota',
+      () => {
+        expect(texts('.member .tier')).toEqual(['适中', '多']);
+        expect(texts('.member .work dt')).toEqual(['派活', '派活']);
+        expect(all('.member .work .meter, .member .work .quota-none')).toHaveLength(2);
+        expect(other().querySelector('.work')!.getAttribute('aria-label')).toBe('派活与额度');
+        expect([...other().querySelectorAll('dt')].map(read)).toContain('派活');
+        expect([...other().querySelectorAll('dt')].map(read)).toContain('擅长');
+        expect(read(other().querySelector('.skills')!)).toBe('未填写');
+        const suggestion = card().querySelector('.suggest')!;
+        expect(read(suggestion)).toBe('多 采用');
+        expect(suggestion.getAttribute('aria-label')).toBeNull();
+        expect(suggestion.getAttribute('title')).toBe('建议：多');
+      },
+    );
   });
 
   Scenario('The owner edits a profile and cancels without losing focus', ({ When, Then, And }) => {
@@ -209,11 +215,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario('A model suggestion is an explicit owner choice', ({ Then, When, And }) => {
-    Then("the owner's card offers Strong and Use labelled Suggested: Strong", () => {
+    Then("the owner's card offers More and Use labelled Suggested: More", () => {
       const suggestion = card().querySelector('.suggest')!;
-      expect(read(suggestion)).toBe('Strong Use');
+      expect(read(suggestion)).toBe('More Use');
       expect(suggestion.getAttribute('aria-label')).toBeNull();
-      expect(suggestion.getAttribute('title')).toBe('Suggested: Strong');
+      expect(suggestion.getAttribute('title')).toBe('Suggested: More');
     });
     When('the owner uses the suggestion', async () => {
       one<HTMLButtonElement>('.suggest').click();

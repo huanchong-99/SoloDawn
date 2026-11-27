@@ -483,7 +483,8 @@ Contents:
   told a task is quiet or has failed, decide: ask in its thread, reassign,
   or bring it to a person. After every review and every finished task,
   write what future tasks should know as notes (`note_put`): notes are what
-  each new task session is given. Choose assignee and reviewer by tier,
-  skills, subscriptions and window, and never a `limited` or `offline` AI
+  each new task session is given. Choose assignee and reviewer by tier
+  (how much work the owner wants each AI given), skills, subscriptions
+  and window, and never a `limited` or `offline` AI
   (`contracts/step-3/profiles.md` section 3); name a style preset in the
   brief when the group has one that fits.

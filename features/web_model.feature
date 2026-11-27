@@ -23,7 +23,7 @@ Feature: Choosing AI models and levels
 
   Scenario: Model text limits count code points and block invalid submissions
     Given the CLI lists no models
-    When the owner opens the model editor
+    When the owner opens the profile editor
     Then 101 astral model code points cannot be saved but 100 are valid
     When the owner opens Add AI
     And 101 astral model code points cannot join but 100 are valid
@@ -32,15 +32,15 @@ Feature: Choosing AI models and levels
     When the owner opens Add AI
     And the owner chooses Opus and high
     And chooses Haiku without levels
-    Then no level is offered and the tier is Light
+    Then the level offers only the CLI's default, says the model has none, and the tier is Light
     When the owner returns to the CLI defaults
-    Then no level is offered and the tier is Standard
+    Then the level offers only the CLI's default, asks for a model first, and the tier is Standard
     When the owner changes computer CLI candidates
     Then the model and level draft return to the CLI defaults
 
   Scenario: Everyone sees model names and levels but only the owner can edit
     Then the owner card shows Opus and high and the other card shows CLI defaults
-    And the other card has no model editor or refresh
+    And the other card has no profile editor or refresh
     When the browser switches to Chinese
     Then model labels and defaults are translated
 
@@ -52,17 +52,17 @@ Feature: Choosing AI models and levels
     And the stored model level tier and skills are unchanged
 
   Scenario: The owner changes only model and level and can cancel
-    When the owner opens the model editor
+    When the owner opens the profile editor
     Then Save is disabled and the editor has focus
     When the owner chooses Haiku in the editor
-    And saves the model editor
+    And saves the profile editor
     Then exactly one member set changes only model and level
-    When the owner opens the model editor again and cancels
-    Then focus returns to Change model
+    When the owner opens the profile editor again and cancels
+    Then focus returns to Edit profile
 
   Scenario: A failed edit stays open and offline controls are disabled
     Given the CLI lists no models
-    When the owner opens the model editor
+    When the owner opens the profile editor
     And saves typed model and level while the home holds its answer
     Then the editor is disabled while saving
     When the home refuses the model change

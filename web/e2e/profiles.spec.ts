@@ -123,7 +123,7 @@ describe('AI profiles with fake CLIs', () => {
     await poll(() => dialog.locator('.fast').textContent()).toBe('Fast mode');
     await poll(() =>
       dialog
-        .getByRole('combobox', { name: 'Level', exact: true })
+        .getByRole('combobox', { name: 'Thinking level', exact: true })
         .locator('option')
         .allTextContents(),
     ).toEqual(["The CLI's default", 'medium', 'high']);
@@ -135,14 +135,16 @@ describe('AI profiles with fake CLIs', () => {
       .selectOption('anthropic/claude-opus-5');
     await poll(() =>
       dialog
-        .getByRole('combobox', { name: 'Level', exact: true })
+        .getByRole('combobox', { name: 'Thinking level', exact: true })
         .locator('option')
         .allTextContents(),
     ).toEqual(["The CLI's default", 'low', 'high']);
     await poll(() => dialog.locator('.fast').count()).toBe(0);
     await dialog.locator('.choice', { hasText: 'Qwen Code · studio' }).locator('input').check();
     await poll(() => dialog.getByRole('textbox', { name: 'Model', exact: true }).count()).toBe(1);
-    await poll(() => dialog.getByRole('textbox', { name: 'Level', exact: true }).count()).toBe(1);
+    await poll(() =>
+      dialog.getByRole('textbox', { name: 'Thinking level', exact: true }).count(),
+    ).toBe(1);
     await dialog.locator('.choice', { hasText: 'Claude Code · studio' }).locator('input').check();
     await poll(() =>
       dialog
@@ -153,12 +155,14 @@ describe('AI profiles with fake CLIs', () => {
     await dialog.getByRole('combobox', { name: 'Model', exact: true }).selectOption('default');
     await poll(() =>
       dialog
-        .getByRole('combobox', { name: 'Level', exact: true })
+        .getByRole('combobox', { name: 'Thinking level', exact: true })
         .locator('option')
         .allTextContents(),
     ).toEqual(["The CLI's default", 'low', 'high']);
     await poll(() => dialog.locator('input[type="radio"][value="strong"]').isChecked()).toBe(true);
-    await dialog.getByRole('combobox', { name: 'Level', exact: true }).selectOption('high');
+    await dialog
+      .getByRole('combobox', { name: 'Thinking level', exact: true })
+      .selectOption('high');
     await dialog.getByRole('textbox', { name: 'Name in the group', exact: true }).fill('Opus');
     await dialog.getByPlaceholder('What this AI is good at, in one line').fill('Go backend');
     await chooseFolder(dialog, await makeFolder(net.dir, 'opus'));
@@ -168,7 +172,7 @@ describe('AI profiles with fake CLIs', () => {
       .locator('.member')
       .filter({ has: page.getByRole('heading', { name: 'Opus', exact: true }) });
     await poll(() => member.locator('.skills').textContent()).toBe('Go backend');
-    await poll(() => member.locator('.tier-row').innerText()).toBe('Strong');
+    await poll(() => member.locator('.tier-row').innerText()).toBe('More');
     await member.getByRole('button', { name: 'Edit profile', exact: true }).click();
     const editor = member.getByRole('form', { name: 'Edit profile', exact: true });
     await editor.locator('input[value="light"]').check();
@@ -200,7 +204,7 @@ describe('AI profiles with fake CLIs', () => {
     );
     await writeFile(claude, gained);
     await member.getByRole('button', { name: 'Refresh the models', exact: true }).click();
-    await member.getByRole('button', { name: 'Change model', exact: true }).first().click();
+    await member.getByRole('button', { name: 'Edit profile', exact: true }).click();
     await poll(() =>
       member
         .getByRole('combobox', { name: 'Model', exact: true })
@@ -208,26 +212,28 @@ describe('AI profiles with fake CLIs', () => {
         .allTextContents(),
     ).toEqual(["The CLI's default", 'Default', 'Haiku', 'Pro']);
     await member.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await poll(() => member.locator('.suggest span').textContent()).toBe('Strong');
+    await poll(() => member.locator('.suggest span').textContent()).toBe('More');
 
     await writeFile(codex, '{"session":"models","exit":1}');
     await writeFile(claude, original.replace('"claude-opus-5"', '"gemini-3-pro"'));
     await member.getByRole('button', { name: 'Refresh the models', exact: true }).click();
-    await poll(() => member.locator('.suggest span').textContent()).toBe('Standard');
+    await poll(() => member.locator('.suggest span').textContent()).toBe('Normal');
     await poll(() => member.locator('.tier-row > .tier').getAttribute('data-tier')).toBe('light');
     await poll(() => member.locator('.skills').textContent()).toBe('docs');
 
     await page.locator('.members').getByRole('button', { name: 'Add AI', exact: true }).click();
     await dialog.locator('.choice', { hasText: 'Codex · studio' }).locator('input').check();
     await poll(() => dialog.getByRole('textbox', { name: 'Model', exact: true }).count()).toBe(1);
-    await poll(() => dialog.getByRole('textbox', { name: 'Level', exact: true }).count()).toBe(1);
+    await poll(() =>
+      dialog.getByRole('textbox', { name: 'Thinking level', exact: true }).count(),
+    ).toBe(1);
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 
     await writeFile(claude, '{"session":"models","exit":1}');
     await member.getByRole('button', { name: 'Refresh the models', exact: true }).click();
     await poll(() => member.locator('.what .badge').textContent()).toBe('Not listed');
     await poll(() => member.locator('.suggest').count()).toBe(0);
-    await poll(() => member.locator('.tier-row').innerText()).toBe('Light');
+    await poll(() => member.locator('.tier-row').innerText()).toBe('Less');
     await poll(() => member.locator('.skills').textContent()).toBe('docs');
 
     const [node] = net.nodes;
@@ -253,7 +259,7 @@ describe('AI profiles with fake CLIs', () => {
     await page.reload();
     await poll(() => member.locator('.what .badge').textContent()).toBe('Not listed');
     await poll(() => member.locator('.suggest').count()).toBe(0);
-    await poll(() => member.locator('.tier-row').innerText()).toBe('Light');
+    await poll(() => member.locator('.tier-row').innerText()).toBe('Less');
     await poll(() => member.locator('.skills').textContent()).toBe('docs');
   });
 
@@ -285,7 +291,7 @@ describe('AI profiles with fake CLIs', () => {
       otherCard.getByRole('button', { name: 'Edit profile', exact: true }).count(),
     ).toBe(0);
     await poll(() =>
-      otherCard.getByRole('button', { name: 'Change model', exact: true }).count(),
+      otherCard.getByRole('button', { name: 'Refresh the models', exact: true }).count(),
     ).toBe(0);
     const owner = await cast('Q');
     const ownCard = owner

@@ -230,11 +230,12 @@ By the owner's decision of 2026-11-26
 - **R-165** `[S3]` The node lists the models and thinking levels each
   installed CLI offers, by the CLI's own listing, again whenever the
   owner asks. The owner chooses model and level for each AI member, may
-  add several members from one CLI, and gives each a profile: how strong
-  it is and what it is good at. The node suggests the strength from the
-  model's name; what the owner set is never overwritten. The secretary is shown every AI's
-  profile and state and chooses assignee and reviewer by them: hard work
-  to strong AIs, simple work to light ones, independent tasks spread over
+  add several members from one CLI, and gives each a profile: how much
+  work it should be given and what it is good at. The node suggests the
+  share from the model's name; what the owner set is never overwritten. The secretary is shown every AI's
+  profile and state and chooses assignee and reviewer by them: more work,
+  and the hard tasks, to AIs set to more, less and simple work to AIs set
+  to less, independent tasks spread over
   different AIs, none to an AI that is limited or offline. An assignee
   whose task fails twice in a row in the same way (review) must ask a
   stronger AI and get an answer before it submits

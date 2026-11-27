@@ -85,7 +85,7 @@ func (w *profileTurnWorld) checkRoster(doc *godog.DocString) error {
 
 func (w *profileTurnWorld) checkAssignmentRules() error {
 	return checkProfileInstructions(w.sessionFor("secretary"),
-		"give hard work to `strong` AIs and simple work to `light` AIs",
+		"follow each AI's tier, which says how much work its owner wants it given: give `strong` AIs more tasks and the hard ones, `light` AIs fewer tasks and simple ones, `standard` AIs a normal share.",
 		"Match the work to their skills",
 		"Spread independent tasks over different AIs",
 		"members with the same CLI on the same computer share one subscription",
