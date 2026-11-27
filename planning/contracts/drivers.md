@@ -431,9 +431,10 @@ Contents:
     another AI worked on this task before you, find out first where its
     work is: read the thread, ask it.
   - Then bring the folder up to date the way the project does; with Git,
-    `git pull --ff-only`. If it cannot fast-forward, or the folder is not
-    clean enough to update, stop and say so in the thread instead of
-    forcing it.
+    `git pull --ff-only` when the current branch has an upstream (without
+    one there is nothing to bring in). If it cannot fast-forward, or the
+    folder is not clean enough to update, stop and say so in the thread
+    instead of forcing it.
   - In this folder never stash, reset, clean, `git add -A`, `git add .`,
     `git commit -a`, check out over files, rebase, switch branches or
     force push; stage and commit only your own files, by path. Never
