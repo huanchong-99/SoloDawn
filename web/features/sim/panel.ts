@@ -28,9 +28,13 @@ function button(label: string, act: () => unknown) {
   return made;
 }
 
-/** The pairing code shown on the page, if any: four groups of four (pairing.ts `shown`). */
-const codeOnPage = () =>
-  /\b[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}\b/.exec(document.body.innerText)?.[0] ?? '';
+/** The pairing code shown on the page outside the panel, if any: four groups of four (pairing.ts
+ *  `shown`). The panel's own text holds an example code. */
+const codeOnPage = (panel: Element) => {
+  const page = [...document.body.children].filter((each) => each !== panel);
+  const text = page.map((each) => (each as HTMLElement).innerText).join('\n');
+  return /\b[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}\b/.exec(text)?.[0] ?? '';
+};
 
 const restart = (mode: Mode) => {
   location.href = `${address(mode)}&reset`;
@@ -43,6 +47,10 @@ export class Panel {
   );
   #open = false;
   #note = '';
+  /** What the person typed into the code field. A render (every 2 s while the panel is open)
+   *  writes it back, and the page's code is only the placeholder, so that typing a code never adds
+   *  to one already in the field. */
+  #typed = '';
 
   constructor(
     readonly world: World,
@@ -110,8 +118,11 @@ export class Panel {
     const node = this.events.unpaired();
     if (!node) return [];
     const input = el('input', `${buttonStyle};cursor:text`) as HTMLInputElement;
-    input.value = codeOnPage();
-    input.placeholder = '例如 7K2M-9QXD-4F8T-WB3N';
+    input.value = this.#typed;
+    input.placeholder = codeOnPage(this.#box) || '例如 7K2M-9QXD-4F8T-WB3N';
+    input.oninput = () => {
+      this.#typed = input.value;
+    };
     return [
       el('div', headStyle, `配对：${node.name}`),
       el(
@@ -120,7 +131,7 @@ export class Panel {
         '把引导页的配对码交给这台电脑上的 AI（这里代替你在电脑上操作）。',
       ),
       input,
-      button(`交给 ${node.name}`, () => this.#pair(input.value || codeOnPage())),
+      button(`交给 ${node.name}`, () => this.#pair(this.#typed || codeOnPage(this.#box))),
     ];
   }
 
@@ -133,6 +144,7 @@ export class Panel {
       return this.#say('这不是配对码：要 16 个字符，例如 7K2M-9QXD-4F8T-WB3N。');
     }
     const heard = await answerRoom(node, secret, 'b');
+    if (heard) this.#typed = '';
     this.#say(
       heard
         ? `${node.name} 收到了配对码，看引导页。`

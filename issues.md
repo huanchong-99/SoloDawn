@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · bug · The demo panel refused a typed or pasted pairing code on the first try
+
+- Symptom: in `?demo=fresh`, a reviewer typed the onboarding page's code into the demo panel's pairing field and pressed **交给 MacBook Pro**; the panel said 「这不是配对码」. The same code paired on the second try. Reproduced on 47ae57c1e in 3 of 3 runs that click into the field and then type or paste the code (one of them after clearing the field and clicking on the page for 3 s); 0 of 4 runs that hand over the prefilled field as it is or select it before typing.
+- Cause: every render of the panel wrote the page's code into the field (`web/features/sim/panel.ts:113` on 47ae57c1e, `input.value = codeOnPage()`), and an open panel renders every 2 s while it is neither hovered nor focused (`panel.ts:55-57`). A click into the field puts the caret after that code, so typing or pasting the code made 38 characters, which `parseSecret` refuses (`panel.ts:131-133`). The refusal renders the panel again, which puts the bare code back, so the second try hands it over. `codeOnPage` also read the panel's own text, so once the page showed no code it took the example code of the panel's message. Demo only: the real client has no field for a code (the browser creates the secret, or reads it from a join link in `web/src/lib/join.ts:48`), and a real node reads the code once from `solodawn pair <code>` (`internal/node/node.go:758`, `internal/node/pair.go:212`).
+- Status: resolved on branch `fix/pairing-first-try`: the field holds only what the person typed, kept across renders and emptied once the computer heard the code; the page's code is the placeholder and is handed over from an empty field; `codeOnPage` reads the page outside the panel (`web/features/sim/panel.ts:31-37,50-53,118-147`). Test: `web/features/sim/panel.test.ts`.
+
 ### 2026-11-27 · bug · Four OS-specific functions failed the CRAP limit on any other system
 
 - Symptom: `gate.py --stage merge` on macOS failed the crap gate on `internal/node/service_linux.go:25 InstallService` (CRAP 20, CC 4), `:47 RemoveService` (12, CC 3), `internal/node/socket_windows.go:30 privateDir` (20, CC 4) and `internal/rendezvous/truncated_windows.go:15 readDatagram` (12, CC 3), each "no coverage data for this file".
