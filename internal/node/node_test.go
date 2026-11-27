@@ -65,24 +65,20 @@ func checkLogErrors(t *testing.T) {
 	t.Helper()
 	badRoot := t.TempDir()
 	mustNoErr(t, os.WriteFile(filepath.Join(badRoot, "logs"), []byte("x"), 0o600))
-	if _, err := openLog(badRoot); err == nil {
+	if _, err := openLog(badRoot, 10); err == nil {
 		t.Fatal("expected openLog error when logs is a file")
 	}
 	badFileRoot := t.TempDir()
 	mustNoErr(t, os.MkdirAll(filepath.Join(badFileRoot, "logs", "node.log"), 0o700))
-	if _, err := openLog(badFileRoot); err == nil {
+	if _, err := openLog(badFileRoot, 10); err == nil {
 		t.Fatal("expected openLog error when node.log is a directory")
 	}
 }
 
 func checkLogRotation(t *testing.T) {
 	t.Helper()
-	savedMax := maxLogBytes
-	t.Cleanup(func() { maxLogBytes = savedMax })
-	maxLogBytes = 10
-
 	bigDir := t.TempDir()
-	bigLog, err := openLog(bigDir)
+	bigLog, err := openLog(bigDir, 10)
 	mustNoErr(t, err)
 	_, err = bigLog.Write([]byte("0123456789ab"))
 	mustNoErr(t, err)
@@ -91,7 +87,7 @@ func checkLogRotation(t *testing.T) {
 	}
 	mustNoErr(t, bigLog.Close())
 
-	exact, err := openLog(t.TempDir())
+	exact, err := openLog(t.TempDir(), 10)
 	mustNoErr(t, err)
 	_, err = exact.Write([]byte("01234"))
 	mustNoErr(t, err)
@@ -103,7 +99,7 @@ func checkLogRotation(t *testing.T) {
 	}
 	mustNoErr(t, exact.Close())
 
-	lf, err := openLog(t.TempDir())
+	lf, err := openLog(t.TempDir(), 10)
 	mustNoErr(t, err)
 	_, err = lf.Write([]byte("0123456789"))
 	mustNoErr(t, err)
@@ -417,6 +413,9 @@ func TestMultiNodePortFallbackWebAndLocalCommands(t *testing.T) {
 	}()
 	checkLocalSocketAndMCP(t, dir1, n1)
 	checkUnownedLocalCommands(t, dir1, n1)
+	// Last opened, first closed: each node puts back the log output it found,
+	// and n1 found the process's own.
+	n2.Close()
 	n1.Close()
 	<-done1
 }
