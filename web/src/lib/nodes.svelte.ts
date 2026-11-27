@@ -141,6 +141,31 @@ export class Nodes {
     return answer;
   }
 
+  /** Sets the defaults of `agent` on `to` with `agent.defaults`, then refreshes `host.info`. */
+  async setDefaults(
+    home: Home,
+    to: string,
+    agent: string,
+    profile: p.Profile,
+  ): Promise<p.CmdResult | p.ErrorResponse> {
+    const payload: p.AgentDefaults = {
+      t: 'agent.defaults',
+      n: newId(),
+      ts: Date.now(),
+      to,
+      agent,
+      model: profile.model,
+      effort: profile.effort,
+      tier: profile.tier,
+      skills: profile.skills,
+    };
+    const env = await home.me.sign(JSON.stringify(payload));
+    const ctl = home.ctl;
+    const answer = await (ctl ? ctl.request({ t: 'cmd', env }).catch(lost) : lost());
+    if (!answer.err) await this.#read(home, ctl!);
+    return answer;
+  }
+
   /** Gives the members that run `agent` on `device` its declared account type; the first refusal,
    *  when there is one (contracts/commands.md 1.2 `set`). */
   async correct(device: string, agent: string, account: string) {

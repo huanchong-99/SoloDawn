@@ -477,6 +477,74 @@ describe('Nodes', () => {
     expect(asked).toHaveLength(3);
   });
 
+  it('sends agent.defaults and refreshes host.info on success, without refreshing on failure or disconnect', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1763600000000);
+    const store = new Nodes();
+    const home = new Home(me);
+    const { asked, link } = connectHome(home, { owner: true });
+
+    const defaults: p.Profile = {
+      model: 'opus',
+      effort: 'high',
+      tier: 'strong',
+      skills: 'Go backend, protocol design',
+    };
+    const call = store.setDefaults(home, deviceId, 'claude', defaults);
+    let settled = false;
+    void call.then(() => {
+      settled = true;
+    });
+    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    expect(asked[0].req).toStrictEqual({
+      t: 'cmd',
+      env: { p: signed[0], k: 'this-browser', s: 'signature' },
+    });
+    const payload = JSON.parse(signed[0]) as Record<string, unknown>;
+    expect(p.decode(p.AgentDefaults, signed[0])).toStrictEqual(payload);
+    expect(payload).toStrictEqual({
+      t: 'agent.defaults',
+      n: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
+      ts: 1763600000000,
+      to: deviceId,
+      agent: 'claude',
+      model: 'opus',
+      effort: 'high',
+      tier: 'strong',
+      skills: 'Go backend, protocol design',
+    });
+    asked[0].answer({ re: 1, ok: true });
+
+    await vi.waitFor(() => expect(asked).toHaveLength(2));
+    expect(asked[1].req).toStrictEqual({ t: 'host.info' });
+    expect(settled).toBe(false);
+    const updated = hostAnswer({ open: 3 });
+    asked[1].answer(updated);
+
+    expect(await call).toStrictEqual({ re: 1, ok: true });
+    const { re: _re, ok: _ok, ...expected } = updated;
+    expect(store.infos.get(home)).toStrictEqual(expected);
+
+    // Refused agent.defaults returns the error and does not re-read host.info.
+    const errFrame = { re: 2, err: { code: 'bad_request', msg: 'bad' } };
+    const refused = store.setDefaults(home, deviceId, 'claude', defaults);
+    await vi.waitFor(() => expect(asked).toHaveLength(3));
+    asked[2].answer(errFrame);
+    expect(await refused).toStrictEqual(errFrame);
+    expect(asked).toHaveLength(3);
+
+    // Disconnected request failure returns lost() and does not re-read host.info.
+    const failed = store.setDefaults(home, deviceId, 'claude', defaults);
+    await vi.waitFor(() => expect(asked).toHaveLength(4));
+    asked[3].fail();
+    expect(await failed).toStrictEqual(lost());
+    expect(asked).toHaveLength(4);
+
+    // Offline home returns lost() without sending cmd or host.info.
+    link.offline();
+    expect(await store.setDefaults(home, deviceId, 'claude', defaults)).toStrictEqual(lost());
+    expect(asked).toHaveLength(4);
+  });
+
   it('gives the members of the CLI on that computer its account type, and no other', async () => {
     const store = new Nodes();
     const first = new Home(me);

@@ -1,0 +1,20 @@
+{
+  "defaults.title": "默认设置",
+  "defaults.lead": "这台电脑上的 {ai} 加进任何群，都先用这一套。哪个群改过，就以那个群为准。",
+  "defaults.unset": "未设置",
+  "defaults.unset.line": "还没设：用 CLI 自己的默认模型，派活适中",
+  "defaults.set": "设置默认值",
+  "defaults.edit": "修改",
+  "defaults.save": "保存",
+  "defaults.cancel": "取消",
+  "defaults.followers": "保存后，{n} 个跟随默认的群成员会一起更新",
+  "defaults.followers.none": "还没有群成员跟随这套默认",
+  "defaults.follow": "跟随默认",
+  "defaults.own": "本群单独设置",
+  "defaults.follow.card": "跟随「{computer}」上的默认设置",
+  "defaults.restore": "恢复默认",
+  "defaults.edit.note": "保存后，这个群用自己的设置，不再跟随默认。",
+  "defaults.switch": "使用这台电脑上的默认设置",
+  "defaults.switch.second": "群里已经有一个 {ai}，第二个通常用不同的模型。",
+  "defaults.setting": "设置"
+}
