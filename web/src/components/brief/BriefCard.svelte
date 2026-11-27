@@ -147,7 +147,7 @@
             <span class="who muted">
               <Avatar
                 id={item.assignee}
-                name={assignee?.name ?? '?'}
+                name={nameOf(item.assignee)}
                 cli={assignee?.kind === 'ai' ? assignee.cli : undefined}
                 size="sm"
               />

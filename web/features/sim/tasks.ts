@@ -50,6 +50,22 @@ export class Tasks extends Scene {
     this.flags(id).push(flag);
   }
 
+  /** A new assignee starts the work over, but does not put a question again that a card of the task
+   *  holds, answered or still waiting; an approval that was reassigned is asked again. */
+  restart(g: string, id: string) {
+    const asked = this.world
+      .rows(g)
+      .some(
+        (row) =>
+          ['approval', 'decision'].includes(row.kind as string) &&
+          (row.body as { task?: string }).task === id &&
+          (row.state as { status: string }).status !== 'reassigned',
+      );
+    this.world.memory.flags[id] = this.flags(id).filter(
+      (flag) => flag.startsWith('script:') || (flag === 'ask' && asked),
+    );
+  }
+
   /** The folder of an AI: its computer and its workspace there. */
   #folder(g: string, ai: string) {
     const member = this.ai(g, ai);
@@ -258,8 +274,7 @@ export class Tasks extends Scene {
 
   /** Task-machine row 5: the assignee's report is the submission; its reviewer takes over. */
   #report(g: string, t: Task) {
-    const text = words.report(t.num);
-    const report = this.post('report', { g, by: t.assignee, thread: t.id, text });
+    const report = this.post('report', { g, by: t.assignee, thread: t.id, text: words.report });
     const reviewer = t.reviewer ?? this.working(g).find((ai) => ai.id !== t.assignee)?.id;
     this.setTask(g, t.id, { step: 'review', report: report.id, failures: 0, reviewer });
     this.setAI(g, t.assignee, { state: 'waiting', task: undefined });
@@ -311,8 +326,19 @@ export class Tasks extends Scene {
     const { score, round: rounds } = t.review!;
     const body = { task: t.id, score, rounds, minutes };
     this.post('summary', { g, by: secretary.id, thread: t.id, main: true }, body);
+    this.#close(g, t, secretary.id);
     const left = this.tasksOf(g).filter((each) => each.brief === t.brief && each.state !== 'done');
     if (t.brief && !left.length) this.post('text', { g, by: secretary.id, text: words.allDone });
+  }
+
+  /** Flow task.md step 17: the secretary asks the assignee, in the task's thread, for the closing
+   *  step the project needs, and the assignee answers there. */
+  #close(g: string, t: Task, secretary: string) {
+    const ask = { g, by: secretary, thread: t.id, mentions: [t.assignee] };
+    this.post('text', { ...ask, text: words.closeAsk });
+    this.world.after(2500, () =>
+      this.post('text', { g, by: t.assignee, thread: t.id, text: words.closed }),
+    );
   }
 
   /** The pending cards of a task that ended become `expired`. */

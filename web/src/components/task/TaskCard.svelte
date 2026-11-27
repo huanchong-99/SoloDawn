@@ -72,7 +72,7 @@
         <span class="who">
           <Avatar
             id={assignee?.kind === 'human' ? assignee.user : task.assignee}
-            name={assignee?.name ?? '?'}
+            name={group.nameOf(task.assignee)}
             cli={assignee?.kind === 'ai' ? assignee.cli : undefined}
             size="sm"
           />

@@ -26,11 +26,14 @@
   let busyAcct = $state<Record<string, boolean>>({});
   let acctFailed = $state<Record<string, string>>({});
 
+  // What `host.info` says of the homes is as old as its last read: a group this browser has since
+  // followed to another computer is no longer this one's.
   function hostedGroups(comp: Computer) {
     const map = new Map<string, string>();
     if (comp.info) {
       for (const entry of comp.info.homes) {
-        if (entry.home === comp.info.device) map.set(entry.g, entry.name);
+        const moved = (find(entry.g)?.home ?? comp.home) !== comp.home;
+        if (entry.home === comp.info.device && !moved) map.set(entry.g, entry.name);
       }
     }
     for (const group of comp.home.groups) map.set(group.g, group.name);

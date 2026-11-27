@@ -179,7 +179,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         () => {
           expect(one('nav.needbar').getAttribute('aria-label')).toBe('Waiting on you');
           expect(texts('nav.needbar b')).toEqual(['Waiting on you · 4']);
-          expect(texts('nav.needbar a')).toEqual([
+          expect(texts('nav.needbar a:not(.lead)')).toEqual([
             'Confirm start · Show connection paths',
             'Approval · Time the path change in a browser.',
             'Your call · Where should the path appear?',
@@ -188,7 +188,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When('the person clicks the approval chip in the waiting bar', () => {
-        all<HTMLAnchorElement>('nav.needbar a')[1].click();
+        all<HTMLAnchorElement>('nav.needbar a:not(.lead)')[1].click();
         flushSync();
       });
       Then(
@@ -201,7 +201,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When('the person clicks the brief chip in the waiting bar', () => {
-        all<HTMLAnchorElement>('nav.needbar a')[0].click();
+        all<HTMLAnchorElement>('nav.needbar a:not(.lead)')[0].click();
         flushSync();
       });
       Then('focus moves to the brief message in the main line', () => {
@@ -211,7 +211,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(document.activeElement).toBe(target);
       });
       When('the person clicks the decision chip in the waiting bar', () => {
-        all<HTMLAnchorElement>('nav.needbar a')[2].click();
+        all<HTMLAnchorElement>('nav.needbar a:not(.lead)')[2].click();
         flushSync();
       });
       Then('focus moves to the decision message in the main line', () => {
@@ -222,7 +222,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(document.activeElement).toBe(target);
       });
       When('the person clicks the confirmation chip in the waiting bar', () => {
-        all<HTMLAnchorElement>('nav.needbar a')[3].click();
+        all<HTMLAnchorElement>('nav.needbar a:not(.lead)')[3].click();
         flushSync();
       });
       Then('focus moves to the Confirm button of that card', () => {
@@ -376,7 +376,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And('the chat waiting bar names the command as the chip subject', () => {
-        expect(texts('nav.needbar a')).toEqual(['Approval · patch README.md']);
+        expect(texts('nav.needbar a:not(.lead)')).toEqual(['Approval · patch README.md']);
       });
       When('the person clicks "Deny" and the home writes the denied row', async () => {
         all<HTMLButtonElement>('#m-netluHiPQf-UoheEIBfbLw .card-foot button')[1].click();

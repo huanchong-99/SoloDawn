@@ -902,6 +902,17 @@ kbd,
   b .i {
     display: none;
   }
+  /* The label is a link to the first card that waits: it keeps the look of a label. */
+  b a {
+    height: auto;
+    padding: 0;
+    background: none;
+    color: inherit;
+    animation: none;
+  }
+  b a::before {
+    content: none;
+  }
   a {
     position: relative;
     isolation: isolate;

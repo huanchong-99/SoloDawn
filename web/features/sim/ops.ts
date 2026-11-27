@@ -105,9 +105,7 @@ export class Ops extends Scene {
         this.decide(g, card.id as string, { status: 'reassigned', by: ids.me, at: Date.now() });
     if (this.ai(g, t.assignee)?.task === t.id)
       this.setAI(g, t.assignee, { state: 'waiting', task: undefined });
-    this.tasks
-      .flags(t.id)
-      .splice(0, Infinity, ...this.tasks.flags(t.id).filter((flag) => flag.startsWith('script:')));
+    this.tasks.restart(g, t.id);
     this.post('progress', {
       g,
       by: assignee,

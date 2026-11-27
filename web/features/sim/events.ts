@@ -39,23 +39,18 @@ export class Events {
   }
 
   /** `solodawn group export <g> --to <other>` on its home, then `group import` on the other: the
-   *  old home answers `moved` from now on, the new one lists the group a moment later. */
+   *  old home answers `moved` from now on, the new one lists the group a moment later. The group
+   *  stays in the world meanwhile, so its AIs are still counted on their computers. */
   move(g: string) {
     const from = this.world.home(g)!;
     const to = [...this.world.nodes.values()].find(
       (node) => node !== from && node.owner === this.world.me && node.paired,
     )!;
-    const held = from.groups.get(g)!;
-    from.groups.delete(g);
     from.moved.set(g, to.device);
     to.moved.delete(g);
     from.relist();
     this.world.changed();
-    this.world.after(2500, () => {
-      to.groups.set(g, held);
-      this.world.change(g, 'group', g, { home: to.device });
-      to.relist();
-    });
+    this.world.after(2500, () => this.world.arrive(g, to));
     return to.name;
   }
 

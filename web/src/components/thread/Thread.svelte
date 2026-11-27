@@ -123,7 +123,7 @@
         <li class="ti">
           <Avatar
             id={author?.kind === 'human' ? author.user : msg.by}
-            name={author?.name ?? '?'}
+            name={group.nameOf(msg.by)}
             cli={author?.kind === 'ai' ? author.cli : undefined}
             size="sm"
           />

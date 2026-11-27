@@ -112,7 +112,7 @@
       <span class="who">
         <Avatar
           id={ai ? ai.id : msg.body.ai}
-          name={ai?.name ?? '?'}
+          name={group.nameOf(msg.body.ai)}
           cli={ai?.cli ?? ''}
           size="sm"
         />

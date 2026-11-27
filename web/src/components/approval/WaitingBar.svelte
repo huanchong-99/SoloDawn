@@ -11,10 +11,17 @@
 </script>
 
 {#if group.waiting.length}
+  {@const first = group.waiting[0]}
   <nav class="needbar" aria-label={t('approval.waiting')}>
     <b>
-      <Icon name="alert" sm />
-      <span>{t('approval.waiting.count').replace('{n}', String(group.waiting.length))}</span>
+      <a
+        class="lead"
+        href={`#m-${first.id}`}
+        onclick={(event) => jumpToMessage(event, first.id, first.kind as Asked)}
+      >
+        <Icon name="alert" sm />
+        <span>{t('approval.waiting.count').replace('{n}', String(group.waiting.length))}</span>
+      </a>
     </b>
     {#each group.waiting as msg (msg.id)}
       {@const kind = msg.kind as Asked}
