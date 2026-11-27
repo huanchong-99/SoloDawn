@@ -117,7 +117,7 @@ update every node and every browser together. At its first start the new
 version deletes every group on the node, with its messages, tasks, cards,
 notes, knowledge-base documents and sessions. Pairing, your own devices,
 account types and peers stay. The people who were in your groups are
-forgotten and must be invited again by link. A file made by
+forgotten and must be invited again by code or by link. A file made by
 `solodawn group export` on rc.1 cannot be imported. The old `projects/`
 folder in the data directory is not touched: it may hold task branches and
 worktrees that were never pushed, so copy what you need, then delete it.

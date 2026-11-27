@@ -1048,6 +1048,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-27 · bug · The acceptance suite's clean-up list raced when two people joined at once
+
+- Symptom: `go test -tags acceptance -race` on "People who type one invitation code meet the home in its room and join, at once (A9.47)" failed one run in three with `WARNING: DATA RACE` (`testing.go: race detected during execution of test`); the two writes were the two browsers' clean-ups.
+- Cause: the function `afterScenario` returns appended to a plain slice (`features/acceptance_test.go:136`, before the fix), and `twoJoin` (`features/node_pair_code_test.go:458`, `twoJoin`) opens one browser (`newPeerBrowser`, which registers its clean-up) in each of two goroutines.
+- Status: resolved in unit M3-7: the list is guarded by a mutex in `afterScenario`; `-race -count=3` of the invitation-code scenarios passes.
+
 ### 2026-11-26 · bug · Scroll-back stopped after a jump to the top: the edge's observer read its oldest entry
 
 - Symptom: CI run 45845149651 (Chrome 137, PR #422), `web/e2e/jump.spec.ts` "keeps a card 160 messages back in place at 390 px with reduce motion": no page was asked for after the jump (`waiting()` stayed 0). On `origin/rebuild` with Playwright Chromium 1248, 390x844, reduced motion: 2 of 240 runs failed, 22 of 240 with a `requestAnimationFrame` loop in the page.
