@@ -182,7 +182,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then(
-        'the home has added Mina with "add_person", her row says "Added", and Sam\'s row says to send the link',
+        'the home has added Mina with "add_person", her row says "Added", and Sam\'s row says to send the code or the link',
         () => {
           const sent = home.asked
             .filter((req) => req.t === 'cmd')

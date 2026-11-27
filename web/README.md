@@ -204,8 +204,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
 
   Parts at `member.ai` show or edit more of the member. A part at `member.add` may set the draft's
   `model`, `effort` and `tier` before `host.join` sends it; `candidate` is undefined until chosen.
-  The model area uses both points at order 10: `MemberModel` displays and edits the member's
-  model/level, and `AddModel` supplies the chosen candidate's model/level fields.
+  The model area uses both points at order 10: `MemberModel` displays the member's model and
+  level and refreshes its computer's list (editing is in `Profile.svelte`), and `AddModel`
+  supplies the chosen candidate's model/level fields.
 
   The external AI area adds an account type and optional tool label to the same draft. A part
   at `member.joined` receives `{ group, candidate, name }` after a successful `host.join`; the
@@ -525,9 +526,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
   - The create-group dialog holds the computer chosen as the home, not its place in the list, and
     sends nothing when that computer is no longer among those that can be reached. A computer
     that appears while there was none to choose from is chosen. The dialog also lists the people who are
-    already in one of the person's groups on that computer and the person's connected AIs, each with a
-    tick, and the folder each ticked AI works in (`FolderPicker.svelte`), and "Also make an
-    invitation code" with its lifetime, off by default. It creates the group first, then adds
+    already in one of the person's groups on that computer and the person's connected managed AIs
+    (never an external one), each with a tick and, for each ticked one, its folder
+    (`FolderPicker.svelte`), name, model, thinking level, work share (not for the secretary) and a
+    secretary choice, and "Also make an invitation code" with its lifetime, off by default. It creates the group first, then adds
     each person and each AI, then sends `code new` when the box is ticked (`found` in
     `src/lib/members.ts`), and says beside any of them that was refused. A code that was made is
     shown with its copies before the dialog closes; a refused code is said under the box.
@@ -559,7 +561,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
     for owned AIs whose driver has a takeover (`offersTerminal` of `src/components/driver/`) an
     "Open terminal" link enabled only when the browser's own path to that computer is `direct`, or,
     while the AI is in `takeover`, a "Hand back" button that sends `takeover.end` and says that
-    messages to it wait until then; then the human members with their roles and online status;
+    messages to it wait until then; then the human members with their "You" and role tags;
     actions and errors go below the person's name. Owners and admins open "Invite"
     (`InvitationDialog.svelte`): first the group's invitation code (`contracts/step-2/people.md`
     2.6), read with `code show` when the dialog opens and again each time the home is reached; with
@@ -586,12 +588,15 @@ file in `src/routes/`. It edits neither the shell nor another area:
   - AI profiles (`src/components/profile/`) show on every AI card, first under its name, the tier
     worded as the work share ("Less / Normal / More": how much work the secretary gives it) in one
     block with its usage line (`Quota.svelte`: window used and its reset, turns today, or none
-    reported), and its skills. Only the AI's owner can open the inline editor of model, thinking
-    level, work share (with the usage line) and skills, or accept a differing model-tier
-    suggestion from `host.info`; accepting sends only the tier, and saving sends only what changed.
-    The add-AI dialog uses the same fields and sends tier and skills with the chosen model and
-    level, and the create-group dialog gives each ticked AI model, level and work share, sent in its
-    `host.join`. The skills counter counts code points; over 200, Save and Add are disabled.
+    reported), and its skills; a secretary takes no tasks, so its card shows the usage line alone,
+    headed "Quota", and no editor or dialog offers it a work share. Only the AI's owner can open
+    the inline editor of model and thinking level (not for an external AI:
+    `contracts/step-3/external.md` section 11), work share (with the usage line, not for the
+    secretary) and skills, or accept a differing model-tier suggestion from `host.info`; accepting
+    sends only the tier, and saving sends only what changed. The add-AI dialog uses the same fields
+    and sends tier and skills with the chosen model and level, and the create-group dialog gives
+    each ticked managed AI model, level and work share (no skills), sent in its `host.join`. The
+    skills counter counts code points; over 200, Save and Add are disabled.
   - Model choices (`src/components/model/`) show the CLI's model names, levels and fast-mode
     capability. The thinking level is always shown beside the model: the chosen model's levels and
     "The CLI's default", disabled with its reason when the model lists none or none is chosen, and
@@ -795,7 +800,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/profile/`     | work share and usage block, owner editor, model-tier suggestion, profile fields   |
-| `src/components/model/`       | model/level fields, owner editor and catalog refresh                              |
+| `src/components/model/`       | model/level fields, display and catalog refresh                                   |
 | `src/components/people/`      | invitation dialog and code card, role/removal actions and join form               |
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
 | `src/components/groupinfo/`   | home, settings (order 19) and project memory (order 20) at `chat.side`            |

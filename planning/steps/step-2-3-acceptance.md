@@ -46,7 +46,7 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   connected browser without a link and without a reload, and a browser of
   theirs that connects later lists it. A person who is in no group on that
   computer is not offered, `add_person` for them is answered `not_found`,
-  and they get a link.
+  and they are invited by code or by link.
 - In A9.47 to A9.52, Q and R are people whose browsers have never met `P1`,
   each with a node.
 - **A9.47** P sends `code new` with 24 hours. The answer has a code of 16

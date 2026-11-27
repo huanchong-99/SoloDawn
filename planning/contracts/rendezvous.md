@@ -28,9 +28,11 @@ only (`risks.md` T-11).
 
 **Local delivery.** On its own handler a node counts as connected under its
 device id, without a WebSocket: a `to` for it reaches it as `from`, its
-`presence` is always `on`, and it sends `to` and joins rooms there like a
-client. A pairing node joins the room there and on each rendezvous it uses,
-so `solodawn open` pairs on `localhost`. Nothing is forwarded to other nodes.
+`presence` is always `on`, and it sends `to` and joins or hosts rooms there
+like a client. A pairing node joins the room there and on each rendezvous it
+uses, and a home hosts its open invitation codes there too
+(`contracts/step-2/people.md` 2.6), so `solodawn open` pairs and a browser on
+`localhost` joins by code. Nothing is forwarded to other nodes.
 
 ## 2. Signalling protocol
 
@@ -84,9 +86,9 @@ server -> {"t":"ready","ice":[ … ],"ttl":3600,"hosts":true}
 | `{"t":"to","k":"<target>","env":{…}}` | if the target is connected, sends it `{"t":"from","k":"<sender>","env":{…}}`; otherwise answers `{"t":"offline","k":"<target>"}` |
 | `{"t":"watch","k":["<id>",…]}` (at most 64) | replaces the watch list; sends `{"t":"presence","k":"<id>","on":true}` or `false` now and on every change |
 | `{"t":"join","room":"<room id>"}` | puts the client in a pairing room of at most two; when the second arrives sends both `{"t":"joined","room":"<room id>"}`; a third gets `{"t":"full","room":"<room id>"}` and is not joined |
-| `{"t":"join","room":"<room id>","data":{…}}` | **hosts** the room and keeps `data`: each device waiting in it gets `joined` and `{"t":"room","room":"<room id>","data":{…}}` and is out of it. From then on every other client that joins gets those two frames and is not kept, and its `room` frame for this room goes to the host. A room that has a host, and the 17th room a connection would host: `full`. The host gets no `joined` |
+| `{"t":"join","room":"<room id>","data":{…}}` | **hosts** the room and keeps `data`: each device waiting in it gets `joined` and `{"t":"room","room":"<room id>","data":{…}}` and is out of it. From then on every other client that joins gets those two frames and is not kept; a `room` frame for this room from any other connection goes to the host. A room that has a host, and the 17th room a connection would host: `full`. The host gets no `joined` |
 | `{"t":"leave","room":"<room id>"}` | ends the room when this connection hosts it; otherwise nothing |
-| `{"t":"room","room":"<room id>","data":{…}}` | forwards the same object to the other member of the room |
+| `{"t":"room","room":"<room id>","data":{…}}` | forwards the same object to the other member of the room; in a hosted room, to its host |
 | `{"t":"quota"}` | answers `{"t":"quota","used":3250000,"limit":52428800}` for this device, today |
 
 The server never reads `env` or `data`. A room id is the 32 lower-case hex

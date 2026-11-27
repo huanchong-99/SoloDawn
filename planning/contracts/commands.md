@@ -44,12 +44,14 @@ included, is the outcome its receipt keeps; a command that one of those
 checks refused leaves no receipt. The answer to a repeated refusal has the
 same code. Its `msg` is not kept, and need not be the same.
 
-Two results name something that lives only in memory: the link of
-`pair.browser` and the terminal of `takeover.start`. Their receipts record
-that the command succeeded, not the link or the terminal. A repeat is
-answered `ok` with the original link while that link is still valid, or
-`ok` while that terminal is still open on this connection; otherwise
-`conflict`. A repeat never creates a new link or a new terminal.
+Three results name something that lives only in memory: the link of
+`pair.browser`, the link of `invite` (`contracts/step-2/people.md` 2.1)
+and the terminal of `takeover.start`. Their receipts record that the
+command succeeded, not the link or the terminal. A repeat of
+`pair.browser` or `invite` is answered `ok` with the original link (and
+expiry for `invite`) while that link is still open, and `takeover.start`
+is answered `ok` while that terminal is still open on this connection;
+otherwise `conflict`. A repeat never creates a new link or a new terminal.
 
 The code of `code new` and `code show` is stored by the home and is in no
 receipt: a repeat is answered `ok` with no field
@@ -97,12 +99,14 @@ may hold people only. While it has none, main-line messages that mention
 nobody reach no AI and no brief can be posted.
 
 **Creating a group with people and AIs** (R-10) is not one command, and
-nothing in it is atomic. The client sends `group create`; then one `member
-add_person` per person chosen (1.2); then one `host.join` per AI chosen,
-each to the computer of that AI, with its folder (section 2). A step that
-fails is shown beside its person or AI; the group exists, and the same two
-commands add them again later. Adding a person or an AI to an existing
-group is those same commands.
+nothing in it is atomic. The client sends `group create`; then one
+`member add_person` per person chosen (1.2); then one `host.join` per AI
+chosen, each to the computer of that AI, with its folder (section 2); then
+`code new` (`contracts/step-2/people.md` 2.6) when an invitation code was
+asked for. The first step that fails stops the rest and is shown beside its
+person or AI, or under the code; the group exists, and the same commands
+add them again later. Adding a person or an AI to an existing group is
+those same commands.
 
 ### 1.2 `member`
 

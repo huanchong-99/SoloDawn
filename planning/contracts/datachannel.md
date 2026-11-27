@@ -340,8 +340,10 @@ the table itself is in `contracts/storage.md` section 3.
 | --- | --- |
 | a device of the node's owner | everything: host surface, and home surface for groups homed here |
 | a device that passed the pairing exchange and is not yet in the owner's log | `hello` and `devlog` only, until a log entry makes it an owner device (`flows/pairing.md`); any other request is answered `forbidden` |
-| a device of another member of a group homed here (step 2) | home surface for that group only |
+| a device of another member of a group homed here (step 2) | home surface for that group; `devlog` |
 | the host of an AI member of a group homed here | home surface for that group, `ack` for its own items |
+| a joining peer: a device that passed the room exchange of an invitation or a code and is not yet a member (step 2) | `hello` (`groups: []`, `owner: false`, `join`), `devlog` for one person's log and `cmd` with a `join` for its group; every other request is `forbidden` (`contracts/step-2/people.md` section 5) |
+| a device of a person who holds a watch grant on this host (step 2) | `hello`, `devlog`, `watch.start` and the `watch` channel of that grant (`contracts/step-2/watch-team.md` sections 3 and 4) |
 | anything else | the connection is not accepted (signalling was dropped) |
 
 ## 9. Error codes
