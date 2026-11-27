@@ -1,25 +1,64 @@
 /* SoloDawn design tokens (design/README.md, sections 1 and 3).
-   Every colour is one line: light-dark(light value, dark value). The theme only changes
+   Every colour is a light-dark(light value, dark value) pair. The theme only changes
    color-scheme: <html data-theme="light|dark"> forces one, anything else follows the system. */
 
 :root {
   color-scheme: light dark;
 
-  /* Neutrals: light is clean paper, dark is graphite. Navigation sits on --bg, content on
-     --surface. */
-  --bg: light-dark(#f5f6f8, #0d0e11); /* rail, group list, page */
-  --surface: light-dark(#ffffff, #16171b); /* chat canvas, side panel, cards, dialogs */
-  --surface-2: light-dark(#f0f1f4, #1e2025); /* others' bubbles, inset blocks, hover */
-  --surface-3: light-dark(#e4e6eb, #292b31); /* pressed, tracks, disabled fill */
+  /* The surfaces, hairlines and texts are the theme's paper: each has a lightness and a chroma of
+     its own, in OKLCH, and takes its hue (--hue) and the strength of its tint (--tint, 1 unless
+     the theme lowers it) from the theme colour (accents.css). The lightness alone sets the steps
+     between surfaces and the contrast of the texts, so both are the same in every theme. Light is
+     paper, dark is ink; a light surface can carry little chroma before it leaves sRGB, a dark
+     one much more. */
+  --tint: 1;
+  /* The navigation, on --bg, carries the most tint; the content, on --surface, leads. */
+  --bg: light-dark(
+    oklch(0.958 calc(0.017 * var(--tint)) var(--hue)),
+    oklch(0.165 calc(0.03 * var(--tint)) var(--hue))
+  ); /* rail, top bar, group list, page */
+  --surface: light-dark(
+    oklch(0.991 calc(0.004 * var(--tint)) var(--hue)),
+    oklch(0.205 calc(0.03 * var(--tint)) var(--hue))
+  ); /* chat, side panel, cards, dialogs */
+  --surface-2: light-dark(
+    oklch(0.948 calc(0.02 * var(--tint)) var(--hue)),
+    oklch(0.245 calc(0.032 * var(--tint)) var(--hue))
+  ); /* others' bubbles, inset blocks */
+  --surface-3: light-dark(
+    oklch(0.928 calc(0.026 * var(--tint)) var(--hue)),
+    oklch(0.29 calc(0.034 * var(--tint)) var(--hue))
+  ); /* hover, pressed, tracks */
   /* What is raised off its ground (a selected row, a plain button, a menu): the card colour in
      the light, one step lighter in the dark, where a shadow barely shows. */
-  --raised: light-dark(#ffffff, #1e2025);
-  --raised-2: light-dark(#ffffff, #292b31); /* raised off --surface-2 */
-  --line: light-dark(#e6e8ec, #2a2c32); /* hairlines, card borders */
-  --line-strong: light-dark(#7f8590, #6e737e); /* input borders, contrast >= 3:1 */
-  --text: light-dark(#15171c, #edeef0); /* body */
-  --text-2: light-dark(#4a505b, #b6bac3); /* secondary */
-  --text-3: light-dark(#5c6270, #8f949f); /* auxiliary, still >= 4.5:1 */
+  --raised: light-dark(
+    oklch(0.993 calc(0.003 * var(--tint)) var(--hue)),
+    oklch(0.245 calc(0.032 * var(--tint)) var(--hue))
+  );
+  --raised-2: light-dark(
+    oklch(0.993 calc(0.003 * var(--tint)) var(--hue)),
+    oklch(0.29 calc(0.034 * var(--tint)) var(--hue))
+  ); /* raised off --surface-2 */
+  --line: light-dark(
+    oklch(0.905 calc(0.03 * var(--tint)) var(--hue)),
+    oklch(0.3 calc(0.04 * var(--tint)) var(--hue))
+  ); /* hairlines, card borders */
+  --line-strong: light-dark(
+    oklch(0.6 calc(0.035 * var(--tint)) var(--hue)),
+    oklch(0.56 calc(0.04 * var(--tint)) var(--hue))
+  ); /* input borders, contrast >= 3:1 */
+  --text: light-dark(
+    oklch(0.21 calc(0.02 * var(--tint)) var(--hue)),
+    oklch(0.95 calc(0.008 * var(--tint)) var(--hue))
+  ); /* body */
+  --text-2: light-dark(
+    oklch(0.43 calc(0.035 * var(--tint)) var(--hue)),
+    oklch(0.8 calc(0.025 * var(--tint)) var(--hue))
+  ); /* secondary */
+  --text-3: light-dark(
+    oklch(0.5 calc(0.04 * var(--tint)) var(--hue)),
+    oklch(0.68 calc(0.035 * var(--tint)) var(--hue))
+  ); /* auxiliary, still >= 4.5:1 */
 
   /* The one accent, --sky, and --on-sky that stands on it: actions, links, focus, an AI at work,
      own bubbles. They are the theme colour the person chose, in accents.css. */
@@ -27,9 +66,9 @@
   --dawn: light-dark(#f2a23a, #f4b256); /* fill */
   --on-dawn: #2a1a00; /* text on the fill */
   --dawn-text: light-dark(#9a5300, #f4b256); /* dawn-coloured text on a normal surface */
-  --ok: light-dark(#12784a, #5ed193);
+  --ok: light-dark(#117246, #5ed193);
   --on-ok: light-dark(#ffffff, #05210f);
-  --danger: light-dark(#c42f28, #ff8a80);
+  --danger: light-dark(#bb2c25, #ff8a80);
   --on-danger: light-dark(#ffffff, #2a0806);
 
   /* Soft fills are mixed from the semantic colour and the card colour, never set by hand. */

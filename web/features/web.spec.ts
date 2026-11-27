@@ -216,7 +216,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client at "#/settings"', () => open('#/settings'));
     Then(
-      'the theme colours are radios named "黎明", "雨后", "深潭", "浅湾", "林荫", "远山", "朝霞", "晨曦", "夜幕", and "黎明" is chosen',
+      'the theme colours are radios named "黎明", "雨后", "深潭", "浅湾", "林荫", "远山", "朝霞", "余晖", "晨曦", "夜幕", and "黎明" is chosen',
       () => {
         expect(swatches().map((radio) => radio.labels![0].textContent!.trim())).toEqual([
           '黎明',
@@ -226,6 +226,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
           '林荫',
           '远山',
           '朝霞',
+          '余晖',
           '晨曦',
           '夜幕',
         ]);
@@ -238,8 +239,8 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       'the page uses the "firstlight" theme colour and the settings name "晨曦" as chosen',
       () => {
         expect(document.documentElement.dataset.accent).toBe('firstlight');
-        expect(swatches()[7].checked).toBe(true);
-        expect(swatches()[7].closest('.set-row')!.querySelector('p')!.textContent).toBe('晨曦');
+        expect(swatches()[8].checked).toBe(true);
+        expect(swatches()[8].closest('.set-row')!.querySelector('p')!.textContent).toBe('晨曦');
       },
     );
     And(

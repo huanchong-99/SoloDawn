@@ -158,6 +158,7 @@ describe('theme colour', () => {
     ['shade'],
     ['hills'],
     ['glow'],
+    ['afterglow'],
     ['firstlight'],
     ['nightfall'],
   ])('reads %s back on the next visit', async (accent) => {
@@ -166,10 +167,11 @@ describe('theme colour', () => {
     expect(prefs.accent).toBe(accent);
   });
 
-  it('keeps the default of earlier versions, so a person who never chose sees no change', () => {
+  it('keeps the accent of earlier versions, so a person who never chose sees its blue', () => {
     const css = readFileSync('src/styles/accents.css', 'utf8');
     expect(css).toContain(
       ":root,\n[data-accent='daybreak'] {\n" +
+        '  --hue: 268;\n' +
         '  --sky: light-dark(#3a57e8, #8fa3ff);\n' +
         '  --on-sky: light-dark(#ffffff, #0b1030);\n}',
     );

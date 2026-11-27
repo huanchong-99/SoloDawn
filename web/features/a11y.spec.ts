@@ -98,12 +98,40 @@ function contrast(a: Rgb, b: Rgb): number {
   return (Math.max(lumA, lumB) + 0.05) / (Math.min(lumA, lumB) + 0.05);
 }
 
+// sRGB from OKLCH, unclipped: a channel outside 0 to 1 is a colour sRGB cannot show.
+function parseOklch(l: number, c: number, h: number): Rgb {
+  const [a, b] = [c * Math.cos((h * Math.PI) / 180), c * Math.sin((h * Math.PI) / 180)];
+  const [lc, mc, sc] = [
+    l + 0.3963377774 * a + 0.2158037573 * b,
+    l - 0.1055613458 * a - 0.0638541728 * b,
+    l - 0.0894841775 * a - 1.291485548 * b,
+  ].map((v) => v ** 3);
+  return [
+    4.0767416621 * lc - 3.3077115913 * mc + 0.2309699292 * sc,
+    -1.2684380046 * lc + 2.6097574011 * mc - 0.3413193965 * sc,
+    -0.0041960863 * lc - 0.7034186147 * mc + 1.707614701 * sc,
+  ].map((v) => (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055)) as Rgb;
+}
+
+const lastNumber = (css: string, name: string) =>
+  Number([...css.matchAll(new RegExp(`--${name}:\\s*([\\d.]+)\\s*;`, 'g'))].at(-1)?.[1]);
+
+// A tinted token: light-dark() of two oklch(L calc(C * var(--tint)) var(--hue)).
+const tinted = String.raw`oklch\(([\d.]+) calc\(([\d.]+) \* var\(--tint\)\) var\(--hue\)\)`;
+
 function parsePalette(css: string, mode: 'light' | 'dark'): Record<string, Rgb> {
   const palette: Record<string, Rgb> = {};
   for (const match of css.matchAll(
     /--([\w-]+):\s*light-dark\((#[0-9a-f]{6}),\s*(#[0-9a-f]{6})\)/gi,
   )) {
     palette[match[1]] = parseHex(mode === 'light' ? match[2] : match[3]);
+  }
+  const [hue, tint] = [lastNumber(css, 'hue'), lastNumber(css, 'tint')];
+  for (const match of css.matchAll(
+    new RegExp(String.raw`--([\w-]+):\s*light-dark\(\s*${tinted},\s*${tinted}\s*\)`, 'g'),
+  )) {
+    const [l, c] = mode === 'light' ? [match[2], match[3]] : [match[4], match[5]];
+    palette[match[1]] = parseOklch(Number(l), Number(c) * tint, hue);
   }
   for (const match of css.matchAll(/--([\w-]+):\s*(#[0-9a-f]{6})\s*;/gi)) {
     palette[match[1]] = parseHex(match[2]);
@@ -116,28 +144,24 @@ function parsePalette(css: string, mode: 'light' | 'dark'): Record<string, Rgb> 
   return palette;
 }
 
-// Text and badges: 4.5 to 1.
+// Text, icons and badges: 4.5 to 1. Every surface is tinted with the theme colour, so each text
+// colour is held on each surface it can stand on.
+const surfaces = [
+  'bg',
+  'surface',
+  'surface-2',
+  'surface-3',
+  'raised',
+  'raised-2',
+  'mine',
+  'sky-soft',
+];
 const textPairs: [string, string][] = [
-  ['text', 'bg'],
-  ['text', 'surface'],
-  ['text', 'surface-2'],
-  ['text-2', 'bg'],
-  ['text-2', 'surface'],
-  ['text-2', 'surface-2'],
-  ['text-3', 'bg'],
-  ['text-3', 'surface'],
-  ['text-3', 'surface-2'],
-  ['text', 'mine'],
-  ['text-3', 'mine'],
-  ['sky', 'mine'],
-  ['sky', 'surface'],
-  ['sky', 'sky-soft'],
-  ['sky', 'surface-3'],
-  ['dawn-text', 'surface'],
+  ...['text', 'text-2', 'text-3', 'sky', 'dawn-text', 'ok', 'danger'].flatMap((fg) =>
+    surfaces.map((bg): [string, string] => [fg, bg]),
+  ),
   ['dawn-text', 'dawn-soft'],
-  ['ok', 'surface'],
   ['ok', 'ok-soft'],
-  ['danger', 'surface'],
   ['danger', 'danger-soft'],
   ['on-sky', 'sky'],
   ['on-dawn', 'dawn'],
@@ -155,6 +179,8 @@ const textPairs: [string, string][] = [
 const uiPairs: [string, string][] = [
   ['line-strong', 'bg'],
   ['line-strong', 'surface'],
+  ['line-strong', 'surface-2'],
+  ['line-strong', 'raised'],
   ['sky', 'bg'],
   ['sky', 'surface'],
   ['sky', 'surface-2'],
@@ -993,6 +1019,35 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               hueDistance(palette.dawn, palette.sky),
               `${accent} ${mode} dawn from sky`,
             ).toBeGreaterThanOrEqual(45);
+          }
+        },
+      );
+      And(
+        'every surface, hairline and text has a colour of its own in each theme colour, inside sRGB',
+        () => {
+          // Not --mine and --sky-soft: they are the accent's own fills.
+          const tokens = [
+            ...surfaces.slice(0, -2),
+            'line',
+            'line-strong',
+            'text',
+            'text-2',
+            'text-3',
+          ];
+          for (const mode of ['light', 'dark']) {
+            for (const token of tokens) {
+              const colours = palettes
+                .filter(([, m]) => m === mode)
+                .map(([, , palette]) => palette[token]);
+              for (const colour of colours) {
+                expect(Math.min(...colour), `${mode} ${token}`).toBeGreaterThanOrEqual(0);
+                expect(Math.max(...colour), `${mode} ${token}`).toBeLessThanOrEqual(1);
+              }
+              const distinct = new Set(
+                colours.map((rgb) => rgb.map((v) => Math.round(v * 255)).join()),
+              );
+              expect(distinct.size, `${mode} ${token}`).toBe(accents.length);
+            }
           }
         },
       );

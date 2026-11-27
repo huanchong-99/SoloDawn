@@ -71,5 +71,6 @@ Feature: Accessibility across the pages and design widths
     When the colour tokens of "src/styles/tokens.css" are evaluated in light and dark themes with each theme colour of "src/styles/accents.css"
     Then every text and badge colour pair meets at least 4.5 to 1 contrast and every control border and focus ring meets at least 3 to 1 contrast
     And the waiting signal stays at least 45 degrees of hue away from the accent in every theme colour
+    And every surface, hairline and text has a colour of its own in each theme colour, inside sRGB
     When the system asks for reduced motion
     Then jumping to a message, returning to the latest message and switching preferences run without smooth scrolling or view transitions, and the stylesheet keeps a single reduced-motion rule
