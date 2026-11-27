@@ -95,10 +95,10 @@ func testHTTPTimeouts(t *testing.T, serve func(net.Listener)) {
 			t.Fatal(b, err)
 		}
 		send(t, ws, proto.Auth{Type: "auth", Key: key(1).ID(), Signature: key(1).SignChallenge(challenge.Nonce)})
-		expect(t, ws, proto.ICEConfig{Type: "ready", ICE: []proto.ICEServer{}, TTL: 3600})
+		expect(t, ws, proto.ICEConfig{Type: "ready", ICE: []proto.ICEServer{}, TTL: 3600, Hosts: true})
 		time.Sleep(time.Hour)
 		send(t, ws, proto.RVFrame{Type: "ice"})
-		expect(t, ws, proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600})
+		expect(t, ws, proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600, Hosts: true})
 		ws.CloseNow()
 		tr.CloseIdleConnections()
 		e.Close()

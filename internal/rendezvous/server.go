@@ -58,6 +58,7 @@ type client struct {
 	id        string
 	watch     []string
 	rooms     map[string]*room // the rooms this connection is in
+	hosted    map[string]*room // the rooms this connection hosts
 	window    [120]time.Time
 	next      int
 	mu        sync.Mutex     // guards queued and strangers, which the writer also changes
@@ -89,7 +90,7 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(maxBytes)
-	c := &client{conn: conn, out: make(chan frame, 128), rooms: make(map[string]*room), queued: make(map[string]int)}
+	c := &client{conn: conn, out: make(chan frame, 128), rooms: make(map[string]*room), hosted: make(map[string]*room), queued: make(map[string]int)}
 	go c.write()
 	defer close(c.out)
 	if !c.authenticate(s.wait) {
@@ -267,7 +268,7 @@ func (s *server) dispatch(c *client, m fields, kind string) bool {
 		return s.route(c, m)
 	case "watch":
 		return s.watch(c, m)
-	case "join", "room":
+	case "join", "leave", "room":
 		return s.roomFrame(c, m, kind)
 	default:
 		return false

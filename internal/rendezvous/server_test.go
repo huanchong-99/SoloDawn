@@ -113,7 +113,7 @@ func login(t *testing.T, url string, k identity.Key) *websocket.Conn {
 	t.Helper()
 	c, nonce := dial(t, url)
 	send(t, c, proto.Auth{Type: "auth", Key: k.ID(), Signature: k.SignChallenge(nonce)})
-	expect(t, c, proto.ICEConfig{Type: "ready", ICE: []proto.ICEServer{}, TTL: 3600})
+	expect(t, c, proto.ICEConfig{Type: "ready", ICE: []proto.ICEServer{}, TTL: 3600, Hosts: true})
 	return c
 }
 
@@ -157,7 +157,7 @@ func TestChallengeDeadline(t *testing.T) {
 	closed(t, idle)
 	// The deadline is over, and it was for the answer to the challenge only.
 	send(t, active, proto.RVFrame{Type: "ice"})
-	expect(t, active, proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600})
+	expect(t, active, proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600, Hosts: true})
 }
 
 func TestRoutePresenceAndReplacement(t *testing.T) {
@@ -183,7 +183,7 @@ func TestRoutePresenceAndReplacement(t *testing.T) {
 	send(t, from, proto.Watch{Type: "watch", Keys: []string{}})
 	ice := proto.RVFrame{Type: "ice"}
 	send(t, from, ice)
-	emptyICE := proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600}
+	emptyICE := proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600, Hosts: true}
 	expect(t, from, emptyICE)
 	_ = login(t, url, b)
 	send(t, from, ice)
@@ -196,7 +196,7 @@ func TestInvalidFrames(t *testing.T) {
 	id := key(2).ID()
 	noncanonical := id[:42] + string(id[42]+1)
 	weak := strings.Repeat("A", 43)
-	for _, msg := range []string{`{}`, `null`, `{"T":"ice"}`, `{"t":"ready"}`, `[]`, `{}{}`, `{"t":"to","k":5,"env":{}}`, `{"t":"to","env":{}}`, fmt.Sprintf(`{"t":"to","k":%q}`, key(2).ID()), fmt.Sprintf(`{"t":"to","k":%q,"env":null}`, key(2).ID()), `{"t":"watch"}`, `{"t":"watch","k":[null]}`, `{"t":"watch","k":"device"}`, `{"t":"to","k":"","env":{}}`, `{"t":"to","k":"no device id","env":{}}`, `{"t":"to","k":"\ud800","env":{}}`, `{"t":"to","k":"` + strings.Repeat("\u2028", 5000) + `","env":{}}`, fmt.Sprintf(`{"t":"to","k":%q,"env":{}}`, noncanonical), fmt.Sprintf(`{"t":"to","k":%q,"env":{}}`, weak), `{"t":"watch","k":["no device id"]}`, fmt.Sprintf(`{"t":"watch","k":[%q,"\ud800"]}`, key(2).ID()), fmt.Sprintf(`{"t":"watch","k":[%q]}`, weak), `{"t":"join","room":"AB"}`, `{"t":"room","room":"00000000000000000000000000000000","data":[]}`, "{\"t\":\"ice\",\"x\":\"\xff\"}"} {
+	for _, msg := range []string{`{}`, `null`, `{"T":"ice"}`, `{"t":"ready"}`, `[]`, `{}{}`, `{"t":"to","k":5,"env":{}}`, `{"t":"to","env":{}}`, fmt.Sprintf(`{"t":"to","k":%q}`, key(2).ID()), fmt.Sprintf(`{"t":"to","k":%q,"env":null}`, key(2).ID()), `{"t":"watch"}`, `{"t":"watch","k":[null]}`, `{"t":"watch","k":"device"}`, `{"t":"to","k":"","env":{}}`, `{"t":"to","k":"no device id","env":{}}`, `{"t":"to","k":"\ud800","env":{}}`, `{"t":"to","k":"` + strings.Repeat("\u2028", 5000) + `","env":{}}`, fmt.Sprintf(`{"t":"to","k":%q,"env":{}}`, noncanonical), fmt.Sprintf(`{"t":"to","k":%q,"env":{}}`, weak), `{"t":"watch","k":["no device id"]}`, fmt.Sprintf(`{"t":"watch","k":[%q,"\ud800"]}`, key(2).ID()), fmt.Sprintf(`{"t":"watch","k":[%q]}`, weak), `{"t":"join","room":"AB"}`, `{"t":"leave","room":"AB"}`, `{"t":"leave"}`, `{"t":"room","room":"00000000000000000000000000000000","data":[]}`, "{\"t\":\"ice\",\"x\":\"\xff\"}"} {
 		t.Run(msg, func(t *testing.T) {
 			c := login(t, url, key(1))
 			write(t, c, websocket.MessageText, msg)
@@ -215,7 +215,7 @@ func TestLimits(t *testing.T) {
 	c := login(t, url, key(1))
 	msg := fmt.Sprintf("%-*s", 16384, `{"t":"ice"}`)
 	write(t, c, websocket.MessageText, msg)
-	ice := proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600}
+	ice := proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600, Hosts: true}
 	expect(t, c, ice)
 	write(t, c, websocket.MessageText, msg+" ")
 	closed(t, c)
@@ -257,7 +257,7 @@ func TestForwardedFrameSize(t *testing.T) {
 	closed(t, sender)
 	// The target never gets a partial or oversized frame and stays connected.
 	send(t, receiver, proto.RVFrame{Type: "ice"})
-	expect(t, receiver, proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600})
+	expect(t, receiver, proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600, Hosts: true})
 }
 
 func TestInvalidServerFramePanics(t *testing.T) {

@@ -117,7 +117,7 @@ func (w *relayWorld) allocateBoth() error {
 	name := regexp.QuoteMeta(w.domain)
 	frame := regexp.MustCompile(`^\{"t":"ready","ice":\[\{"urls":\["stun:` + name + `:(\d+)"\]\},` +
 		`\{"urls":\["turn:` + name + `:(\d+)\?transport=udp","turns:turn\.` + name + regexp.QuoteMeta(w.tcp[strings.LastIndex(w.tcp, ":"):]) + `\?transport=tcp"\],` +
-		`"username":"(\d+):[A-Za-z0-9_-]{22}","credential":"[A-Za-z0-9+/]{27}="\}\],"ttl":3600\}$`)
+		`"username":"(\d+):[A-Za-z0-9_-]{22}","credential":"[A-Za-z0-9+/]{27}="\}\],"ttl":3600,"hosts":true\}$`)
 	m := frame.FindStringSubmatch(string(b))
 	if m == nil || m[1] != m[2] {
 		return fmt.Errorf("ready frame %s", b)
