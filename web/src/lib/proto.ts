@@ -800,6 +800,16 @@ export const Note = v.object({
 });
 export type Note = v.InferOutput<typeof Note>;
 
+/** Changes a live note in place: its text, and the name of a typed note (commands.md 1.6). */
+export const NoteEdit = v.object({
+  t: v.literal('note_edit'),
+  ...HomeCommand,
+  id: Id,
+  name: optionalText,
+  text: str,
+});
+export type NoteEdit = v.InferOutput<typeof NoteEdit>;
+
 export const Forget = v.object({ t: v.literal('forget'), ...HomeCommand, r: str, id: Id });
 export type Forget = v.InferOutput<typeof Forget>;
 

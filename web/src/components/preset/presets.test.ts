@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Group, Home } from '../../lib/groups.svelte';
 import { goldens } from '../../lib/mock';
 import { decode, Row, type Ctl, type NoteRow, type HumanMemberRow } from '../../lib/proto';
-import { canWrite, presets, PresetView, savePreset, validName } from './presets.svelte';
+import { presets, PresetView } from './presets.svelte';
 
 const row = (name: string, overrides: object = {}) =>
   ({ ...decode(Row, goldens[name]), ...overrides }) as Row;
@@ -19,7 +19,7 @@ beforeEach(() => {
   home.ctl = { request: request as Ctl['request'] };
 });
 
-describe('preset projections and writing', () => {
+describe('preset projections', () => {
   it('lists only live presets in creation order', () => {
     expect(presets(group)).toEqual([]);
     const first = row('row-note-preset', { id: 'first', pos: 1 });
@@ -32,39 +32,6 @@ describe('preset projections and writing', () => {
       { r: 'note', id: 'gone', seq: 1, gone: true },
     ]);
     expect(presets(group)).toEqual([first, last]);
-  });
-  it('allows members with a home connection to write regardless of presence', () => {
-    expect(canWrite(group)).toBe(true);
-    const owner = group.me!;
-    group.apply([{ ...owner, online: false, seq: owner.seq + 1 }]);
-    expect(canWrite(group)).toBe(true);
-    group.apply([{ r: 'member', id: owner.id, seq: owner.seq + 2, gone: true }]);
-    expect(canWrite(group)).toBe(false);
-    group.home.ctl = undefined;
-    expect(canWrite(group)).toBe(false);
-  });
-  it('validates exact names including Unicode character counts and controls', () => {
-    expect(
-      ['', 'x', 'x'.repeat(80), 'x'.repeat(81), '😀'.repeat(80), 'a\nb', 'a\u007fb'].map(validName),
-    ).toEqual([false, true, true, false, true, false, false]);
-  });
-  it('sends a new id on each write and returns refusal codes', async () => {
-    expect(await savePreset(group, 'Calm', 'Text')).toBe('');
-    const cmd = JSON.parse(request.mock.calls[0][0].env.p);
-    expect(cmd).toEqual({
-      t: 'note',
-      n: expect.any(String),
-      ts: expect.any(Number),
-      g: group.g,
-      id: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
-      task: null,
-      type: 'preset',
-      name: 'Calm',
-      text: 'Text',
-    });
-    request.mockResolvedValueOnce({ re: 1, err: { code: 'forbidden' } });
-    expect(await savePreset(group, 'Calm', '')).toBe('forbidden');
-    expect(JSON.parse(request.mock.calls[1][0].env.p).id).not.toBe(cmd.id);
   });
 });
 

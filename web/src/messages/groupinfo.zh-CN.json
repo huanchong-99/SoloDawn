@@ -59,5 +59,15 @@
   "groupinfo.limit.ask_wait_s": "等别的 AI 回答的时间",
   "groupinfo.limit.ask_wait_s.hint": "到时间 AI 先往下做，回答会作为消息送到。",
   "groupinfo.limit.ask_depth": "提问的层数",
-  "groupinfo.limit.ask_depth.hint": "一个问一个最多连着问几层。填 1，被问的 AI 就不能再问别的；填 0，AI 之间不能提问。"
+  "groupinfo.limit.ask_depth.hint": "一个问一个最多连着问几层。填 1，被问的 AI 就不能再问别的；填 0，AI 之间不能提问。",
+  "groupinfo.name": "群名",
+  "groupinfo.name.edit": "更改群名",
+  "groupinfo.secretary.none": "无",
+  "groupinfo.secretary.edit": "更改秘书",
+  "groupinfo.change": "更改",
+  "groupinfo.edit.keys": "Ctrl 或 ⌘ + 回车保存，Esc 取消",
+  "groupinfo.edit.gone": "没有保存：它在这期间被删除了。",
+  "groupinfo.note.add": "添加笔记",
+  "groupinfo.note.edit": "更改笔记：{text}",
+  "groupinfo.note.text": "笔记"
 }

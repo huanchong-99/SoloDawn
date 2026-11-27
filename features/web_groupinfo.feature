@@ -38,3 +38,16 @@ Feature: Group info panel and project memory
     Then the dialog stays open and says "Not sent: this device may not do that."
     When the chat is reopened at 820 px wide, the owner opens "People and details" and "Project memory", opens delete on the note and presses Escape
     Then the confirmation dialog closes and the side panel stays open
+
+  Scenario: A member writes and corrects notes in place, on a narrow screen
+    Given the home holds one note and a member reads "Project memory" at 820 px wide
+    When the member presses "Change note: Keep sockets short." and saves "Keep sockets under 30 s." with Ctrl and Enter
+    Then the home receives a signed "note_edit" for that note, which reads "Keep sockets under 30 s." with focus back on its button
+    When the home refuses the next edit with "not_found"
+    Then the field stays open and says "Not saved: it was deleted in the meantime."
+    When the member presses Escape in the field
+    Then the field is gone, the note reads "Keep sockets under 30 s." and the side panel stays open
+    When the member adds the note "Ask before merging."
+    Then the home receives a signed "note" with a new id and no task, and the notes end with "Ask before merging."
+    When the home disconnects
+    Then the change and add buttons are disabled

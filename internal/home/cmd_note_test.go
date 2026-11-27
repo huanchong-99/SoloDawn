@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
@@ -231,6 +232,78 @@ func TestNoteForgetRefusals(t *testing.T) {
 				},
 			}
 			noteRefused(t, noteApply(t, s, d, receipts{}, tc.by, tc.payload), tc.code)
+		})
+	}
+}
+
+func noteEditDisk() *presetDisk {
+	d := presetNewDisk()
+	task := noteTask
+	d.notes[id(140)] = proto.NoteRow{
+		RowHeader: proto.RowHeader{Type: "note", ID: id(140), Seq: 7}, Pos: 7, Group: groupID,
+		Task: &task, Text: "Old lesson.", By: noteWorker, Timestamp: noteTS - 100,
+	}
+	for i, name := range []string{"Decision A", "Decision B"} {
+		d.notes[id(byte(141+i))] = proto.NoteRow{
+			RowHeader: proto.RowHeader{Type: "note", ID: id(byte(141 + i)), Seq: int64(8 + i)}, Pos: int64(8 + i), Group: groupID,
+			NoteType: "kb", Name: name, Text: "Why.", By: noteWorker, Timestamp: noteTS - 100,
+		}
+	}
+	return d
+}
+
+func noteEditCmd(n byte, note, name, text string) string {
+	named := ""
+	if name != "" {
+		named = fmt.Sprintf(`,"name":%q`, name)
+	}
+	return fmt.Sprintf(`{"t":"note_edit","n":%q,"ts":%d,"g":%q,"id":%q%s,"text":%q}`, id(n), noteTS, groupID, note, named, text)
+}
+
+func TestNoteEditChangesTextAndNameInPlace(t *testing.T) {
+	s := noteState(t)
+	d := noteEditDisk()
+	res := presetApply(t, s, d, receipts{}, guest, noteEditCmd(150, id(140), "", "New lesson."))
+	equal(t, res.Answer, store.Outcome{OK: true})
+	task := noteTask
+	equal(t, []any{res.Rows[0].Value()}, []any{proto.NoteRow{
+		RowHeader: proto.RowHeader{Type: "note", ID: id(140), Seq: 11}, Pos: 7, Group: groupID,
+		Task: &task, Text: "New lesson.", By: noteMember, Timestamp: noteTS,
+	}})
+	s.Commit(res)
+
+	for i, name := range []string{"Decision C", "Decision C"} {
+		res = presetApply(t, s, d, receipts{}, browser, noteEditCmd(byte(151+i), id(141), name, "Because."))
+		equal(t, res.Answer, store.Outcome{OK: true})
+		equal(t, []any{res.Rows[0].Value()}, []any{proto.NoteRow{
+			RowHeader: proto.RowHeader{Type: "note", ID: id(141), Seq: int64(12 + i)}, Pos: 8, Group: groupID,
+			NoteType: "kb", Name: name, Text: "Because.", By: ownerID, Timestamp: noteTS,
+		}})
+		s.Commit(res)
+		d.record(res)
+	}
+}
+
+func TestNoteEditRefusals(t *testing.T) {
+	for name, tc := range map[string]struct {
+		by      identity.Key
+		payload string
+		code    string
+	}{
+		"signed for an AI": {
+			by:      laptop,
+			payload: strings.Replace(noteEditCmd(160, id(140), "", "x"), `"id"`, fmt.Sprintf(`"as":%q,"id"`, noteWorker), 1),
+			code:    "forbidden",
+		},
+		"with a bad id":            {browser, noteEditCmd(160, "bad", "", "x"), "bad_request"},
+		"of a missing note":        {browser, noteEditCmd(160, id(149), "", "x"), "not_found"},
+		"naming a context note":    {browser, noteEditCmd(160, id(140), "Lesson", "x"), "bad_request"},
+		"of a typed note unnamed":  {browser, noteEditCmd(160, id(141), "", "x"), "bad_request"},
+		"to a name another has":    {browser, noteEditCmd(160, id(141), "Decision B", "x"), "conflict"},
+		"to a name with a control": {browser, noteEditCmd(160, id(141), "a\tb", "x"), "bad_request"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			noteRefused(t, presetApply(t, noteState(t), noteEditDisk(), receipts{}, tc.by, tc.payload), tc.code)
 		})
 	}
 }

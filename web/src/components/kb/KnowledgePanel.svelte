@@ -1,16 +1,28 @@
 <script lang="ts">
-  import { authorOf } from '../../lib/groupinfo.svelte';
+  import { addNote, authorOf, editNote, Editing } from '../../lib/groupinfo.svelte';
   import type { Group } from '../../lib/groups.svelte';
   import { isAdmin } from '../../lib/members';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { now, shortWhen } from '../../lib/when';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
+  import EditButton from '../groupinfo/EditButton.svelte';
+  import EditField, { type Field } from '../groupinfo/EditField.svelte';
   import ForgetDialog, { type ForgetTarget } from '../groupinfo/ForgetDialog.svelte';
   import { Knowledge } from './knowledge.svelte';
 
+  /** The knowledge base: a person writes and edits documents in place, name and text
+   *  (commands.md 1.6; step-3/knowledge.md section 2); an admin deletes them. */
   let { group }: { group: Group } = $props();
   const uid = $props.id();
+  const addId = `${uid}-add`;
+  const editing = new Editing();
+  const close = () => void editing.close();
+  const reasons = $derived({ conflict: t('kb.taken'), not_found: t('groupinfo.edit.gone') });
+  const fields = (name: string, text: string): Field[] => [
+    { label: t('kb.name'), value: name, maxlength: 80 },
+    { label: t('kb.text'), value: text, multiline: true },
+  ];
   let open = $state(false);
   let heading = $state<HTMLElement>();
   let pending = $state.raw<ForgetTarget>();
@@ -23,6 +35,12 @@
   $effect(() => {
     if (open) view.sync();
   });
+
+  /** A new document never replaces one of the same name that this browser holds. */
+  const add = ([name, text]: string[]) =>
+    view.has(name.trim())
+      ? Promise.resolve('conflict')
+      : addNote(group, text, { type: 'kb', name: name.trim() });
 
   function clear() {
     query = '';
@@ -74,13 +92,22 @@
         {#if view.narrow}<p class="hint">{t('kb.narrow')}</p>{/if}
         <ul class="mem-list" aria-labelledby={`${uid}-title`}>
           {#each documents as document (document.id)}
+            {@const editId = `${uid}-edit-${document.id}`}
             <li class="mem-item">
-              <b>{document.name}</b>
+              {#if editing.id !== editId}<b>{document.name}</b>{/if}
               <div class="mem-meta">
                 <b>{authorOf(group, document.by)}</b>
                 <time datetime={new Date(document.ts).toISOString()}>
                   {shortWhen(document.ts, now(), prefs.lang)}
                 </time>
+                {#if group.me}
+                  <EditButton
+                    id={editId}
+                    label={t('kb.edit').replace('{name}', document.name!)}
+                    {editing}
+                    disabled={offline}
+                  />
+                {/if}
                 <button
                   type="button"
                   class="btn btn-sm btn-ghost del"
@@ -92,13 +119,37 @@
                   {t('groupinfo.forget')}
                 </button>
               </div>
-              <p class="mem-text">{document.text}</p>
+              {#if editing.id === editId}
+                <EditField
+                  fields={fields(document.name!, document.text)}
+                  {reasons}
+                  save={([name, text]) => editNote(group, document, text, name.trim())}
+                  onclose={close}
+                />
+              {:else}
+                <p class="mem-text">{document.text}</p>
+              {/if}
             </li>
           {/each}
         </ul>
         {#if !view.busy && !view.failed && documents.length === 0}
           {#if view.ids !== undefined}<p class="hint">{t('kb.noMatch')}</p>
           {:else if view.loaded}<p class="hint">{t('kb.empty')}</p>{/if}
+        {/if}
+        {#if editing.id === addId}
+          <div class="mem-item">
+            <EditField fields={fields('', '')} {reasons} save={add} onclose={close} />
+          </div>
+        {:else if group.me}
+          <button
+            type="button"
+            id={addId}
+            class="btn btn-sm btn-ghost add"
+            disabled={offline}
+            onclick={() => (editing.id = addId)}
+          >
+            <Icon name="plus" sm />{t('kb.add')}
+          </button>
         {/if}
       </div>
     {/if}
@@ -157,8 +208,20 @@
     color: var(--text);
     font-size: var(--fs-sm);
   }
-  .del {
+  .del,
+  .mem-meta :global(.edit) {
     margin-left: auto;
+  }
+  .mem-meta :global(.edit + .del) {
+    margin-left: 0;
+  }
+  .add {
+    align-self: flex-start;
+    gap: 4px;
+    color: var(--sky);
+  }
+  .add[disabled] {
+    color: var(--text-3);
   }
   .del:not([disabled]) {
     color: var(--danger);

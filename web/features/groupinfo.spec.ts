@@ -44,6 +44,8 @@ interface MemoryRig {
   home: TestHome;
   store: Home;
   forgets: p.Forget[];
+  writes: Record<string, unknown>[];
+  refuseWrite?: string;
   fetches: Record<string, unknown>[];
   refuseForget?: string;
   freshBrowser(): void;
@@ -54,6 +56,7 @@ interface MemoryRig {
 function makeRig(): MemoryRig {
   const home = new TestHome('workstation');
   const forgets: p.Forget[] = [];
+  const writes: Record<string, unknown>[] = [];
   const fetches: Record<string, unknown>[] = [];
   let drop = () => {};
   let seq = 200;
@@ -70,10 +73,22 @@ function makeRig(): MemoryRig {
     return { re: (seq += 1), ok: true as const };
   }
 
+  // `note` and `note_edit` reach the home's own handler: it writes the note as a home does.
+  home.reply = (payload) => {
+    writes.push(payload);
+    if (rig.refuseWrite) return { err: { code: rig.refuseWrite, msg: 'refused' } };
+    const { id, task, text } = payload as { id: string; task?: string | null; text: string };
+    const old = home.groups.get(website)!.rows.get(`note ${id}`) as p.NoteRow | undefined;
+    const note = { ...(example('row-note') as p.NoteRow), ...old };
+    home.write(website, { ...note, id, task: task ?? null, text, by: owner });
+    return { ok: true };
+  };
+
   const rig: MemoryRig = {
     home,
     store: new Home({ user, sign }),
     forgets,
+    writes,
     fetches,
     freshBrowser() {
       rig.drop();
@@ -507,6 +522,152 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then('the confirmation dialog closes and the side panel stays open', () => {
         expect(all('#chat-side dialog')).toEqual([]);
         expect(one('#chat-side').classList.contains('open')).toBe(true);
+      });
+    },
+  );
+  Scenario(
+    'A member writes and corrects notes in place, on a narrow screen',
+    ({ Given, When, Then }) => {
+      const field = () => one<HTMLTextAreaElement>('.groupinfo .edit-field textarea');
+      const key = (init: KeyboardEventInit) =>
+        field().dispatchEvent(
+          new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }),
+        );
+      const type = (text: string) => {
+        field().value = text;
+        field().dispatchEvent(new Event('input', { bubbles: true }));
+        flushSync();
+      };
+      async function sent(count: number) {
+        await vi.waitFor(() => expect(rig.writes).toHaveLength(count));
+        await tick();
+        flushSync();
+      }
+      Given(
+        'the home holds one note and a member reads "Project memory" at 820 px wide',
+        async () => {
+          await closePage();
+          rig.freshBrowser();
+          rig.home.write(
+            website,
+            example('row-note', {
+              id: note1Id,
+              g: website,
+              by: secId,
+              text: 'Keep sockets short.',
+            }),
+          );
+          rig.home.write(
+            website,
+            example('row-member-human', {
+              id: owner,
+              g: website,
+              user,
+              name: 'Alex',
+              role: 'member',
+              online: true,
+            }),
+          );
+          homes.push(rig.store);
+          await syncRig();
+          openPage(`#/groups/${website}`, 820);
+          one<HTMLButtonElement>('.side-open').click();
+          await tick();
+          flushSync();
+          await openMemory();
+          expect(all('.groupinfo .add')).toHaveLength(1);
+        },
+      );
+      When(
+        'the member presses "Change note: Keep sockets short." and saves "Keep sockets under 30 s." with Ctrl and Enter',
+        async () => {
+          buttonByLabel('Change note: Keep sockets short.').click();
+          flushSync();
+          expect([document.activeElement, field().value]).toEqual([field(), 'Keep sockets short.']);
+          type('Keep sockets under 30 s.');
+          key({ key: 'Enter', ctrlKey: true });
+          await sent(1);
+        },
+      );
+      Then(
+        'the home receives a signed "note_edit" for that note, which reads "Keep sockets under 30 s." with focus back on its button',
+        async () => {
+          expect(rig.writes[0]).toEqual({
+            t: 'note_edit',
+            n: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
+            ts: expect.any(Number),
+            g: website,
+            id: note1Id,
+            text: 'Keep sockets under 30 s.',
+          });
+          expect(texts('.groupinfo .mem-text')).toEqual(['Keep sockets under 30 s.']);
+          await vi.waitFor(() =>
+            expect(document.activeElement).toBe(
+              buttonByLabel('Change note: Keep sockets under 30 s.'),
+            ),
+          );
+        },
+      );
+      When('the home refuses the next edit with "not_found"', async () => {
+        rig.refuseWrite = 'not_found';
+        buttonByLabel('Change note: Keep sockets under 30 s.').click();
+        flushSync();
+        type('Keep sockets under 10 s.');
+        one<HTMLButtonElement>('.groupinfo .edit-field .btn-primary').click();
+        await sent(2);
+      });
+      Then('the field stays open and says "Not saved: it was deleted in the meantime."', () => {
+        expect(texts('.groupinfo .edit-field [role=alert]')).toEqual([
+          'Not saved: it was deleted in the meantime.',
+        ]);
+      });
+      When('the member presses Escape in the field', async () => {
+        key({ key: 'Escape' });
+        await tick();
+        flushSync();
+      });
+      Then(
+        'the field is gone, the note reads "Keep sockets under 30 s." and the side panel stays open',
+        () => {
+          expect(all('.groupinfo .edit-field')).toEqual([]);
+          expect(texts('.groupinfo .mem-text')).toEqual(['Keep sockets under 30 s.']);
+          expect(one('#chat-side').classList.contains('open')).toBe(true);
+        },
+      );
+      When('the member adds the note "Ask before merging."', async () => {
+        rig.refuseWrite = undefined;
+        one<HTMLButtonElement>('.groupinfo .add').click();
+        flushSync();
+        expect(field().value).toBe('');
+        type('Ask before merging.');
+        key({ key: 'Enter', metaKey: true });
+        await sent(3);
+      });
+      Then(
+        'the home receives a signed "note" with a new id and no task, and the notes end with "Ask before merging."',
+        () => {
+          expect(rig.writes[2]).toEqual({
+            t: 'note',
+            n: expect.any(String),
+            ts: expect.any(Number),
+            g: website,
+            id: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
+            task: null,
+            text: 'Ask before merging.',
+          });
+          expect(texts('.groupinfo .mem-text')).toEqual([
+            'Keep sockets under 30 s.',
+            'Ask before merging.',
+          ]);
+        },
+      );
+      When('the home disconnects', () => {
+        rig.drop();
+        flushSync();
+      });
+      Then('the change and add buttons are disabled', () => {
+        const buttons = all<HTMLButtonElement>('.groupinfo .edit, .groupinfo .add');
+        expect(buttons.map((each) => each.disabled)).toEqual([true, true, true]);
       });
     },
   );

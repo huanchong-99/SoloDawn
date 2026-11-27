@@ -2,13 +2,13 @@
   "preset.title": "风格预设",
   "preset.label": "风格预设",
   "preset.lead": "任务简报指定的风格",
-  "preset.name": "名称",
+  "preset.name": "预设名称",
   "preset.text": "预设正文",
-  "preset.save": "保存预设",
-  "preset.edit": "编辑",
-  "preset.cancel": "取消",
+  "preset.edit": "更改预设：{name}",
   "preset.empty": "暂无预设。",
   "preset.deleted": "此预设已删除。",
   "preset.offline": "无法连接群组主机。预设为只读。",
-  "preset.loading": "正在加载预设…"
+  "preset.loading": "正在加载预设…",
+  "preset.add": "新建预设",
+  "preset.taken": "没有保存：已有同名的预设。"
 }

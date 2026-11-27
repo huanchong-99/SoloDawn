@@ -43,14 +43,13 @@ function input(selector: string, value: string) {
   flushSync();
 }
 
-async function submit(selector = '.preset form') {
-  one(selector).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+async function confirmDelete() {
+  one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await tick();
   flushSync();
   await vi.waitFor(() => {
     flushSync();
-    if (selector === 'dialog form') expect(all('dialog')).toEqual([]);
-    else expect(one<HTMLTextAreaElement>('textarea').disabled).toBe(false);
+    expect(all('dialog')).toEqual([]);
   });
 }
 
@@ -64,26 +63,42 @@ it('shows fetch refusal and an empty list without requiring member presence', as
   show(PresetPanel, { group });
   await open();
   expect(texts('.preset .hint')).toEqual(['No presets yet.']);
-  expect(one<HTMLInputElement>('.preset input').disabled).toBe(false);
+  expect(one<HTMLButtonElement>('.preset .add').disabled).toBe(false);
 });
 
-it('retains text on write refusal, cancels an edit and reuses the forget dialog', async () => {
+const field = (label: string) => one<HTMLInputElement>(`.preset [aria-label="${label}"]`);
+
+async function save(count: number) {
+  one<HTMLFormElement>('.preset .edit-field').requestSubmit();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(request.mock.calls.filter(([req]) => req.t === 'cmd')).toHaveLength(count);
+  });
+  await tick();
+  flushSync();
+}
+
+it('keeps a refused change open, cancels it and reuses the forget dialog', async () => {
   group.apply([row('row-note-preset')]);
   show(PresetPanel, { group });
   await open();
-  one<HTMLButtonElement>('.mem-item button').click();
+  one<HTMLButtonElement>('.preset .edit').click();
   flushSync();
-  input('textarea', 'Changed');
+  expect(texts('.preset .mem-item > b')).toEqual([]);
+  input('.preset textarea', 'Changed');
   request.mockResolvedValueOnce({ re: 1, err: { code: 'bad_request' } });
-  await submit();
+  await save(1);
   expect(texts('.preset [role=alert]')).toEqual([
     'Not sent: the home refused it as too long or malformed.',
   ]);
-  expect(one<HTMLTextAreaElement>('textarea').value).toBe('Changed');
-  all<HTMLButtonElement>('.preset form button')[1].click();
+  expect(field('Preset text').value).toBe('Changed');
+  one<HTMLButtonElement>('.preset .edit-field .btn-ghost').click();
+  await tick();
   flushSync();
-  expect(one<HTMLInputElement>('input').value).toBe('');
-  expect(one<HTMLTextAreaElement>('textarea').value).toBe('');
+  expect(all('.preset .edit-field')).toEqual([]);
+  expect(texts('.preset .mem-text')).toEqual([
+    'Principles: one accent colour; no motion longer than 200 ms.',
+  ]);
   one<HTMLButtonElement>('.del').click();
   flushSync();
   expect(texts('dialog .preview')).toEqual(['Calm dashboard']);
@@ -105,40 +120,49 @@ it('shows brief fetch refusal and offline state', async () => {
   expect(texts('.hint')).toEqual(['Cannot reach the group home. Presets are read-only.']);
 });
 
-it('creates, replaces and deletes a preset', async () => {
+it('creates, renames and deletes a preset, and refuses a second of one name', async () => {
   group.apply([row('row-note-preset')]);
   let seq = 10000;
   request.mockImplementation(async (req) => {
     if (req.t === 'cmd') {
       const cmd = JSON.parse(req.env.p);
       if (cmd.t === 'forget') group.apply([{ r: 'note', id: cmd.id, seq: ++seq, gone: true }]);
-      if (cmd.t === 'note') {
-        const id =
-          [...group.rows.values()].find(
-            (note) => note.r === 'note' && 'name' in note && note.name === cmd.name,
-          )?.id ?? cmd.id;
-        group.apply([{ ...row('row-note-preset'), ...cmd, id, r: 'note', seq: ++seq }]);
-      }
+      else group.apply([{ ...row('row-note-preset'), ...cmd, r: 'note', seq: ++seq, pos: seq }]);
     }
     return { re: 1, ok: true, rows: [], more: false };
   });
   show(PresetPanel, { group });
   await open();
-  input('input', 'New');
-  input('textarea', 'First');
-  await submit();
-  expect(texts('.mem-item > b')).toEqual(['Calm dashboard', 'New']);
-  all<HTMLButtonElement>('.mem-item button')[2].click();
+  one<HTMLButtonElement>('.preset .add').click();
   flushSync();
-  input('textarea', 'Second');
-  await submit();
+  input('.preset input', ' Calm dashboard ');
+  input('.preset textarea', 'First');
+  one<HTMLFormElement>('.preset .edit-field').requestSubmit();
+  await vi.waitFor(() =>
+    expect(texts('.preset [role=alert]')).toEqual([
+      'Not saved: another preset already has that name.',
+    ]),
+  );
+  input('.preset input', ' New ');
+  await save(1);
+  expect(texts('.mem-item > b')).toEqual(['Calm dashboard', 'New']);
+  one<HTMLButtonElement>('button[aria-label="Change preset: New"]').click();
+  flushSync();
+  input('.preset input', 'Newer');
+  input('.preset textarea', 'Second');
+  await save(2);
+  const [, edit] = request.mock.calls
+    .filter(([req]) => req.t === 'cmd')
+    .map(([req]) => JSON.parse(req.env.p));
+  expect(edit).toMatchObject({ t: 'note_edit', name: 'Newer', text: 'Second' });
+  expect(texts('.mem-item > b')).toEqual(['Calm dashboard', 'Newer']);
   expect(texts('.mem-item .mem-text')).toEqual([
     'Principles: one accent colour; no motion longer than 200 ms.',
     'Second',
   ]);
   all<HTMLButtonElement>('.del')[1].click();
   flushSync();
-  await submit('dialog form');
+  await confirmDelete();
   expect(texts('.mem-item > b')).toEqual(['Calm dashboard']);
   expect(document.activeElement).toBe(one('.preset summary'));
 });

@@ -105,6 +105,7 @@ export const schemaOf: Record<string, GenericSchema> = {
   note: p.Note,
   'note-kb': p.Note,
   'note-preset': p.Note,
+  note_edit: p.NoteEdit,
   offer: p.Offer,
   pair: p.Pair,
   'pair-browser': p.HostCommandOnly,

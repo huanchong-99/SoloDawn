@@ -1,7 +1,8 @@
-// Project-memory projections, paging and forget command (planning/contracts/rows.md sections 5
-// and 6; planning/contracts/commands.md section 1.6; planning/contracts/datachannel.md section 4).
-import { untrack } from 'svelte';
-import { lost, Paging, type Group } from './groups.svelte';
+// Project-memory projections, paging, and the commands that write, edit and forget what group
+// info shows (planning/contracts/rows.md sections 5 and 6; planning/contracts/commands.md sections
+// 1.1 and 1.6; planning/contracts/datachannel.md section 4).
+import { tick, untrack } from 'svelte';
+import { lost, newId, Paging, type Group } from './groups.svelte';
 import { isAdmin } from './members';
 import { t } from './prefs.svelte';
 import type * as p from './proto';
@@ -52,10 +53,44 @@ export function previewText(text: string): string {
   return oneLine.length > 60 ? `${oneLine.slice(0, 59)}…` : oneLine;
 }
 
-/** Signs and sends `forget` for a note or review, returning the refusal code or an empty string. */
-export async function forgetMemory(group: Group, r: ForgetRowType, id: string): Promise<string> {
-  const answer = await group.home.command({ t: 'forget', g: group.g, r, id });
+/** Signs and sends a command of `group`, returning the refusal code or an empty string. */
+async function refusal(group: Group, fields: { t: string; [field: string]: unknown }) {
+  const answer = await group.home.command({ g: group.g, ...fields });
   return answer.err ? answer.err.code : '';
+}
+
+/** Signs and sends `forget` for a note or review, returning the refusal code or an empty string. */
+export const forgetMemory = (group: Group, r: ForgetRowType, id: string) =>
+  refusal(group, { t: 'forget', r, id });
+
+/** `group set` of the fields given (`commands.md` section 1.1). */
+export const setGroup = (group: Group, fields: { name?: string; secretary?: string }) =>
+  refusal(group, { t: 'group', op: 'set', ...fields });
+
+/** `note_edit`: the note keeps its id and place, and a typed note its name unless one is given
+ *  (`commands.md` section 1.6). */
+export const editNote = (group: Group, note: p.NoteRow, text: string, name = note.name) =>
+  refusal(group, { t: 'note_edit', id: note.id, name, text });
+
+/** A new context note, or a knowledge-base document or style preset of a name (`commands.md`
+ *  section 1.6; `step-3/knowledge.md` section 2). */
+export const addNote = (
+  group: Group,
+  text: string,
+  typed?: { type: 'kb' | 'preset'; name: string },
+) => refusal(group, { t: 'note', id: newId(), task: null, ...typed, text });
+
+/** Which value of a panel is being edited in place, by the id of the button that opened the
+ *  edit. When the edit ends, focus goes back to that button. */
+export class Editing {
+  id = $state<string>();
+
+  async close(): Promise<void> {
+    const id = this.id;
+    this.id = undefined;
+    await tick();
+    document.getElementById(id!)?.focus();
+  }
 }
 
 /** Fetches and pages `note` and `review` project-memory rows across sync epochs of `group`. */

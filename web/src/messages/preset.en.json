@@ -2,13 +2,13 @@
   "preset.title": "Style presets",
   "preset.label": "Style preset",
   "preset.lead": "Styles named by briefs",
-  "preset.name": "Name",
+  "preset.name": "Preset name",
   "preset.text": "Preset text",
-  "preset.save": "Save preset",
-  "preset.edit": "Edit",
-  "preset.cancel": "Cancel",
+  "preset.edit": "Change preset: {name}",
   "preset.empty": "No presets yet.",
   "preset.deleted": "This preset was deleted.",
   "preset.offline": "Cannot reach the group home. Presets are read-only.",
-  "preset.loading": "Loading presets…"
+  "preset.loading": "Loading presets…",
+  "preset.add": "New preset",
+  "preset.taken": "Not saved: another preset already has that name."
 }

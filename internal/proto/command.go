@@ -226,6 +226,15 @@ type Note struct {
 	Text     string `json:"text"`
 }
 
+// NoteEdit changes a live note in place: its text, and the name of a typed
+// note (contracts/commands.md 1.6).
+type NoteEdit struct {
+	HomeCommand
+	ID   ID     `json:"id"`
+	Name string `json:"name,omitempty"`
+	Text string `json:"text"`
+}
+
 type Forget struct {
 	HomeCommand
 	Row string `json:"r"`

@@ -100,6 +100,7 @@ var shapes = map[string]reflect.Type{
 	"note":                           of[Note](),
 	"note-kb":                        of[Note](),
 	"note-preset":                    of[Note](),
+	"note_edit":                      of[NoteEdit](),
 	"offer":                          of[Offer](),
 	"pair":                           of[Pair](),
 	"pair-browser":                   of[HostCommand](),

@@ -2,8 +2,8 @@
 // them: a group made with a person and connected AIs, each in a folder of its computer; a
 // confirmed brief whose tasks go through work, report and review to done, one task at a time per
 // folder; a denied approval that stays denied while the task goes on without it; a message let go
-// first that pauses the busy AI's task; who paused or reassigned a task; and a saved world that
-// comes back as it was. Every row the world writes has the shape the client reads.
+// first that pauses the busy AI's task; who paused or reassigned a task; the project memory and
+// knowledge base, written, edited, searched and paged; and a saved world that comes back as it was. Every row the world writes has the shape the client reads.
 import * as v from 'valibot';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId } from '../../src/lib/groups.svelte';
@@ -226,6 +226,50 @@ describe('the demo world', () => {
     const info = world.info(world.node(devices.macbook)!);
     const entry = info.agents.flatMap((agent) => agent.groups).find((each) => each.g === docs);
     expect(entry).toMatchObject({ member: ai.id, workspace: '/Users/alex/dev/blog' });
+    parses();
+  });
+
+  it('writes, edits, searches and pages the project memory and the knowledge base', async () => {
+    const notes = (type?: string) =>
+      world.rows(g).filter((row) => row.r === 'note' && row.type === type) as Row[];
+    const fetch = (fields: Fields) =>
+      line.request({ t: 'fetch', g, before: 0, limit: 50, ...fields } as never) as Promise<{
+        rows: Row[];
+        more: boolean;
+      }>;
+    expect(notes().map((row) => row.text)).toHaveLength(3);
+    const [decision, convention] = notes('kb');
+    expect((await fetch({ kind: 'kb' })).rows.map((row) => row.id)).toEqual([
+      convention.id,
+      decision.id,
+    ]);
+    const page = await fetch({ kind: 'note', limit: 2 });
+    expect([page.rows.length, page.more]).toEqual([2, true]);
+    const older = await fetch({ kind: 'note', before: page.rows[1].pos });
+    expect([older.rows.length, older.more]).toEqual([1, false]);
+    expect((await fetch({ kind: 'review' })).rows.map((row) => row.kind)).toEqual(['review']);
+    expect((await fetch({ kind: 'kb', q: '静态  CDN' })).rows).toEqual([decision]);
+
+    const note = notes()[0];
+    const edit = { t: 'note_edit', id: note.id, text: '断点用 `640px`。' };
+    expect(await send(edit)).toMatchObject({ ok: true });
+    expect(world.find(g, 'note', note.id)).toMatchObject({ pos: note.pos, text: edit.text });
+    const rename = { t: 'note_edit', id: decision.id, text: 'x', name: convention.name };
+    expect(await send(rename)).toMatchObject({ err: { code: 'conflict' } });
+    expect(await send({ ...rename, name: '决策：静态页' })).toMatchObject({ ok: true });
+    expect(world.find(g, 'note', decision.id)).toMatchObject({
+      name: '决策：静态页',
+      pos: decision.pos,
+    });
+
+    const put = { t: 'note', id: newId(), task: null, type: 'kb', name: '决策：静态页', text: 'y' };
+    expect(await send(put)).toMatchObject({ ok: true });
+    expect(notes('kb').map((row) => [row.id, row.text])).toEqual([
+      [decision.id, 'y'],
+      [convention.id, convention.text],
+    ]);
+    expect(await send({ t: 'forget', r: 'note', id: decision.id })).toMatchObject({ ok: true });
+    expect(await send({ ...edit, id: decision.id })).toMatchObject({ err: { code: 'not_found' } });
     parses();
   });
 });

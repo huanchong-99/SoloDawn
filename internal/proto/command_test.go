@@ -178,6 +178,10 @@ func TestOtherHomeCommandGoldens(t *testing.T) {
 		NoteType: "kb", Name: "Decision: the home is the single writer",
 		Text: "Every change to a group goes through its home.",
 	})
+	golden(t, "note_edit", NoteEdit{
+		HomeCommand: command("note_edit", "note edit command"), ID: ID(id("kb note")),
+		Name: "Decision: one writer per group", Text: "Every change to a group goes through its home, the one writer.",
+	})
 	golden(t, "forget", Forget{command("forget", "forget"), "note", ID(id("note"))})
 	on := PushOn{command("push", "push on"),
 		PushSubscription{"https://push.example/send/" + id("subscription"), keyBytes("p256dh", 65), keyBytes("auth", 16)},
@@ -250,7 +254,7 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 			if noteType, there := fields["type"].(string); there {
 				want += "-" + noteType
 			}
-		case "jump", "forget", "ack", "inbox", "invite":
+		case "jump", "note_edit", "forget", "ack", "inbox", "invite":
 			want = kind
 		case "join":
 			if _, homeCmd := fields["g"]; !homeCmd {

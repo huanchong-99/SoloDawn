@@ -1,7 +1,10 @@
 <script lang="ts">
   import { parts } from '../../lib/compose';
   import {
+    addNote,
     authorOf,
+    editNote,
+    Editing,
     forgetDisabledReason,
     groupNotes,
     groupReviews,
@@ -13,11 +16,17 @@
   import { prefs, t } from '../../lib/prefs.svelte';
   import { now, shortWhen } from '../../lib/when';
   import Icon from '../Icon.svelte';
+  import EditButton from './EditButton.svelte';
+  import EditField from './EditField.svelte';
   import ForgetDialog, { type ForgetTarget } from './ForgetDialog.svelte';
 
-  /** Group info and project-memory section mounted in `chat.side` below the member list. */
+  /** Group info and project-memory section mounted in `chat.side` below the member list. A
+   *  person writes and edits notes in place (commands.md 1.6); an admin deletes them. */
   let { group }: { group: Group } = $props();
   const uid = $props.id();
+  const addId = `${uid}-add`;
+  const editing = new Editing();
+  const close = () => void editing.close();
 
   let open = $state(false);
   let notesHead = $state<HTMLElement>();
@@ -81,6 +90,7 @@
               {#each notes as note (note.id)}
                 {@const task = note.task ? group.task(note.task) : undefined}
                 {@const label = previewText(note.text)}
+                {@const editId = `${uid}-edit-${note.id}`}
                 <li class="mem-item">
                   <div class="mem-meta">
                     <b>{authorOf(group, note.by)}</b>
@@ -88,6 +98,14 @@
                     <time datetime={new Date(note.ts).toISOString()}>
                       {shortWhen(note.ts, now(), prefs.lang)}
                     </time>
+                    {#if group.me}
+                      <EditButton
+                        id={editId}
+                        label={t('groupinfo.note.edit').replace('{text}', label)}
+                        {editing}
+                        disabled={!group.home.ctl}
+                      />
+                    {/if}
                     <button
                       type="button"
                       class="btn btn-sm btn-ghost del"
@@ -99,16 +117,46 @@
                       {t('groupinfo.forget')}
                     </button>
                   </div>
-                  <p class="mem-text">
-                    {#each parts(note.text, []) as part, i (i)}
-                      {#if part.kind === 'code'}<code>{part.text}</code>{:else}{part.text}{/if}
-                    {/each}
-                  </p>
+                  {#if editing.id === editId}
+                    <EditField
+                      fields={[
+                        { label: t('groupinfo.note.text'), value: note.text, multiline: true },
+                      ]}
+                      reasons={{ not_found: t('groupinfo.edit.gone') }}
+                      save={([text]) => editNote(group, note, text)}
+                      onclose={close}
+                    />
+                  {:else}
+                    <p class="mem-text">
+                      {#each parts(note.text, []) as part, i (i)}
+                        {#if part.kind === 'code'}<code>{part.text}</code>{:else}{part.text}{/if}
+                      {/each}
+                    </p>
+                  {/if}
                 </li>
               {/each}
             </ul>
           {:else if !memory.note.more && !noteStuck}
             <p class="hint">{t('groupinfo.notes.empty')}</p>
+          {/if}
+          {#if editing.id === addId}
+            <div class="mem-item">
+              <EditField
+                fields={[{ label: t('groupinfo.note.text'), value: '', multiline: true }]}
+                save={([text]) => addNote(group, text)}
+                onclose={close}
+              />
+            </div>
+          {:else if group.me}
+            <button
+              type="button"
+              id={addId}
+              class="btn btn-sm btn-ghost add"
+              disabled={!group.home.ctl}
+              onclick={() => (editing.id = addId)}
+            >
+              <Icon name="plus" sm />{t('groupinfo.note.add')}
+            </button>
           {/if}
         </div>
 
@@ -276,8 +324,20 @@
     color: var(--text);
     font-size: var(--fs-sm);
   }
-  .del {
+  .del,
+  .mem-meta :global(.edit) {
     margin-left: auto;
+  }
+  .mem-meta :global(.edit + .del) {
+    margin-left: 0;
+  }
+  .add {
+    align-self: flex-start;
+    gap: 4px;
+    color: var(--sky);
+  }
+  .add[disabled] {
+    color: var(--text-3);
   }
   .del:not([disabled]) {
     color: var(--danger);

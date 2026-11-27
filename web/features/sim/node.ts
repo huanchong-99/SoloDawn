@@ -4,6 +4,7 @@
 // `hello`, `host.info`, `host.workspaces`, `watch.start` and the host commands. What its AIs do is the director's.
 import type * as p from '../../src/lib/proto';
 import { ActHome } from '../home';
+import { fetchKind } from './memory';
 import type { Fields } from './rows';
 
 /** A CLI found on the computer, as `host.info` lists it without its groups. */
@@ -118,6 +119,7 @@ export class SimNode extends ActHome {
       return { re: 0, ...this.#world.watchStart(this, req.g!, req.member!) };
     const moved = this.moved.get(gOf(req));
     if (moved) return { re: 0, err: { code: 'moved', msg: 'the group moved', home: moved } };
+    if (req.t === 'fetch' && 'kind' in req) return fetchKind(this, req as Fields);
     return req.t === 'cmd' ? this.#command(base, req) : base(req);
   }
 

@@ -4,6 +4,7 @@
 // with Mina.
 import { agents, words } from './content';
 import { devices, ids, users } from './ids';
+import { memory } from './memory';
 import { ai, group, msg, person, system, task, type AISpec, type Row } from './rows';
 import type { World } from './world';
 
@@ -123,6 +124,7 @@ function site(world: World, now: number) {
     world.write(g, ai(g, each, each.id === ids.minaAi ? 'takeover' : 'waiting'));
   yesterday(world, now - 24 * hour);
   today(world, now);
+  memory(world, g, now);
 }
 
 /** The first request and its one task, done. */

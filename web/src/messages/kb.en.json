@@ -9,5 +9,10 @@
   "kb.empty": "No documents yet.",
   "kb.noMatch": "No matching documents.",
   "kb.narrow": "More documents match. Narrow your query.",
-  "kb.offline": "Cannot reach the group home. Documents are read-only."
+  "kb.offline": "Cannot reach the group home. Documents are read-only.",
+  "kb.add": "New document",
+  "kb.edit": "Change document: {name}",
+  "kb.name": "Document name",
+  "kb.text": "Document text",
+  "kb.taken": "Not saved: another document already has that name."
 }

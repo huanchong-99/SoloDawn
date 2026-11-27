@@ -68,7 +68,8 @@ ones:
 - in `member status`: `task` (the AI is on no task) and `event` (there is
   no fact to report);
 - in `push`: either `sub`, `vapid` and `on`, or `off` alone (1.7);
-- in `takeover.start`: `task`.
+- in `takeover.start`: `task`;
+- in `note_edit`: `name`, there exactly when the note has a `type`.
 
 A `post` always carries `kind`, `text`, `thread` (or `null`), `main`,
 `mentions`, `re` (or `null`) and `body`; what `body` must hold for each
@@ -212,7 +213,13 @@ request or a merge: the node runs none. A submission is the assignee's
 | `t` | Fields | By | Effect |
 | --- | --- | --- | --- |
 | `note` | `id`, `task`, `text` | a person, or an AI | note row written |
+| `note_edit` | `id`, `name`, `text` | a person | the live note `id` gets `text`, and `name` when it has a `type`; `by` becomes the sender and `ts` the command's. Its `id`, `pos`, `task` and `type` stay, and it gets a new `seq`. A note that does not exist or was forgotten is `not_found`; one signed for an AI, `forbidden`. A `name` on a context note, or on a typed note none or one outside the rule of `contracts/step-3/knowledge.md` section 1, is `bad_request`; a name that another note of the same `type` has is `conflict` |
 | `forget` | `r` (`note` or `msg`), `id` | an admin | a note, or a `review` message, is replaced by a `gone` marker; any other message is refused with `conflict` |
+
+`note_edit` is how a person corrects an entry of the project memory, a
+document of the knowledge base or a preset where it is shown: by its `id`,
+so an entry forgotten meanwhile is not written again. No history: the old
+text is gone.
 
 Notes and `review` messages are not removed by retention (R-102). `forget`
 is how a person deletes one by hand, and it deletes nothing else: R-102
