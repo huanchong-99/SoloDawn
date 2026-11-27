@@ -101,6 +101,16 @@ export class World implements NodeWorld {
     return [...this.nodes.values()].find((node) => node.groups.has(g));
   }
 
+  /** `group import` on `to`: the group that was exported from its home is its home's now. */
+  arrive(g: string, to: SimNode) {
+    const from = this.home(g)!;
+    const held = from.groups.get(g)!;
+    from.groups.delete(g);
+    to.groups.set(g, held);
+    this.change(g, 'group', g, { home: to.device });
+    to.relist();
+  }
+
   /** Every row of a group. */
   rows(g: string): Row[] {
     const held = [...(this.home(g)?.groups.get(g)?.rows.values() ?? [])] as unknown as Row[];
@@ -204,6 +214,10 @@ export class World implements NodeWorld {
       for (const [g, to] of held.moved) node.moved.set(g, to);
       Object.assign(node, { agents: held.agents, offline: held.offline, paired: held.paired });
     }
+    // A group exported when the world was saved and not yet imported is imported now.
+    for (const node of this.nodes.values())
+      for (const [g, device] of node.moved)
+        if (node.groups.has(g)) this.arrive(g, this.nodes.get(device)!);
     this.memory = { ...emptyMemory(), ...saved.memory };
   }
 }

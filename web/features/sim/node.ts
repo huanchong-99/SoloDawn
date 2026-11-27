@@ -95,9 +95,12 @@ export class SimNode extends ActHome {
     for (const push of this.#pushes) push(structuredClone(frame));
   }
 
-  /** The groups this node homes, as `welcome` and `groups` list them. */
+  /** The groups this node homes, as `welcome` and `groups` list them: one that was exported is
+   *  held until it is imported, and no longer listed. */
   listed() {
-    return [...this.groups].map(([g, { name, seq }]) => ({ g, name, seq }));
+    return [...this.groups]
+      .filter(([g]) => !this.moved.has(g))
+      .map(([g, { name, seq }]) => ({ g, name, seq }));
   }
 
   /** The node's list of groups changed: every browser hears it. */
@@ -117,10 +120,17 @@ export class SimNode extends ActHome {
     if (req.t === 'host.workspaces') return { re: 0, ...this.#world.workspaces(this, req.agent!) };
     if (req.t === 'watch.start')
       return { re: 0, ...this.#world.watchStart(this, req.g!, req.member!) };
-    const moved = this.moved.get(gOf(req));
+    const moved = this.#movedTo(req);
     if (moved) return { re: 0, err: { code: 'moved', msg: 'the group moved', home: moved } };
     if (req.t === 'fetch' && 'kind' in req) return fetchKind(this, req as Fields);
     return req.t === 'cmd' ? this.#command(base, req) : base(req);
+  }
+
+  /** Where the group of a request went, when the request is for its old home. A host command
+   *  (it has `to`) is for the computer and its AIs, which stay: it is not for the home. */
+  #movedTo(req: Request) {
+    const host = req.t === 'cmd' && 'to' in (JSON.parse(req.env!.p) as Fields);
+    return host ? undefined : this.moved.get(gOf(req));
   }
 
   #welcome(answer: unknown) {

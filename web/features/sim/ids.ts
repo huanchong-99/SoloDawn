@@ -6,6 +6,7 @@ import { owner } from '../home';
 export const ids = {
   site: 'BsebuFCdYvLaA9AbRCg9dA',
   talk: 'sAMBSgZyIJo0pKEACZb8tA',
+  blog: 'VpKGCCq3zA0bPrDeyF7C_A',
   /** The person at this browser, in every group: the member id the test homes write for them. */
   me: owner,
   secretary: 'geb2UHpWAhcQHK7NLhk4Og',
@@ -15,6 +16,7 @@ export const ids = {
   minaAi: 'ClIbmHyJqjLSWCFIrynHQg',
   minaTalk: '7doctR3yhr0PKuGiENYJ0Q',
   leo: 'ZTOztQLrN05IQixJLCmskA',
+  noraBlog: 'PVsxxaFQ4UPcrTBctiLd1A',
 };
 
 export const devices = {
@@ -27,4 +29,5 @@ export const devices = {
 export const users = {
   mina: 'PdL7iYPxf1msb6CLlsHUkZJTtnPlzflgYNoYZNcY-F4',
   leo: 'WIDKvh-CYfCLhlVbSUXKT8QCkNq_ZCOKwZqFh7mZNMw',
+  nora: 'sORopNDxmIOr5XQyYnyWUFfzf4XkHtfagoEefbRzudo',
 };

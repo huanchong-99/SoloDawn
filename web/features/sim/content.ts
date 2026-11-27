@@ -71,8 +71,7 @@ export const folders: Record<string, Record<string, string[]>> = {
 };
 
 /** The first sentence of a request, as the title of a brief. */
-export function titleOf(text: string): string {
-  const plain = text.replace(/@\S+/g, '').trim();
+export function titleOf(plain: string): string {
   const first = plain.split(/[。！？!?\n，,；;]/)[0].trim() || plain;
   return first.length > 26 ? `${first.slice(0, 25)}…` : first;
 }
@@ -81,7 +80,9 @@ export const words = {
   briefLead: '需求我整理成了任务说明，你看一下，确认后我就派活：',
   briefAgain: '按你的意见改好了，再看一下：',
   confirmed: '收到，已经派下去了。进度会在各自的任务里更新。',
-  allDone: '这批任务都完成了。要合并的分支我来安排。',
+  allDone: '这批任务都完成了。',
+  closeAsk: '这个任务完成了。请按项目的做法把改动收尾，做完在这里告诉我。',
+  closed: '收尾做完了，改动都在我的文件夹里。',
   oneAI: '这个群现在只有一个干活的 AI。任务要有人复核，再加一个 AI 我就能派活。',
   answer:
     '我查了一下：官网用 Vite 构建、Svelte 写页面，部署在 GitHub Pages。要我把细节整理成文档吗？',
@@ -107,8 +108,8 @@ export const words = {
   ],
   decided: (choice: string) => `好，按「${choice}」来做。`,
   decidedText: (text: string) => `收到：「${text}」。按这个来。`,
-  report: (num: number) =>
-    `做完了：改了 3 个文件，加了对应的测试，pnpm test 全部通过。改动提交在分支 t-${num} 上，已推送到 origin。`,
+  report:
+    '做完了：改了 3 个文件，加了对应的测试，pnpm test 全部通过。改动都在我的文件夹里，主要在 src/routes/Home.svelte。',
   reviewItems: [
     {
       text: '小屏幕下的间距可以再统一一点，不影响通过。',

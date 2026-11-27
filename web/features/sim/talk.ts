@@ -10,9 +10,8 @@ import type { Tasks } from './tasks';
 import type { World } from './world';
 
 const reply = 2500;
-const isQuestion = (text: string) =>
-  /[?？]\s*$/.test(text.trim()) ||
-  /^(怎么|为什么|是否|能不能|有没有)/.test(text.replace(/@\S+\s*/g, ''));
+const isQuestion = (plain: string) =>
+  /[?？]\s*$/.test(plain) || /^(怎么|为什么|是否|能不能|有没有)/.test(plain);
 
 export class Talk extends Scene {
   #turn = 0;
@@ -94,7 +93,8 @@ export class Talk extends Scene {
   }
 
   #secretary(g: string, ai: AI, said: Msg) {
-    if (isQuestion(said.text)) return this.post('text', { g, by: ai.id, text: words.answer });
+    if (isQuestion(this.#request(g, said.text)))
+      return this.post('text', { g, by: ai.id, text: words.answer });
     if (this.#pair(g).length < 2) return this.post('text', { g, by: ai.id, text: words.oneAI });
     this.brief(g, ai.id, { text: said.text, requester: said.by });
   }
@@ -106,9 +106,21 @@ export class Talk extends Scene {
     return [...own, ...working.filter((ai) => !own.includes(ai))].slice(0, 2);
   }
 
+  /** The request without the members it mentions: the client takes `@秘书` as a mention also when
+   *  the sentence runs straight on after it, so the names are cut, not the word they touch. */
+  #request(g: string, text: string) {
+    const names = this.world
+      .rows(g)
+      .filter((row) => row.r === 'member')
+      .map((row) => row.name as string)
+      .sort((a, b) => b.length - a.length);
+    return names.reduce((rest, name) => rest.replaceAll(`@${name}`, ''), text).trim();
+  }
+
   /** What a brief says: a title and goal from the request, the person's note when the brief is
    *  written again, and three tasks for the two AIs, each reviewed by the other. */
-  #body(g: string, text: string, note: string) {
+  #body(g: string, said: string, note: string) {
+    const text = this.#request(g, said);
     const [first, second] = this.#pair(g);
     const entry = (title: string, assignee: string, reviewer: string) => ({
       title,
@@ -126,11 +138,10 @@ export class Talk extends Scene {
     const again = note
       ? { title: `${titleOf(text)}（已按意见修改）`, criteria: [...words.criteria, note] }
       : {};
-    const goal = text.replace(/@\S+\s*/g, '');
     const scope = { in: words.scopeIn, out: words.scopeOut };
     return {
       title: titleOf(text),
-      goal,
+      goal: text,
       criteria: words.criteria,
       scope,
       tasks,

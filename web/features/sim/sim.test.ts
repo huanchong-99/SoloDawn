@@ -11,21 +11,23 @@ import * as p from '../../src/lib/proto';
 import { user } from '../home';
 import { words } from './content';
 import { Director } from './director';
+import { Events } from './events';
 import { devices, ids, users } from './ids';
 import type { Line } from './node';
-import type { Fields, Row } from './rows';
+import { task as taskRow, type Fields, type Row } from './rows';
 import { seed } from './seed';
 import { World } from './world';
 
 const g = ids.site;
 let world: World;
+let director: Director;
 let line: Line;
 
 beforeEach(() => {
   vi.useFakeTimers();
   world = new World(user, 'full');
   seed(world);
-  new Director(world);
+  director = new Director(world);
   line = world.node(devices.macbook)!.open(() => {});
 });
 
@@ -77,6 +79,17 @@ async function confirmedBrief() {
 const approve = (card: Row) =>
   card.kind === 'approval' ? { action: 'approve' } : { action: 'choose', arg: 'B' };
 
+/** The secretary asked the assignee of a task, in the task's thread, and the assignee answered
+ *  there from its own folder. */
+function closedIn(row: Row) {
+  const thread = rows('text').filter((each) => each.thread === row.id);
+  expect(thread.map((each) => [each.by, each.text])).toEqual([
+    [ids.secretary, words.closeAsk],
+    [row.assignee, words.closed],
+  ]);
+  expect(thread[0].mentions).toEqual([row.assignee]);
+}
+
 describe('the demo world', () => {
   it('takes a confirmed brief through work, report and review to done, one task per folder', async () => {
     await confirmedBrief();
@@ -97,6 +110,10 @@ describe('the demo world', () => {
     );
     const summaries = rows('summary').map((row) => (row.body as { task: string }).task);
     expect(summaries).toEqual(expect.arrayContaining(made().map((row) => row.id)));
+    await vi.advanceTimersByTimeAsync(3000);
+    const notices = rows('text').filter((row) => row.text === words.allDone);
+    expect(notices.map((row) => row.by)).toEqual([ids.secretary]);
+    for (const each of made()) closedIn(each);
     const reviews = rows('review').map((row) => row.body as { ok: boolean; report: string });
     expect(reviews.filter((review) => !review.ok)).toHaveLength(1);
     const reports = rows('report').map((row) => row.id);
@@ -108,6 +125,30 @@ describe('the demo world', () => {
     );
     expect(done).toHaveLength(made().length + 1);
     parses();
+  });
+
+  it('asks the assignee of a task with no brief to close it, too', async () => {
+    const spec = { g, num: 9, title: '改一处文案', assignee: ids.claude, reviewer: ids.codex };
+    const lone = world.write(g, taskRow(spec)) as Row;
+    director.tasks.kick(g, lone.id as string);
+    await run(approve);
+    expect(world.find<Row>(g, 'task', lone.id as string)!.state).toBe('done');
+    await vi.advanceTimersByTimeAsync(3000);
+    closedIn(lone);
+    expect(rows('text').map((row) => row.text)).not.toContain(words.allDone);
+  });
+
+  it('titles the brief of a request that runs on straight after @秘书', async () => {
+    await say('@秘书首页加一个导出价格表的按钮。', [ids.secretary]);
+    await vi.advanceTimersByTimeAsync(3000);
+    const [brief] = pending('brief');
+    expect(brief.body).toMatchObject({
+      title: '首页加一个导出价格表的按钮',
+      goal: '首页加一个导出价格表的按钮。',
+    });
+    await say('@秘书怎么部署的');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(rows('text').at(-1)!.text).toBe(words.answer);
   });
 
   it('shows a denied approval as denied, and the AI works on without it', async () => {
@@ -133,6 +174,26 @@ describe('the demo world', () => {
     await vi.advanceTimersByTimeAsync(6000);
     expect(rows('text').at(-1)!.text).toContain(words.preemptedAnswer);
     expect(world.rows(g).some((row) => row.r === 'task' && row.state === 'paused')).toBe(false);
+  });
+
+  it('adds Nora, who is in the blog group on the same computer, without an invitation', async () => {
+    const people = (group: string) =>
+      world.rows(group).filter((row) => row.r === 'member' && row.kind === 'human');
+    const offered = people(ids.blog).filter(
+      (row) => row.user !== world.me && !people(g).some((each) => each.user === row.user),
+    );
+    expect(offered.map((row) => row.name)).toEqual(['Nora']);
+    expect(world.home(ids.blog)).toBe(world.home(g));
+    const add = { t: 'member', op: 'add_person', user: users.nora, name: 'Nora' };
+    expect(await send(add)).toMatchObject({ ok: true });
+    expect(await send(add)).toMatchObject({ err: { code: 'conflict' } });
+    expect(people(g).map((row) => row.name)).toContain('Nora');
+    const nora = people(g).find((row) => row.user === users.nora)!;
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(rows('text').at(-1)).toMatchObject({ by: nora.id, text: words.addedHello });
+    expect(await say('@Nora 欢迎', [nora.id as string])).toMatchObject({ ok: true });
+    expect(rows('text').at(-1)!.mentions).toEqual([nora.id]);
+    parses();
   });
 
   it('comes back from what it saved as it was', async () => {
@@ -166,6 +227,64 @@ describe('the demo world', () => {
       by: ids.me,
     });
     parses();
+  });
+
+  it('does not ask a question again that was answered when a task goes to another AI', async () => {
+    await confirmedBrief();
+    const second = made()[1];
+    for (let i = 0; i < 20 && !pending('decision').length; i += 1)
+      await vi.advanceTimersByTimeAsync(1000);
+    await send({ t: 'act', msg: pending('decision')[0].id, action: 'choose', arg: 'B' });
+    expect(await send({ t: 'task', op: 'pause', id: second.id })).toMatchObject({ ok: true });
+    const mina = { t: 'task', op: 'assign', id: second.id, assignee: ids.minaAi };
+    expect(await send(mina)).toMatchObject({ ok: true });
+    expect(await send({ t: 'task', op: 'resume', id: second.id })).toMatchObject({ ok: true });
+    await run(approve);
+    expect(world.find<Row>(g, 'task', second.id)!.state).toBe('done');
+    expect(rows('decision')).toHaveLength(1);
+  });
+
+  it('keeps the AIs on their computers while a group moves, and moves the group', async () => {
+    const office = world.node(devices.office)!;
+    const mac = world.node(devices.macbook)!;
+    const aisOf = (device: string) =>
+      world
+        .info(world.node(device)!)
+        .agents.flatMap((agent) => agent.groups)
+        .filter((entry) => entry.g === g).length;
+    const before = [aisOf(devices.macbook), aisOf(devices.office)];
+    office.paired = true;
+    mac.paired = true;
+    new Events(world, director).move(g);
+    expect(mac.listed().map((each) => each.g)).not.toContain(g);
+    expect([aisOf(devices.macbook), aisOf(devices.office)]).toEqual(before);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(office.listed().map((each) => each.g)).toContain(g);
+    expect(mac.groups.has(g)).toBe(false);
+    expect([aisOf(devices.macbook), aisOf(devices.office)]).toEqual(before);
+    expect(world.info(mac).homes.find((home) => home.g === g)?.home).toBe(devices.office);
+  });
+
+  it('still starts a takeover on an AI of the computer after its group moved', async () => {
+    for (const node of world.nodes.values()) node.paired = true;
+    new Events(world, director).move(g);
+    await vi.advanceTimersByTimeAsync(2500);
+    const home = { t: 'post', kind: 'text', thread: null, main: false, text: 'x', mentions: [] };
+    expect(await send(home)).toMatchObject({ err: { code: 'moved' } });
+    const start = { t: 'takeover.start', to: devices.macbook, member: ids.claude };
+    expect(await send(start)).toMatchObject({ ok: true });
+    expect(world.find<Row>(g, 'member', ids.claude)).toMatchObject({ state: 'takeover' });
+  });
+
+  it('imports a group that was exported when the world was saved', () => {
+    for (const node of world.nodes.values()) node.paired = true;
+    new Events(world, director).move(g);
+    const again = new World(user, 'full');
+    seed(again);
+    again.restore(JSON.parse(JSON.stringify(world.saved())));
+    expect(again.home(g)?.device).toBe(devices.office);
+    expect(again.find<Row>(g, 'group', g)).toMatchObject({ home: devices.office });
+    again.stop();
   });
 
   it('makes a group with a person and a connected AI in a folder of its computer', async () => {

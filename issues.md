@@ -2256,3 +2256,75 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: an AI posted that it would do something (the secretary: "I'll arrange the merge") and ended its turn; nothing followed. The owner's rule (2026-11-27): whoever posts that they will do something must do it; a report of what is done is fine, a promise in it must be kept.
 - Cause: a session runs only when a new item reaches it, and a turn ends after the post. The instructions stated no duty to act before ending the turn, and the secretary's closing-step line (`internal/host/instructions/secretary.md:23`) said "arrange" without saying when or how.
 - Status: resolved in branch `m/follow-through`. Every role's instructions say "Never end a turn with a promise": do it in the same turn, or hand it to a tool that makes it run (`start_task`, `set_task`, `propose_brief`, `ask`, a mention, `request_decision`) and say which (`planning/contracts/drivers.md` section 4). The secretary requests the closing step in the same turn. No code looks for promises in the text; the duty is not enforced (`planning/risks.md` K-26).
+
+### 2026-11-27 · deviation · The demo world kept the old model's wording
+
+- Symptom: AI reports in the demo said the change was "committed on branch t-1 and pushed to origin", and a person's message spoke of merging.
+- Cause: `report` in `web/features/sim/content.ts` and `demoDay` in `web/features/sim/seed.ts`. SoloDawn makes no branches or merges; an AI works in its folder and says where its result is.
+- Status: resolved. The report names the folder and the file; no branch, merge, push, origin, PR or check wording is left in `web/features/sim`.
+
+### 2026-11-27 · bug (demo) · Moving a group emptied the computers' cards for a moment, and left them stale
+
+- Symptom: after the group panel's "move" button, a computers page opened (or `host.info` read) within the next 2.5 s showed the moved group's AIs as "Not in any group yet" and "0 open" on every computer.
+- Cause: `Events.move` (`web/features/sim/events.ts`) took the group out of the old computer at once and put it into the new one 2.5 s later. In between no computer held it, so `Host.#members` (`web/features/sim/host.ts:35`), which goes over `world.groups()`, found none of its AIs and `host.info` listed none.
+- Status: resolved. The exported group stays on its old computer until the import (`World.arrive`, `web/features/sim/world.ts`); `SimNode.listed` does not list it meanwhile, and the old computer already answers `moved`. A world saved in between is imported when it is read back (`World.restore`). `keeps the AIs on their computers while a group moves` fails on the old code.
+
+### 2026-11-27 · bug · The Computers page listed a group that moved as the home of the computer it left
+
+- Symptom: after a group moved (the client follows `moved`), the old computer's card still read it under "Hosts" until the next connection, and the new computer's card listed it too.
+- Cause: `hostedGroups` (`web/src/routes/Nodes.svelte:29`) took every `host.info.homes` entry of the computer as its own home. `host.info` is read on connect and pushed for `watchers` only (the limitation of 2026-11-21), and `nodes.infos` takes no push, so what it holds is as old as the last read; the browser knew by then that the group lives elsewhere. Now an entry is skipped when this browser holds the group on another computer. `web/src/routes/nodes.test.ts` fails on the old code.
+- Status: resolved. What `host.info` shows of the AIs (`agents[].groups`) does not change with a move: an AI stays on its computer.
+
+### 2026-11-27 · bug (demo) · A task given to another AI had it ask an answered question again
+
+- Symptom: after a task was paused with its decision card answered and given to another AI, the new AI put the same decision again.
+- Cause: `Ops.#handOver` (`web/features/sim/ops.ts`) dropped every mark of the task's script but its name, among them `ask`, so the next stage of the work asked again. The real client only draws the cards the node writes. Now `Tasks.restart` (`web/features/sim/tasks.ts`) keeps `ask` when a card of the task holds the question, answered or pending; a reassigned approval is asked again. `does not ask a question again that was answered when a task goes to another AI` fails on the old code.
+- Status: resolved.
+
+### 2026-11-27 · bug · A member that left showed "?" as its picture beside its name
+
+- Symptom: the old messages of a removed member showed a "?" picture next to the name that was kept.
+- Cause: `Message.svelte`, `Thread.svelte`, `TaskCard.svelte`, `BriefCard.svelte` and `ApprovalCard.svelte` gave `Avatar` the name of the member row, which is gone, and `?` when there is none, while the name beside it came from `Group.nameOf` (`web/src/lib/groups.svelte.ts:142`), which keeps the name a member left with.
+- Status: resolved. The picture takes `nameOf` too. `web/src/components/chat/message.test.ts` fails on the old code.
+
+### 2026-11-27 · note · The "waiting for you" chip jumped every time it was tried
+
+- Symptom: one click on the chip at the top of a group was reported not to reach its card.
+- Cause: not found. About 14 clicks (scrolling the main line away first, with the wheel and by script, and twice quickly) all ended with the card in view and its first control focused. A smooth scroll from the top of a long line starts about a second after the click and takes two more, so a look within 1.5 s sees the card still on its way (`jumpToMessage`, `web/src/lib/jump.ts`).
+- Status: no change.
+
+### 2026-11-27 · note · Adding a person to an existing group without a link is in the invitation dialog only
+
+- Symptom: the walk through the demo found only the invitation link.
+- Cause: `InvitationDialog.svelte` lists "people in your other groups on this computer" (`knownPeople`, `web/src/lib/members.ts:374`) with an Add button (`member add_person`), but only people of other groups homed on the group's own computer who are not in the group yet. The demo has none for "官网改版" (the only other group, "产品讨论", is on the office computer, and has Mina, who is in the site group already), so the section does not show. The members panel itself has no picker; the plan's picker is the create dialog's people list and this section.
+- Status: as designed; nothing built.
+
+### 2026-11-27 · deviation · The invitation dialog of the demo's website group offered nobody to add
+
+- Symptom: the section "你在这台电脑上其他群里的人" did not show in "官网改版", so adding a person without a link could not be tried in `?demo`.
+- Cause: `knownPeople` (`web/src/lib/members.ts:374`) lists the people of the other groups homed on the same computer, and the demo had none: its only other group, "产品讨论", is homed on the office computer and holds Mina, who is in the website group already.
+- Status: resolved in the demo world only. `blog` (`web/features/sim/seed.ts`) is a third group, "博客", homed on the MacBook with Alex and Nora; the dialog lists Nora, and adding her makes her a member who says hello (`People.added`). `adds Nora, who is in the blog group on the same computer, without an invitation` in `web/features/sim/sim.test.ts` covers it.
+
+### 2026-11-27 · bug (demo) · The closing step asked only the AI of the last task, in the main line
+
+- Symptom: after a batch the secretary asked "the responsible AIs" in the main line and only the assignee of the last finished task answered; the AIs of the other folders were never asked, and a task with no brief got no closing step.
+- Cause: `Tasks.#summary` (`web/features/sim/tasks.ts:329-332` before the fix) posted `allDone` once per brief, mentioning `t.assignee` of the task that ended last. `planning/flows/task.md` step 17 has the secretary ask the assignee in the task's thread after each task's summary.
+- Status: resolved. `Tasks.#close` asks each task's assignee in that task's thread, whether or not it has a brief, and the assignee answers there from "my folder"; `allDone` is a plain notice. `sim.test.ts` checks the request and the answer per task.
+
+### 2026-11-27 · bug · The "waiting for you" label was not a link
+
+- Symptom: people click the bold label with the dot; nothing happened.
+- Cause: `WaitingBar.svelte:15-18` drew it as a `<b>` with no link; only the chips after it jumped.
+- Status: resolved. The label is a link to the first waiting card (`a.lead`, same look); `web/src/components/approval/waiting.test.ts` fails on the old code.
+
+### 2026-11-27 · bug (demo) · The takeover terminal of an AI failed after its group moved
+
+- Symptom: after a move, opening the terminal of an AI that stayed on the old computer answered "moved".
+- Cause: `SimNode.#route` (`web/features/sim/node.ts:122-123` before the fix) answered `moved` to every request with the group's id, host commands such as `takeover.start` too. The real node gives host commands to the host (`internal/node/session.go:581-590`), and only the home's `Cmd` answers `moved`.
+- Status: resolved. A command with `to` is a host command and skips the check (`SimNode.#movedTo`); `still starts a takeover on an AI of the computer after its group moved` fails on the old code.
+
+### 2026-11-27 · bug (demo) · The brief's title was empty when the request ran on straight after "@秘书"
+
+- Symptom: "@秘书首页加一个…" gave the chip "确认开工 · " with no title; "@秘书怎么…" was not taken as a question.
+- Cause: the demo's secretary, not the client. `titleOf` (`web/features/sim/content.ts`), the goal and `isQuestion` (`web/features/sim/talk.ts`) cut `@\S+`, which takes the whole run of characters up to the next space, a sentence in Chinese. The client reads `@秘书` as a mention when a non-word character follows (`named`, `web/src/lib/compose.ts:39-46`), and the brief's title is written by the secretary AI, so the real product has no code that makes it.
+- Status: resolved. `Talk.#request` cuts the names of the group's members. `sim.test.ts` fails on the old code.

@@ -1,7 +1,8 @@
-// The computers of the demo world and, unless it starts empty for onboarding, its two groups with
+// The computers of the demo world and, unless it starts empty for onboarding, its three groups with
 // a short history: a group with a secretary and three working AIs, each in its folder on its
 // computer, where one task was done yesterday, and a group of people only that the person shares
-// with Mina.
+// with Mina; and a blog group of the person and Nora, homed with the website group, so that Nora
+// can be added to it without an invitation.
 import { agents, words } from './content';
 import { devices, ids, users } from './ids';
 import { memory } from './memory';
@@ -102,6 +103,7 @@ export function seed(world: World, now = Date.now()) {
   mac.paired = office.paired = true;
   site(world, now);
   talk(world, now);
+  blog(world, now);
 }
 
 const at = (now: number, ago: number) => ({ ts: now - ago });
@@ -191,7 +193,7 @@ function done(world: World, day: number, brief: string) {
     g,
     msg('progress', { ...thread(ids.claude, 6), text: '开始做，先看一下价格表的样式。' }),
   );
-  const report = msg('report', { ...thread(ids.claude, 21), text: words.report(1) });
+  const report = msg('report', { ...thread(ids.claude, 21), text: words.report });
   world.write(g, report);
   const review = {
     task: id,
@@ -284,9 +286,23 @@ function talk(world: World, now: number) {
   world.write(g, group({ g, name: '产品讨论', home: devices.office, created: now - 72 * hour }));
   world.write(g, person(g, ids.me, world.me, 'Alex', 'owner'));
   world.write(g, person(g, ids.minaTalk, users.mina, 'Mina', 'admin'));
-  const demoDay = '下周三要给客户演示新官网，在那之前大家别合并大改动。';
+  const demoDay = '下周三要给客户演示新官网，在那之前大家别动大的结构。';
   world.write(g, msg('text', { g, by: ids.minaTalk, text: demoDay, ...at(now, 26 * hour) }));
   const news = '「官网改版」T-1 已完成：价格表在手机上不再溢出。';
   world.write(g, msg('text', { g, by: ids.me, text: news, ...at(now, 23 * hour) }));
   world.write(g, msg('text', { g, by: ids.me, text: '收到，我会盯着。', ...at(now, 22 * hour) }));
+}
+
+/** A group of the person and Nora, homed on the MacBook as the website group is: Nora is in it, so
+ *  the invitation dialog of the website group offers to add her without a link. */
+function blog(world: World, now: number) {
+  const g = ids.blog;
+  const home = world.node(devices.macbook)!;
+  home.groups.set(g, { name: '博客', seq: 0, rows: new Map() });
+  world.write(g, group({ g, name: '博客', home: devices.macbook, created: now - 96 * hour }));
+  world.write(g, person(g, ids.me, world.me, 'Alex', 'owner'));
+  world.write(g, person(g, ids.noraBlog, users.nora, 'Nora', 'member'));
+  const draft = '新一篇《静态生成的取舍》我写完初稿了，放在 posts/static-sites.md。';
+  world.write(g, msg('text', { g, by: ids.noraBlog, text: draft, ...at(now, 30 * hour) }));
+  world.write(g, msg('text', { g, by: ids.me, text: '好，我今晚看。', ...at(now, 29 * hour) }));
 }
