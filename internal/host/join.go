@@ -32,6 +32,7 @@ type joinStart struct {
 type joinConfig struct {
 	account   string
 	approvers []string
+	defaults  map[string]proto.Profile
 }
 
 const joinConfigQuerySQL = `SELECT
@@ -247,13 +248,19 @@ func joinValidJoin(p proto.HostJoin) bool {
 }
 
 func joinValidExternal(p proto.HostJoin) bool {
-	return p.Agent == externalAgent && !p.Secretary && slices.Contains(externalAccounts, p.Account)
+	return p.Agent == externalAgent && !p.Secretary && !bool(p.Follow) && slices.Contains(externalAccounts, p.Account)
 }
 
 func joinLoadConfig(h *Host, p proto.HostJoin) (joinConfig, error) {
 	var account, listJSON string
+	var defaults map[string]proto.Profile
 	read := func(tx *store.Tx) error {
-		return tx.QueryRow(joinConfigQuerySQL, p.Agent).Scan(&account, &listJSON)
+		if err := tx.QueryRow(joinConfigQuerySQL, p.Agent).Scan(&account, &listJSON); err != nil {
+			return err
+		}
+		var err error
+		defaults, err = readDefaultsTx(tx)
+		return err
 	}
 	if err := h.Store.Write(read); err != nil {
 		return joinConfig{}, err
@@ -268,7 +275,7 @@ func joinLoadConfig(h *Host, p proto.HostJoin) (joinConfig, error) {
 	if err := json.Unmarshal([]byte(listJSON), &approvers); err != nil {
 		return joinConfig{}, err
 	}
-	return joinConfig{account: account, approvers: approvers}, nil
+	return joinConfig{account: account, approvers: approvers, defaults: defaults}, nil
 }
 
 func joinExecuteJoin(ctx context.Context, h *Host, jp *joinPart, p proto.HostJoin, cfg joinConfig, by string) error {
@@ -407,10 +414,18 @@ func joinSendAddAI(ctx context.Context, h *Host, p proto.HostJoin, cfg joinConfi
 		Account:    cfg.account,
 		Secretary:  p.Secretary,
 		Approvers:  cfg.approvers,
-		ProfileSet: p.ProfileSet,
+		ProfileSet: joinProfile(p, cfg.defaults),
+		Follow:     p.Follow,
 	}
 	_, err := h.Command(ctx, p.Home, marshalWire(cmd))
 	return memberID, err
+}
+
+func joinProfile(p proto.HostJoin, defaults map[string]proto.Profile) proto.ProfileSet {
+	if p.Follow {
+		return profileSetFrom(defaultProfileOf(defaults, p.Agent))
+	}
+	return p.ProfileSet
 }
 
 func joinCommitJoined(h *Host, p proto.HostJoin, member, groupName, by string) error {

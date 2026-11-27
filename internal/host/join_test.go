@@ -1432,3 +1432,92 @@ func waitGroupSyncWaiters(t *testing.T, d *delivery, group string, want int) {
 		return ""
 	})
 }
+
+func TestHostJoinFollowDefaultsAndRefusals(t *testing.T) {
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	rig.setAgent("codex", "0.164.0", joinStr("team"))
+	fh := rig.addHome("home-1")
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
+	fh.putGroup(makeGroupRow(joinTestGroup2, "home-1", "Backend"))
+	fh.putGroup(makeGroupRow(joinTestGroup3, "home-1", "Docs"))
+
+	// Set claude defaults, leave codex defaults unset.
+	_, err := Surface["agent.defaults"](t.Context(), rig.h, nil, joinTestByDev, defPayload(t, "claude", "opus", "high", "strong", "Go backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Follow=true ignores host.join's four profile fields and sends agent defaults + follow:true.
+	var addPayloads []string
+	origCmdFn := fh.cmdFn
+	fh.cmdFn = func(env proto.Envelope) (json.RawMessage, error) {
+		addPayloads = append(addPayloads, env.Payload)
+		return json.RawMessage(marshalWire(proto.CmdResult{Success: proto.Success{Re: 7, OK: true}})), fh.recordMemberCmd(env.Payload)
+	}
+	rig.mustJoin(proto.HostJoin{
+		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude Follow",
+		Workspace: rig.folder("g1-claude"),
+		ProfileSet: proto.ProfileSet{
+			Model: joinStr("haiku"), Effort: joinStr("low"), Tier: joinStr("light"), Skills: joinStr("ignored"),
+		},
+		Follow: true,
+	})
+	joinAssertEqual(t, "add_ai[0] follow", bool(fh.addAIs[0].Follow), true)
+	joinAssertEqual(t, "add_ai[0] model", *fh.addAIs[0].Model, "opus")
+	joinAssertEqual(t, "add_ai[0] effort", *fh.addAIs[0].Effort, "high")
+	joinAssertEqual(t, "add_ai[0] tier", *fh.addAIs[0].Tier, "strong")
+	joinAssertEqual(t, "add_ai[0] skills", *fh.addAIs[0].Skills, "Go backend")
+
+	// Unset agent defaults with follow=true sends all four empty/standard fields + follow:true.
+	rig.mustJoin(proto.HostJoin{
+		Group: joinTestGroup2, Home: "home-1", Agent: "codex", Name: "Codex Unset",
+		Workspace: rig.folder("g2-codex"),
+		Follow:    true,
+	})
+	joinAssertEqual(t, "add_ai[1] follow", bool(fh.addAIs[1].Follow), true)
+	joinAssertEqual(t, "add_ai[1] model", *fh.addAIs[1].Model, "")
+	joinAssertEqual(t, "add_ai[1] effort", *fh.addAIs[1].Effort, "")
+	joinAssertEqual(t, "add_ai[1] tier", *fh.addAIs[1].Tier, "standard")
+	joinAssertEqual(t, "add_ai[1] skills", *fh.addAIs[1].Skills, "")
+	for _, wantKey := range []string{`"follow":true`, `"model":""`, `"effort":""`, `"tier":"standard"`, `"skills":""`} {
+		if !strings.Contains(addPayloads[1], wantKey) {
+			t.Fatalf("unset follow add_ai missing %s: %s", wantKey, addPayloads[1])
+		}
+	}
+
+	// Without follow, host.join forwards ProfileSet unchanged and omits follow.
+	rig.mustJoin(proto.HostJoin{
+		Group: joinTestGroup3, Home: "home-1", Agent: "claude", Name: "Claude Own",
+		Workspace:  rig.folder("g3-claude"),
+		ProfileSet: proto.ProfileSet{Model: joinStr("haiku"), Tier: joinStr("light")},
+	})
+	joinAssertEqual(t, "add_ai[2] follow", bool(fh.addAIs[2].Follow), false)
+	joinAssertEqual(t, "add_ai[2] model", *fh.addAIs[2].Model, "haiku")
+	joinAssertEqual(t, "add_ai[2] tier", *fh.addAIs[2].Tier, "light")
+	if strings.Contains(addPayloads[2], `"follow"`) {
+		t.Fatalf("non-follow add_ai unexpectedly includes follow: %s", addPayloads[2])
+	}
+	fh.cmdFn = origCmdFn
+	assertJoinFollowRefusals(t, rig)
+}
+
+func assertJoinFollowRefusals(t *testing.T, rig *joinRig) {
+	t.Helper()
+	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{
+		Group: joinTestGroup1, Home: "home-1", Agent: externalAgent, Name: "Ext", Account: "team",
+		Workspace: rig.folder("g1-ext"), Follow: true,
+	}), "bad_request")
+	for _, rawFollow := range []string{`false`, `null`} {
+		p := fmt.Sprintf(`{"t":"host.join","n":%q,"ts":%d,"to":%q,"g":%q,"home":"home-1","agent":"claude","name":"Bad","secretary":false,"workspace":%q,"follow":%s}`,
+			joinTestNonce1, seamStart, rig.h.Key.ID(), joinTestGroup1, rig.folder("g1-bad-"+rawFollow), rawFollow)
+		_, err := Surface["host.join"](t.Context(), rig.h, nil, joinTestByDev, json.RawMessage(p))
+		seamCode(t, err, "bad_request")
+	}
+	joinExecSQL(t, rig.db, `INSERT OR REPLACE INTO setting(key, value) VALUES('defaults', '{')`)
+	if err := rig.callJoin(t.Context(), proto.HostJoin{
+		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Corrupt", Workspace: rig.folder("g1-corrupt"),
+	}); err == nil {
+		t.Fatal("expected error for corrupt defaults JSON in joinLoadConfig")
+	}
+}

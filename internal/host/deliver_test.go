@@ -1795,3 +1795,66 @@ func TestSessionsEndWithTheirTaskRoleAndMember(t *testing.T) {
 	r2.h.Attach(r2.homeKey.ID(), r2.home)
 	r2.waitUntil("the orphan session ended after the restart", func() bool { return !hasSession(r2.h, kT5) })
 }
+
+func TestAfterGroupStateFollowsDefaultsOnlyWhenLive(t *testing.T) {
+	r := newDeliverRig(t, false)
+	r.seedGroupAndMembers()
+	r.setSetting("defaults", map[string]proto.Profile{
+		"claude": {Model: "opus", Effort: "high", Tier: "strong", Skills: "Go backend"},
+	})
+	stale := proto.AIMemberRow{
+		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 10}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "Claude"},
+		CLI:       "claude", Host: r.hostKey.ID(), HostName: "node", Workspace: r.folder,
+		Account: "personal", Allow: []string{r.ownerKey.ID()}, Approvers: []string{}, State: "waiting", Path: "local",
+		Profile: proto.Profile{Model: "haiku", Effort: "", Tier: "light", Skills: ""},
+		Follow:  true,
+	}
+
+	// While group sync is active, afterGroupState sends no member set.
+	d := deliv(r.h)
+	d.mu.Lock()
+	d.groupLocked(testGroup1, r.homeKey.ID()).live = false
+	d.mu.Unlock()
+	r.h.Rows.Put(testGroup1, "member", testAI1, json.RawMessage(marshalWire(stale)))
+	afterGroupState(r.h, d, testGroup1)
+	tskEqual(t, len(memberSetPayloads(r.home.cmdPayloads())), 0)
+	d.mu.Lock()
+	d.groupLocked(testGroup1, r.homeKey.ID()).live = true
+	d.mu.Unlock()
+
+	// Once live, pushing a stale following row triggers member set via afterGroupState.
+	stale.Seq = 11
+	frame := proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{json.RawMessage(marshalWire(stale))}}
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(frame)))
+	settleDelivery(r.h)
+	payloads := memberSetPayloads(r.home.cmdPayloads())
+	tskEqual(t, len(payloads), 1)
+	var cmd proto.MemberSet
+	tskNoErr(t, proto.Decode([]byte(payloads[0]), &cmd))
+	tskEqual(t, cmd.Op, "set")
+	tskEqual(t, cmd.ID, proto.ID(testAI1))
+	tskEqual(t, bool(cmd.Follow), true)
+	tskEqual(t, *cmd.Model, "opus")
+
+	// When home pushes back the matching row, no duplicate member set is sent.
+	stale.Seq = 12
+	stale.Profile = proto.Profile{Model: "opus", Effort: "high", Tier: "strong", Skills: "Go backend"}
+	matched := proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{json.RawMessage(marshalWire(stale))}}
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(matched)))
+	settleDelivery(r.h)
+	tskEqual(t, len(memberSetPayloads(r.home.cmdPayloads())), 1)
+}
+
+func memberSetPayloads(all []string) []string {
+	var out []string
+	for _, p := range all {
+		var hdr struct {
+			Type string `json:"t"`
+			Op   string `json:"op"`
+		}
+		if json.Unmarshal([]byte(p), &hdr) == nil && hdr.Type == "member" && hdr.Op == "set" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
