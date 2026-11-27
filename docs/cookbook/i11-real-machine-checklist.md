@@ -88,7 +88,7 @@ Run on a clean user account on macOS, Linux and Windows. `P1` is already done by
 
 ### 6. A task from brief to done, with a review (`A5.1`, `A5.4`, `A5.21`)
 
-Use two AIs in `Alpha` that are in different folders (`F1` on `P1`, `F2` on `P2`), and each reviews the other's task.
+Use the two working AIs in `Alpha`, never the secretary: the second AI on `P1`, added in step 5 item 3, which works in `F1`, and the AI on `P2`, which works in `F2`. Each reviews the other's task.
 
 - **Do:**
   1. In the main line of `Alpha`, ask the secretary for two small tasks: one creates `hello-a.txt` with one line in it, the other creates `hello-b.txt`, one for each AI, each reviewed by the other.
@@ -102,10 +102,10 @@ Use two AIs in `Alpha` that are in different folders (`F1` on `P1`, `F2` on `P2`
 ### 7. A second task waits for its folder (`A5.20`, `A5.24`)
 
 - **Do:**
-  1. Ask the secretary for two tasks for the same AI, the one in `F1`, so that the second cannot start until the first is done.
-  2. Look at the second task's card while the first works. Do the same for the AI you added to `F1` in step 5, which shares the folder.
+  1. Ask the secretary for two tasks for the same working AI, the one you added to `F1` in step 5, so that the second cannot start until the first is done.
+  2. Look at the second task's card while the first works. Ask for a task for the AI in `F2` as well.
   3. Let the first task finish and be reviewed.
-- **See:** the second task shows **Queued** and says it **waits for its folder, which T-n is using**; no AI starts it. When the first task is done the second starts by itself, in the same folder; with three tasks (ask for three to see it) only one is released at a time. For the AI that shares the folder, a task of its own waits in the same way. A task for an AI in another folder starts at once.
+- **See:** the second task shows **Queued** and says it **waits for its folder, which T-n is using**; no AI starts it. When the first task is done the second starts by itself, in the same folder; with three tasks (ask for three to see it) only one is released at a time. The task for the AI in `F2` starts at once.
 - **Write:** `A5.20`; for `A5.24` write whether the second task's first turn started before the first AI had ended its turn (it must not).
 
 ### 8. Pause and reassign: who did it (`A5.23`)
@@ -229,7 +229,7 @@ Use real `claude` and `codex` members. `O` is the owner's browser; `W` is a team
 
 1. **Repository hooks (`A3.8`, `A10.4`).** In a test Git project (`F2` will do) add a hook that writes a marker file. Run one group mention, one task turn and one review turn on each real CLI. The hook must fire in task and review sessions and not in group sessions (Claude `--setting-sources`, Codex `project_doc_max_bytes = 0`). For Qwen Code record four results: group and task session, each with the hook unapproved and approved (approve it by starting `qwen` once in the folder), and whether `QWEN.md` was read; then decide the `@pending` scenario of `features/s3_drivers.feature` ([issues.md](../../issues.md), "A Qwen Code group session may load the repository's configuration"). **Write:** `A3.8`, `A10.4` per CLI.
 2. **Questions (`A4.1`, `A4.11`).** Claude Code: ask it for a multiple-choice question (`AskUserQuestion`); a `decision` card must reach the browser and the answer must reach the CLI. Codex with `-c features.default_mode_request_user_input=true`: see whether it sends `item/tool/requestUserInput`; if the installed release has no such tool, see that it asks through `request_decision` ([drivers.md](../../planning/contracts/drivers.md) 1.2). **Write:** `A4.1`, `A4.11` with CLI versions.
-3. **Review across computers (`A5.21`).** Make the folder of the reviewer on `P1` a clone of the same scratch repository as `F2` on `P2`. Give a task to the AI in `F2`, reviewed by the AI on `P1`. **See:** the project has no rules for publishing, so the assignee commits and pushes to a branch of its own, not to `main`, before the review; its report names the branch and commit; the reviewer on the other computer fetches that branch and reads it without changing what its own folder holds, and the review passes. SoloDawn merges nothing: after the pass the secretary asks the assignee, or a person, for the closing step (the merge). Then repeat with two plain folders and no shared remote: the reviewer says it cannot see the work and asks the assignee, and does not score what it has not read (the known limit, [issues.md](../../issues.md)). **Write:** `A5.21` for both cases.
+3. **Review across computers (`A5.21`).** In `Alpha`, press **Add AI** for another AI on `P1`, with a new folder `F4` that is a clone of the same scratch repository as `F2` on `P2`. Give a task to the AI in `F2`, reviewed by this new AI. **See:** the project has no rules for publishing, so the assignee commits and pushes to a branch of its own, not to `main`, before the review; its report names the branch and commit; the reviewer on the other computer fetches that branch and reads it without changing what its own folder holds, and the review passes. SoloDawn merges nothing: after the pass the secretary asks the assignee, or a person, for the closing step (the merge). Then repeat with two plain folders and no shared remote: the reviewer says it cannot see the work and asks the assignee, and does not score what it has not read (the known limit, [issues.md](../../issues.md)). **Write:** `A5.21` for both cases.
 4. **Rendezvous and footprint (`A1.4`, `A8.6`).** With a direct connection open and answering `host.info`, stop the rendezvous on the server (`sudo systemctl stop solodawn-rendezvous`), wait 10 minutes, read `host.info` again, and start it again (`A1.4`). Record for `A8.6`: CLI versions, node binary size (target 30 MB or less), node idle memory (40 MB or less) and peak memory per open session of each CLI, with the machine named. **Write:** `A1.4`, `A8.6`.
 
 ### 18. External AI: setup prompt and scheduled jobs (`A10.28`, [external.md](../../planning/contracts/step-3/external.md))
@@ -288,7 +288,7 @@ Cast: `P` owns `P1` (the group's home) and `P2`; `Q` owns `Q1` and has two AIs o
 
 1. Every id above has a line in the report.
 2. `logs/node.log` of every node has no unexplained error line.
-3. Remove what you made: cron, launchd and scheduler jobs, scratch repositories, test hooks and the folders `F1` to `F3` (scratch groups stay: version 1 cannot delete a group).
+3. Remove what you made: cron, launchd and scheduler jobs, scratch repositories, test hooks and the folders `F1` to `F4` (scratch groups stay: version 1 cannot delete a group).
 
 ## Failure reports
 
