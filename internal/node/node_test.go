@@ -1461,3 +1461,67 @@ func waitPTYBytes(t *testing.T, recvCh <-chan []byte, sub string) {
 		}
 	}
 }
+
+// The running node hosts the room of an open code on its own handler and on
+// each rendezvous: when the code is made, when a rendezvous connects, when
+// that connection is made again and when the node starts (A9.49).
+func TestNodeHostsItsCodes(t *testing.T) {
+	dir := socketRoot(t)
+	n, err := openNode(t.Context(), dir)
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	admin, group := adoptTestBrowser(t, n), sesID("node-code-group")
+	owner := startAdoptedConn(t, n, admin.ID())
+	ph := &pairHarness{pairer: n.pairer, nodeKey: n.key, clock: newPairClock(time.Now())}
+	create := proto.GroupCreate{
+		GroupCommand: proto.GroupCommand{HomeCommand: inviteCommand(ph, "group", group, ""), Op: "create"},
+		Name:         "Group", MemberName: "Admin",
+	}
+	create.Nonce = group
+	sendInviteCmd(owner, admin, 7, create)
+	mustEqual(t, bool(inviteJoinResult(t, owner).OK), true)
+	hours := 24
+	sendInviteCmd(owner, admin, 8, proto.Code{HomeCommand: inviteCommand(ph, "code", group, "node-code-new"), Op: "new", Hours: &hours})
+	secret, err := identity.ParseSecret(inviteJoinResult(t, owner).Code)
+	mustNoErr(t, err)
+	local := func(n *nodeRuntime) string { return "ws://127.0.0.1:" + strconv.Itoa(n.httpPort) + "/rv" }
+	waitHosted(t, local(n), secret, n.key.ID())
+
+	rv := startRV(t)
+	mustNoErr(t, n.saveRendezvous([]string{rv}))
+	n.syncRendezvous()
+	waitHosted(t, rv, secret, n.key.ID())
+	first := n.remoteRVPaths()[0]
+	first.Close()
+	waitCond(t, func() bool {
+		paths := n.remoteRVPaths()
+		return len(paths) == 1 && paths[0] != first
+	})
+	waitHosted(t, rv, secret, n.key.ID())
+
+	// A person who types the code there is let in by the running node.
+	guest := sesKey("node-code-guest")
+	path, err := peer.Dial(t.Context(), rv, guest)
+	mustNoErr(t, err)
+	t.Cleanup(func() { path.Close() })
+	typeInRoom(t, path, guest, secret)
+	waitCond(t, func() bool { return n.knownPeer(guest.ID()) })
+	ctl := newFakeCtl()
+	n.spawn("test", func() { n.pairer.Serve(n.ctx, guest.ID(), ctl) })
+	mustEqual(t, codeHello(t, ctl).Join, string(group))
+	ctl.push(proto.Devlog{Type: "devlog", User: guest.ID(), Entries: []proto.Envelope{sesAddEntry(guest, guest.ID(), 1, guest.ID(), "browser", "Guest")}})
+	sendInviteCmd(ctl, guest, 2, proto.Join{HomeCommand: inviteCommand(ph, "join", group, "node-code-join"), Name: "Guest"})
+	mustEqual(t, inviteJoinResult(t, ctl), proto.CmdResult{Success: proto.Success{Re: 2, OK: true}})
+
+	n.Close()
+	n, err = openNode(t.Context(), dir)
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	waitHosted(t, local(n), secret, n.key.ID())
+	waitHosted(t, rv, secret, n.key.ID())
+	owner = startAdoptedConn(t, n, admin.ID())
+	sendInviteCmd(owner, admin, 9, proto.Code{HomeCommand: inviteCommand(ph, "code", group, "node-code-off"), Op: "off"})
+	mustEqual(t, bool(inviteJoinResult(t, owner).OK), true)
+	waitHosted(t, local(n), secret, "")
+	waitHosted(t, rv, secret, "")
+}

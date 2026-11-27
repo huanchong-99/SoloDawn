@@ -54,17 +54,23 @@ type (
 		Now          func() time.Time
 		After        func(time.Duration) <-chan time.Time
 	}
-	// Pairer runs pairing rooms in both roles and serves pair.browser.
-	// Lock order: mu is a leaf lock guarding attempts and links; it is never held
-	// across Store.Write, Logs, Sessions, Peer or WebSocket calls.
+	// Pairer runs pairing rooms in both roles, serves pair.browser and hosts
+	// the rooms of the open invitation codes.
+	// Lock order: mu is a leaf lock guarding attempts, links, codes and
+	// codePeers; it is never held across Store.Write, Logs, Sessions, Peer or
+	// WebSocket calls. codeMu is taken before Store.Write and before mu, and
+	// held while the frames about the rooms of codes are written.
 	Pairer struct {
 		// Peer handles WebRTC signalling on paths dialled by Pairer; N-4 sets
 		// it after peer.New when Peer's callbacks reference this Pairer.
-		Peer     *peer.Peer
-		cfg      PairConfig
-		mu       sync.Mutex
-		attempts map[*pairAttempt]bool
-		links    map[string]*pairAttempt
+		Peer      *peer.Peer
+		cfg       PairConfig
+		mu        sync.Mutex
+		attempts  map[*pairAttempt]bool
+		links     map[string]*pairAttempt
+		codeMu    sync.Mutex
+		codes     map[string]*code     // the open codes, by group
+		codePeers map[string]*codePeer // the joining peers of codes, by device
 	}
 	pairAttempt struct {
 		role, wantRole, room, label, saveName, pathUsed string
@@ -104,7 +110,10 @@ func newPairer(cfg PairConfig) *Pairer {
 	if cfg.After == nil {
 		cfg.After = time.After
 	}
-	return &Pairer{cfg: cfg, attempts: map[*pairAttempt]bool{}, links: map[string]*pairAttempt{}}
+	return &Pairer{
+		cfg: cfg, attempts: map[*pairAttempt]bool{}, links: map[string]*pairAttempt{},
+		codes: map[string]*code{}, codePeers: map[string]*codePeer{},
+	}
 }
 
 func (p *Pairer) bind(s *Sessions) {
@@ -124,7 +133,8 @@ func (p *Pairer) Close() {
 	}
 }
 
-// Known reports whether device completed a room exchange on an active attempt.
+// Known reports whether device completed a room exchange on an active
+// attempt or under an open code.
 func (p *Pairer) Known(device string) bool { return len(p.Routes(device)) > 0 }
 
 // Routes returns the active signalling routes for a pairing peer, or nil.
@@ -135,18 +145,24 @@ func (p *Pairer) Routes(device string) []peer.Route {
 	if a := p.findPeerLocked(device, now); a != nil {
 		return slices.Clone(a.routes)
 	}
+	if rec := p.codePeers[device]; rec != nil {
+		return []peer.Route{rec.route}
+	}
 	return nil
 }
 
 // Serve runs a ctl session on Sessions, marking it paired when device matches
-// an active room exchange.
+// an active room exchange, and joining when the exchange was for an
+// invitation or under a code.
 func (p *Pairer) Serve(ctx context.Context, device string, raw Ctl) {
-	a := p.attachAttempt(device, raw)
+	a, rec := p.attach(device, raw)
 	switch {
+	case rec != nil:
+		p.serveJoining(ctx, p.codeVia(rec), device, raw)
 	case a == nil:
 		p.cfg.Sessions.Serve(ctx, device, false, raw)
 	case a.invitation.group != "":
-		p.serveJoining(ctx, a, device, raw)
+		p.serveJoining(ctx, p.inviteVia(a), device, raw)
 	default:
 		c := &sesConn{device: device, label: a.label, paired: true, raw: raw, staging: map[string]*identity.Log{}}
 		p.cfg.Sessions.serve(ctx, c, nil)
@@ -154,37 +170,41 @@ func (p *Pairer) Serve(ctx context.Context, device string, raw Ctl) {
 	}
 }
 
-func (p *Pairer) attachAttempt(device string, raw Ctl) *pairAttempt {
+// attach finds what the connection of a device belongs to, an attempt or
+// else a code, and notes the connection there.
+func (p *Pairer) attach(device string, raw Ctl) (*pairAttempt, *codePeer) {
 	now := p.cfg.Now().UnixMilli()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	a := p.findPeerLocked(device, now)
-	if a == nil {
-		return nil
-	}
-	if a.invitation.group != "" {
+	a, rec := p.findPeerLocked(device, now), p.codePeers[device]
+	switch {
+	case a == nil && rec != nil:
+		(*rec.joining)[raw] = true
+		return nil, rec
+	case a == nil:
+	case a.invitation.group != "":
 		a.joining[raw] = true
-	} else {
+	default:
 		a.conn = raw
 	}
-	return a
+	return a, nil
 }
 
 // HandleEvent processes a non-signalling rendezvous frame ("joined", "full" or
-// "room") received on path.
+// "room") received on path. A frame for the room of no attempt may be a pair
+// message under a code; a full for the room of a code ends nothing.
 func (p *Pairer) HandleEvent(ctx context.Context, path *peer.Path, kind string, data []byte) {
 	var f proto.RoomID
 	proto.Decode(data, &f)
 	a := p.findRoom(f.Room)
-	if a == nil {
-		return
-	}
-	switch kind {
-	case "joined":
+	switch {
+	case a == nil:
+		p.onCodeMsg(path, f.Room, data)
+	case kind == "joined":
 		path.Write(ctx, proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: f.Room}, Data: a.rawSelf})
-	case "full":
+	case kind == "full":
 		p.finish(a, errRoomFull)
-	case "room":
+	case kind == "room":
 		p.onPairMsg(a, data)
 	}
 }
@@ -425,12 +445,17 @@ func (p *Pairer) findRoom(room string) *pairAttempt {
 }
 
 func (p *Pairer) onPairMsg(a *pairAttempt, data []byte) {
+	if m, ok := roomPair(data); ok {
+		p.acceptPair(a, m)
+	}
+}
+
+// roomPair reads the pair message of a room frame; no other frame has one.
+func roomPair(data []byte) (proto.Pair, bool) {
 	var rd proto.RoomData
 	var m proto.Pair
-	if proto.Decode(data, &rd) != nil || proto.Decode(rd.Data, &m) != nil {
-		return
-	}
-	p.acceptPair(a, m)
+	ok := proto.Decode(data, &rd) == nil && proto.Decode(rd.Data, &m) == nil
+	return m, ok
 }
 
 func (p *Pairer) acceptPair(a *pairAttempt, m proto.Pair) {

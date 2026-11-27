@@ -25,7 +25,7 @@ the channel handlers are the caller's.
 | `candidates.go` | the candidates of one connection: held until the description is set, each applied once |
 | `ctl.go` | `Connection`: the `ctl` channel, `Read`, `Send` and `Request` with its response matching |
 | `stream.go` | `Stream`: any other data channel as a stream of bytes |
-| `path.go` | `Path`: the signalling WebSocket, `Dial`, `Serve`, frame pacing and renewal of the ICE servers |
+| `path.go` | `Path`: the signalling WebSocket, `Dial`, `Serve`, frame pacing, renewal of the ICE servers, and `Hosts` |
 | `sockets.go` | `Sockets`, `Listen`, the two WebRTC APIs, the TURN client's socket that takes its server's datagrams only, and `Connection.Path` with `PathChanged` |
 | `accept.go` | `Steady`, a listener whose accept loop ends only when it is closed |
 | `reconnect.go` | `Connect` and its back-off |
@@ -56,7 +56,9 @@ the channel handlers are the caller's.
 - **Signalling frames.** At most 16 KiB. `Path` sends at most 90 frames in any 11 seconds, under
   the server's limit of 120 in 10, and a frame over the limit waits for its turn. `Dial` returns
   nothing before the server has authenticated this device. The ICE servers are asked for again at
-  half their time to live.
+  half their time to live. `Path.Hosts` is the `hosts` of `ready` and then of each answer to `ice`,
+  which replaces what the path kept: whether the server has hosted rooms, and so whether it may be
+  sent a `join` with `data` or a `leave` ([rendezvous](../../planning/contracts/rendezvous.md) 2.1).
 - **Reconnecting.** `Connect` offers again after 1, 2, 4 ... 60 seconds, and starts from 1 second
   after a connection that stayed open for 60 seconds. A signal on `present` ends the wait at once.
   An offer is retired after 10 seconds without an answer, or at once when every path it was sent
