@@ -5,11 +5,22 @@
   import type { AIMemberRow } from '../../lib/proto';
   import { hostHomeOf } from '../../lib/terminal.svelte';
   import Failure from '../Failure.svelte';
+  import { changed } from '../changed';
   import ModelFields from '../model/ModelFields.svelte';
   import { listedModels, modelChanges } from '../model/model';
   import ProfileFields from './ProfileFields.svelte';
   import TierMark from './TierMark.svelte';
-  import { newDraft, profileChanges, tooLong, type Draft, type Tier } from './profile';
+  import {
+    memberSetting,
+    newDraft,
+    profileChanges,
+    profileSet,
+    restoreDefaults,
+    tooLong,
+    type Draft,
+    type MemberUpdate,
+    type Tier,
+  } from './profile';
 
   /** Tier and skills of an AI member card, with the suggestion, and its owner's editor of model,
    *  level, tier and skills (contracts/step-3/profiles.md section 2a). A secretary takes no tasks:
@@ -37,21 +48,16 @@
   const offline = $derived(!group.home.ctl);
   const models = $derived(listedModels(hostHomeOf(homes, ai.host), ai.cli) ?? []);
   const changes = $derived({ ...modelChanges(ai, draft), ...profileChanges(ai, draft) });
+  const setting = $derived(memberSetting(ai, mine));
   const offer = $derived(mine && suggested !== undefined && suggested !== ai.tier);
   const label = $derived(
     t('profile.suggest').replace('{tier}', t(`profile.tier.${suggested as Tier}`)),
   );
 
-  async function send(updates: Partial<Draft>) {
+  async function send(updates: MemberUpdate) {
     busy = true;
     failed = '';
-    const answer = await group.home.command({
-      t: 'member',
-      g: group.g,
-      op: 'set',
-      id: ai.id,
-      ...updates,
-    });
+    const answer = await group.home.command(profileSet(group.g, ai.id, updates));
     busy = false;
     if (answer.err) failed = answer.err.code;
     return !answer.err;
@@ -95,6 +101,28 @@
 {#snippet skillsRow()}
   <dt>{t('profile.skills')}</dt>
   <dd class="skills" class:muted={!ai.skills}>{ai.skills || t('profile.skills.none')}</dd>
+  {#if setting.shown}
+    <dt>{t('defaults.setting')}</dt>
+    <dd class="setting" class:muted={setting.follow} use:changed={ai.follow}>
+      {#if setting.follow}
+        <span class="follow-note">
+          {t('defaults.follow.card').replace('{computer}', () => ai.host_name)}
+        </span>
+      {:else}
+        <span class="badge">{t('defaults.own')}</span>
+        {#if setting.restore}
+          <button
+            type="button"
+            class="btn btn-sm btn-ghost"
+            disabled={busy || offline}
+            onclick={() => send(restoreDefaults())}
+          >
+            {t('defaults.restore')}
+          </button>
+        {/if}
+      {/if}
+    </dd>
+  {/if}
 {/snippet}
 
 {#snippet editProfile()}
@@ -118,6 +146,9 @@
       if (await send(changes)) await close();
     }}
   >
+    {#if setting.shown && setting.follow}
+      <p class="hint">{t('defaults.edit.note')}</p>
+    {/if}
     {#if ai.cli !== 'external'}
       <ModelFields bind:draft {models} disabled={busy || offline} />
     {/if}
@@ -147,6 +178,20 @@
   }
   .skills {
     overflow-wrap: anywhere;
+  }
+  .setting {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+  }
+  .setting:global([data-changed]) > * {
+    animation: -global-land var(--dur-4) var(--spring);
+  }
+  .editor .hint {
+    display: block;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
   }
   .suggest {
     display: inline-flex;

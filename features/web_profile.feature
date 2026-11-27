@@ -65,3 +65,29 @@ Feature: AI profiles and stronger-AI escalation
     Then the error is cleared and the stored skills are restored
     When the group home disconnects
     Then the editor and suggestion are disabled offline
+
+  Scenario: The card says whether the group follows, and restores the defaults
+    Given the owner's Claude Code in "Website" follows the defaults
+    Then its card says "Follows the defaults on "workstation""
+    When the owner opens the profile editor
+    Then the editor says saving gives this group its own setting
+    When the owner chooses Less and saves the profile
+    Then exactly one member set sends tier "light" and no follow
+    When the row comes back without follow
+    Then the card shows "Own setting in this group" and "Restore defaults"
+    When the owner restores the defaults
+    Then exactly one member set sends follow alone
+    And another person's card shows the setting line but no "Restore defaults"
+    And an external AI's card has no setting line
+
+  Scenario: Restoring defaults handles busy state, refusal, offline state and Chinese labels
+    Given the owner's Claude Code in "Website" has its own setting
+    Then the setting row starts without a change marker
+    When the owner restores the defaults while the home holds its answer
+    Then Restore defaults is disabled while sending
+    When the home refuses the restore
+    Then the profile error is visible and Restore defaults is enabled again
+    When the browser switches to Chinese
+    Then the setting row and follow note use the Chinese labels
+    When the group home disconnects
+    Then Restore defaults is disabled offline
