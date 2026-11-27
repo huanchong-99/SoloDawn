@@ -1,0 +1,20 @@
+{
+  "defaults.title": "Defaults",
+  "defaults.lead": "{ai} on this computer starts with these in every group. A group that changed them keeps its own.",
+  "defaults.unset": "Not set",
+  "defaults.unset.line": "Not set yet: the CLI's own model, Normal work share",
+  "defaults.set": "Set defaults",
+  "defaults.edit": "Edit",
+  "defaults.save": "Save",
+  "defaults.cancel": "Cancel",
+  "defaults.followers": "Saving also updates {n} group members that follow these",
+  "defaults.followers.none": "No group member follows these yet",
+  "defaults.follow": "Follows defaults",
+  "defaults.own": "Own setting in this group",
+  "defaults.follow.card": "Follows the defaults on \"{computer}\"",
+  "defaults.restore": "Restore defaults",
+  "defaults.edit.note": "Saving gives this group its own setting; it stops following the defaults.",
+  "defaults.switch": "Use this computer's defaults",
+  "defaults.switch.second": "The group already has a {ai}; a second one usually runs another model.",
+  "defaults.setting": "Setting"
+}

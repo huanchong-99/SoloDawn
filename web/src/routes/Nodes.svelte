@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import Avatar from '../components/Avatar.svelte';
+  import AgentDefaults from '../components/defaults/AgentDefaults.svelte';
   import Failure from '../components/Failure.svelte';
   import Icon from '../components/Icon.svelte';
   import { offeredAccounts } from '../components/driver/driver';
@@ -298,6 +299,7 @@
                 </div>
               {/if}
               {#if acctFailed[acctKey]}<Failure code={acctFailed[acctKey]} />{/if}
+              {#if agent.account !== null}<AgentDefaults {comp} {agent} />{/if}
 
               {#if agent.groups.length}
                 {#each agent.groups as entry (entry.member)}
@@ -320,6 +322,15 @@
                       <i></i>{stateLabel(state)}{#if taskRow}
                         {' '}· T-{taskRow.num}{/if}
                     </span>
+                    {#if member?.kind === 'ai'}
+                      <span class="perm-def">
+                        {#if member.follow}
+                          <span class="def-follow">{t('defaults.follow')}</span>
+                        {:else}
+                          <span class="badge">{t('defaults.own')}</span>
+                        {/if}
+                      </span>
+                    {/if}
                     <p class="path-row">
                       <Icon name="folder" sm />
                       <span class="sr">{t('nodes.ai.folder')}</span>
@@ -455,6 +466,14 @@
     flex: 1;
     min-width: 0;
   }
+  .perm-def {
+    flex-basis: 100%;
+    margin-top: calc(2px - var(--sp-2));
+  }
+  .def-follow {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
   /* The folder of the membership above it: a quiet line right under it, no fill. */
   .perm .path-row {
     flex-basis: 100%;
@@ -479,7 +498,12 @@
       align-items: flex-start;
       gap: 4px;
     }
+    .perm-def {
+      flex-basis: auto;
+      margin-top: 0;
+    }
     .perm .path-row {
+      flex-basis: auto;
       margin-top: -2px;
     }
   }
