@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import type { Group } from '../../lib/groups.svelte';
   import type { Candidate, Draft } from '../../lib/members';
+  import { defaultsOf, unsetProfile } from '../defaults/defaults';
   import ModelFields from './ModelFields.svelte';
   import { listedModels } from './model';
 
@@ -13,8 +15,11 @@
   const models = $derived(candidate && (listedModels(candidate.home, candidate.agent) ?? []));
 
   $effect.pre(() => {
-    void candidate?.key;
-    Object.assign(draft, { model: '', effort: '', tier: 'standard' });
+    const current = candidate;
+    void current?.key;
+    const defaults = current ? untrack(() => defaultsOf(current.home, current.agent)) : undefined;
+    const { model, effort, tier } = defaults ?? unsetProfile;
+    Object.assign(draft, { model, effort, tier });
   });
 </script>
 

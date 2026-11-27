@@ -110,8 +110,12 @@ describe('AI profiles with fake CLIs', () => {
     await pairAndCreateGroup(page, surface, net.nodes[0]);
     await page.locator('.members').getByRole('button', { name: 'Add AI', exact: true }).click();
     const dialog = page.locator('dialog.dlg[open]');
+    const followSwitch = dialog.getByRole('switch', { name: "Use this computer's defaults" });
     await poll(() => dialog.locator('.choice').count()).toBe(5);
     await dialog.locator('.choice', { hasText: 'Codex · studio' }).locator('input').check();
+    await poll(() => followSwitch.getAttribute('aria-checked')).toBe('true');
+    await followSwitch.click();
+    await poll(() => followSwitch.getAttribute('aria-checked')).toBe('false');
     await poll(() =>
       dialog
         .getByRole('combobox', { name: 'Model', exact: true })
@@ -130,6 +134,8 @@ describe('AI profiles with fake CLIs', () => {
     await dialog.getByRole('combobox', { name: 'Model', exact: true }).selectOption('gpt-6-luna');
     await poll(() => dialog.locator('input[value="standard"]').isChecked()).toBe(true);
     await dialog.locator('.choice', { hasText: 'OpenCode · studio' }).locator('input').check();
+    await poll(() => followSwitch.getAttribute('aria-checked')).toBe('true');
+    await followSwitch.click();
     await dialog
       .getByRole('combobox', { name: 'Model', exact: true })
       .selectOption('anthropic/claude-opus-5');
@@ -141,11 +147,15 @@ describe('AI profiles with fake CLIs', () => {
     ).toEqual(["The CLI's default", 'low', 'high']);
     await poll(() => dialog.locator('.fast').count()).toBe(0);
     await dialog.locator('.choice', { hasText: 'Qwen Code · studio' }).locator('input').check();
+    await poll(() => followSwitch.getAttribute('aria-checked')).toBe('true');
+    await followSwitch.click();
     await poll(() => dialog.getByRole('textbox', { name: 'Model', exact: true }).count()).toBe(1);
     await poll(() =>
       dialog.getByRole('textbox', { name: 'Thinking level', exact: true }).count(),
     ).toBe(1);
     await dialog.locator('.choice', { hasText: 'Claude Code · studio' }).locator('input').check();
+    await poll(() => followSwitch.getAttribute('aria-checked')).toBe('true');
+    await followSwitch.click();
     await poll(() =>
       dialog
         .getByRole('combobox', { name: 'Model', exact: true })
@@ -186,6 +196,10 @@ describe('AI profiles with fake CLIs', () => {
 
     await page.locator('.members').getByRole('button', { name: 'Add AI', exact: true }).click();
     await dialog.locator('.choice', { hasText: 'Claude Code · studio' }).locator('input').check();
+    await poll(() => followSwitch.getAttribute('aria-checked')).toBe('false');
+    await poll(() => dialog.locator('.sw-row .tip').textContent()).toBe(
+      'The group already has a Claude Code; a second one usually runs another model.',
+    );
     await dialog.getByRole('combobox', { name: 'Model', exact: true }).selectOption('haiku');
     await poll(() => dialog.locator('input[value="light"]').isChecked()).toBe(true);
     await dialog.getByRole('textbox', { name: 'Name in the group', exact: true }).fill('Haiku');
@@ -223,6 +237,8 @@ describe('AI profiles with fake CLIs', () => {
 
     await page.locator('.members').getByRole('button', { name: 'Add AI', exact: true }).click();
     await dialog.locator('.choice', { hasText: 'Codex · studio' }).locator('input').check();
+    await poll(() => followSwitch.getAttribute('aria-checked')).toBe('true');
+    await followSwitch.click();
     await poll(() => dialog.getByRole('textbox', { name: 'Model', exact: true }).count()).toBe(1);
     await poll(() =>
       dialog.getByRole('textbox', { name: 'Thinking level', exact: true }).count(),

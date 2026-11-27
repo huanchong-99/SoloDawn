@@ -4,6 +4,7 @@
   import {
     candidatesOf,
     canMakeSecretary,
+    hasHostAgent,
     joinError,
     joinGroup,
     nameClash,
@@ -19,8 +20,11 @@
   import { t } from '../../lib/prefs.svelte';
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
+  import FollowSwitch from '../defaults/FollowSwitch.svelte';
+  import { defaultsOf, draftOf } from '../defaults/defaults';
   import SecretaryWarning from '../groupinfo/SecretaryWarning.svelte';
   import Mount from '../Mount.svelte';
+  import { listedModels } from '../model/model';
   import ProfileFields from '../profile/ProfileFields.svelte';
   import FolderPicker from './FolderPicker.svelte';
   import { newDraft, tooLong } from '../profile/profile';
@@ -52,12 +56,28 @@
   let failed = $state.raw<Refusal>();
   let taken = $state(false);
   let draft = $state(newDraft());
+  let follow = $state(false);
   let workspace = $state('');
 
   const candidates = $derived(candidatesOf(group, owned, nodes.infos));
   const selectable = $derived(selectableCandidates(candidates));
   let chosen = $state.raw<Candidate>();
   const canSecretary = $derived(chosen?.agent !== 'external' && canMakeSecretary(group));
+  const chosenDefaults = $derived(chosen ? defaultsOf(chosen.home, chosen.agent) : undefined);
+  const chosenModels = $derived(chosen ? (listedModels(chosen.home, chosen.agent) ?? []) : []);
+  const isSecond = $derived(
+    Boolean(
+      chosen && chosen.agent !== 'external' && hasHostAgent(group, chosen.device, chosen.agent),
+    ),
+  );
+
+  function applyCandidate(candidate: Candidate) {
+    chosen = candidate;
+    if (candidate.agent === 'external') secretary = false;
+    follow =
+      candidate.agent !== 'external' && !hasHostAgent(group, candidate.device, candidate.agent);
+    draft = draftOf(defaultsOf(candidate.home, candidate.agent));
+  }
 
   $effect(() => {
     if (!open) {
@@ -71,6 +91,7 @@
       secretary = false;
       failed = undefined;
       taken = false;
+      follow = false;
       workspace = '';
       draft = newDraft();
       nodes.sync(homes, true);
@@ -83,22 +104,21 @@
     nodes.sync(homes);
     if (!chosen && selectable.length) {
       const first = selectable[0];
-      chosen = first;
-      if (!untrack(() => customName)) {
-        name = suggestedName(
-          group,
-          first.agent,
-          untrack(() => secretary),
-        );
-      }
+      untrack(() => {
+        applyCandidate(first);
+        if (!customName) name = suggestedName(group, first.agent, secretary);
+      });
     }
   });
 
   function pickCandidate(candidate: Candidate) {
     if (candidate !== chosen) workspace = '';
-    chosen = candidate;
-    if (candidate.agent === 'external') secretary = false;
+    applyCandidate(candidate);
     if (!customName) name = suggestedName(group, candidate.agent, secretary);
+  }
+
+  function toggleFollow(on: boolean) {
+    if (!on) draft.skills = chosenDefaults?.skills ?? '';
   }
 
   function toggleSecretary(checked: boolean) {
@@ -111,7 +131,7 @@
     const candidate = chosen;
     const trimmed = name.trim();
     if (!candidate || !group.info || !trimmed || !workspace) return undefined;
-    return { candidate, name: trimmed, secretary, workspace, draft };
+    return { candidate, name: trimmed, secretary, workspace, follow, draft };
   }
 
   /** A computer that has gone leaves the choice to the first one left; a refusal keeps the dialog
@@ -210,20 +230,6 @@
       </div>
     {/if}
 
-    <Mount
-      at="member.add"
-      props={{
-        group,
-        candidate: chosen,
-        get draft() {
-          return draft;
-        },
-        set draft(value) {
-          draft = value;
-        },
-      }}
-    />
-
     <label class="field">
       <span>{t('member.join.name')}</span>
       <input
@@ -236,7 +242,35 @@
       />
     </label>
 
-    <ProfileFields bind:draft share={!secretary} />
+    {#if chosen && chosen.agent !== 'external'}
+      {@const aiLabel = cliName(chosen.agent)}
+      <FollowSwitch
+        bind:follow
+        defaults={chosenDefaults}
+        models={chosenModels}
+        note={isSecond ? t('defaults.switch.second').replace('{ai}', () => aiLabel) : undefined}
+        onchange={toggleFollow}
+      />
+    {/if}
+
+    {#if !follow}
+      <div class="custom-fields">
+        <Mount
+          at="member.add"
+          props={{
+            group,
+            candidate: chosen,
+            get draft() {
+              return draft;
+            },
+            set draft(value) {
+              draft = value;
+            },
+          }}
+        />
+        <ProfileFields bind:draft share={!secretary} />
+      </div>
+    {/if}
 
     {#if canSecretary}
       <div class="sec-opt">
@@ -274,7 +308,10 @@
       </button>
       <button
         class="btn btn-primary"
-        disabled={busy || (!chosen && !selectable.length) || !workspace || tooLong(draft)}
+        disabled={busy ||
+          (!chosen && !selectable.length) ||
+          !workspace ||
+          (!follow && tooLong(draft))}
       >
         {t('member.join.submit')}
       </button>
@@ -352,5 +389,10 @@
   .fail {
     color: var(--danger);
     font-size: var(--fs-sm);
+  }
+  .custom-fields {
+    display: grid;
+    gap: var(--sp-4);
+    animation: -global-appear var(--dur-2) var(--ease-out);
   }
 </style>

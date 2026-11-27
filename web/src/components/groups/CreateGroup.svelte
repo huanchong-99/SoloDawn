@@ -21,12 +21,13 @@
   import { t, type Key } from '../../lib/prefs.svelte';
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
+  import FollowSwitch from '../defaults/FollowSwitch.svelte';
+  import { defaultsOf, draftOf } from '../defaults/defaults';
   import FolderPicker from '../member/FolderPicker.svelte';
   import CodeCard from '../people/CodeCard.svelte';
   import ModelFields from '../model/ModelFields.svelte';
   import { listedModels } from '../model/model';
   import ProfileFields from '../profile/ProfileFields.svelte';
-  import { newDraft } from '../profile/profile';
 
   /** The create-group dialog (contracts/commands.md 1.1): a name, the person's own name, the
    *  people already in one of their groups on the chosen computer, and their connected AIs, each
@@ -44,8 +45,10 @@
   let name = $state('');
   let member = $state('');
   let people = $state<Record<string, boolean>>({});
-  /** The AIs ticked, by candidate key, with their name, folder, model, level and tier. */
-  let ais = $state<Record<string, { name: string; workspace: string; draft: Draft }>>({});
+  /** The AIs ticked, by candidate key, with their name, folder, follow flag, model, level and tier. */
+  let ais = $state<
+    Record<string, { name: string; workspace: string; follow: boolean; draft: Draft }>
+  >({});
   let secretary = $state('');
   let busy = $state(false);
   let failed = $state('');
@@ -105,7 +108,8 @@
     const taken = Object.values(ais).map((ai) => ai.name);
     if (on) {
       const name = freeName(taken, cliName(candidate.agent));
-      ais[candidate.key] = { name, workspace: '', draft: newDraft() };
+      const defaults = defaultsOf(candidate.home, candidate.agent);
+      ais[candidate.key] = { name, workspace: '', follow: true, draft: draftOf(defaults) };
     } else delete ais[candidate.key];
     if (!ais[secretary]) secretary = Object.keys(ais)[0] ?? '';
   }
@@ -138,6 +142,7 @@
         name: ais[key].name.trim(),
         secretary: secretary === key,
         workspace: ais[key].workspace,
+        follow: ais[key].follow,
         draft: ais[key].draft,
       })),
       hours: coded ? hours : undefined,
@@ -325,18 +330,31 @@
                   disabled={Boolean(outcome)}
                 />
               </label>
-              <ModelFields
-                bind:draft={ai.draft}
+              <FollowSwitch
+                bind:follow={ai.follow}
+                defaults={defaultsOf(candidate.home, candidate.agent)}
                 models={listedModels(candidate.home, candidate.agent) ?? []}
-                suggest
                 disabled={Boolean(outcome)}
+                onchange={(on) => {
+                  if (!on) ai.draft = draftOf(defaultsOf(candidate.home, candidate.agent));
+                }}
               />
-              <ProfileFields
-                bind:draft={ai.draft}
-                skills={false}
-                share={secretary !== candidate.key}
-                disabled={Boolean(outcome)}
-              />
+              {#if !ai.follow}
+                <div class="ai-custom">
+                  <ModelFields
+                    bind:draft={ai.draft}
+                    models={listedModels(candidate.home, candidate.agent) ?? []}
+                    suggest
+                    disabled={Boolean(outcome)}
+                  />
+                  <ProfileFields
+                    bind:draft={ai.draft}
+                    skills={false}
+                    share={secretary !== candidate.key}
+                    disabled={Boolean(outcome)}
+                  />
+                </div>
+              {/if}
               <label class="check">
                 <input
                   type="radio"
@@ -479,5 +497,10 @@
     gap: var(--sp-2);
     font-size: var(--fs-sm);
     cursor: pointer;
+  }
+  .ai-custom {
+    display: grid;
+    gap: var(--sp-3);
+    animation: -global-appear var(--dur-2) var(--ease-out);
   }
 </style>

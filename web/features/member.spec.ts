@@ -815,6 +815,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       When(
         'the owner sets the work share to "Less", toggles "Make this AI the group\'s secretary" on and off, then checks it and names the AI "Lead Secretary"',
         () => {
+          // Turn off following defaults so the custom work-share control is shown.
+          one<HTMLButtonElement>('dialog [role="switch"]').click();
+          flushSync();
           const secCheck = one<HTMLInputElement>('dialog .check input');
           const nameInput = one<HTMLInputElement>('dialog input[required]');
           shareSeen.length = 0;
@@ -1090,6 +1093,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             '/home/dev/website',
           ]),
         );
+        // Turn off following defaults for both AIs so their model and work-share controls are shown.
+        for (const sw of all<HTMLButtonElement>('dialog [role="switch"]')) sw.click();
+        flushSync();
       });
       Then(
         '"Claude Code" is the secretary, "Codex" is not, each secretary choice is named for its AI, and each AI has the newest folder that no other group has',
@@ -1542,4 +1548,189 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect(texts('.members .add-why')).toEqual(['Cannot reach the group home.']);
     });
   });
+
+  function setWorkstationClaudeDefaults() {
+    workstation.agents[0].models = [
+      { model: 'opus', name: 'Opus', efforts: ['low', 'high'], tier: 'strong' },
+      { model: 'haiku', name: 'Haiku', efforts: [], tier: 'light' },
+    ];
+    workstation.agents[0].defaults = {
+      model: 'opus',
+      effort: 'high',
+      tier: 'strong',
+      skills: 'Go backend',
+    };
+  }
+
+  async function openAndPickWorkstationClaude() {
+    one<HTMLButtonElement>('.members .head button').click();
+    flushSync();
+    await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(2));
+    flushSync();
+    const claudeChoice = all<HTMLInputElement>('dialog .choice input')[0];
+    if (!claudeChoice.checked) {
+      claudeChoice.click();
+      flushSync();
+    }
+    await folderTaken();
+  }
+
+  Scenario("A new AI follows the computer's defaults", ({ Given, When, Then, And }) => {
+    Given(
+      'on "workstation" Claude Code has defaults "Opus", "high", More and "Go backend" and is not in the group yet',
+      async () => {
+        setWorkstationClaudeDefaults();
+        workstation.agents[0].groups = [];
+        workstation.home.remove(website, 'member', 'claude-ws');
+        await new Promise((later) => setTimeout(later));
+        flushSync();
+      },
+    );
+    When('the owner opens "Add AI" and chooses "Claude Code · workstation"', () =>
+      openAndPickWorkstationClaude(),
+    );
+    Then(
+      'the switch "Use this computer\'s defaults" is on, with "Opus · high · Work share More · Go backend" under it',
+      () => {
+        const sw = one<HTMLButtonElement>('dialog [role="switch"]');
+        expect(read(one('dialog .sw-lbl'))).toBe("Use this computer's defaults");
+        expect(sw.getAttribute('aria-checked')).toBe('true');
+        expect(read(one('dialog .sw-row .sum'))).toBe('Opus · high · Work share More · Go backend');
+        expect(all('dialog .sw-row .tip')).toEqual([]);
+      },
+    );
+    And('no model, level or work share field is shown', () => {
+      expect(all('dialog select, dialog .tiers, dialog .custom-fields')).toEqual([]);
+      const sw = one<HTMLButtonElement>('dialog [role="switch"]');
+      const submit = one<HTMLButtonElement>('dialog .btn-primary');
+      expect(submit.disabled).toBe(false);
+
+      // Switching off reveals custom fields; over-long skills disable Submit only while not following.
+      sw.click();
+      flushSync();
+      expect(sw.getAttribute('aria-checked')).toBe('false');
+      expect(submit.disabled).toBe(false);
+      const skillsInput = one<HTMLInputElement>(
+        'dialog input[placeholder="What this AI is good at, in one line"]',
+      );
+      expect(skillsInput.value).toBe('Go backend');
+      fill(skillsInput, '😀'.repeat(201));
+      flushSync();
+      expect(submit.disabled).toBe(true);
+
+      // Switching back on hides the over-long draft and enables Submit again.
+      sw.click();
+      flushSync();
+      expect(sw.getAttribute('aria-checked')).toBe('true');
+      expect(all('dialog .custom-fields')).toEqual([]);
+      expect(submit.disabled).toBe(false);
+
+      // Switching off again refills skills from defaults; switching back on leaves follow enabled for submit.
+      sw.click();
+      flushSync();
+      expect(
+        one<HTMLInputElement>('dialog input[placeholder="What this AI is good at, in one line"]')
+          .value,
+      ).toBe('Go backend');
+      expect(submit.disabled).toBe(false);
+      sw.click();
+      flushSync();
+      expect(sw.getAttribute('aria-checked')).toBe('true');
+    });
+    When('the owner submits the add-AI dialog', async () => {
+      submitDialog();
+      await vi.waitFor(() => expect(workstation.joins).toHaveLength(1));
+      await vi.waitFor(() => expect(all('dialog[open]')).toEqual([]));
+    });
+    Then(
+      '"workstation" receives a signed "host.join" with follow and no model, effort, tier or skills',
+      async () => {
+        const join = workstation.joins[0];
+        expect(join.follow).toBe(true);
+        expect('model' in join || 'effort' in join || 'tier' in join || 'skills' in join).toBe(
+          false,
+        );
+
+        // Picking an external candidate after a managed one hides the switch, turns follow off, and sends no follow.
+        await addLaptop();
+        laptop.agents.push({
+          agent: 'external',
+          cli_version: '',
+          account: null,
+          login_ok: true,
+          driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'none' },
+          models: [],
+          caps: {},
+          groups: [],
+        });
+        one<HTMLButtonElement>('.members .head button').click();
+        flushSync();
+        await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(5));
+        flushSync();
+
+        const choices = all<HTMLInputElement>('dialog .choice input');
+        choices[2].click();
+        flushSync();
+        expect(all('dialog [role="switch"]')).toHaveLength(1);
+        expect(one('dialog [role="switch"]').getAttribute('aria-checked')).toBe('true');
+        expect(all('dialog .custom-fields')).toEqual([]);
+
+        choices[4].click();
+        flushSync();
+        await folderTaken();
+        expect(all('dialog [role="switch"]')).toHaveLength(0);
+        expect(all('dialog .custom-fields')).toHaveLength(1);
+        choose(one<HTMLSelectElement>('dialog .custom-fields select'), 'API key');
+        flushSync();
+        submitDialog();
+        await vi.waitFor(() => expect(laptop.joins).toHaveLength(1));
+        expect(laptop.joins[0]).toMatchObject({ agent: 'external', account: 'api_key' });
+        expect('follow' in laptop.joins[0]).toBe(false);
+      },
+    );
+  });
+
+  Scenario(
+    'A second Claude Code in the group starts with its own setting',
+    ({ Given, When, Then, And }) => {
+      Given(
+        'on "workstation" Claude Code has defaults "Opus", "high", More and "Go backend" and the group already has a Claude Code member from "workstation"',
+        () => setWorkstationClaudeDefaults(),
+      );
+      When('the owner opens "Add AI" and chooses "Claude Code · workstation"', () =>
+        openAndPickWorkstationClaude(),
+      );
+      Then('the switch is off, with the note that a second one usually runs another model', () => {
+        const sw = one<HTMLButtonElement>('dialog [role="switch"]');
+        expect(sw.getAttribute('aria-checked')).toBe('false');
+        expect(read(one('dialog .sw-row .tip'))).toBe(
+          'The group already has a Claude Code; a second one usually runs another model.',
+        );
+      });
+      And('the model field shows "Opus" and the work share More', () => {
+        const [model, effort] = all<HTMLSelectElement>('dialog select');
+        expect(model.value).toBe('opus');
+        expect(model.selectedOptions[0].textContent).toBe('Opus');
+        expect(effort.value).toBe('high');
+        expect(dialogShare()).toEqual(['strong']);
+        expect(one<HTMLInputElement>('dialog .custom-fields input.input').value).toBe('Go backend');
+      });
+      When('the owner chooses model "Haiku" and submits the add-AI dialog', async () => {
+        choose(all<HTMLSelectElement>('dialog select')[0], 'Haiku');
+        submitDialog();
+        await vi.waitFor(() => expect(workstation.joins).toHaveLength(1));
+        await vi.waitFor(() => expect(all('dialog[open]')).toEqual([]));
+      });
+      Then('"workstation" receives a signed "host.join" with model "haiku" and no follow', () => {
+        const join = workstation.joins[0];
+        expect(join).toMatchObject({
+          model: 'haiku',
+          effort: '',
+          tier: 'light',
+          skills: 'Go backend',
+        });
+        expect('follow' in join).toBe(false);
+      });
+    },
+  );
 });

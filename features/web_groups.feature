@@ -128,3 +128,10 @@ Feature: Group list and group cache of the web client
     Given the browser has read the group up to its last row
     When a message is deleted on purpose, and a page that still holds it arrives afterwards
     Then the browser keeps the marker and does not show the message
+
+  Scenario: The create-group dialog follows by default
+    Given the owner's computer "desk" has Claude Code and Codex with defaults
+    When the owner ticks Claude Code and Codex in the create-group dialog
+    Then each has the switch on
+    When the owner turns Codex's switch off and creates the group
+    Then Claude Code's host.join carries follow, and Codex's carries its four fields and no follow
