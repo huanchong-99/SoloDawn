@@ -171,6 +171,7 @@ type s2PeopleWorld struct {
 	removeAt      time.Time
 	qClosed       chan time.Time
 	clock         *s2ClockHome
+	code          s2CodeState
 }
 
 func s2PeopleSteps(sc *godog.ScenarioContext, f fixtures) {
@@ -179,6 +180,7 @@ func s2PeopleSteps(sc *godog.ScenarioContext, f fixtures) {
 	registerS2PeopleA93A94Steps(sc, w)
 	registerS2PeopleA95A96Steps(sc, w)
 	registerS2PeopleGroupSteps(sc, w)
+	registerS2PeopleCodeSteps(sc, w)
 }
 
 func registerS2PeopleA91A92Steps(sc *godog.ScenarioContext, w *s2PeopleWorld) {
@@ -368,14 +370,22 @@ func joinGroupWithLink(
 	if err != nil {
 		return nil, nil, err
 	}
+	raw, err := sendJoinOn(ctx, bc, signer, entries, link, memberName, joinNonce, now)
+	return bc, raw, err
+}
+
+// sendJoinOn presents the device log on a joining connection and sends join for the link's group.
+func sendJoinOn(
+	ctx context.Context, bc *peerBrowserConn, signer identity.Key, entries []proto.Envelope,
+	link s2JoinLink, memberName string, joinNonce proto.ID, now time.Time,
+) (json.RawMessage, error) {
 	if err := bc.conn.Send(proto.Devlog{Type: "devlog", User: signer.ID(), Entries: entries}); err != nil {
-		return bc, nil, err
+		return nil, err
 	}
-	raw, err := sendSignedCmdRaw(ctx, bc.conn, signer, proto.Join{
+	return sendSignedCmdRaw(ctx, bc.conn, signer, proto.Join{
 		HomeCommand: proto.HomeCommand{Type: "join", Nonce: joinNonce, Timestamp: now.UnixMilli(), Group: proto.ID(link.Group)},
 		Name:        memberName,
 	})
-	return bc, raw, err
 }
 
 func openJoiningCtl(ctx context.Context, cleanup func(func()), b *peerBrowser, link s2JoinLink) (*peerBrowserConn, error) {

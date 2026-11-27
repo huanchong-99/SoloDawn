@@ -39,6 +39,7 @@ type s2ExportWorld struct {
 	mention    proto.ID
 	rows       [][]any
 	importedAt time.Time
+	code       s2CodeState
 }
 
 func s2ExportSteps(sc *godog.ScenarioContext, f fixtures) {
@@ -61,6 +62,7 @@ func s2ExportSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^P takes a copy on P1 that carries the schema version of v3\.0\.0-rc\.1$`, w.rc1Copy)
 	sc.Step(`^importing that copy on P2 is refused in one line that says it was written by another version$`, w.rc1Refused)
 	sc.Step(`^P2 holds no row of the group$`, w.p2HoldsNothing)
+	registerS2ExportCodeSteps(sc, w)
 }
 
 func (w *s2ExportWorld) group(name string) error {

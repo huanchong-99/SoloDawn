@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cucumber/godog"
@@ -124,16 +125,25 @@ func tags(goos string) string {
 
 // afterScenario returns a function that defers undo to the end of the current
 // scenario, after its last step, whether the steps passed or not. The undos
-// run in reverse order.
+// run in reverse order. The returned function may be called from several
+// goroutines at once: two people who join together each open a browser.
 func afterScenario(sc *godog.ScenarioContext) func(undo func()) {
+	var mu sync.Mutex
 	var undos []func()
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
-		for _, undo := range slices.Backward(undos) {
+		mu.Lock()
+		pending := slices.Clone(undos)
+		mu.Unlock()
+		for _, undo := range slices.Backward(pending) {
 			undo()
 		}
 		return ctx, nil
 	})
-	return func(undo func()) { undos = append(undos, undo) }
+	return func(undo func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		undos = append(undos, undo)
+	}
 }
 
 func environ() map[string]string {

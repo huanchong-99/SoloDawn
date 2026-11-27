@@ -564,16 +564,7 @@ func codeAnswer(ctx context.Context, url string, secret identity.Secret) (card p
 // awaitHost waits until the room of a code on a rendezvous is hosted by a
 // device, or by nobody when host is empty.
 func (w *nodeCodeWorld) awaitHost(url string, secret identity.Secret, host string) error {
-	return waitUntil(10*time.Second, fmt.Sprintf("host %q of the code's room", host), func() error {
-		card, _, err := codeAnswer(w.ctx, url, secret)
-		if err != nil {
-			return abort(err)
-		}
-		if card.Key != host {
-			return fmt.Errorf("host %q", card.Key)
-		}
-		return nil
-	})
+	return awaitCodeHost(w.ctx, url, secret, host)
 }
 
 func (w *nodeCodeWorld) connectionClosed(name string) error {

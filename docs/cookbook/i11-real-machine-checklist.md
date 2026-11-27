@@ -127,6 +127,21 @@ Use two AIs in `Alpha` that are in different folders (`F1` on `P1`, `F2` on `P2`
 - **See:** `Q` joins as a member and both browsers show the group and its history with no reload. A used or expired link is refused.
 - **Write:** `A9.1`, `A9.2`.
 
+### 9a. People by code (`A9.47` to `A9.52`, `A9.54`)
+
+`Q` and `R` each have a computer (`Q1`, `R1`), paired and online, and their own browser, and have never been in a group of `P1`. Every computer, and the rendezvous they use, runs the same release: a code is answered only on a rendezvous of this version ([self-hosting.md](self-hosting.md), "Update").
+
+- **Do:**
+  1. Press **New group**, name it `Delta`, tick **Also make an invitation code** and press **Create group**. Read the code before the dialog closes, then press **Open the group**.
+  2. `Q` opens **Groups** and presses **Join a group**. `Q` types the code with the letter `O` in place of its first character and presses **Join group**. Then `Q` pastes the code in lower case, with spaces and no hyphens, gives a name and presses **Join group**.
+  3. Stop the node on `P1` (the commands of `install.md`, "Update"). `R` types the code and joins. Wait one minute, then start the node on `P1` again, within 10 minutes of `R` pressing the button. Also type a code with one character changed on a third browser and leave it waiting.
+  4. Press **Invite** in `Delta`: the dialog shows the code and when it ends. Press **Create link** and open that link in a browser of a person who has a computer and has never been in a group of `P1`. Then `Q` types the code of `Delta` again.
+  5. Press **New code**, then **New code** again under "The current code stops working at once.", and type the first code in a browser. Press **Turn off** and type the new one. Make a code again.
+  6. Press **Remove** on `Q`: the confirmation says that an open code is ended as well. Confirm, reopen **Invite** and type the code in a browser. Make a code again; `R` presses **Leave**; type the code in a browser.
+  7. Make a code of **1 hour**. After an hour type it in a browser.
+- **See:** in item 1 the code is 16 characters in four groups of four, and is shown before the dialog closes. In item 2 the text with the `O` is refused on the page (**This is not an invitation code: …**) and nothing is sent; the pasted one opens `Delta` with its history and no reload. In item 3 `R`'s page says **Looking for the group's home…** while `P1` is off, and `R` is a member after `P1` starts, with no second typing; the changed code never gets an answer and the page keeps waiting. In item 4 the link works while the code is open, and `Q`'s second typing opens `Delta` with no second row for `Q`. In item 5 the first code gets no answer (the page keeps **Looking for the group's home…**), the dialog shows no code after **Turn off** and the new one gets no answer either. In item 6 the removal ends the code and nothing answers it; after `R` leaves by themself the code is still answered. In item 7 the hour's end gets no answer. Apart from `Q`'s removal and `R`'s leaving, the people who joined stay members, and the chat shows who made the code: `<name> joined, invited by <your name>.`
+- **Write:** `A9.47` to `A9.52`, `A9.54`.
+
 ### 10. People you already know, added with no link (`A9.46`)
 
 - **Do:**
@@ -293,6 +308,7 @@ If a direct path fails on macOS, look at System Settings, Network, Firewall, Opt
 | `A4.5` | Contradicted by [drivers.md](../../planning/contracts/drivers.md) 1.1: at level 3 the CLIs still ask and it becomes a card; step 17.2 shows the question cards. |
 | `A8.2` self-update | Not in version 1; step 1 is the update by hand. |
 | `A8.5` on Firefox | CI, Firefox 136, every pull request. |
+| `A9.53`, `A9.55` | The rendezvous's hosted rooms and a node on a rendezvous that cannot host for it: CI runs them in `features/rendezvous.feature` and `features/node_pair.feature`. |
 | `A4.1` at levels 1 and 2, `A4.4`, `A4.10`, the level 1 checks of OpenCode and Qwen Code | Need a permission level other than 3. Version 1 has no control for it (`perm.set` is postponed, [commands.md](../../planning/contracts/commands.md) section 2); only a row in the node's database sets it. A coordinator's agent does it on a test node (needs `sqlite3`) and runs these with the real CLIs. |
 | `A5.22`, `A5.24`, the second half of `A2.9` (two joins at once) | Need a secret pattern in a summary or the exact timing of two turns and two joins; CI runs them with fake CLIs. |
 | `A8.6`, rendezvous memory with 100 idle connections | The repository has no tool that makes the connections. A coordinator's agent runs it with a load tool. |

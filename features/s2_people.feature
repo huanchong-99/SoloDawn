@@ -71,3 +71,38 @@ Feature: Step 2 people, invitations, roles, removal and host surfaces
     Given the people cast where Q joined "Alpha" on P1 with Q-team on Q1 and P has a second group "Solo" on P1
     Then on P1 Q's browser may use the shared group's home surface while host commands, host.info and sync of P's other group are refused with "forbidden"
     And Q1 accepts no host command and no takeover.start from a device of P
+
+  Scenario: Q types one invitation code at P1 and joins with Q1, and no row or receipt holds the code (A9.47, A9.49, A9.52)
+    Given the people cast with P's group "Alpha" on P1 and pre-join history "Welcome before Q"
+    When P makes an invitation code for 24 hours on P1
+    Then the code has 16 characters in four groups, ends 24 hours on and the rendezvous shows P1 as the host of its room
+    When Q types the code and joins as "Q"
+    Then Q has a human member row with role "member" and Q's device log is on P1 as device rows
+    And both P's and Q's browsers show Q and the pre-join history without a reload
+    And P1 holds Q as a member, let in by P
+    When Q1 joins Q-team to the people group with host.join
+    Then Q-team's member row has host Q1, user Q and the folder Q chose as its workspace
+    When P sends that code command again
+    Then P1 answers it ok with no code and makes no second code
+    And no row and no receipt of P1 holds the code, and the receipt of the command says only that it succeeded
+    When Q, a member, types the code again
+    Then P1 answers join ok and Q has no second member row
+
+  Scenario: P1 stopped and started again answers the code, also for Q who typed it while P1 was off (A9.49, A9.51)
+    Given the people cast with P's group "Alpha" on P1
+    And P makes an invitation code for 24 hours on P1
+    When P1 is stopped, Q types the code and waits, and nothing answers a wrong code
+    And P1 is started again
+    Then Q is shown P1 and joins without typing again
+    And the rendezvous gives a wrong code no answer
+
+  Scenario: A new code and the removal of a person end the code at P1, and the connection of a person who waited on it closes (A9.48, A9.50)
+    Given the people cast where Q joined P's group "Alpha" on P1 by an invitation code
+    And a person who typed the code waits on a connection to P1
+    When P makes an invitation code for 1 hour on P1
+    Then the rendezvous shows P1 as the host of the room of the new code and of no other
+    And the connection that waited on the first code is closed
+    And P1 holds Q as a member, let in by P
+    When P removes Q from the people group
+    And P asks P1 for the code with show
+    Then P1 answers ok with no code, and nothing answers the code that was open

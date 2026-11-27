@@ -536,6 +536,11 @@ func (c *s2Cast) seedAndStartNode(t testing.TB, n *s2Node) error {
 		return err
 	}
 	n.Env = c.buildNodeEnv(n)
+	return c.startNode(t, n)
+}
+
+// startNode starts the process of n on the data it has: a node that was stopped starts again so.
+func (c *s2Cast) startNode(t testing.TB, n *s2Node) error {
 	cmd := exec.Command(c.F.bin, "node")
 	cmd.Env = n.Env
 	cmd.Stdout, cmd.Stderr = &n.Out, &n.Out

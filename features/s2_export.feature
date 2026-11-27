@@ -27,3 +27,15 @@ Feature: Step 2 exporting and importing a group
     When P takes a copy on P1 that carries the schema version of v3.0.0-rc.1
     Then importing that copy on P2 is refused in one line that says it was written by another version
     And P2 holds no row of the group
+
+  Scenario: A move ends the group's invitation code, the file holds none, and a code made at the new home admits a member (A9.49)
+    Given P has a project group "Cove" on P1 with Q and Q-team on Q1
+    And the group has a secretary on P1, P-work on P2, task 1 and a gone note
+    And P1 holds an unacknowledged mention for Q-team
+    And P has made an invitation code for 24 hours on P1
+    When P exports the group on P1 with --to P2
+    Then P1 has ended the code, nothing answers it on the rendezvous and the file holds no invitation code
+    When P imports the file on P2
+    And P makes an invitation code for 24 hours on P2
+    And Q, a member, types the code and join succeeds without adding a member row
+    Then Q's browser peer and Q1 use P2 as the restored home
