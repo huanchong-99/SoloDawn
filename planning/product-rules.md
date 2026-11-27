@@ -26,7 +26,7 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 ## Groups and workspaces
 
 By the owner's decision of 2026-11-26
-([record](../docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)):
+([record](../docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)):
 
 - **R-10** `[S1]` There is one kind of group: people and AIs. A group is
   created by choosing people and connected AIs, and people and AIs can be
@@ -46,8 +46,9 @@ By the owner's decision of 2026-11-26
   secretary has one long session per group; a working AI has one session per
   task, whose working folder is the member's workspace and which ends when
   the task ends. What carries over between tasks is the ledger and the notes
-  (R-102), not a session. A working AI also has one read-only group
-  session per group, in the member's workspace, for what belongs to no task:
+  (R-102), not a session. A working AI also has one group session per group
+  (non-editing by instruction; default level 3, `contracts/drivers.md`
+  sections 1 and 4), in the member's workspace, for what belongs to no task:
   questions, main-line mentions, calls from other tasks. To change code it
   starts a task, which gets its own session (Q-15). One folder takes one
   task at a time: a task whose assignee's folder is in use by another task
@@ -90,10 +91,12 @@ By the owner's decision of 2026-11-26
 
 ## Permissions and approvals
 
-- **R-40** `[S1]` Three levels, set per project and per AI by the owner of the
-  machine: (1) read only; (2) work inside the workspace, the default; (3)
-  unrestricted. The owner may set level 3 for all projects at once. Level 2
-  limits what the AI itself does.
+- **R-40** `[S1]` Three levels, set per group and per AI by the owner of the
+  machine: (1) read only; (2) work inside the workspace; (3) unrestricted. The
+  owner may set level 3 for all groups at once. Level 2 limits what the AI
+  itself does. In 1.0 (decisions of 2026-11-21 and 2026-11-22), every session
+  runs at level 3 by default and level control (`perm.set`, `settings.set`) is
+  postponed (`contracts/drivers.md` section 1; `contracts/commands.md` section 2).
 - **R-41** `[S1]` At level 2 the AI changes files in the workspace without
   asking. What reaches further (a change outside the workspace, or the
   network: installing software, pushing code) is meant to happen only
@@ -122,7 +125,7 @@ By the owner's decision of 2026-11-26
   shipped inside a repository (plugins, hooks, project MCP servers, the
   project's own instruction file) is always loaded in task and review
   sessions and never loaded in group sessions (`contracts/drivers.md` 1.1,
-  1.2; `risks.md` Q-24, K-25). Add only repositories you trust.
+  1.2; `risks.md` Q-24, K-25). Give an AI only folders you trust.
 
 ## Whose instructions an AI follows
 
@@ -149,9 +152,10 @@ By the owner's decision of 2026-11-26
   no human message; the secretary alerts the person responsible. Each AI has
   an hourly wake-up cap.
 - **R-61** `[S1]` Usage is shown per AI. The owner may cap usage per day and
-  per task; reaching a cap stops the AI until the owner decides. When a
-  subscription is rate-limited the AI pauses, the secretary says when it
-  resumes and may reassign.
+  per task; reaching a cap stops the AI until the owner decides (usage caps,
+  `settings.set` and `cap_reached` are postponed after 1.0,
+  `contracts/commands.md` 1.9, section 2). When a subscription is rate-limited
+  the AI pauses, the secretary says when it resumes and may reassign.
 - **R-62** `[S1]` One run lasts at most 60 minutes, then stops and reports.
 - **R-63** `[S1]` Three consecutive failures on a task stop it and alert the
   owner. Review may send work back at most five times, then a person decides.
@@ -277,11 +281,10 @@ By the owner's decision of 2026-11-26
   and the rendezvous service.
 - **R-131** `[S1]` Several paths are tried at once (UDP hole punching, TCP,
   IPv6); the first to work is used; ICE may move to a better one by itself (R-132).
-  In step 1, TCP means a direct connection to a port the other node has
+  In 1.0, TCP means a direct connection to a port the other node has
   open or forwarded on its router (no UPnP or NAT-PMP mapping: cut
-  2026-11-21), plus the relay on port 443. TCP simultaneous open between two nodes that are both behind NAT
-  is an experiment (spike S-9) and is built in step 3 only if it shows a
-  clear benefit (Q-1).
+  2026-11-21), plus the relay on port 443; TCP simultaneous open between two
+  nodes that are both behind NAT (spike S-9) was not built in 1.0 (Q-1).
 - **R-132** `[S1]` Relay is a bridge and a last resort. A relayed connection
   moves to a direct pair only when ICE finds one or at its next reconnect;
   no separate attempt is made (cut 2026-11-21). Relay carries small data
@@ -297,9 +300,11 @@ By the owner's decision of 2026-11-26
   is the secretary's machine. The user is told plainly that this machine must
   stay on. A user's own machine forwarding for its own group is not "relay".
 - **R-135** `[S1]` All data stays on users' machines. Default retention is
-  three months, rolling daily; adjustable. The ledger and the notes are
-  exempt (R-102). Moving a group to another home, and copies for
-  safekeeping, come in step 2 (Q-12).
+  three months, rolling daily (adjusting `retention_days` via `settings.set`
+  is postponed after 1.0; `contracts/commands.md` section 2). The ledger and
+  the notes are exempt (R-102). Moving a group to another home, and copies for
+  safekeeping, are `solodawn group export` and `group import`
+  (`contracts/step-2/export.md`, Q-12).
 - **R-136** `[S1]` A node acts only on instructions signed by its owner, and
   on the items of the homes of its groups. From step 2 a home may belong to
   another member, whom the owner trusts by joining the group (2026-11-22: no
