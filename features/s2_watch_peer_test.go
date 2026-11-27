@@ -19,20 +19,21 @@ import (
 
 type s2TerminalPeer struct {
 	dispatchWorld
-	path    *websocket.Conn
-	key     identity.Key
-	target  string
-	connID  string
-	seq     int64
-	answers chan proto.Envelope
-	ice     proto.ICEConfig
-	net     *m7NetControl
-	saw     trail // the frames read from ctl
+	path     *websocket.Conn
+	key      identity.Key
+	target   string
+	connID   string
+	seq      int64
+	answers  chan proto.Envelope
+	ice      proto.ICEConfig
+	net      *m7NetControl
+	withTURN bool
+	saw      trail // the frames read from ctl
 }
 
 func openS2TerminalPeer(c *s2Cast, person *s2Person, key identity.Key, target *s2Node, withTURN bool) (*s2TerminalPeer, error) {
 	ctx, cancel := context.WithCancel(c.Ctx)
-	p := &s2TerminalPeer{key: key, target: target.ID(), connID: randomConn(), answers: make(chan proto.Envelope, 1)}
+	p := &s2TerminalPeer{key: key, target: target.ID(), connID: randomConn(), answers: make(chan proto.Envelope, 1), withTURN: withTURN}
 	p.dispatchWorld = dispatchWorld{ctx: ctx, cleanup: c.addUndo, toPeer: make(chan proto.Envelope, 64)}
 	c.addUndo(cancel)
 	if err := p.dial(c.RVURL); err != nil {
@@ -167,9 +168,18 @@ func (p *s2TerminalPeer) applySignal(raw json.RawMessage) error {
 	case "answer":
 		p.answers <- env
 	case "ice":
-		p.toPeer <- env
+		p.forwardRemoteICE(env)
 	}
 	return nil
+}
+
+// When TURN is enabled to test direct-to-relay failover on one host, remote host
+// candidates (127.0.0.1) would score above srflx and relay even at high RTT.
+func (p *s2TerminalPeer) forwardRemoteICE(env proto.Envelope) {
+	if p.withTURN && m7DropSignalledICE(env.Payload, m7CandSrflxAndRelay) {
+		return
+	}
+	p.toPeer <- env
 }
 
 func (p *s2TerminalPeer) send(frame any) error {

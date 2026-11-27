@@ -139,10 +139,12 @@
     </p>
   {/if}
 
-  <p class="note">
-    <Icon name="info" sm />
-    <span>{t('pairing.status.relay_note')}</span>
-  </p>
+  {#if session.hasRelay}
+    <p class="note">
+      <Icon name="info" sm />
+      <span>{t('pairing.status.relay_note')}</span>
+    </p>
+  {/if}
 </section>
 
 {#each session.agents ?? [] as item (item.agent)}

@@ -99,12 +99,12 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     });
   }
 
-  async function signInSocket() {
+  async function signInSocket(ice: unknown[] = []) {
     await vi.waitFor(() => expect(FakeSocket.made.length).toBeGreaterThan(0));
     const ws = FakeSocket.made.at(-1)!;
     await ws.deliver({ t: 'challenge', nonce: 'LdAL134CIs7YgmZUganB2Q' });
     await vi.waitFor(() => expect(ws.sent.some((f) => f.t === 'auth')).toBe(true));
-    await ws.deliver({ t: 'ready', ice: [], ttl: 3600 });
+    await ws.deliver({ t: 'ready', ice, ttl: 3600 });
     return ws;
   }
 
@@ -210,6 +210,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
       And('the countdown starts at "10 min 0 s"', () => {
         expect(one('.prompt footer').textContent).toContain('10 min 0 s');
+        expect(one('.link-steps').closest('section.card')!.textContent).not.toContain(
+          'a relay takes over',
+        );
       });
 
       When('the person copies the prompt and gives the code to the node', async () => {
@@ -474,8 +477,16 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
       When('a fresh browser opens the pairing link', async () => {
         openPage(`#pair=${shown(linkSecret)}`);
-        ws = await signInSocket();
+        ws = await signInSocket([
+          { urls: ['turn:rv.example:3478?transport=udp'], username: 'u', credential: 'p' },
+        ]);
         browserDev = await loadDevice({ crypto, idb: () => idb });
+        await vi.waitFor(() => {
+          flushSync();
+          expect(one('.link-steps').closest('section.card')!.textContent).toContain(
+            'a relay takes over',
+          );
+        });
       });
 
       Then(

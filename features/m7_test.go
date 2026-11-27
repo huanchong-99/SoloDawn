@@ -402,8 +402,14 @@ func (b *m7Browser) queueRemoteICE(payload string) {
 	}
 }
 
+func isLoopbackHostCand(candidate string) bool {
+	return strings.Contains(candidate, " typ host") &&
+		(strings.Contains(candidate, " 127.0.0.1 ") || strings.Contains(candidate, " ::1 "))
+}
+
 func (b *m7Browser) keepRemoteCandidate(candidate string) bool {
-	return m7KeepCandidate(b.mode, candidate) || b.mode == m7CandSrflxAndRelay && strings.Contains(candidate, " typ host")
+	return m7KeepCandidate(b.mode, candidate) ||
+		b.mode == m7CandSrflxAndRelay && strings.Contains(candidate, " typ host") && !isLoopbackHostCand(candidate)
 }
 
 func (b *m7Browser) sendSignal(nodePeer *peer.Peer, payload any) error {

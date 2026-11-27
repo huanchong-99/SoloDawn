@@ -203,7 +203,8 @@ the review of section 5.1 measured. "Evidence n" is entry n of
   address `[verified, S-1 and A.1]`.
 - **TCP.** An ICE-TCP passive listener on 47801 (`SetICETCPMux`), for the
   connections a node answers and for those it offers `[verified, S-1]`.
-- Host candidates on IPv4 and IPv6, server-reflexive by STUN, relay by TURN.
+- Host candidates on IPv4 and IPv6, including IPv4 loopback (127.0.0.1) for a
+  browser on the same machine, server-reflexive by STUN, relay by TURN.
 - The node asks no router for a port mapping (UPnP and NAT-PMP were cut on
   2026-11-21). A port is reachable from outside only if its owner forwards it
   (section 5.1, point 8).

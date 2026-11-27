@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-28 · limitation · Firefox and Safari/WebKit cannot pair over same-machine loopback without TURN while a host firewall holds LAN traffic
+
+- Symptom: on the same computer, with the macOS Application Firewall prompt unanswered (or LAN traffic blocked) and no TURN server configured, Chromium pairs over IPv4 loopback (`127.0.0.1`), whereas Firefox (default preferences, `media.peerconnection.ice.loopback`) and Safari/WebKit (`web/e2e/connect.spec.ts`, Apple WebKit e2e run `46072171616`) do not pair over loopback ICE and time out after 60 s.
+- Cause: Firefox ignores `127.0.0.1` host candidates unless `media.peerconnection.ice.loopback` is enabled, Safari/WebKit likewise does not establish a loopback ICE connection without TURN (`web/e2e/connect.spec.ts` skips both), and a standalone node's `/rv` advertises no TURN server (`internal/rendezvous/relay.go:43-47`).
+- Status: open, accepted limitation. Workaround: click "Allow" on the firewall prompt, or pair through a rendezvous server configured with TURN.
+
 ### 2026-11-27 · limitation · Escalation orders AIs by work-share tier rather than skills or model strength
 
 - Symptom: when a task fails twice in a row in review (`stuck.ask`), escalation chooses candidate AIs by comparing `tier` (`light < standard < strong`), even though `tier` means work share and hard or special task assignment now routes by `skills` first (`planning/product-rules.md` R-165, updated 2026-11-27).
@@ -753,6 +759,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted limitation.
 
 ## Resolved
+
+### 2026-11-28 · bug · Local browser pairing blocked when a host firewall holds LAN traffic and no relay is configured
+
+- Symptom: opening a node's own web UI on the local computer and running `solodawn pair` with the macOS Application Firewall prompt unanswered held incoming LAN connections (`10.90.10.20`) so ICE failed (`ice_failed`) even though `localhost:47800` and `/rv` worked over IPv4 loopback (`127.0.0.1`). Meanwhile, the onboarding panel showed `pairing.status.relay_note` promising relay takeover even though the node's own `/rv` (`internal/rendezvous/relay.go:43-47`) returns `"ice": []` with no TURN server, so no relay could start; when a TURN server is provided, pairing falls back to `relay` cleanly behind the pending prompt.
+- Cause: (1) `peer.Listen` (`internal/peer/sockets.go:39-43`) omitted `engine.SetIncludeLoopbackCandidate(true)` and `ice.UDPMuxFromPortWithLoopback()`, so the node offered no IPv4 loopback (`127.0.0.1`) host candidates matching a local browser whose `.local` mDNS candidates do not resolve (`planning/contracts/rendezvous.md:206-214`). (2) `StatusPanel.svelte:142-147` rendered `pairing.status.relay_note` unconditionally without checking whether any `ready` or `ice` signalling frame advertised a `turn:` or `turns:` server.
+- Status: resolved on `gemini/181-local-pair`: `peer.Listen` enables IPv4 loopback (`127.0.0.1`) ICE host candidates (`TestListenLoopback` in `internal/peer/ctl_test.go`; `connect.spec.ts` loopback test with `dropLan: true` and empty ICE list), and `PairingSession.hasRelay` (`web/src/lib/onboard.svelte.ts:62-63,155,240,348-354`) gates `StatusPanel.svelte:142-147` on advertised TURN servers (`web/src/lib/onboard.test.ts`, `web/features/onboarding.spec.ts`).
+
+### 2026-11-28 · bug (test) · Blocked-direct simulations in A7.9 and A9.21 let loopback `typ host` outscore TURN relay
+
+- Symptom: `Moving an open takeover PeerConnection from direct to TURN relay... (A7.9)` (`features/m7.feature:49`) and `An open direct watch closes after the same connection selects TURN (A9.21)` (`features/s2_watch.feature:14`) timed out waiting for TURN relay selection after `peer.Listen` enabled loopback host candidates (PR #434, run `46074428110`).
+- Cause: `m7Browser.keepRemoteCandidate` (`features/m7_test.go:405-407`) kept remote `127.0.0.1 typ host` candidates and `s2TerminalPeer.applySignal` (`features/s2_watch_peer_test.go:157-173`) forwarded the node's `127.0.0.1 typ host` candidate when `withTURN` was true. Because Pion evaluates `srflx <-> host` above relay pairs even after direct packets are dropped or delayed, ICE stayed on `127.0.0.1`.
+- Status: resolved on `gemini/181-local-pair`: `keepRemoteCandidate` excludes `isLoopbackHostCand` (`features/m7_test.go`) while preserving LAN host candidates needed for the post-cut relay pair, and `s2TerminalPeer.forwardRemoteICE` filters remote candidates with `m7DropSignalledICE(env.Payload, m7CandSrflxAndRelay)` when `withTURN` is true (`features/s2_watch_peer_test.go`). Both scenarios pass with `-race -tags acceptance` selecting TURN relay.
+
+### 2026-11-28 · bug (test) · `expectQConnectedToP1` raced `Q1`'s background `connectHome` dial in A9.48 on Windows
+
+- Symptom: `A new code and the removal of a person end the code at P1... (A9.48, A9.50)` failed intermittently on Windows (`P1 lists connections of [jVw-...], want Q's browser and Q1`, PR #434, run `46074428110`).
+- Cause: `followJoin` (`features/s2_cast_test.go:754-768`) returns once `Q1`'s `home.add` starts `connectHome` asynchronously, and `expectQConnectedToP1` (`features/s2_people_test.go:1119-1125`) ran `solodawn status` once with no retry, racing `Q1`'s background connection setup on slower Windows runners.
+- Status: resolved on `gemini/181-local-pair`: extracted `awaitTwoDevices` (`features/s2_people_test.go`) polling every `100ms` for up to `15s` until both devices appear (`TestAwaitTwoDevicesWaitsForAsyncNodeConn`).
 
 ### 2026-11-27 · bug · Panics inside `Pairer.mu` in `internal/node/admit.go` left the mutex locked and blocked test clean-up for 10 minutes
 
