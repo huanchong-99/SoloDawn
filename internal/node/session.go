@@ -305,7 +305,7 @@ func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json
 	base := s.sesWelcomeBase(id, c, h.V)
 	joining := c.joining.pending()
 	if joining {
-		base.Owner = false
+		base.Owner, base.Join = false, c.joining.group
 	}
 	s.sesBeforeWelcome(c)
 	onSent := func() []proto.Devlog {

@@ -333,3 +333,20 @@ func TestPacedBacklogKeepsAMargin(t *testing.T) {
 		eq(t, string(data), fmt.Sprint(i))
 	}
 }
+
+// Whether the server has hosted rooms is what its ready said and then what
+// each answer to ice says: an answer replaces what the path kept of ready.
+func TestPathHostsIsTheServersLatestWord(t *testing.T) {
+	old, _, err := testPath(t, challenge, ready)
+	check(t, err)
+	eq(t, old.Hosts(), false)
+	p, _, err := testPath(t, challenge, `{"t":"ready","ice":[],"ttl":3600,"hosts":true}`)
+	check(t, err)
+	eq(t, p.Hosts(), true)
+	p.startRenewal(t.Context())
+	defer p.renew.Stop()
+	check(t, p.refresh([]byte(`{"t":"ice","ice":[],"ttl":3600}`)))
+	eq(t, p.Hosts(), false)
+	check(t, p.refresh([]byte(`{"t":"ice","ice":[],"ttl":3600,"hosts":true}`)))
+	eq(t, p.Hosts(), true)
+}

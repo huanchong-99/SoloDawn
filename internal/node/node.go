@@ -238,7 +238,8 @@ func (n *nodeRuntime) stepServices() error {
 	})
 	loop, err := home.StartLoop(home.LoopConfig{
 		Store: n.db, Home: n.key.ID(), OwnerFn: logs.Owner,
-		Logs: logs.Log, Forget: logs.dvlForget, Tables: home.NodeTables(), Invite: n.pairer, Every: time.Second,
+		Logs: logs.Log, Forget: logs.dvlForget, Tables: home.NodeTables(), Invite: n.pairer,
+		CodeChanged: n.pairer.CodeChanged, Every: time.Second,
 	})
 	if err != nil {
 		return err
@@ -329,6 +330,7 @@ func (n *nodeRuntime) stepStartup() error {
 		return err
 	}
 	n.host.ReportSaved(n.ctx, n.saved)
+	n.pairer.CodeChanged("")
 	n.syncRendezvous()
 	n.startRetention()
 	return nil
@@ -659,6 +661,7 @@ func (n *nodeRuntime) serveOneRV(ctx context.Context, url string, loop *rvLoop) 
 	n.rvPaths[url] = path
 	n.mu.Unlock()
 	loop.finishFirst(nil)
+	n.pairer.HostCodes(path)
 	stop := context.AfterFunc(ctx, func() { path.Close() })
 	path.Serve(ctx, n.peer, n.rvEvents(ctx, path))
 	stop()

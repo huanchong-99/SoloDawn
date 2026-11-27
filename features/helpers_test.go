@@ -446,6 +446,7 @@ type peerNodeConfig struct {
 	Now           func() time.Time
 	MapRoute      func(peer.Route) peer.Route
 	OnInbound     func(*peer.Connection)
+	After         func(time.Duration) <-chan time.Time // the Pairer's timers; time.After when nil
 }
 
 type peerNode struct {
@@ -460,12 +461,14 @@ type peerNode struct {
 	Pairer   *node.Pairer
 	Sockets  *peer.Sockets
 	Peer     *peer.Peer
-	Path     *peer.Path
+	Path     *peer.Path // the path to the rendezvous of the configuration, made at the start
 	once     sync.Once
+	ctx      context.Context
 	cancel   context.CancelFunc
 	serving  sync.WaitGroup
 	mu       sync.Mutex
 	closing  bool
+	paths    []*peer.Path // the node's rendezvous paths now, under mu
 }
 
 func startPeerNode(t testing.TB, cleanup func(func()), cfg peerNodeConfig) (*peerNode, error) {
@@ -500,7 +503,9 @@ func (n *peerNode) closeCore() {
 
 func (n *peerNode) Close() {
 	n.once.Do(func() {
-		n.Path.Close()
+		for _, path := range n.livePaths() {
+			path.Close()
+		}
 		n.Pairer.Close()
 		n.Sockets.Close()
 		n.mu.Lock()
@@ -608,6 +613,7 @@ func (n *peerNode) initCore(cfg peerNodeConfig) error {
 	loop, err := home.StartLoop(home.LoopConfig{
 		Store: n.Store, Home: n.Key.ID(), OwnerFn: logs.Owner,
 		Logs: logs.Log, Tables: home.NodeTables(), Invite: peerNodeInviter{n}, Now: cfg.Now,
+		CodeChanged: func(group string) { n.Pairer.CodeChanged(group) },
 	})
 	if err != nil {
 		return err
@@ -653,12 +659,11 @@ func (n *peerNode) initTransport(cfg peerNodeConfig) error {
 		return err
 	}
 	ctx, cancel := context.WithCancel(cfg.Ctx)
-	n.cancel = cancel
-	n.Sockets, n.Path = socks, rvPath
+	n.ctx, n.cancel = cfg.Ctx, cancel
+	n.Sockets, n.Path, n.paths = socks, rvPath, []*peer.Path{rvPath}
 	n.Pairer = node.NewPairer(node.PairConfig{
 		Key: n.Key, Store: n.Store, Logs: n.Logs, Sessions: n.Sessions,
-		Paths: func() []*peer.Path { return []*peer.Path{rvPath} },
-		Now:   cfg.Now,
+		Paths: n.livePaths, Now: cfg.Now, After: cfg.After,
 	})
 	known := func(dev string) bool { return n.Logs.Known(dev) || n.Pairer.Known(dev) }
 	routes := func(dev string) []peer.Route { return n.routesFor(dev, cfg.MapRoute) }
@@ -675,19 +680,57 @@ func (n *peerNode) initTransport(cfg peerNodeConfig) error {
 	channels := peer.Channels{"pty:": func(s *peer.Stream) { n.Host.ServeTerminal(s) }}
 	n.Peer = peer.New(n.Key, socks, n.Store, known, routes, inbound, channels)
 	n.Pairer.Peer = n.Peer
-	event := func(kind string, data []byte) error {
-		n.Pairer.HandleEvent(cfg.Ctx, rvPath, kind, data)
-		return nil
-	}
-	go rvPath.Serve(cfg.Ctx, n.Peer, event)
+	n.Pairer.CodeChanged("")
+	n.servePath(rvPath)
 	return nil
 }
 
+func (n *peerNode) servePath(path *peer.Path) {
+	event := func(kind string, data []byte) error {
+		n.Pairer.HandleEvent(n.ctx, path, kind, data)
+		return nil
+	}
+	go path.Serve(n.ctx, n.Peer, event)
+}
+
+func (n *peerNode) livePaths() []*peer.Path {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return slices.Clone(n.paths)
+}
+
+// Connect dials a rendezvous as the node's runtime does when a path connects:
+// the path becomes one of the node's and the open codes are hosted on it.
+func (n *peerNode) Connect(url string) (*peer.Path, error) {
+	path, err := peer.Dial(n.ctx, url, n.Key)
+	if err != nil {
+		return nil, err
+	}
+	n.mu.Lock()
+	n.paths = append(n.paths, path)
+	n.mu.Unlock()
+	n.Pairer.HostCodes(path)
+	n.servePath(path)
+	return path, nil
+}
+
+// Cut ends one of the node's rendezvous connections.
+func (n *peerNode) Cut(path *peer.Path) {
+	n.mu.Lock()
+	n.paths = slices.DeleteFunc(n.paths, func(p *peer.Path) bool { return p == path })
+	n.mu.Unlock()
+	path.Close()
+}
+
 func (n *peerNode) routesFor(dev string, mapRoute func(peer.Route) peer.Route) []peer.Route {
-	own := n.Path.Route()
-	out := []peer.Route{mapRoute(own)}
+	var out []peer.Route
+	ids := map[string]bool{}
+	for _, path := range n.livePaths() {
+		route := path.Route()
+		out, ids[route.ID] = append(out, mapRoute(route)), true
+	}
 	for _, r := range n.Pairer.Routes(dev) {
-		if r.ID != own.ID {
+		if !ids[r.ID] {
 			out = append(out, mapRoute(r))
 		}
 	}

@@ -164,6 +164,15 @@ func (p *Path) Route() Route {
 	defer p.mu.Unlock()
 	return Route{ID: p.id, Send: p.send, ICE: p.config.ICE}
 }
+
+// Hosts reports whether the server said, in ready or in its latest answer to
+// ice, that it has hosted rooms: only then is it sent a join with data or a
+// leave (contracts/rendezvous.md 2.1).
+func (p *Path) Hosts() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.config.Hosts
+}
 func (p *Path) send(ctx context.Context, to string, env proto.Envelope) error {
 	return p.write(ctx, encode(proto.Route{Type: "to", Key: to, Env: encode(env)}), toLimit)
 }
