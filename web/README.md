@@ -266,7 +266,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   random ids. Signing is left to WebCrypto, so in Safari two signatures of one payload differ.
 - **Preferences.** `prefs.theme` is `auto`, `light` or `dark`; `prefs.accent`, the theme colour,
   is one of `accents` (`daybreak`, the default, `rain`, `pool`, `shallows`, `shade`, `hills`,
-  `glow`, `firstlight`, `nightfall`); `prefs.lang` is `zh-CN` or `en`.
+  `glow`, `afterglow`, `firstlight`, `nightfall`); `prefs.lang` is `zh-CN` or `en`.
   Until the person changes a setting, the client follows the system theme and the browser
   language (any `zh` locale opens Chinese) on every visit: nothing is stored on load.
   `localStorage` (`sd-theme`, `sd-accent`, `sd-lang`) gets a value only when the person changes
@@ -279,10 +279,15 @@ file in `src/routes/`. It edits neither the shell nor another area:
   server reloads is, it is the same preference; made with other values, or as `theme`, `accent`
   or `lang`, it throws. `tokens.css` turns `data-theme` into
   `color-scheme`; every colour is a `light-dark()` pair. `accents.css` turns `data-accent` into
-  `--sky` and `--on-sky` (and, for `firstlight`, the waiting colours), from which `tokens.css` mixes the
-  soft fills, `--mine` and the focus ring; a swatch carries its own `data-accent`. The browser's own bar
+  `--hue` (with `--tint` for `afterglow` and `nightfall`), `--sky` and `--on-sky` (and, for `afterglow` and
+  `firstlight`, the waiting colours). `tokens.css` gives every surface (`--bg`, `--surface` to
+  `--surface-3`, `--raised`, `--raised-2`), the hairlines (`--line`, `--line-strong`) and the texts
+  (`--text` to `--text-3`) an OKLCH lightness and chroma of its own, with the hue `--hue`, so a
+  theme colour changes the whole page as plainly as light and dark do (`design/README.md`,
+  section 3.1), and mixes the soft fills, `--mine` and the focus ring from `--sky`; a swatch carries its own `data-accent`. The browser's own bar
   (`<meta name="theme-color">`) takes the colour `index.html` gives the theme shown, so a chosen
-  theme wins over the system scheme; the manifest colours stay fixed.
+  theme wins over the system scheme; that colour is the untinted page grey of before, and the
+  manifest colours stay fixed (`issues.md`).
 - **Wire types.** `src/lib/proto.ts` mirrors `internal/proto`: one `valibot` schema per message,
   with its TypeScript type inferred under the same name. An unknown field is dropped, as Go's
   `encoding/json` does, so a node that adds a field does not break an older client; a missing

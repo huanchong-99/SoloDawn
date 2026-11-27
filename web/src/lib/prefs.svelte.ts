@@ -19,6 +19,7 @@ export const accents = [
   'shade',
   'hills',
   'glow',
+  'afterglow',
   'firstlight',
   'nightfall',
 ] as const;

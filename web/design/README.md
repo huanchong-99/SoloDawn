@@ -14,9 +14,11 @@ hold.
 look premium and still be simple to anyone who sees it for the first time, with a chat that reads
 as naturally as the messengers people already use.
 
-- **Calm neutrals.** The page is near-white in the light theme and graphite in the dark one.
-  Navigation (the rail, the top bar, the group list) stands on the page colour and recedes; the
-  content (the chat, the side panel, cards, dialogs) stands on the card colour and leads.
+- **Calm, tinted paper.** The page is light paper in the light theme and deep ink in the dark one,
+  and both take the hue of the theme colour: a change of theme colour changes the whole page, as
+  plainly as a change between light and dark. Navigation (the rail, the top bar, the group list)
+  stands on the page colour and recedes; the content (the chat, the side panel, cards, dialogs)
+  stands on the card colour, the lightest in the light theme, and leads.
 - **One accent.** An indigo blue by default (the person may choose another theme colour, see
   "Theme colours" below), kept under the token name `--sky`, marks what can be acted on
   and what an AI is doing: primary buttons, links and mentions, the focus ring, the icon of the
@@ -53,30 +55,42 @@ I looked at its home page, and took only its level of finish: whitespace, corner
 ## 3. The design language
 
 All tokens are in `web/src/styles/tokens.css`, the shared styles in `web/src/styles/base.css`.
-Each colour is one line written as `light-dark(light value, dark value)` with 6-digit hex values,
-and soft fills are `color-mix(in srgb, var(--x) N%, var(--surface))`; the contrast scenario of
-`features/web_a11y.feature` reads that format. Switching themes changes only `color-scheme`.
+Each fixed colour is one line written as `light-dark(light value, dark value)` with 6-digit hex
+values. The surfaces, the hairlines and the texts are
+`light-dark(oklch(L calc(C * var(--tint)) var(--hue)), oklch(…))`: a lightness and a chroma of
+their own in each theme, the hue and the strength of the tint from the theme colour. Soft fills are
+`color-mix(in srgb, var(--x) N%, var(--surface))`. The contrast scenario of
+`features/web_a11y.feature` reads these formats. Switching themes changes only `color-scheme`.
 
 ### 3.1 Colours
 
-| Token           | Light     | Dark      | Use                                                                   |
-| --------------- | --------- | --------- | --------------------------------------------------------------------- |
-| `--bg`          | `#F5F6F8` | `#0D0E11` | rail, top bar, group list, page                                       |
-| `--surface`     | `#FFFFFF` | `#16171B` | chat canvas, side panel, cards, dialogs                               |
-| `--surface-2`   | `#F0F1F4` | `#1E2025` | others' bubbles, inset blocks, hover                                  |
-| `--surface-3`   | `#E4E6EB` | `#292B31` | pressed, tracks, disabled fill                                        |
-| `--raised`      | `#FFFFFF` | `#1E2025` | what is lifted off its ground: a selected row, a plain button, a menu |
-| `--line`        | `#E6E8EC` | `#2A2C32` | hairlines, card borders                                               |
-| `--line-strong` | `#7F8590` | `#6E737E` | input borders (3:1 or more)                                           |
-| `--text`        | `#15171C` | `#EDEEF0` | body text                                                             |
-| `--text-2`      | `#4A505B` | `#B6BAC3` | secondary text                                                        |
-| `--text-3`      | `#5C6270` | `#8F949F` | auxiliary text (still 4.5:1 or more)                                  |
-| `--sky`         | `#3A57E8` | `#8FA3FF` | the accent (the default theme colour)                                 |
-| `--dawn`        | `#F2A23A` | `#F4B256` | needs a person (fill)                                                 |
-| `--dawn-text`   | `#9A5300` | `#F4B256` | dawn-coloured text on an ordinary surface                             |
-| `--on-dawn`     | `#2A1A00` | `#2A1A00` | text on a dawn fill                                                   |
-| `--ok`          | `#12784A` | `#5ED193` | passed, finished, online                                              |
-| `--danger`      | `#C42F28` | `#FF8A80` | failed, the emergency stop                                            |
+The tinted tokens are given by their OKLCH lightness and chroma, and shown with the default theme
+colour (hue 268).
+
+| Token           | Light L / C   | Dark L / C    | Light     | Dark      | Use                                                                   |
+| --------------- | ------------- | ------------- | --------- | --------- | --------------------------------------------------------------------- |
+| `--bg`          | 0.958 / 0.017 | 0.165 / 0.030 | `#ECF1FD` | `#090E1B` | rail, top bar, group list, page                                       |
+| `--surface`     | 0.991 / 0.004 | 0.205 / 0.030 | `#FBFCFF` | `#111725` | chat canvas, side panel, cards, dialogs                               |
+| `--surface-2`   | 0.948 / 0.020 | 0.245 / 0.032 | `#E8EEFC` | `#1A2030` | others' bubbles, inset blocks                                         |
+| `--surface-3`   | 0.928 / 0.026 | 0.290 / 0.034 | `#E0E7F9` | `#242B3D` | hover, pressed, tracks, disabled fill                                 |
+| `--raised`      | 0.993 / 0.003 | 0.245 / 0.032 | `#FCFDFF` | `#1A2030` | what is lifted off its ground: a selected row, a plain button, a menu |
+| `--line`        | 0.905 / 0.030 | 0.300 / 0.040 | `#D7DFF4` | `#252D42` | hairlines, card borders                                               |
+| `--line-strong` | 0.600 / 0.035 | 0.560 / 0.040 | `#778096` | `#6A748D` | input borders (3:1 or more)                                           |
+| `--text`        | 0.210 / 0.020 | 0.950 / 0.008 | `#141822` | `#ECEEF4` | body text                                                             |
+| `--text-2`      | 0.430 / 0.035 | 0.800 / 0.025 | `#474F64` | `#B7BECE` | secondary text                                                        |
+| `--text-3`      | 0.500 / 0.040 | 0.680 / 0.035 | `#59637B` | `#8F98AF` | auxiliary text (still 4.5:1 or more)                                  |
+| `--sky`         |               |               | `#3A57E8` | `#8FA3FF` | the accent (the default theme colour)                                 |
+| `--dawn`        |               |               | `#F2A23A` | `#F4B256` | needs a person (fill)                                                 |
+| `--dawn-text`   |               |               | `#9A5300` | `#F4B256` | dawn-coloured text on an ordinary surface                             |
+| `--on-dawn`     |               |               | `#2A1A00` | `#2A1A00` | text on a dawn fill                                                   |
+| `--ok`          |               |               | `#117246` | `#5ED193` | passed, finished, online                                              |
+| `--danger`      |               |               | `#BB2C25` | `#FF8A80` | failed, the emergency stop                                            |
+
+Lightness alone sets the steps between the surfaces and the contrast of every text, so both are
+the same in every theme colour; the hue changes, and the chroma with `--tint`. A light surface can
+carry little chroma before it leaves sRGB (near white, about 0.004 for blue), a dark one much
+more, so the dark theme carries the stronger tint. Every tinted token stays inside sRGB for every
+theme colour (`features/web_a11y.feature`), so all browsers draw the same colour.
 
 `--sky-soft`, `--dawn-soft`, `--ok-soft` and `--danger-soft` are mixed from the semantic colour and
 the card colour; `--mine` (14% of the accent) is the person's own bubble; `--need-line` is the
@@ -85,40 +99,56 @@ step lighter (`--raised`) with its hairline.
 
 ### Theme colours
 
-The settings page offers nine theme colours as a row of swatches; each replaces `--sky` and
-`--on-sky` (`src/styles/accents.css`), and everything mixed from the accent follows. The set
-covers the accent colours people know from their systems and apps (macOS: blue, purple, pink,
-yellow, green, graphite; Telegram's palette adds cyan; Todoist's themes are the same families).
-Red and orange are left out: red is the failure and the emergency stop, and orange at text
-contrast is the same brown as amber. The names are SoloDawn's own: scenes of a day from dawn to
-night, which echo the product's name, not the colour words other products use.
+The settings page offers ten theme colours as a row of swatches; each sets the accent `--sky`,
+`--on-sky` and the hue of the page `--hue` (`src/styles/accents.css`), and everything tinted or
+mixed from them follows. The set covers the accent colours people know from their systems and
+apps (macOS: blue, purple, pink, yellow, green, graphite; Telegram's palette adds cyan; Todoist's
+themes are the same families), and one warm theme: cream paper and warm brown ink with a clay
+accent. Pure red and orange are left out: red is the failure and the emergency stop, and orange
+at text contrast is the same brown as amber. The names are SoloDawn's own: scenes of a day from
+dawn to night, which echo the product's name, not the colour words other products use.
 
-| Theme colour            | Id           | Light     | Dark      |
-| ----------------------- | ------------ | --------- | --------- |
-| 黎明 Daybreak (default) | `daybreak`   | `#3A57E8` | `#8FA3FF` |
-| 雨后 After rain         | `rain`       | `#46668C` | `#8FADD6` |
-| 深潭 Deep pool          | `pool`       | `#155F72` | `#5AAEC4` |
-| 浅湾 Shallows           | `shallows`   | `#00735F` | `#4FC4A2` |
-| 林荫 Tree shade         | `shade`      | `#387026` | `#8ABD70` |
-| 远山 Far hills          | `hills`      | `#7A4E93` | `#BB98CF` |
-| 朝霞 Morning glow       | `glow`       | `#B52C62` | `#F58BAD` |
-| 晨曦 First light        | `firstlight` | `#985800` | `#E0A24C` |
-| 夜幕 Nightfall          | `nightfall`  | `#434A57` | `#ADB3BD` |
+| Theme colour            | Id           | Light     | Dark      | Page hue | Tint |
+| ----------------------- | ------------ | --------- | --------- | -------- | ---- |
+| 黎明 Daybreak (default) | `daybreak`   | `#3A57E8` | `#8FA3FF` | 268      | 1    |
+| 雨后 After rain         | `rain`       | `#46668C` | `#8FADD6` | 250      | 1    |
+| 深潭 Deep pool          | `pool`       | `#155F72` | `#5AAEC4` | 220      | 1    |
+| 浅湾 Shallows           | `shallows`   | `#00735F` | `#4FC4A2` | 178      | 1    |
+| 林荫 Tree shade         | `shade`      | `#387026` | `#8ABD70` | 140      | 1    |
+| 远山 Far hills          | `hills`      | `#7A4E93` | `#BB98CF` | 312      | 1    |
+| 朝霞 Morning glow       | `glow`       | `#B52C62` | `#F58BAD` | 355      | 1    |
+| 余晖 Afterglow          | `afterglow`  | `#A3492A` | `#E8956F` | 82       | 0.6  |
+| 晨曦 First light        | `firstlight` | `#985800` | `#E0A24C` | 88       | 1    |
+| 夜幕 Nightfall          | `nightfall`  | `#434A57` | `#ADB3BD` | 262      | 0.25 |
+
+- The page hue is the accent's own OKLCH hue, except for the two warm themes: afterglow's paper is
+  warm ivory (82, at 0.6 tint for low chroma) under a clay accent (40 to 45), and first light's a
+  yellower gold (88) than its accent, so the two warm pages stay apart. Nightfall keeps a quarter of
+  the tint: a cool grey page.
+- Afterglow is the evening counterpart of morning glow, the last warm light of the day; it sits
+  between morning glow and first light, by hue.
 
 - Daybreak stays the default: it is the accent the redesign was approved with, and the first stop
-  of the horizon line of the logo. `src/lib/prefs.test.ts` holds its two values, so a person who
-  never chose sees no change.
-- Every theme colour passes the same contrast pairs as the default in both themes, the accent
-  also 4.5:1 on the pressed fill `--surface-3` and 3:1 against the hairline and the inset fill, so
-  that the neutral nightfall still shows the focus ring and a chosen border.
+  of the horizon line of the logo. `src/lib/prefs.test.ts` holds its values, so a person who never
+  chose keeps its blue.
+- Each theme colour tints the whole page, not only what can be acted on: the surfaces, the
+  hairlines and the texts take its hue (section 3.1). The person sees the new colour at
+  once when they choose one; the page cross-fades to it where the browser has view transitions,
+  and changes at once under reduced motion.
+- Every theme colour passes the same contrast pairs as the default in both themes: each text,
+  the accent, dawn's text and the result colours 4.5:1 on every surface (`--bg`, `--surface`,
+  `--surface-2`, `--surface-3`, `--raised`, `--raised-2`, `--mine`, `--sky-soft`), and the accent
+  3:1 against the hairline and the inset fill, so that the neutral nightfall still shows the
+  focus ring and a chosen border.
 - Any two theme colours are at least 17 apart in CIE Lab (ΔE 1976) in each theme, so no two
   swatches read as one.
-- With first light as the accent, dawn turns magenta (`#D94AA3` / `#F08AC8`, text `#A8226F` /
-  `#F08AC8`): still warm and loud, and about 70° of hue from the accent. It is 40° from the red of
+- With first light or afterglow as the accent, dawn turns magenta (`#D94AA3` / `#F08AC8`, text
+  `#A8226F` / `#F08AC8`): still warm and loud, about 70° of hue from first light and 54° from
+  afterglow. It is 40° from the red of
   a failure, a little further than the default amber is (30°). The waiting signal stays at least
   45° of hue from the accent in every theme colour (`features/a11y.spec.ts`).
-- Some accents sit near a result colour: morning glow is 25° of hue from the red of a failure,
-  shallows 16° from the green of a passed result, tree shade 48° from it. The state glyphs and the
+- Some accents sit near a result colour: afterglow is 13° of hue from the red of a failure,
+  morning glow 25°, shallows 16° from the green of a passed result, tree shade 48° from it. The state glyphs and the
   words beside them tell them apart (`issues.md`).
 - A swatch is a radio named by its colour; the chosen one has a ring in its colour and a tick.
 

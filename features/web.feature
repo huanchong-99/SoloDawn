@@ -58,7 +58,7 @@ Feature: Web client
   Scenario: The theme colour choice is applied and remembered
     Given the browser supports Ed25519 in WebCrypto
     And the person opens the client at "#/settings"
-    Then the theme colours are radios named "黎明", "雨后", "深潭", "浅湾", "林荫", "远山", "朝霞", "晨曦", "夜幕", and "黎明" is chosen
+    Then the theme colours are radios named "黎明", "雨后", "深潭", "浅湾", "林荫", "远山", "朝霞", "余晖", "晨曦", "夜幕", and "黎明" is chosen
     When the person chooses the theme colour "晨曦"
     Then the page uses the "firstlight" theme colour and the settings name "晨曦" as chosen
     And the page uses the "firstlight" theme colour after the client is opened again
