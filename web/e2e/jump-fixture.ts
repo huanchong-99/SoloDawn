@@ -30,9 +30,11 @@ const home = new LateHome();
 
 async function cast() {
   home.add(g, 'Website');
-  const say = (i: number) => home.say(g, owner, `Message ${i}: ${'text '.repeat(i % 7)}`);
-  for (let i = 0; i < 39; i += 1) say(i);
-  home.write(g, example('row-msg-approval-approved', { id: card, ts: Date.now() }));
+  const old = Date.now() - 3 * 86_400_000;
+  const say = (i: number, ts = Date.now()) =>
+    home.say(g, owner, `Message ${i}: ${'text '.repeat(i % 7)}`, { ts });
+  for (let i = 0; i < 39; i += 1) say(i, old - (40 - i) * 1_000);
+  home.write(g, example('row-msg-approval-approved', { id: card, ts: old }));
   for (let i = 39; i < 199; i += 1) say(i);
   const me = browser(home);
   homes.push(me.store);

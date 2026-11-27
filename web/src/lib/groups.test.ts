@@ -1,4 +1,6 @@
+import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { watch } from '../../features/watch.svelte';
 import {
   creating,
   find,
@@ -560,6 +562,75 @@ describe('pages', () => {
     // Nor is a page asked for after a read that did not end: nothing says what is held is whole.
     void group.older();
     expect(asked).toHaveLength(2);
+  });
+
+  it('names the gap of the main line, reacts as pages land, and drops to 0 at the end', async () => {
+    const { link, group, asked } = joined();
+    const seen: number[] = [];
+    const stop = watch(() => {
+      seen.push(group.gap);
+    });
+    flushSync();
+    try {
+      expect(group.gap).toBe(0);
+      const newest = Array.from({ length: 48 }, (_, i) => text(`m${i}`, 730 + i));
+      link.push(rows(text('b', 720), text('a', 705), ...newest));
+      flushSync();
+      // Nothing is fixed until the read reaches `synced`.
+      expect(group.gap).toBe(0);
+
+      asked[0].answer(synced(815));
+      await settle();
+      flushSync();
+      expect(group.gap).toBe(705);
+
+      const sought = group.seek('card');
+      asked[1].answer(fetched([text('card', 5)], false));
+      await sought;
+      flushSync();
+      expect(group.gap).toBe(705);
+
+      // Arriving live messages never move `#floor`.
+      link.push(rows(text('m48', 816), text('m49', 817)));
+      flushSync();
+      expect(group.gap).toBe(705);
+
+      void group.older();
+      asked[2].answer(fetched([text('p', 650)], true));
+      await settle();
+      flushSync();
+      expect(group.gap).toBe(650);
+
+      void group.older();
+      asked[3].answer(fetched([text('start', 1)], false));
+      await settle();
+      flushSync();
+      expect(group.gap).toBe(0);
+      expect(seen).toEqual([0, 705, 650, 0]);
+    } finally {
+      stop();
+    }
+  });
+
+  it('clears the gap floor after a reconnect read so paged history is not marked above', async () => {
+    const { home, link, group, asked } = joined();
+    const initial = Array.from({ length: 50 }, (_, i) => text(`m${i}`, 1000 + i));
+    link.push(rows(...initial));
+    asked[0].answer(synced(1050));
+    await settle();
+    expect(group.gap).toBe(1000);
+
+    void group.older();
+    const page = Array.from({ length: 50 }, (_, i) => text(`p${i}`, 950 + i)).reverse();
+    asked[1].answer(fetched(page, true));
+    await settle();
+    expect(group.gap).toBe(950);
+
+    link.offline();
+    const again = connect(home);
+    again.asked[0].answer(synced(1050));
+    await settle();
+    expect(group.gap).toBe(0);
   });
 });
 

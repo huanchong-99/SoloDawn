@@ -474,7 +474,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     page ends the paging; a page the home refuses stops it (`failed`) until the group is read
     again; a page that arrives after a later read, or after its connection is gone, is dropped.
     `paging(thread)` says whether more may exist, whether a page is on its way, and whether one
-    can be asked for (`ready`).
+    can be asked for (`ready`). `gap` is the `pos` where the next page of the main line starts
+    (starting from the oldest of the newest 50 held), or `0` once its last page is in; messages of
+    the main line with a lower `pos` stand above a gap.
   - The lists and lookups: `main` and `thread(task)` in `pos` order, `members` by name,
     `member(id)`, `nameOf(id)` (the name to show: of a member that left, the name of the last row
     this page held of it, else "Former member"), `personName(user)` (also of a person who left
@@ -504,8 +506,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     line on a band of the page's colour, under which the messages pass. A jump to a message puts
     it in the middle of the main line, as far as the line reaches, and keeps it there while pages
     and messages arrive above and below it, until the person scrolls the line, sends a message or
-    jumps elsewhere; the browser's scroll anchoring is off meanwhile. A message the jump puts at
-    the end of the line is not held: the line keeps it and the newest in view. A message within five
+    jumps elsewhere; the browser's scroll anchoring is off meanwhile. The top edge always, and
+    while `group.gap` is non-zero any message with `pos < group.gap` and any day whose messages all
+    lie above the gap, disable scroll anchoring (`overflow-anchor: none`), so a page landing at the
+    top or in a gap below a card fetched alone leaves what is read below it in place. A message the
+    jump puts at the end of the line is not held: the line keeps it and the newest in view. A message within five
     minutes of the one before it, by the same author, is drawn under it without a head; its time
     shows under the pointer, and for all such messages while keyboard focus is on the main line
     or on a button of the chat. That, and the focus ring of the main line, are for someone who
