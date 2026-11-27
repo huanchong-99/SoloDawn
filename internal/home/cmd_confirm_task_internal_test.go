@@ -77,7 +77,9 @@ func TestRoleActivationNamesTheLatestReview(t *testing.T) {
 	}
 	d := cftThreadDisk{thread: []proto.MsgRow{msg("p", "progress"), msg("late", "review"), msg("early", "review")}}
 	cardTestSame(t, cftActivation(d, task, "a"), []Item{{AI: "a", Why: itemAssign, Task: "t", Msg: "late"}})
-	d.thread = d.thread[:1]
+	d.thread = d.thread[1:]
+	cardTestSame(t, cftActivation(d, task, "a"), []Item{{AI: "a", Why: itemAssign, Task: "t", Msg: "late"}})
+	d.thread = []proto.MsgRow{msg("p", "progress")}
 	cardTestSame(t, cftActivation(d, task, "a"), []Item{{AI: "a", Why: itemAssign, Task: "t", Msg: "t"}})
 }
 

@@ -1513,4 +1513,12 @@ describe('simulate', () => {
     expect(clients).toHaveLength(1);
     simulate(() => undefined);
   });
+
+  it('is not taken outside a development server', () => {
+    vi.stubEnv('DEV', false);
+    simulate(() => ({ close() {} }) as Session);
+    vi.unstubAllEnvs();
+    session = connect({ urls: [rv], device, known, name: 'demo' });
+    expect(clients).toHaveLength(1);
+  });
 });

@@ -63,7 +63,7 @@ function folderOf(group: Group, task: TaskRow) {
 function busyHold(group: Group, task: TaskRow): string | undefined {
   const folder = folderOf(group, task);
   const holders = tasksOf(group).filter(
-    (other) => other !== task && hasSession(other) && folderOf(group, other) === folder,
+    (other) => hasSession(other) && folderOf(group, other) === folder,
   );
   return holders.length ? t('task.hold.busy').replace('{tasks}', nums(holders)) : undefined;
 }
@@ -85,7 +85,7 @@ const holdTexts: Partial<
   depends: dependsHold,
   busy: busyHold,
   manual: (group, task) =>
-    t('task.hold.manual').replace('{who}', () => group.nameOf(task.wait?.by)),
+    t('task.hold.manual').replace('{who}', () => group.nameOf(task.wait!.by)),
   failed: (group) => t(isAdmin(group) ? 'task.hold.failed.admin' : 'task.hold.failed'),
 };
 

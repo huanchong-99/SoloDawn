@@ -207,9 +207,7 @@ func takeoverTarget(h *Host, slot aiSlot, ai aiInfo, taskID string) (routedTarge
 	if taskID != "" {
 		return namedTarget(h, target)
 	}
-	if target.key.Task = lastTask(h, slot); target.key.Task == "" {
-		target.kind = GroupSession
-	}
+	target.key.Task = lastTask(h, slot)
 	return target, nil
 }
 

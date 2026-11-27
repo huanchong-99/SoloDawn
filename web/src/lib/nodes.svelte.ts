@@ -106,8 +106,7 @@ export class Nodes {
    *  connection (contracts/step-2/people.md section 7, point 2). */
   tell(homes: readonly Home[]) {
     const groups = homes.flatMap((home) => home.groups).filter(unheard);
-    for (const [node] of this.infos)
-      for (const group of groups) if (group.home !== node) this.#tell(node, group);
+    for (const [node] of this.infos) for (const group of groups) this.#tell(node, group);
   }
 
   #tell(node: Home, { g, name, home }: Group) {

@@ -415,7 +415,8 @@ func tskLatestReview(d Disk, taskID string) string {
 	var before int64
 	for {
 		page := d.Thread(&taskID, before, tskPage)
-		if i := slices.IndexFunc(page, func(m proto.MsgRow) bool { return m.Kind == revKindReview }); i >= 0 {
+		i := slices.IndexFunc(page, func(m proto.MsgRow) bool { return m.Kind == revKindReview })
+		if i >= 0 {
 			return page[i].ID
 		}
 		if len(page) < tskPage {

@@ -919,9 +919,11 @@ func TestNonBlockingPushHandlersAndLockOrder(t *testing.T) {
 	verifyHoldLockNotUnderDeliveryMutex(t, r)
 }
 
-// A command the host sends by itself waits for its home one minute at most.
+// A command the host sends by itself waits for its home one minute at most,
+// and only a failed one is logged.
 func verifyHostCommandIsBounded(t *testing.T, r *deliverRig) {
 	t.Helper()
+	logs := captureLogs(t)
 	var hasDeadline bool
 	var remaining time.Duration
 	r.home.mu.Lock()
@@ -936,6 +938,16 @@ func verifyHostCommandIsBounded(t *testing.T, r *deliverRig) {
 	err := sendHostCommand(context.Background(), r.h, r.homeKey.ID(), marshalWire(hostTaskCommand(r.h, testGroup1, "resume", testTask1)))
 	if err != nil || !hasDeadline || remaining <= 30*time.Second || remaining > time.Minute {
 		t.Fatalf("expected 1m bounded context on h.Command, got %v ok=%v remaining=%v", err, hasDeadline, remaining)
+	}
+	if strings.Contains(logs.String(), "host: command to") {
+		t.Fatalf("a command the home took was logged: %q", logs.String())
+	}
+	r.home.mu.Lock()
+	r.home.onCmd = func(context.Context, proto.Cmd) (json.RawMessage, error) { return nil, errors.New("home down") }
+	r.home.mu.Unlock()
+	err = sendHostCommand(context.Background(), r.h, r.homeKey.ID(), marshalWire(hostTaskCommand(r.h, testGroup1, "resume", testTask1)))
+	if err == nil || !strings.Contains(logs.String(), "host: command to "+r.homeKey.ID()+": "+err.Error()) {
+		t.Fatalf("a failed command = %v, logs %q", err, logs.String())
 	}
 	r.home.mu.Lock()
 	r.home.onCmd = nil
