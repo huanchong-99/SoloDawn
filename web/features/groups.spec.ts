@@ -2,6 +2,7 @@ import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { flushSync } from 'svelte';
 import { expect, vi } from 'vitest';
 import { homes, type Group } from '../src/lib/groups.svelte';
+import { goldens } from '../src/lib/mock';
 import * as p from '../src/lib/proto';
 import { browser, example, ownedNode, owner, TestHome, user, type OwnedNode } from './home';
 import CreateGroup from '../src/components/groups/CreateGroup.svelte';
@@ -208,6 +209,24 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       });
     },
   );
+
+  Scenario('The group list offers to join a group by code', ({ When, Then }) => {
+    When('the reader opens the group list', () => openPage());
+    Then(
+      '"Join a group" beside "New group" opens the join page, which asks for an invitation code and a name',
+      () => {
+        expect(texts('.head :is(a, button)')).toEqual(['New group', 'Join a group']);
+        const link = one<HTMLAnchorElement>('.head a');
+        expect(link.getAttribute('href')).toBe('#/join');
+        go(link.getAttribute('href')!);
+        expect(text('main h1')).toBe('Join a group');
+        expect(texts('main form label span')).toEqual([
+          'Invitation code',
+          'Your name in this group',
+        ]);
+      },
+    );
+  });
 
   Scenario('The list shows a task and a notice as the chat words them', ({ Given, When, Then }) => {
     Given(
@@ -439,6 +458,121 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     flushSync();
   }
+
+  const coded = JSON.parse(goldens['cmd-code']) as { code: string; expires: number };
+  /** Opens the dialog, names the group "Notes" and its maker "Alex", ticks the code and creates
+   *  it, the code chosen for `hours` when given. */
+  function createWithCode(hours?: string) {
+    openPage();
+    one('.head button').click();
+    flushSync();
+    const [name, member] = all<HTMLInputElement>('dialog input.input');
+    fill(name, 'Notes');
+    fill(member, 'Alex');
+    expect(all('dialog .seg')).toEqual([]);
+    one<HTMLInputElement>('dialog .code-pick input[type=checkbox]').click();
+    flushSync();
+    expect(texts('dialog .code-pick label')).toEqual([
+      'Also make an invitation code',
+      '1 hour',
+      '24 hours',
+      '7 days',
+    ]);
+    if (hours)
+      all<HTMLInputElement>('dialog .seg input')
+        .find((input) => input.closest('label')!.textContent!.trim() === hours)!
+        .click();
+    flushSync();
+    one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  }
+  const made = () =>
+    home.asked
+      .filter((req) => req.t === 'cmd')
+      .map((req) => {
+        const { n: _n, ts: _ts, ...fields } = signed(req);
+        return fields;
+      });
+  const footer = () => texts('dialog footer button');
+  /** Where the page scrolls an element into view, from now on. */
+  const scrolled = () =>
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {});
+
+  Scenario(
+    'A group made with an invitation code shows the code before the dialog closes',
+    ({ When, Then, And }) => {
+      When(
+        'the person ticks "Also make an invitation code", chooses 7 days and creates the group "Notes"',
+        async () => {
+          home.reply = (payload) =>
+            payload.t === 'code' ? { ok: true, code: coded.code, expires: coded.expires } : {};
+          const scroll = scrolled();
+          createWithCode('7 days');
+          await vi.waitFor(() => expect(made()).toHaveLength(2));
+          // Below a long dialog's sticky footer the code would not be seen: it is brought up.
+          await vi.waitFor(() => expect(scroll.mock.contexts).toEqual([one('dialog .made')]));
+          expect(one('dialog .made .code-card')).not.toBeNull();
+          expect(scroll.mock.calls).toEqual([[{ block: 'nearest', behavior: 'instant' }]]);
+        },
+      );
+      Then('the home has made "Notes" and then a code for 168 hours', () => {
+        const [create, code] = made();
+        expect(create).toMatchObject({ t: 'group', op: 'create', name: 'Notes' });
+        expect(code).toEqual({ t: 'code', g: create.g, op: 'new', hours: 168 });
+      });
+      And(
+        'the dialog shows the code with "Copy code", and its one button reads "Open the group"',
+        async () => {
+          await vi.waitFor(() => expect(text('dialog .code-card output')).toBe(coded.code));
+          expect(texts('dialog .code-card button')).toEqual(['Copy code', 'Copy invitation']);
+          expect(footer()).toEqual(['Open the group']);
+          expect(one<HTMLDialogElement>('dialog').open).toBe(true);
+          expect(all('dialog .warn')).toEqual([]);
+          expect(one<HTMLInputElement>('dialog .code-pick input').disabled).toBe(true);
+        },
+      );
+      When('the person presses "Open the group"', () => {
+        one<HTMLButtonElement>('dialog footer button').click();
+        flushSync();
+      });
+      Then('the chat of "Notes" opens', async () => {
+        await vi.waitFor(() => expect(location.hash).toBe(`#/groups/${made()[0].g}`));
+        expect(one<HTMLDialogElement>('dialog').open).toBe(false);
+      });
+    },
+  );
+
+  Scenario(
+    'A code the home refuses after making the group is said in the dialog',
+    ({ When, Then, And }) => {
+      When(
+        'the person ticks "Also make an invitation code", creates the group "Notes", and the home refuses the code',
+        async () => {
+          home.reply = () => ({ err: { code: 'forbidden', msg: 'refused by the test' } });
+          const scroll = scrolled();
+          createWithCode();
+          await vi.waitFor(() => expect(scroll.mock.contexts).toEqual([one('dialog .made')]));
+          expect(one('dialog .made .fail')).not.toBeNull();
+          await vi.waitFor(() => expect(made()).toHaveLength(2));
+          expect(made()[1]).toMatchObject({ t: 'code', op: 'new', hours: 24 });
+        },
+      );
+      Then(
+        'the dialog says why the code was not made, and not that someone could not be added',
+        async () => {
+          await vi.waitFor(() =>
+            expect(texts('dialog [role=alert]')).toEqual([
+              'Not sent: this device may not do that.',
+            ]),
+          );
+          expect(texts('dialog [role=status]')).toEqual([]);
+          expect(all('dialog .code-card')).toEqual([]);
+        },
+      );
+      And('its one button reads "Open the group"', () =>
+        expect(footer()).toEqual(['Open the group']),
+      );
+    },
+  );
 
   Scenario(
     'The dialog sends to the computer that was chosen, whatever happens to the others',

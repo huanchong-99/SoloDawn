@@ -6,6 +6,7 @@ import { cliName } from './onboard.svelte';
 import { t, type Key } from './prefs.svelte';
 import type {
   AIMemberRow,
+  Code,
   ErrorResponse,
   HostInfoPush,
   HostJoin,
@@ -391,26 +392,67 @@ export async function addPerson(home: Home, g: string, { user, name }: Known) {
   return answer.err;
 }
 
-/** What the create dialog chose (contracts/commands.md 1.1). */
+/** A group's open invitation code, as shown, and when it ends (contracts/step-2/people.md 2.6). */
+export interface OpenCode {
+  code: string;
+  expires: number;
+}
+
+/** The lifetimes a code is made for, in hours: 1 hour, 24 hours (the default) and 7 days. */
+export const lifetimes = [1, 24, 168] as const;
+
+/** Sends `code` to the home of group `g`: `new` for `hours`, `off` or `show`. Answers the
+ *  refusal, or the code open after it, which is none after `off` and while none is open. A `new`
+ *  sent again is answered from its receipt without the code, and is followed by `show`
+ *  (contracts/step-2/people.md 2.6). */
+export async function sendCode(
+  home: Home,
+  g: string,
+  op: Code['op'],
+  hours?: number,
+): Promise<{ err?: Refusal; open?: OpenCode }> {
+  const answer = await home.command({ t: 'code', g, op, hours });
+  if (answer.err) return { err: answer.err };
+  if (answer.code) return { open: { code: answer.code, expires: answer.expires! } };
+  return op === 'new' ? sendCode(home, g, 'show') : {};
+}
+
+/** When an open code ends, as its status says it: "Valid until 18:00". */
+export const codeUntil = ({ expires }: OpenCode, lang: string) =>
+  t('people.code.until').replace('{time}', clockOn(expires, now(), lang));
+
+/** The invitation to copy for group `group`: one line that says where to type the code and until
+ *  when, with the date, since it is read on another day; then the code on a line of its own. */
+export const invitationText = (group: string, { code, expires }: OpenCode, lang: string) =>
+  t('people.code.invitation')
+    .replace('{group}', () => group)
+    .replace('{time}', clockOn(expires, 0, lang))
+    .replace('{code}', code);
+
+/** What the create dialog chose (contracts/commands.md 1.1), and the lifetime of the invitation
+ *  code to make with the group, if one is. */
 export interface Founding extends NewGroup {
   people: Known[];
   ais: NewAI[];
+  hours?: number;
 }
 
-/** Where making a group stopped: `group create`, or the person or AI at `index` of its list. */
+/** Where making a group stopped: `group create`, the person or AI at `index` of its list, or the
+ *  invitation code. */
 export interface Stop {
-  step: 'group' | 'people' | 'ais';
+  step: 'group' | 'people' | 'ais' | 'code';
   index: number;
   err: Refusal;
 }
 
 /** Creates a group on `home`, then adds each person and joins each AI, one at a time, in the
- *  order chosen (contracts/commands.md 1.1). Nothing in it is atomic: the first refusal stops it,
- *  and is answered with where it came; what came before it stays done. */
+ *  order chosen, then makes the invitation code when `hours` is given (contracts/commands.md 1.1).
+ *  Nothing in it is atomic: the first refusal stops it, and is answered with where it came; what
+ *  came before it stays done. */
 export async function found(
   home: Home,
-  { people, ais, ...named }: Founding,
-): Promise<{ g: string; stopped?: Stop }> {
+  { people, ais, hours, ...named }: Founding,
+): Promise<{ g: string; stopped?: Stop; code?: OpenCode }> {
   const { g, answer } = await home.create(named);
   if (answer.err) return { g, stopped: { step: 'group', index: 0, err: answer.err } };
   for (const [index, person] of people.entries()) {
@@ -421,5 +463,16 @@ export async function found(
     const err = await joinGroup(g, home.device, ai);
     if (err) return { g, stopped: { step: 'ais', index, err } };
   }
-  return { g };
+  return withCode(home, g, hours);
+}
+
+/** The last step of `found`: the new group's invitation code, when it is to have one. */
+async function withCode(
+  home: Home,
+  g: string,
+  hours: number | undefined,
+): Promise<{ g: string; stopped?: Stop; code?: OpenCode }> {
+  if (!hours) return { g };
+  const { err, open } = await sendCode(home, g, 'new', hours);
+  return err ? { g, stopped: { step: 'code', index: 0, err } } : { g, code: open };
 }

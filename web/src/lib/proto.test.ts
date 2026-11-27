@@ -910,6 +910,12 @@ describe('mock connection', () => {
     expect(invited).toStrictEqual({ ...JSON.parse(goldens['cmd-invite-link']), re: 6 });
     const noted = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['note-preset'])) });
     expect(noted).toStrictEqual({ ...JSON.parse(goldens['cmd-noted']), re: 7 });
+    for (const [i, name] of ['code-new', 'code-show'].entries()) {
+      const code = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens[name])) });
+      expect(code).toStrictEqual({ ...JSON.parse(goldens['cmd-code']), re: 8 + i });
+    }
+    const off = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['code-off'])) });
+    expect(off).toStrictEqual({ re: 10, ok: true });
     expect(seen).toEqual(['groups', 'groups']);
   });
 });

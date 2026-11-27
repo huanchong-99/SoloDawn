@@ -23,6 +23,10 @@ Feature: Group list and group cache of the web client
     And both browsers list "Handbook" without a reload
     And the first browser has opened its chat
 
+  Scenario: The group list offers to join a group by code
+    When the reader opens the group list
+    Then "Join a group" beside "New group" opens the join page, which asks for an invitation code and a name
+
   Scenario: The list shows a task and a notice as the chat words them
     Given the last message of "Website" is the task T-12 "Show connection path", and the home also holds "Docs", whose last message says that "Mina" joined
     When the browser has read both groups
@@ -48,6 +52,18 @@ Feature: Group list and group cache of the web client
     And its chat says neither its kind nor how many members it has
     When that computer connects, with "Mina: Section 3 is in." in "Docs"
     Then the list shows "Docs" with "Mina: Section 3 is in."
+
+  Scenario: A group made with an invitation code shows the code before the dialog closes
+    When the person ticks "Also make an invitation code", chooses 7 days and creates the group "Notes"
+    Then the home has made "Notes" and then a code for 168 hours
+    And the dialog shows the code with "Copy code", and its one button reads "Open the group"
+    When the person presses "Open the group"
+    Then the chat of "Notes" opens
+
+  Scenario: A code the home refuses after making the group is said in the dialog
+    When the person ticks "Also make an invitation code", creates the group "Notes", and the home refuses the code
+    Then the dialog says why the code was not made, and not that someone could not be added
+    And its one button reads "Open the group"
 
   Scenario: The dialog sends to the computer that was chosen, whatever happens to the others
     Given the person owns a second computer, "laptop", which is connected

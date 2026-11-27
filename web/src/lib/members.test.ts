@@ -6,21 +6,25 @@ import {
   aiMembers,
   candidatesOf,
   canMakeSecretary,
+  codeUntil,
   humanMembers,
   addPerson,
   found,
   freeName,
   hasAI,
+  invitationText,
   isAdmin,
   joinError,
   joinGroup,
   knownPeople,
+  lifetimes,
   nameClash,
   openTasks,
   otherWaiter,
   pathLabel,
   personTags,
   selectableCandidates,
+  sendCode,
   statusOf,
   suggestedName,
   taskWaitKind,
@@ -1210,6 +1214,94 @@ describe('people and groups made with them', () => {
       });
       expect(sent).toHaveLength(at);
     }
+  });
+});
+
+describe('the invitation code of a group', () => {
+  const golden = JSON.parse(goldens['cmd-code']) as { code: string; expires: number };
+  const open = { code: golden.code, expires: golden.expires };
+
+  /** A home whose answers are given in turn; what it was sent, without `n` and `ts`. */
+  function answering(...answers: object[]) {
+    const home = makeHome();
+    const sent: Record<string, unknown>[] = [];
+    home.ctl = makeOnlineCtl(async (req) => {
+      const { n: _n, ts: _ts, ...fields } = JSON.parse((req as { env: p.Envelope }).env.p);
+      sent.push(fields);
+      return { re: sent.length, ...answers[sent.length - 1] };
+    });
+    return { home, sent };
+  }
+
+  it('offers 1 hour, 24 hours and 7 days', () => expect(lifetimes).toEqual([1, 24, 168]));
+
+  it('makes a code for its hours and answers it', async () => {
+    const { home, sent } = answering(JSON.parse(goldens['cmd-code']));
+    expect(await sendCode(home, gid, 'new', 168)).toEqual({ open });
+    expect(sent).toEqual([{ t: 'code', g: gid, op: 'new', hours: 168 }]);
+    expect(p.decode(p.Code, JSON.stringify({ ...sent[0], n: gid, ts: 1 }))).toBeTruthy();
+  });
+
+  it('shows the code a repeated new was answered without', async () => {
+    const { home, sent } = answering({ ok: true }, { ok: true, ...open });
+    expect(await sendCode(home, gid, 'new', 24)).toEqual({ open });
+    expect(sent).toEqual([
+      { t: 'code', g: gid, op: 'new', hours: 24 },
+      { t: 'code', g: gid, op: 'show' },
+    ]);
+  });
+
+  it.each(['off', 'show'] as const)('answers no code after %s with no field', async (op) => {
+    const { home, sent } = answering({ ok: true });
+    expect(await sendCode(home, gid, op)).toEqual({});
+    expect(sent).toEqual([{ t: 'code', g: gid, op }]);
+  });
+
+  it('answers the refusal', async () => {
+    const err = { code: 'forbidden', msg: 'not an admin' };
+    const { home } = answering({ err }, { ok: true, ...open });
+    expect(await sendCode(home, gid, 'new', 24)).toEqual({ err });
+  });
+
+  it('says until when a code is valid, and the invitation with its date and the code alone on its last line', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const expires = new Date(2026, 10, 28, 18, 5).getTime();
+      vi.setSystemTime(new Date(2026, 10, 28, 9, 0));
+      prefs.lang = 'en';
+      expect(codeUntil({ ...open, expires }, 'en')).toBe('Valid until 18:05');
+      expect(invitationText('Web $& team', { ...open, expires }, 'en')).toBe(
+        `Join the group "Web $& team" in SoloDawn: on the group list choose "Join a group" and enter this code (valid until Nov 28, 18:05):\n${open.code}`,
+      );
+      vi.setSystemTime(new Date(2026, 10, 27, 9, 0));
+      expect(codeUntil({ ...open, expires }, 'en')).toBe('Valid until Nov 28, 18:05');
+      prefs.lang = 'zh-CN';
+      expect(codeUntil({ ...open, expires }, 'zh-CN')).toBe('11月28日 18:05 失效');
+      expect(invitationText('网站', { ...open, expires }, 'zh-CN')).toBe(
+        `用 SoloDawn 加入群「网站」：在群列表点「加入群」，输入下面的邀请码（11月28日 18:05 前有效）：\n${open.code}`,
+      );
+    } finally {
+      prefs.lang = 'en';
+      vi.useRealTimers();
+    }
+  });
+
+  it('makes the code after the people and AIs of a new group, and says where it stopped', async () => {
+    const created = { ok: true };
+    const founding = { name: 'Docs', member_name: 'Alex', people: [], ais: [], hours: 1 };
+    const made = answering(created, { ok: true, ...open });
+    const result = await found(made.home, founding);
+    expect(result).toEqual({ g: made.sent[0].g, code: open });
+    expect(made.sent[1]).toEqual({ t: 'code', g: result.g, op: 'new', hours: 1 });
+    const err = { code: 'internal', msg: 'disk' };
+    const refused = answering(created, { err });
+    const stopped = await found(refused.home, founding);
+    expect(stopped).toEqual({ g: refused.sent[0].g, stopped: { step: 'code', index: 0, err } });
+    const none = answering(created);
+    expect(await found(none.home, { ...founding, hours: undefined })).toEqual({
+      g: none.sent[0].g,
+    });
+    expect(none.sent).toHaveLength(1);
   });
 });
 

@@ -46,7 +46,9 @@ export interface Net {
   watchHost?(id: string): () => void;
 }
 
-type JoinResult = { notifications: Awaited<Awaited<ReturnType<typeof joinGroup>>['notices']> };
+type Joined = Awaited<ReturnType<typeof joinGroup>>;
+/** The group joined, and the person's nodes that were not told its home. */
+type JoinResult = { g: string; notifications: Awaited<Joined['notices']> };
 type Join = NonNullable<Net['join']>;
 type WatchHost = NonNullable<Net['watchHost']>;
 
@@ -114,11 +116,10 @@ function startLive(
     const openSession = (log: DeviceLog, addrs: Record<string, string[]>, joined: JoinedHomes) => {
       if (!pairedNodes(log).length) return undefined;
       const url = signalUrlOf();
-      const urls = [
-        url,
-        ...Object.values(addrs).flat(),
-        ...Object.values(joined).map((h) => h.url),
-      ];
+      // This page's rendezvous and the addresses its nodes gave: a code is looked for on each
+      // (contracts/step-2/people.md 4.1).
+      const ownPaths = [...new Set([url, ...Object.values(addrs).flat()])];
+      const urls = [...ownPaths, ...Object.values(joined).map((h) => h.url)];
       const invited = new Set<string>();
       const watches = new Map<string, number>();
       const hub = connect({
@@ -220,18 +221,21 @@ function startLive(
         return () => releaseWatch(id);
       });
       setJoin(async (invitation, name, cancel) => {
-        const id = invitation.home;
+        // A link names the home; a code's home is known once its pair message came.
+        let id = invitation.home!;
         let trackPath: ((path: Path | undefined) => void) | undefined;
         let replaced: Home | undefined;
         try {
-          const { peer, notices } = await joinGroup(invitation, name, {
+          const { g, peer, notices } = await joinGroup(invitation, name, {
             device,
             log,
             url,
+            urls: ownPaths,
             session: hub,
             browserName,
             signal: AbortSignal.any([cancel, controller.signal]),
-            dial(listen, onpath) {
+            dial(home, listen, onpath) {
+              id = home;
               invited.add(id);
               replaced = added.get(id);
               return hub.peer(id, listen, onpath);
@@ -240,19 +244,19 @@ function startLive(
               const own = new Set(pairedNodes(log).map(([node]) => node));
               return [...added.values()].filter((home) => home.ctl && own.has(home.device));
             },
-            async remember(homeName) {
-              joined[id] = { name: homeName, url };
+            async remember(home, at, homeName) {
+              joined[home] = { name: homeName, url: at };
               await saveJoined(() => indexedDB, joined);
             },
-            link: () => {
-              const home = homeOf(log, id, joined[id].name);
+            link: (target) => {
+              const home = homeOf(log, target, joined[target].name);
               trackPath = (path) => (path ? paths.set(home, path) : paths.delete(home));
               return connectHome(home);
             },
             onpath: (path) => trackPath?.(path),
           });
           peers.set(id, peer);
-          return { notifications: await notices };
+          return { g, notifications: await notices };
         } catch (error) {
           if (replaced && session === hub) dial(id, replaced);
           throw error;

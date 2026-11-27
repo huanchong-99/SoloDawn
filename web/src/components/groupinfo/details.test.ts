@@ -35,10 +35,13 @@ it.each([
   expect(document.querySelector('.note')?.textContent ?? '').toBe(expected ? warning : '');
 });
 
-it('warns in the invitation dialog before the first other person joins, not afterward', () => {
-  const { group, info, ai, person } = setup();
+it('warns in the invitation dialog before the first other person joins, not afterward', async () => {
+  const { group, info, ai, person, request } = setup();
   show(InvitationDialog, { group, open: true });
   expect(document.querySelector('dialog header .note')).toBeNull();
+  // The dialog reads the group's invitation code when it opens (people.md 2.6).
+  await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+  expect(sent(request)).toEqual({ t: 'code', g: group.g, op: 'show' });
   group.apply([
     { ...info, seq: 100, secretary: ai.id },
     { ...ai, seq: 101, account: 'personal' },

@@ -5,6 +5,7 @@
   import type { Net } from '../../lib/net.svelte';
   import { titleOf } from '../../lib/notify.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
+  import { href } from '../../lib/route.svelte';
   import type { MsgRow } from '../../lib/proto';
   import { now, shortWhen } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
@@ -35,9 +36,13 @@
     <h2 class="sec-title">{t('groups.all')}</h2>
     <p class="hint">{t('groups.lead')}</p>
   </div>
-  <button class="btn btn-sm" onclick={oncreate} disabled={!canCreate}>
-    <Icon name="plus" sm /><span>{t('groups.new')}</span>
-  </button>
+  <div class="row">
+    <button class="btn btn-sm" onclick={oncreate} disabled={!canCreate}>
+      <Icon name="plus" sm /><span>{t('groups.new')}</span>
+    </button>
+    <!-- Someone given an invitation code types it there (contracts/step-2/people.md 4.1). -->
+    <a class="btn btn-sm btn-ghost" href={href('join')}>{t('groups.join')}</a>
+  </div>
 </header>
 
 {#if groups.length}
@@ -101,11 +106,16 @@
 {/if}
 
 <style>
+  /* The title keeps its line; where the two buttons do not fit beside it they go below it. */
   .head {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--sp-3);
+    gap: var(--sp-2) var(--sp-3);
     padding: var(--sp-4) var(--sp-4) var(--sp-2) var(--sp-5);
+  }
+  .head > .grow {
+    min-width: fit-content;
   }
   .head h2 {
     color: var(--text);

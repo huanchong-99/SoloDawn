@@ -1336,14 +1336,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the dialog stays open and says "Mina" was "Added", "Sam" was refused with "Not in any of your groups on this computer any more: invite them by link." and "Claude Code" is "Not sent: an earlier step was refused"',
+        'the dialog stays open and says "Mina" was "Added", "Sam" was refused with "Not in any of your groups on this computer any more: invite them by code or link." and "Claude Code" is "Not sent: an earlier step was refused"',
         () => {
           expect(one<HTMLDialogElement>('dialog').open).toBe(true);
           const [mina, sam] = peopleRows();
           expect(read(mina.querySelector('b')!)).toBe('Mina');
           expect(said(mina)).toEqual(['Added', false]);
           expect(said(sam)).toEqual([
-            'Not in any of your groups on this computer any more: invite them by link.',
+            'Not in any of your groups on this computer any more: invite them by code or link.',
             true,
           ]);
           const ai = aiRow('Claude Code', 'workstation');
