@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 let systemDark: boolean;
@@ -27,7 +28,7 @@ beforeEach(() => {
 describe('first visit', () => {
   it('follows the system theme and the browser language', async () => {
     const { prefs } = await load();
-    expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
+    expect(prefs).toEqual({ theme: 'auto', accent: 'daybreak', lang: 'en' });
   });
 
   it('opens in Chinese for any Chinese locale', async () => {
@@ -40,9 +41,10 @@ describe('first visit', () => {
 describe('remembered choices', () => {
   it('reads them from this browser', async () => {
     localStorage.setItem('sd-theme', 'dark');
+    localStorage.setItem('sd-accent', 'nightfall');
     localStorage.setItem('sd-lang', 'zh-CN');
     const { prefs } = await load();
-    expect(prefs).toEqual({ theme: 'dark', lang: 'zh-CN' });
+    expect(prefs).toEqual({ theme: 'dark', accent: 'nightfall', lang: 'zh-CN' });
   });
 
   it.each([['auto'], ['light'], ['dark']])('reads the theme %s', async (theme) => {
@@ -60,9 +62,10 @@ describe('remembered choices', () => {
 
   it('ignores values it does not know, such as those of another version', async () => {
     localStorage.setItem('sd-theme', 'sepia');
+    localStorage.setItem('sd-accent', 'cyan');
     localStorage.setItem('sd-lang', 'fr');
     const { prefs } = await load();
-    expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
+    expect(prefs).toEqual({ theme: 'auto', accent: 'daybreak', lang: 'en' });
   });
 
   it('writes nothing to this browser until the person changes a setting', async () => {
@@ -74,15 +77,19 @@ describe('remembered choices', () => {
   it('writes a change to <html> and to this browser', async () => {
     const { choose, flushSync, toggleLang, toggleTheme } = await load();
     expect(document.documentElement.dataset.theme).toBe('auto');
+    expect(document.documentElement.dataset.accent).toBe('daybreak');
     expect(document.documentElement.lang).toBe('en');
 
     choose('theme', 'light');
+    choose('accent', 'firstlight');
     choose('lang', 'zh-CN');
     flushSync();
 
     expect(document.documentElement.dataset.theme).toBe('light');
+    expect(document.documentElement.dataset.accent).toBe('firstlight');
     expect(document.documentElement.lang).toBe('zh-CN');
     expect(localStorage.getItem('sd-theme')).toBe('light');
+    expect(localStorage.getItem('sd-accent')).toBe('firstlight');
     expect(localStorage.getItem('sd-lang')).toBe('zh-CN');
 
     toggleTheme();
@@ -142,6 +149,40 @@ describe('theme', () => {
   });
 });
 
+describe('theme colour', () => {
+  it.each([
+    ['daybreak'],
+    ['rain'],
+    ['pool'],
+    ['shallows'],
+    ['shade'],
+    ['hills'],
+    ['glow'],
+    ['firstlight'],
+    ['nightfall'],
+  ])('reads %s back on the next visit', async (accent) => {
+    localStorage.setItem('sd-accent', accent);
+    const { prefs } = await load();
+    expect(prefs.accent).toBe(accent);
+  });
+
+  it('keeps the default of earlier versions, so a person who never chose sees no change', () => {
+    const css = readFileSync('src/styles/accents.css', 'utf8');
+    expect(css).toContain(
+      ":root,\n[data-accent='daybreak'] {\n" +
+        '  --sky: light-dark(#3a57e8, #8fa3ff);\n' +
+        '  --on-sky: light-dark(#ffffff, #0b1030);\n}',
+    );
+  });
+
+  it('has a block in accents.css for each colour, and none for another', async () => {
+    const { accents } = await load();
+    const css = readFileSync('src/styles/accents.css', 'utf8');
+    const blocks = [...css.matchAll(/\[data-accent='([\w-]+)'\]/g)].map((m) => m[1]);
+    expect(blocks).toEqual(accents);
+  });
+});
+
 describe('language', () => {
   it('toggles between the two and looks texts up in the current one', async () => {
     const { prefs, t, toggleLang } = await load();
@@ -169,7 +210,7 @@ it('applies successive toggles in the order their transition callbacks run', asy
     toggleLang();
     toggleLang();
     expect(changes).toHaveLength(4);
-    expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
+    expect(prefs).toEqual({ theme: 'auto', accent: 'daybreak', lang: 'en' });
     for (const [i, [theme, lang]] of [
       ['dark', 'en'],
       ['light', 'en'],
@@ -177,7 +218,7 @@ it('applies successive toggles in the order their transition callbacks run', asy
       ['light', 'en'],
     ].entries()) {
       changes[i]();
-      expect(prefs).toEqual({ theme, lang });
+      expect(prefs).toEqual({ theme, accent: 'daybreak', lang });
     }
   } finally {
     Reflect.deleteProperty(document, 'startViewTransition');
@@ -196,7 +237,7 @@ it('announces top bar actions in the chosen language and clears the status on a 
   toggleLang();
   expect(announcement.text).toBe('Language: English');
   choose('theme', 'auto');
-  expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
+  expect(prefs).toEqual({ theme: 'auto', accent: 'daybreak', lang: 'en' });
   expect(announcement.text).toBe('');
 });
 
@@ -210,16 +251,18 @@ describe('a browser that blocks site storage', () => {
 
   it('opens with the defaults', async () => {
     const { prefs } = await load();
-    expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
+    expect(prefs).toEqual({ theme: 'auto', accent: 'daybreak', lang: 'en' });
     expect(document.documentElement.dataset.theme).toBe('auto');
   });
 
   it('applies a change without remembering it', async () => {
     const { choose, flushSync } = await load();
     choose('theme', 'dark');
+    choose('accent', 'pool');
     choose('lang', 'zh-CN');
     flushSync();
     expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(document.documentElement.dataset.accent).toBe('pool');
     expect(document.documentElement.lang).toBe('zh-CN');
   });
 });
@@ -274,6 +317,7 @@ describe('a preference that a part of the client keeps', () => {
     ['hint', ['shown', 'hidden'], 'hidden'],
     ['theme', ['auto', 'light', 'dark'], 'auto'],
     ['lang', ['zh-CN', 'en'], 'en'],
+    ['accent', ['daybreak'], 'daybreak'],
   ] as const)('refuses %s made again with %j and %s', async (name, allowed, fallback) => {
     const { preference } = await load();
     preference('hint', choices, 'shown');

@@ -17,7 +17,8 @@ as naturally as the messengers people already use.
 - **Calm neutrals.** The page is near-white in the light theme and graphite in the dark one.
   Navigation (the rail, the top bar, the group list) stands on the page colour and recedes; the
   content (the chat, the side panel, cards, dialogs) stands on the card colour and leads.
-- **One accent.** An indigo blue, kept under the token name `--sky`, marks what can be acted on
+- **One accent.** An indigo blue by default (the person may choose another theme colour, see
+  "Theme colours" below), kept under the token name `--sky`, marks what can be acted on
   and what an AI is doing: primary buttons, links and mentions, the focus ring, the icon of the
   current navigation entry, an AI's working glyph, the current step of a task, the person's own
   bubbles (as the tint `--mine`) and the send button when it can send. Nowhere else.
@@ -70,7 +71,7 @@ and soft fills are `color-mix(in srgb, var(--x) N%, var(--surface))`; the contra
 | `--text`        | `#15171C` | `#EDEEF0` | body text                                                             |
 | `--text-2`      | `#4A505B` | `#B6BAC3` | secondary text                                                        |
 | `--text-3`      | `#5C6270` | `#8F949F` | auxiliary text (still 4.5:1 or more)                                  |
-| `--sky`         | `#3A57E8` | `#8FA3FF` | the accent                                                            |
+| `--sky`         | `#3A57E8` | `#8FA3FF` | the accent (the default theme colour)                                 |
 | `--dawn`        | `#F2A23A` | `#F4B256` | needs a person (fill)                                                 |
 | `--dawn-text`   | `#9A5300` | `#F4B256` | dawn-coloured text on an ordinary surface                             |
 | `--on-dawn`     | `#2A1A00` | `#2A1A00` | text on a dawn fill                                                   |
@@ -81,6 +82,45 @@ and soft fills are `color-mix(in srgb, var(--x) N%, var(--surface))`; the contra
 the card colour; `--mine` (14% of the accent) is the person's own bubble; `--need-line` is the
 border of a card that waits. In the dark theme a shadow barely shows, so a raised layer is one
 step lighter (`--raised`) with its hairline.
+
+### Theme colours
+
+The settings page offers nine theme colours as a row of swatches; each replaces `--sky` and
+`--on-sky` (`src/styles/accents.css`), and everything mixed from the accent follows. The set
+covers the accent colours people know from their systems and apps (macOS: blue, purple, pink,
+yellow, green, graphite; Telegram's palette adds cyan; Todoist's themes are the same families).
+Red and orange are left out: red is the failure and the emergency stop, and orange at text
+contrast is the same brown as amber. The names are SoloDawn's own: scenes of a day from dawn to
+night, which echo the product's name, not the colour words other products use.
+
+| Theme colour            | Id           | Light     | Dark      |
+| ----------------------- | ------------ | --------- | --------- |
+| 黎明 Daybreak (default) | `daybreak`   | `#3A57E8` | `#8FA3FF` |
+| 雨后 After rain         | `rain`       | `#46668C` | `#8FADD6` |
+| 深潭 Deep pool          | `pool`       | `#155F72` | `#5AAEC4` |
+| 浅湾 Shallows           | `shallows`   | `#00735F` | `#4FC4A2` |
+| 林荫 Tree shade         | `shade`      | `#387026` | `#8ABD70` |
+| 远山 Far hills          | `hills`      | `#7A4E93` | `#BB98CF` |
+| 朝霞 Morning glow       | `glow`       | `#B52C62` | `#F58BAD` |
+| 晨曦 First light        | `firstlight` | `#985800` | `#E0A24C` |
+| 夜幕 Nightfall          | `nightfall`  | `#434A57` | `#ADB3BD` |
+
+- Daybreak stays the default: it is the accent the redesign was approved with, and the first stop
+  of the horizon line of the logo. `src/lib/prefs.test.ts` holds its two values, so a person who
+  never chose sees no change.
+- Every theme colour passes the same contrast pairs as the default in both themes, the accent
+  also 4.5:1 on the pressed fill `--surface-3` and 3:1 against the hairline and the inset fill, so
+  that the neutral nightfall still shows the focus ring and a chosen border.
+- Any two theme colours are at least 17 apart in CIE Lab (ΔE 1976) in each theme, so no two
+  swatches read as one.
+- With first light as the accent, dawn turns magenta (`#D94AA3` / `#F08AC8`, text `#A8226F` /
+  `#F08AC8`): still warm and loud, and about 70° of hue from the accent. It is 40° from the red of
+  a failure, a little further than the default amber is (30°). The waiting signal stays at least
+  45° of hue from the accent in every theme colour (`features/a11y.spec.ts`).
+- Some accents sit near a result colour: morning glow is 25° of hue from the red of a failure,
+  shallows 16° from the green of a passed result, tree shade 48° from it. The state glyphs and the
+  words beside them tell them apart (`issues.md`).
+- A swatch is a radio named by its colour; the chosen one has a ring in its colour and a tick.
 
 Rules:
 

@@ -1,4 +1,5 @@
 import './styles/tokens.css';
+import './styles/accents.css';
 import './styles/base.css';
 import { boot } from './lib/boot';
 

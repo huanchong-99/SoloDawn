@@ -250,6 +250,44 @@ export async function reducedThemeChange() {
   });
 }
 
+// Moves the theme colour from the radio named `from` with the left arrow key, counting the
+// cross-fades the page starts and the animations under way once the colour is chosen.
+export async function accentByArrow(from: string) {
+  await page.evaluate(() => {
+    const start = document.startViewTransition.bind(document);
+    Object.assign(window, { crossFades: 0 });
+    document.startViewTransition = (update) => {
+      Object.assign(window, { crossFades: (window as unknown as Faded).crossFades + 1 });
+      return start(update);
+    };
+  });
+  await page.getByRole('radio', { name: from, exact: true }).focus();
+  await page.keyboard.press('ArrowLeft');
+  return page.evaluate(() => ({
+    chosen: document
+      .querySelector<HTMLInputElement>('input[name=accent]:checked')!
+      .labels![0].textContent!.trim(),
+    crossFades: (window as unknown as Faded).crossFades,
+    animations: document.getAnimations().length,
+  }));
+}
+type Faded = { crossFades: number };
+
+// The computed colour of each token, as a part painted in it has it.
+export function colours(...tokens: string[]) {
+  return page.evaluate(
+    (tokens) =>
+      tokens.map((token) => {
+        const probe = document.body.appendChild(document.createElement('i'));
+        probe.style.color = `var(--${token})`;
+        const colour = getComputedStyle(probe).color;
+        probe.remove();
+        return colour;
+      }),
+    tokens,
+  );
+}
+
 export function forceColors() {
   return page.emulateMedia({ forcedColors: 'active' });
 }

@@ -1,5 +1,5 @@
-// Browser preferences (theme, language, and those a unit adds with `preference`) and the lookup
-// of interface texts.
+// Browser preferences (theme, theme colour, language, and those a unit adds with `preference`) and
+// the lookup of interface texts.
 import { MediaQuery } from 'svelte/reactivity';
 import { langs, messages, type Key, type Lang } from '../messages/texts';
 import { shift } from './motion';
@@ -8,6 +8,21 @@ export { langs, type Key, type Lang };
 
 export const themes = ['auto', 'light', 'dark'] as const;
 export type Theme = (typeof themes)[number];
+
+/** The theme colours, in the order of the settings page: by hue from blue round to gold, then the
+ *  neutral one. Each has a block in accents.css. The first is the default. */
+export const accents = [
+  'daybreak',
+  'rain',
+  'pool',
+  'shallows',
+  'shade',
+  'hills',
+  'glow',
+  'firstlight',
+  'nightfall',
+] as const;
+export type Accent = (typeof accents)[number];
 
 // This browser's storage is a boundary: a browser that blocks site data throws on any access to
 // it, and a value may come from another version of the client. Either way the default applies.
@@ -32,6 +47,7 @@ function store(key: string, value: string) {
 // language and scheme: a default is not a choice.
 export const prefs = $state({
   theme: stored('sd-theme', themes, themes[0]),
+  accent: stored('sd-accent', accents, accents[0]),
   lang: stored('sd-lang', langs, navigator.language.startsWith('zh') ? 'zh-CN' : 'en'),
 });
 
@@ -90,10 +106,11 @@ const barColour = new Map(
   [...bars()].map((meta) => [meta.matches('[media*=dark]'), meta.getAttribute('content')]),
 );
 
-// <html> follows the preferences; tokens.css reads data-theme.
+// <html> follows the preferences; tokens.css reads data-theme and accents.css data-accent.
 $effect.root(() => {
   $effect(() => {
     document.documentElement.dataset.theme = prefs.theme;
+    document.documentElement.dataset.accent = prefs.accent;
     document.documentElement.lang = prefs.lang;
   });
   $effect(() => {

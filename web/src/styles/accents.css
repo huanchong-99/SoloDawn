@@ -1,0 +1,51 @@
+/* The theme colours (design/README.md, "Theme colours"): the accent --sky and the colour that
+   stands on it, one block per choice of `accents` in src/lib/prefs.svelte.ts. <html data-accent>
+   picks one; a swatch carries its own data-accent, so it shows its colour whatever is chosen.
+   tokens.css mixes the soft fills, --mine and the focus ring from --sky; this file loads after it
+   (src/main.ts), so the firstlight block replaces its dawn. Each colour stays one line,
+   light-dark(light, dark), as features/a11y.spec.ts reads it for every block. */
+
+:root,
+[data-accent='daybreak'] {
+  --sky: light-dark(#3a57e8, #8fa3ff);
+  --on-sky: light-dark(#ffffff, #0b1030);
+}
+[data-accent='rain'] {
+  --sky: light-dark(#46668c, #8fadd6);
+  --on-sky: light-dark(#ffffff, #0c1724);
+}
+[data-accent='pool'] {
+  --sky: light-dark(#155f72, #5aaec4);
+  --on-sky: light-dark(#ffffff, #06151c);
+}
+[data-accent='shallows'] {
+  --sky: light-dark(#00735f, #4fc4a2);
+  --on-sky: light-dark(#ffffff, #03231b);
+}
+[data-accent='shade'] {
+  --sky: light-dark(#387026, #8abd70);
+  --on-sky: light-dark(#ffffff, #0d2205);
+}
+[data-accent='hills'] {
+  --sky: light-dark(#7a4e93, #bb98cf);
+  --on-sky: light-dark(#ffffff, #1f0f29);
+}
+[data-accent='glow'] {
+  --sky: light-dark(#b52c62, #f58bad);
+  --on-sky: light-dark(#ffffff, #2e0716);
+}
+/* With a gold accent, the amber of dawn can no longer mean "a person is needed": the waiting
+   signal turns magenta, still warm and loud, and 70 degrees of hue from the accent. */
+[data-accent='firstlight'] {
+  --sky: light-dark(#985800, #e0a24c);
+  --on-sky: light-dark(#ffffff, #2a1a00);
+  --dawn: light-dark(#d94aa3, #f08ac8);
+  --on-dawn: #2b0619;
+  --dawn-text: light-dark(#a8226f, #f08ac8);
+}
+/* A neutral accent: the focus ring and a chosen border still stand 3:1 off the hairlines and the
+   inset fill (features/a11y.spec.ts), and a chosen radio still carries its dot. */
+[data-accent='nightfall'] {
+  --sky: light-dark(#434a57, #adb3bd);
+  --on-sky: light-dark(#ffffff, #15171c);
+}
