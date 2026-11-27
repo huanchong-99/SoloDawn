@@ -662,6 +662,9 @@ export interface Session {
   send(url: string, frame: RVJoin | RVRoom): void;
   /** Joins a room on an existing path and joins it again if that path reconnects. */
   watchRoom(url: string, id: string, heard: (url: string, frame: Heard) => void): () => void;
+  /** How long, in milliseconds, a browser that joins a group waits for its home in the room: 10
+   *  minutes when left out. The demo world's sessions wait on its own clock. */
+  readonly roomWait?: number;
   /** Closes every signalling path and connection; nothing opens again. */
   close(): void;
 }

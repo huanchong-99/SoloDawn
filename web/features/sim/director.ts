@@ -56,6 +56,7 @@ export class Director extends Scene implements Hands {
       // `add_person` is the test home's own command.
       member: () => (payload.op === 'add_person' ? undefined : this.people.member(payload)),
       invite: () => this.people.invite(payload),
+      code: () => this.people.code(payload),
       join: () => this.people.join(payload),
       note: () => notePut(this.world, payload),
       note_edit: () => noteEdit(this.world, payload),

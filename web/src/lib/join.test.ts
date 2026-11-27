@@ -94,6 +94,7 @@ function attempt(
   signal = new AbortController().signal,
   nodes: Home[] = [],
   given: Invitation = invitation,
+  roomWait?: number,
 ) {
   const options = Promise.withResolvers<{ heard: Parameters<Session['watchRoom']>[2] }>();
   const listen = Promise.withResolvers<Listener>();
@@ -124,7 +125,7 @@ function attempt(
     } as unknown as DeviceLog,
     url,
     urls: [url, node],
-    session: { send, watchRoom },
+    session: { send, watchRoom, roomWait },
     dial: peer,
     signal,
     browserName: 'Web',
@@ -437,6 +438,20 @@ it('closes the room when nobody arrives before the invitation window ends', asyn
     await run.options;
     await vi.advanceTimersByTimeAsync(599_999);
     expect(run.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(run.result).rejects.toMatchObject({ step: 'room', code: 'timeout' });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('waits as long as the session says, when it says', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const run = attempt(true, undefined, [], { secret }, 15_000);
+    await run.options;
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(run.stop).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await expect(run.result).rejects.toMatchObject({ step: 'room', code: 'timeout' });
   } finally {

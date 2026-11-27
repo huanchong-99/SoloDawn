@@ -1,10 +1,12 @@
 // The demo panel: a small button at the edge of the page that opens what the person can set off
-// outside the browser (events.ts), the pairing code for a computer, the speed of the scripts and a
-// fresh start. Plain DOM in the colours of the client, so that it stays out of the client's code.
+// outside the browser (events.ts), the pairing code for a computer, the end of an invitation code,
+// the speed of the scripts and a fresh start. Plain DOM in the colours of the client, so that it
+// stays out of the client's code.
 import { parseSecret } from '../../src/lib/pairing';
 import { prefs } from '../../src/lib/prefs.svelte';
 import { ids } from './ids';
 import type { Events } from './events';
+import { endCode } from './people';
 import { answerRoom } from './session';
 import { address, type Mode, type World } from './world';
 
@@ -98,6 +100,7 @@ export class Panel {
       ...this.#pairing(),
       ...this.#computers(),
       ...this.#groups(),
+      ...this.#codes(),
       ...this.#mina(),
       el('div', headStyle, '提醒与速度'),
       button('模拟一条提醒（网页关着时会收到）', () => this.#remind()),
@@ -176,6 +179,22 @@ export class Panel {
         return button(`把「${name}」搬到另一台电脑`, () =>
           this.#say(`已导出，正在 ${this.events.move(g)} 上导入「${name}」…`),
         );
+      }),
+    ];
+  }
+
+  /** An open invitation code reaches its end: an hour or more passes in a click. */
+  #codes() {
+    const open = this.world.groups().filter((g) => this.world.code(g));
+    if (!open.length) return [];
+    return [
+      el('div', headStyle, '邀请码'),
+      ...open.map((g) => {
+        const name = this.world.home(g)!.groups.get(g)!.name;
+        return button(`让「${name}」的邀请码到期`, () => {
+          endCode(this.world, g);
+          this.#say(`「${name}」的邀请码已到期：再用它加入，不会有回应。`);
+        });
       }),
     ];
   }

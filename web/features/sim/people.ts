@@ -1,13 +1,16 @@
 // The people of the demo world and what they do (contracts/step-2/people.md, confirm.md,
-// watch-team.md): an invitation that Leo takes a moment later, a person added to a new group who
-// says hello there, roles, removing a person or an AI,
+// watch-team.md): an invitation that Leo takes a moment later, an invitation code by which Nora
+// joins a moment later, a person added to a new group who says hello there, roles, removing a
+// person or an AI,
 // changing a group or an AI, and the `confirm` cards by which an AI's owner lets it work for someone
 // else or lets someone watch its terminal. Mina is the other person; she answers by herself.
+import { newId } from '../../src/lib/groups.svelte';
 import { newSecret, shown } from '../../src/lib/pairing';
 import { words } from './content';
 import { devices, ids, users } from './ids';
 import { person, type Fields, type Row } from './rows';
 import { Scene, type AI, type Msg } from './scene';
+import type { World } from './world';
 
 type Answer = { ok: true; [field: string]: unknown } | { err: { code: string; msg: string } };
 
@@ -25,6 +28,13 @@ const aiFields = [
   'tool',
 ];
 const groupFields = ['name', 'pass', 'pass_foundation', 'limits'];
+
+/** The group's invitation code ends: turned off, replaced, past its end, a person removed, the
+ *  group moved (people.md 2.6). Nobody who joined by it leaves. */
+export function endCode(world: World, g: string) {
+  delete world.memory.codes[g];
+  world.changed();
+}
 
 /** The address of the client in demo mode, with a fragment. */
 export const here = (fragment: string) => `${location.origin}${location.pathname}?demo${fragment}`;
@@ -62,21 +72,66 @@ export class People extends Scene {
       { g, by: 'system' },
       { code: 'member_joined', member: ids.leo, by: ids.me },
     );
-    this.world.after(2500, () => this.post('text', { g, by: ids.leo, text: words.leoHello }));
+    this.#sayLater(2500, g, ids.leo, words.leoHello);
+  }
+
+  /** A person says `text` after `ms`, if they are still in the group then: a home takes no post
+   *  from someone it removed meanwhile. */
+  #sayLater(ms: number, g: string, by: string, text: string) {
+    this.world.after(ms, () => {
+      if (this.world.find(g, 'member', by)) this.post('text', { g, by, text });
+    });
   }
 
   /** After `member add_person`, which the home applied: the person says hello. */
   added(g: string, payload: Fields) {
-    this.world.after(2500, () =>
-      this.post('text', { g, by: payload.n as string, text: words.addedHello }),
-    );
+    this.#sayLater(2500, g, payload.n as string, words.addedHello);
   }
 
-  /** `join` from this browser: the person is a member of the group already. */
+  /** `join` from this browser, whose person is in every group of the world: a member who opens a
+   *  link or types a code of their group is answered `ok`, and nothing is written (people.md 2.2). */
   join(payload: Fields): Answer {
-    return this.#member(payload.g as string, this.world.me)
-      ? refuse('conflict')
-      : refuse('forbidden');
+    return this.#member(payload.g as string, this.world.me) ? ok : refuse('forbidden');
+  }
+
+  /** `code` (people.md 2.6), by an admin: `new` for 1 to 168 hours, `off`, or `show`. The code is
+   *  in no row and no receipt. */
+  code(payload: Fields): Answer {
+    const g = payload.g as string;
+    const me = this.#member(g, this.world.me);
+    if (!['owner', 'admin'].includes(me?.role as string)) return refuse('forbidden');
+    const ops: Record<string, () => Answer> = {
+      new: () => this.#newCode(g, me!.id as string, payload.hours),
+      off: () => (endCode(this.world, g), ok),
+      show: () => this.#shown(g),
+    };
+    return ops[payload.op as string]?.() ?? refuse('bad_request');
+  }
+
+  #shown(g: string): Answer {
+    const open = this.world.code(g);
+    return open ? { ok: true, code: shown(open.code), expires: open.expires } : ok;
+  }
+
+  /** A new code replaces the open one; Nora, who was given it, types it a moment later. */
+  #newCode(g: string, by: string, hours: unknown): Answer {
+    if (!Number.isInteger(hours) || (hours as number) < 1 || (hours as number) > 168)
+      return refuse('bad_request');
+    const code = newSecret(crypto);
+    const expires = Date.now() + (hours as number) * 3_600_000;
+    this.world.memory.codes[g] = { code, by, expires };
+    this.world.changed();
+    this.world.after(8000, () => this.#noraJoins(g, code));
+    return { ok: true, code: shown(code), expires };
+  }
+
+  #noraJoins(g: string, code: string) {
+    const open = this.world.code(g);
+    if (open?.code !== code || this.#member(g, users.nora)) return;
+    const id = newId();
+    this.world.write(g, person(g, id, users.nora, 'Nora', 'member'));
+    this.post('system', { g, by: 'system' }, { code: 'member_joined', member: id, by: open.by });
+    this.#sayLater(2500, g, id, words.addedHello);
   }
 
   /** `member set` and `member remove`, of a person or of an AI. */
@@ -128,6 +183,8 @@ export class People extends Scene {
     if (theirs.some((ai) => this.#engaged(g, ai.id))) return refuse('conflict');
     for (const ai of theirs) this.removeAI(g, ai);
     this.world.home(g)!.remove(g, 'member', target.id as string);
+    // The person removed may hold the group's code; one who leaves by themself does not end it.
+    if (target.user !== this.world.me) endCode(this.world, g);
     const body = { code: 'member_removed', user: target.user, name: target.name, by: ids.me };
     this.post('system', { g, by: 'system' }, body);
     this.world.changed();
@@ -217,7 +274,7 @@ export class People extends Scene {
     if (!asked) return;
     this.touch(g, ai);
     this.post('text', { g, by: ai, text: words.directDone, mentions: [asked.by] });
-    this.world.after(3000, () => this.post('text', { g, by: asked.by, text: words.minaThanks }));
+    this.#sayLater(3000, g, asked.by, words.minaThanks);
   }
 
   #grant(g: string, ai: string, by: string) {
