@@ -1,5 +1,7 @@
 # Parallel plan for the rest of version 1
 
+> Historical task breakdown. Steps 1 to 3 are built; `planning/contracts/` and `planning/flows/` are the current specification.
+
 How everything left in steps 1, 2 and 3 is cut into small units that many
 sessions build at the same time. This file holds the rules, lanes, waves,
 critical path and what needs the owner's hardware. The units are in

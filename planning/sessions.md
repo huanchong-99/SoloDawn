@@ -12,9 +12,9 @@ An AI in a group has several sessions over time:
 
 | Session | Exists | Working folder | Level | Receives |
 | --- | --- | --- | --- | --- |
-| group session | one per AI per group, long-lived. For the secretary this is its only session. | the member's workspace | the level the owner set for this AI in this project (default 3; owner's decision of 2026-11-21) | main-line mentions, direct questions (R-70), calls from threads where the AI has no role; for the secretary, everything addressed to it |
-| task session | one per task the AI is assigned, from first delivery until the task is done or cancelled, or another AI becomes its assignee (`flows/agent-turn.md` step 17) | the member's workspace | the level the owner set for this AI in this project (default 3; owner's decision of 2026-11-21) | everything about that task |
-| review session | one per task the AI reviews, until that task is done or cancelled, or another AI becomes its reviewer (`flows/agent-turn.md` step 17) | the member's workspace | the level the owner set for this AI in this project (default 3; owner's decision of 2026-11-21) | review requests for that task |
+| group session | one per AI per group, long-lived. For the secretary this is its only session. | the member's workspace | the level the owner set for this AI in this group (default 3; owner's decision of 2026-11-21; `perm.set` postponed after 1.0, `contracts/commands.md` section 2) | main-line mentions, direct questions (R-70), calls from threads where the AI has no role; for the secretary, everything addressed to it |
+| task session | one per task the AI is assigned, from first delivery until the task is done or cancelled, or another AI becomes its assignee (`flows/agent-turn.md` step 17) | the member's workspace | the level the owner set for this AI in this group (default 3; owner's decision of 2026-11-21; `perm.set` postponed after 1.0, `contracts/commands.md` section 2) | everything about that task |
+| review session | one per task the AI reviews, until that task is done or cancelled, or another AI becomes its reviewer (`flows/agent-turn.md` step 17) | the member's workspace | the level the owner set for this AI in this group (default 3; owner's decision of 2026-11-21; `perm.set` postponed after 1.0, `contracts/commands.md` section 2) | review requests for that task |
 
 - **One folder.** Every session of an AI in a group runs in the member's
   workspace, the folder its owner gave it when it was added (R-11;

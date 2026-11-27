@@ -22,8 +22,7 @@ func ownerDACL(inherit string) *windows.ACL {
 // privateDir creates dir with a protected DACL that only the current user
 // is granted, inherited by every file and folder created in it. A mode does
 // not limit access on Windows. An existing directory keeps its DACL: setting
-// one there would rewrite the security of every file below it, the clones
-// included.
+// one there would rewrite the security of every file and folder below it.
 func privateDir(dir string) error {
 	return createDir(dir, setOwnerDACL)
 }

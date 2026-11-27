@@ -1,6 +1,6 @@
 # Agent Note: One kind of group, connected AIs and workspaces
 
-Status: proposed
+Status: implemented
 
 ## Problem
 
@@ -28,11 +28,11 @@ The same simulation showed a second, smaller gap: when a task was paused by hand
 another AI, the client could not say who had done it, because neither the wait nor the card state
 recorded the actor.
 
-## Proposal
+## Decision
 
-**The owner's decision (2026-11-26).** The owner originated the change and, when the coordinator
-asked follow-up questions, chose these points. The decision log records the answers and not the
-options that were not chosen.
+**The owner's decision (2026-11-26), shipped in PR #424 (`MODEL-1126`).** The owner originated the
+change and, when the coordinator asked follow-up questions, chose these points. The decision log
+records the answers and not the options that were not chosen.
 
 1. There is one kind of group. A group is created by choosing people and connected AIs, each AI
    with one workspace; people and AIs can be added at any time afterwards.
@@ -50,8 +50,9 @@ options that were not chosen.
 coordinator (the main session), who decides and reports. These were decided on 2026-11-26, the
 first five on the recommendation of the plan's author, the next two on questions raised by its
 independent review, row 8 in the demo walk-through, rows 9 and 11 in the review's second pass and
-row 10 in the first review; the owner was told and may change any
-of them.
+row 10 in the first review; the owner was told and may change any of them. Row 11's folder-discovery
+mechanism was then updated during implementation (`HS-W`) so Codex and OpenCode query their CLI
+servers as specified in [local interfaces](../../../../planning/contracts/local.md) section 7.
 
 | # | Question | Decided | Reason given |
 | --- | --- | --- | --- |
@@ -65,9 +66,9 @@ of them.
 | 8 | Who paused, who reassigned | the `manual` wait of a task gains `by`, and so does the approval state `reassigned`: the member id of the sender, written by the home | found in the simulation: the client could only say "the secretary or an admin" |
 | 9 | Protocol version | `hello` and `welcome` carry `v` 3; a node answers `version` to 1 and 2; neither the node nor the browser retries with an older version | the rows changed shape and a node of `v3.0.0-rc.1` would misread them; with the retry, a new client would still talk to an old home |
 | 10 | Groups made before the change | deleted by a migration at the first start, with the device records of everyone but the node's owner; an export file of the old version is refused | only the pre-release `v3.0.0-rc.1` was published; keeping old groups would mean mapping branches, pull requests and worktrees onto a model that has none |
-| 11 | The list of folders | cut where the answer would pass the size of one `ctl` message; Codex's folders are read from its session files | the review asked for no cap and for Codex's documented request; a bound has to exist, and the finders are a package that starts no CLI |
+| 11 | The list of folders | cut where the answer would pass the size of one `ctl` message; Claude Code and Qwen Code read `.jsonl` session files, Codex calls `thread/list` on `codex app-server`, and OpenCode calls `GET /api/session` on `opencode serve` | the review asked for no cap and for Codex's documented request; a bound has to exist (`ctl` frame limit), and `HS-W` keeps the pure finders decoupled from `internal/host` via callbacks |
 
-**What changes**, by the document that owns it:
+**What changed**, by the document that owns it:
 
 - Rules: [product rules](../../../../planning/product-rules.md) R-10 to R-14, R-20, R-22, R-24, R-83, R-84,
   R-90 to R-92, R-103, R-111, R-137, R-140.
@@ -84,14 +85,14 @@ of them.
   [data channel](../../../../planning/contracts/datachannel.md) (`host.workspaces`, `workspace` in
   `host.info`, `v` 3), [storage](../../../../planning/contracts/storage.md) section 7 (migration 4).
 - What an AI is told: [drivers](../../../../planning/contracts/drivers.md) sections 3 and 4. The
-  instructions now carry what the platform did before: bring the folder up to date, test the
+  instructions carry what the platform did before: bring the folder up to date, test the
   project's way, publish by the project's rules or else to a branch of its own, never stash,
   reset, clean, `git add -A`, switch branches or force a push in a folder that may hold someone
   else's work, and end the turn after `submit_task`.
 - Flows: [task](../../../../planning/flows/task.md), [trace](../../../../planning/flows/trace-task.md),
   [delivery](../../../../planning/flows/agent-turn.md), [takeover](../../../../planning/flows/takeover.md).
 
-**What is removed.** The clone and the worktrees; the check runner and both hard checks on a
+**What was removed.** The clone and the worktrees; the check runner and both hard checks on a
 diff; the forge commands, the custom forge templates and their contract; the merge, its item and
 its "point of no return"; the tools `push_branch` and `run_checks`; the task commands `branch`,
 `checked`, `submitted`, `cloud`, `merged` and `conflict`; the `checks` message; the group kind
@@ -101,27 +102,26 @@ the repository. The owner's model has no repository to own, so the machinery has
 on. Reintroducing any of it would need a group to name a repository again, which is a reversal of
 this decision and a new record.
 
-**Choices made while writing the contracts** (unit C-1, under the coordinator's instruction to
-decide by the plan's principles where the plan is silent, and to record the choice here):
+**Choices made while writing and implementing the contracts** (unit C-1, under the coordinator's
+instruction to decide by the plan's principles where the plan is silent, and to record the choices
+here):
 
-1. This record is `proposed`, in class `feature`: nothing is built yet, and the class set of the
-   project standard is closed. It moves to `implemented/` when the change is on the integration
-   branch, with its evidence.
-2. A submission (task-machine row 5) is accepted while the task is `paused`, as the host's
+1. A submission (task-machine row 5) is accepted while the task is `paused`, as the host's
    `task submitted` was: a pause can arrive while `submit_task` is on its way.
-3. `task start` keeps its field `origin`, whose one value is now `direct`.
-4. The review turn names the computer and folder of the member who wrote the report, which is
+2. `task start` keeps its field `origin`, whose one value is now `direct`.
+3. The review turn names the computer and folder of the member who wrote the report, which is
    the assignee at the time of the submission, not whoever is assignee when the review is read.
-5. `host.workspaces` resolves each folder as `host.join` does and merges two spellings of one
+4. `host.workspaces` resolves each folder as `host.join` does and merges two spellings of one
    folder, so that the path it lists equals the `workspace` of a member that has it. The time of
-   a folder is the modification time of its newest session file.
-6. A direct task that was created `queued` gets, when it starts, an `assign` item that carries
+   a folder is the modification time of its newest session file for Claude Code and Qwen Code, and
+   the server's `updatedAt` or `updated` timestamp for Codex and OpenCode.
+5. A direct task that was created `queued` gets, when it starts, an `assign` item that carries
    its `task` message; the owner's original message travels only with a task that starts at once.
-7. A takeover whose session folder is gone is refused with `cli` and the path.
-8. `post` takes the kind `handback` in every tool list but the external one, since a takeover can
+6. A takeover whose session folder is gone is refused with `cli` and the path.
+7. `post` takes the kind `handback` in every tool list but the external one, since a takeover can
    now reach a working AI's group session; that hand-back goes to the main line and queues no
    item.
-9. Numbers are kept where other documents and the code cite them: task-machine rows 3, 4, 6, 8
+8. Numbers are kept where other documents and the code cite them: task-machine rows 3, 4, 6, 8
    and 9 and message section 2.8 are left unused, and removed rules, constraints and acceptance
    tests keep a one-line entry.
 
@@ -148,10 +148,12 @@ rule sits between them and yields to the project's own rules.
 review asked for none. The answer is one `ctl` message, which has a size limit, so the bound is
 that size.
 
-**Codex's documented `thread/list` request for its folders** (question 11). Verified to work, and
-kept as what the finder changes to if the file layout changes. It lost for now because it needs a
-running CLI process and the driver's connection, and the finders are a package that imports
-neither.
+**Reading Codex session files vs calling `thread/list`** (question 11). Reading Codex session files
+was initially proposed in C-1 so the finders package would import no CLI driver or process runner.
+During implementation (`HS-W`), `workspaces.Codex` (`internal/host/workspaces/workspaces.go`) instead
+took a callback wired in `internal/host/tools_workspaces.go` to call `thread/list` on
+`codex app-server` (and `workspaces.OpenCode` calls `GET /api/session` on `opencode serve`),
+keeping `workspaces` free of `internal/host` imports without relying on undocumented Codex files.
 
 **Keep `v` 2, or keep the retry with version 1** (question 9). The plan first changed no version;
 the review showed that both clients fall back to 1 and that an old home accepts it, which is the
@@ -165,21 +167,7 @@ For questions 1 to 5 and 8 the available history names the question and the answ
 answers were weighed is not recorded. For question 3 the plan names what it replaces: the earlier
 rule, under which such a takeover created a task and cancelled it when nothing had changed.
 
-## Acceptance criteria
-
-- The acceptance sentences written for the change pass: A2.1, A2.8 to A2.10, A3.3, A3.11 to
-  A3.13, A5.1, A5.2, A5.4 to A5.7, A5.12, A5.19 to A5.24, A7.1, A7.7 and A8.7
-  ([step 1](../../../../planning/steps/step-1-acceptance.md)); A9.22 and A9.46
-  ([step 2](../../../../planning/steps/step-2-3-acceptance.md)); A10.10, A10.12, A10.17, A10.18,
-  A10.21 and A10.22 ([step 3](../../../../planning/steps/step-3-acceptance.md)).
-- The node starts no `git` and no `gh` process and runs no command that a group names.
-- A group is created in the browser from a name, people and connected AIs with a folder each, and
-  an AI's process runs in the folder it was added with.
-- A node that starts on the data directory of `v3.0.0-rc.1` keeps pairing, its owner's devices,
-  account types and peers, lists no group and leaves `projects/` as it was.
-- This record is then moved to `implemented/` and rewritten in the present tense.
-
-## Risks
+## Consequences
 
 The limits this decision accepts are K-26 to K-38 of [risks](../../../../planning/risks.md). In short:
 
@@ -192,15 +180,29 @@ The limits this decision accepts are K-26 to K-38 of [risks](../../../../plannin
 - The scan of a diff for secrets and the check for a change without tests are gone; a missing
   test is caught by the reviewer or not at all.
 - A reviewer on another computer sees the work only if the project has a shared remote.
-- The list of folders reads session files that no vendor documents as an interface; the field
-  for OpenCode is not verified, and OpenCode and Qwen Code were not run.
-- Groups of the published pre-release are deleted, and its nodes and browsers cannot talk to the
-  new version.
+- Folder discovery for Claude Code and Qwen Code reads `.jsonl` session files that no vendor
+  documents as an interface, whereas Codex (`thread/list` via `codex app-server`) and OpenCode
+  (`GET /api/session` via `opencode serve`) query their CLI servers (`contracts/local.md` section 7);
+  live behaviour of OpenCode and Qwen Code remains unverified against the real CLIs
+  ([issues.md](../../../../issues.md)).
+- Groups of the published pre-release are deleted by migration 4, and its nodes and browsers cannot
+  talk to protocol `v` 3.
+
+## Verification
+
+- Shipped on `rebuild` in PR #424 (`MODEL-1126`) across `internal/proto`, `internal/store`,
+  `internal/host`, `internal/home`, `internal/node`, `web/`, `features/`, and `docs/`.
+- Acceptance scenarios pass in Go (`features/`) and web (`web/features/`, `web/e2e/`) suites for
+  A2.1, A2.8 to A2.10, A3.3, A3.11 to A3.13, A5.1, A5.2, A5.4 to A5.7, A5.12, A5.19 to A5.24, A7.1,
+  A7.7, A9.22, A9.46, A10.10, A10.12, A10.17, A10.18, A10.21, and A10.22.
+- The node starts no `git` and no `gh` process and runs no command named by a group.
+- `internal/store/forget.go` (migration 4) deletes pre-2026-11-26 groups and non-owner device rows
+  while leaving `projects/` untouched, and refuses old-version group exports.
+- Real-machine checks (`A8.7` migration on `v3.0.0-rc.1` data, live CLI discovery and multi-host
+  runs) are tracked in [the real-machine checklist](../../../cookbook/i11-real-machine-checklist.md)
+  and [issues.md](../../../../issues.md).
 
 ## Related
 
-- The units that build it are listed in
+- The units that built it are listed in
   [the plan of steps 2 and 3](../../../../planning/steps/parallel-plan-step-2-3.md), last section.
-- The plan and its independent review, on which this record rests, are working documents kept
-  outside the repository. Nothing in this record was run: it describes a decision and the
-  contracts written for it.

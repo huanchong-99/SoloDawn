@@ -248,9 +248,9 @@ func TestInboxAckDeletesOnlyTheHostsOwnItem(t *testing.T) {
 }
 
 // The hourly wake-up cap holds items past wakes_per_hour until the oldest
-// counted wake ages out, per AI, without holding or counting merge items.
+// counted wake ages out, per AI, without holding or counting watch or reply items.
 func TestInboxWakeUpCapHoldsAndReleasesItems(t *testing.T) {
-	t.Run("cap holds excess items and exempts merge", inboxCheckCapAndWatch)
+	t.Run("cap holds excess items and exempts watch", inboxCheckCapAndWatch)
 	t.Run("exact hour expiry and unsorted holds", inboxCheckHourBoundary)
 	t.Run("rollback and restart", inboxCheckCapRollbackAndRestart)
 	t.Run("people and replies are not held", inboxCheckCapSparesPeopleAndReplies)

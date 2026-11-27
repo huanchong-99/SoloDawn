@@ -140,10 +140,11 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   each, the add dialog lists those folders, newest first, and neither a
   folder that has been deleted nor one under the node's data directory.
   (`live` for OpenCode and Qwen Code.)
-- **A3.12** A folder typed by hand is accepted when it exists. The node
-  builds its lists from session files alone: with `~/.claude.json`,
-  `~/.codex/auth.json` and `~/.codex/config.toml` unreadable, the same
-  folders are listed.
+- **A3.12** A folder typed by hand is accepted when it exists. Claude Code
+  reads its session files and Codex queries `codex app-server` `thread/list`
+  (`contracts/local.md` section 7), without reading those config or auth files
+  directly: with `~/.claude.json`, `~/.codex/auth.json` and
+  `~/.codex/config.toml` unreadable, the same folders are listed.
 - **A3.13** With the folder of an AI removed after it joined, the next
   mention produces a `turn_interrupted` row that names the folder; with
   the folder back, the next mention works.
@@ -168,7 +169,10 @@ These tests need a task session, so they follow the first slice of M5
   produces a new card.
 - **A4.4** At level 1 a request to edit a file changes nothing on disk and
   produces no card.
-- **A4.5** At level 3 no card appears.
+- **A4.5** Superseded by owner override 1 of 2026-11-21
+  (`contracts/drivers.md` sections 1.1 and 2): even at level 3, CLI permission
+  prompts and multiple-choice questions produce approval and decision cards
+  (`features/host_approve.feature`).
 - **A4.6** Removed under the owner's rule of 2026-11-21: no defence in code
   against an approval from a device outside the owner's log.
 - **A4.7** Pausing the group interrupts a running turn within 2 seconds.

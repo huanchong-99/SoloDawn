@@ -15,7 +15,7 @@ Feature: Messages, notes and deletion markers in the home
 
   Scenario: Completion reports update the task thread
     Given a group home with two connected browsers of its owner, a secretary and two working AIs on its host
-    When "ai-one" posts a completion report for commit "9f2c1ab" in the thread of task 1
+    When "ai-one" posts a completion report in the thread of task 1
     Then the second browser receives that "report" message and task 1 with 1 thread message
 
   Scenario: Notes and review messages survive retention, and forget removes them with gone markers

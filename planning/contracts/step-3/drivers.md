@@ -61,7 +61,7 @@ and a step 1 acceptance test shows each. A CLI that lacks one waits.
 | a session resumed by its id in that mode, with its history | R-121 | A3.4 |
 | an MCP client that takes, at each start, one stdio server with its arguments, and calls that server's tools without a request for each call | the session token names the caller; `post` is the only way an AI speaks (`contracts/mcp-tools.md`) | A3.1, A3.7 |
 | an approval channel that is not a terminal prompt: the CLI's own permission request reaches the node and waits for its answer (section 4, `approvals`) | R-42, R-43 | A4.1, A4.2 |
-| level 1: settings under which the session changes no file | every group session, review session and secretary is level 1 (`sessions.md`) | A4.4 |
+| level 1: settings under which the session changes no file | used when level 1 is configured; in 1.0 every session defaults to level 3 and relies on its instructions not to edit files (`contracts/drivers.md` section 1, `sessions.md`) | A4.4 |
 | repository configuration loaded in task and review sessions and kept out in group sessions (owner's decision, 2026-11-22) | R-45, Q-24 | A3.8 |
 
 The driver itself is what `steps/step-2-3.md` 3.1 lists, as for the two

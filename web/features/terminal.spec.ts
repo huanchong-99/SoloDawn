@@ -451,7 +451,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'Opening an AI without a task opens its group session and creates no task, route task ids are forwarded, and the secretary is read-only',
+    'Opening an AI without a task opens its group session and creates no task, route task ids are forwarded, and the secretary opens its group session',
     ({ Given, When, Then }) => {
       Given(
         '"Claude Code" has no task and "Secretary" is the group\'s secretary on a direct path',
@@ -546,11 +546,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the session card shows "Read-only group session" and "The secretary\'s session is read-only and changes no files."',
+        'the session card shows "Secretary\'s group session" and "Opens the secretary\'s group session in its folder. Its instructions say not to edit files."',
         () => {
-          expect(one('.info .card').textContent).toContain('Read-only group session');
+          expect(one('.info .card').textContent).toContain("Secretary's group session");
           expect(texts('.info .card .hint')[0]).toBe(
-            "The secretary's session is read-only and changes no files.",
+            "Opens the secretary's group session in its folder. Its instructions say not to edit files.",
           );
         },
       );

@@ -220,7 +220,9 @@ measures decides. This limit is `risks.md` K-22.
 
 `task` is a task id or `null`. `pos` is the group sequence number when the
 note was created, as on a message: notes are listed and paged in `pos`
-order (`fetch` with `kind: note`). A note has no optional field.
+order (`fetch` with `kind: note`). A context note has no optional field; style
+presets and knowledge-base documents add optional `type` and `name`
+(`contracts/step-3/knowledge.md` section 1).
 
 Notes are the group's long-term memory (R-102). They are not part of
 `sync`; a client reads them with `fetch`, and changes are pushed like any

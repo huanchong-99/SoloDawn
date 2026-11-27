@@ -147,7 +147,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 - **Connection.** The shell decides once, when it starts, where the homes come from, and hands
   the result to every page as `net` (`src/lib/net.svelte.ts`): `sourceOf(mode, search)` is
   `mock` in a development server (`import.meta.env.MODE === 'development'`) unless the address
-  has `?nomock`, and `live` everywhere else, the tests included. `mock` adds one home answered by
+  has `?nomock` or `?demo`, and `live` everywhere else, the tests included (`?demo` connects live
+  to the in-browser simulation of `features/sim/`). `mock` adds one home answered by
   `mockCtl`, read by the person of the wire examples with this browser's device key, and online;
   only a development build has this code, so the build carries neither the mock nor the examples
   (checked in the output of `vite build`). `live` acquires the single-tab Web Lock (`runTab` of
@@ -158,8 +159,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   reached) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
   `session.peer(node, ...)` per node, pausing while `#/onboarding` runs a pairing session and
   forwarding updates to this person's device log on both paired and joined connections.
-  The browser sends `hello` with `v: 2`; only a `version`
-  refusal makes it try `v: 1` on that connection. `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)`
+  The browser sends `hello` with `v: 3` without falling back to older protocol versions
+  (`src/lib/version.ts`). `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)`
   is how this browser reaches a home now (`direct` or `relay`, the round trip, since when), and
   undefined while it does not; the mock's path is direct. `net.source` says which it is.
 - **Joining a group.** `readInvitation` in `src/lib/join.ts` reads a `#join=` fragment without
@@ -746,7 +747,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/pairing.ts`          | pairing secret, room id, mac, pair message check                                  |
 | `src/lib/owner.ts`            | owner device log and node signalling URLs in IndexedDB                            |
 | `src/lib/join.ts`             | invitation reader, room pairing, log presentation, `join` and `home.add`          |
-| `src/lib/version.ts`          | hello version 2 and version 1 fallback                                            |
+| `src/lib/version.ts`          | hello protocol version 3                                                          |
 | `src/lib/onboard.svelte.ts`   | onboarding pairing session, `#pair=` capture, `agent.set`, CLI and account labels |
 | `src/lib/payload.ts`          | the payload fields the envelope and log checks read                               |
 | `src/lib/prefs.svelte.ts`     | theme, language and `preference`, their persistence, `t`                          |
@@ -934,8 +935,8 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   does.
 - The texts of the `states` area are in the build, although only a development server shows
   their page.
-- Cards and the rows a home writes are one line each in the main line, and Safari moves the main
-  line when a message arrives while the reader is scrolled back (`issues.md`).
+- Safari moves the main line when a message arrives while the reader is scrolled back
+  (`issues.md`).
 - The end-to-end harness runs on macOS and Linux only (`issues.md`).
 
 ## Verification and sources
@@ -971,14 +972,15 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   lacks fails the exact comparison). It then holds the schemas to `internal/proto/testdata/wire.json`,
   which the Go tests write from the Go types and judge `proto.Decode` by: every value of every
   example is changed in turn (left out, `null`, another type, a fraction, 2^53, a text that is no
-  id) and must be read or refused as that file says, and so must its cases, the slugs among them.
+  id) and must be read or refused as that file says, and so must its cases.
   Fields that appear in no example are not covered by those variants.
 - `src/lib/vectors.test.ts` holds the client to every part of
   `internal/proto/testdata/crypto.json` (`planning/contracts/vectors.md`). It never compares
   signature bytes, since Safari's signatures are random: it verifies the vectors' signatures and
-  the ones the client makes itself. The vectors, and every other identity test,
-  have run in Node only; IndexedDB has run as `fake-indexeddb` only. Running them in the three
-  browsers is task F-01c.
+  the ones the client makes itself. `vitest.vectors.ts` runs only `src/lib/vectors.test.ts` and
+  `features/browser-crypto.ts` in Chromium (Chrome 137 and Edge 137 in CI), Firefox 136 and (on
+  macOS) WebKit (`.github/workflows/browser-vectors.yml`); neither file touches IndexedDB. The
+  other identity tests, and IndexedDB, run in Node only (`fake-indexeddb`).
 - Importing `decode` and `Frame` adds about 7.6 KiB to the bundle, 2.6 KiB gzipped (measured
   with `valibot` 1.5.0 on 2026-11-20). `peer.ts` imports `Frame`.
 - The group list and the chat have unit tests beside `groups.svelte.ts`, `compose.ts` and

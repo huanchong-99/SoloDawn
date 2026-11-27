@@ -15,11 +15,11 @@ type shimOpening struct {
 	MCP string `json:"mcp"`
 }
 
-// RunShim runs "solodawn mcp --token <t>": it parses args, connects to the
-// node's local socket through dial, sends the {"mcp":"<t>"} opening line, and
-// copies stdin to the socket and the socket to stdout (contracts/local.md
-// sections 1 and 3). It writes a usage or error line to stderr on failure and
-// returns the exit code.
+// RunShim runs "solodawn mcp --token <t>" or "solodawn mcp --member <id>": it
+// parses args, connects to the node's local socket through dial, sends the
+// {"mcp":"<t>"} opening line, and copies stdin to the socket and the socket to
+// stdout (contracts/local.md sections 1 and 3, contracts/step-3/external.md).
+// It writes a usage or error line to stderr on failure and returns the exit code.
 func RunShim(args []string, dial func() (net.Conn, error), stdin io.Reader, stdout, stderr io.Writer) int {
 	token, ok := parseShimToken(args)
 	if !ok {

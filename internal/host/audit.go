@@ -15,7 +15,7 @@ const (
 // always stored.
 type AuditRow struct {
 	Group  string
-	Agent  string // the CLI: claude or codex
+	Agent  string // the AI agent id (claude, codex, opencode, qwen or external)
 	What   string // one of the Audit constants
 	Item   int64  // delivered, refused: the id of the inbox item
 	Home   string // delivered, refused: the device id of the home

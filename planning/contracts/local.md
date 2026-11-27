@@ -227,8 +227,8 @@ Patterns:
 Applied on the AI's own node, before signing, to:
 
 - every text argument of the tools that send to the group: `post`, `ask`,
-  `reply`, `start_task`, `submit_task`, `submit_review`, `note_put`,
-  `request_decision`, `propose_brief`;
+  `reply`, `start_task`, `submit_task`, `submit_review`, `note_put`, `kb_put`
+  (both `name` and `text`), `request_decision`, `propose_brief`;
 - the request text and the justification of an approval
   (`flows/approval.md` step 4).
 

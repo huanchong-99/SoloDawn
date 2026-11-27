@@ -1,5 +1,7 @@
 # Step 1: frontend task list
 
+> Historical task breakdown. Steps 1 to 3 are built; `planning/contracts/` and `planning/flows/` are the current specification.
+
 For the frontend implementers (local agents). Read first: `README.md`,
 `architecture.md` sections 2 to 4, `contracts/conventions.md`,
 `contracts/envelope.md`, `contracts/rendezvous.md`,
