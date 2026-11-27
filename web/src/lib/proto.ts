@@ -85,7 +85,9 @@ export type DeviceEntry = v.InferOutput<typeof DeviceEntry>;
 // WebSocket signalling (rendezvous.md section 2)
 
 const iceServer = v.object({ urls: strs, username: v.optional(str), credential: v.optional(str) });
-const iceConfig = { ice: v.array(iceServer), ttl: int };
+/** `hosts` is true in `ready` and in every answer to `ice` from a server that has hosted rooms, and
+ *  left out by one that has not (rendezvous.md 2.1). */
+const iceConfig = { ice: v.array(iceServer), ttl: int, hosts: v.optional(bool) };
 
 export const RVChallenge = v.object({ t: v.literal('challenge'), nonce: str });
 export type RVChallenge = v.InferOutput<typeof RVChallenge>;
@@ -131,6 +133,15 @@ export type RVJoin = v.InferOutput<typeof RVJoin>;
 export const RVJoined = v.object({ t: v.literal('joined'), room: roomId });
 export type RVJoined = v.InferOutput<typeof RVJoined>;
 
+/** A home hosts the room of an invitation code: `data` is its `pair` message, kept as the room's
+ *  card (rendezvous.md 2.2). Sent only where the server says `hosts`. */
+export const RVJoinHost = v.object({ t: v.literal('join'), room: roomId, data: Pair });
+export type RVJoinHost = v.InferOutput<typeof RVJoinHost>;
+
+/** The host ends the room it hosts (rendezvous.md 2.2). Sent only where the server says `hosts`. */
+export const RVLeave = v.object({ t: v.literal('leave'), room: roomId });
+export type RVLeave = v.InferOutput<typeof RVLeave>;
+
 // What two devices send each other through a pairing room is their pair message (envelope.md 6).
 export const RVRoom = v.object({ t: v.literal('room'), room: roomId, data: Pair });
 export type RVRoom = v.InferOutput<typeof RVRoom>;
@@ -163,6 +174,9 @@ export const Welcome = v.object({
   addrs: strs,
   groups: v.array(GroupSummary),
   owner: bool,
+  /** The id of the group of the peer's invitation or code, in the `welcome` to a joining peer alone
+   *  (datachannel.md section 3). */
+  join: v.optional(str),
 });
 export type Welcome = v.InferOutput<typeof Welcome>;
 
@@ -572,6 +586,7 @@ export const CmdResult = v.object({
   passed: v.optional(bool),
   round: v.optional(int),
   link: v.optional(str),
+  code: v.optional(str),
   expires: v.optional(int),
   id: v.optional(str),
   replaced: v.optional(bool),
@@ -700,9 +715,20 @@ export type MemberAddPerson = v.InferOutput<typeof MemberAddPerson>;
 export const Invite = v.object({ t: v.literal('invite'), ...HomeCommand });
 export type Invite = v.InferOutput<typeof Invite>;
 
-/** Admits the person of a joining connection to the invitation's group (people.md section 2.2). */
+/** Admits the person of a joining connection to the group of its invitation or code (people.md
+ *  section 2.2). */
 export const Join = v.object({ t: v.literal('join'), ...HomeCommand, name: str });
 export type Join = v.InferOutput<typeof Join>;
+
+/** Makes, ends or shows the group's invitation code; `hours` is there with `new` alone, and `new`
+ *  and `show` are answered with `code` and `expires` in `CmdResult` (people.md section 2.6). */
+export const Code = v.object({
+  t: v.literal('code'),
+  ...HomeCommand,
+  op: v.picklist(['new', 'off', 'show']),
+  hours: optionalInt,
+});
+export type Code = v.InferOutput<typeof Code>;
 
 /** What the reviewer signs of a review body, `report` being the report under review; the home adds
  *  the rest and answers `passed` and `round` (commands.md 1.8). */

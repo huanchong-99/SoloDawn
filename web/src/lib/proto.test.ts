@@ -345,20 +345,23 @@ describe('message contracts', () => {
 });
 
 describe('rendezvous frames', () => {
-  it.each(['rv-join', 'rv-joined', 'rv-room'])('%s takes a 32-digit lowercase hex room', (name) => {
-    const frame = JSON.parse(goldens[name]);
-    const room = '0123456789abcdef'.repeat(2);
-    expect(accepts(name, { ...frame, room })).toBe(true);
-    for (const invalid of [
-      room.slice(1),
-      'z' + room,
-      room + 'z',
-      room.toUpperCase(),
-      room.slice(1) + 'g',
-    ]) {
-      expect(accepts(name, { ...frame, room: invalid })).toBe(false);
-    }
-  });
+  it.each(['rv-join', 'rv-join-host', 'rv-joined', 'rv-leave', 'rv-room'])(
+    '%s takes a 32-digit lowercase hex room',
+    (name) => {
+      const frame = JSON.parse(goldens[name]);
+      const room = '0123456789abcdef'.repeat(2);
+      expect(accepts(name, { ...frame, room })).toBe(true);
+      for (const invalid of [
+        room.slice(1),
+        'z' + room,
+        room + 'z',
+        room.toUpperCase(),
+        room.slice(1) + 'g',
+      ]) {
+        expect(accepts(name, { ...frame, room: invalid })).toBe(false);
+      }
+    },
+  );
 
   it('limits watch to 64 ids', () => {
     const watch = JSON.parse(goldens['rv-watch']);

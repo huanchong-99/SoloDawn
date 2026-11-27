@@ -1,10 +1,10 @@
 # Contract, step 2: people
 
-How a second person comes into a group, by a link or added by an admin,
-what the three roles may do, and how a person leaves or is removed. It
-settles design point D-7 of
-`steps/parallel-plan-step-2-3.md` and refines the row "People" of
-`steps/step-2-3.md`. Rules: R-134, R-136, R-138, R-140.
+How a second person comes into a group, by a link, by a code or added by
+an admin, what the three roles may do, and how a person leaves or is
+removed. It settles design point D-7 of `steps/parallel-plan-step-2-3.md`
+and refines the row "People" of `steps/step-2-3.md`. Rules: R-134, R-136,
+R-138, R-140.
 
 This file adds to the step 1 contracts and changes nothing in them (section
 8). Who decides what an AI does is `contracts/step-2/authority.md`.
@@ -16,7 +16,7 @@ A person's `member` row has `role` (`contracts/rows.md` section 2).
 | Role | Who | May, beyond what the role above it in this table may |
 | --- | --- | --- |
 | `member` | every person who joined | read the group; `post`, `note`, `note_edit`, `jump`; `act` on a card that names them; add and remove their own AIs (`host.join`, `host.leave`); remove themself |
-| `admin` | named by the owner | everything `contracts/commands.md` gives "an admin"; `invite`; `member add_person`; remove a person whose role is `member` |
+| `admin` | named by the owner | everything `contracts/commands.md` gives "an admin"; `invite`; `code`; `member add_person`; remove a person whose role is `member` |
 | `owner` | the owner of the home node; the person of `group create` | set roles; remove an admin |
 
 - A group has exactly one owner, the owner of the home, and the role never
@@ -60,13 +60,13 @@ invitation is open, otherwise `conflict`, as for `pair.browser`.
 ### 2.2 `join`
 
 `{"t":"join","n":"…","ts":…,"g":"…","name":"…"}`. By the device of a
-joining connection (section 4), for the group of its invitation. `name` is
-the name the person takes in this group.
+joining connection (section 4), for the group of its invitation or code
+(2.6). `name` is the name the person takes in this group.
 
 The home accepts it when all of this holds:
 
-1. The connection is a joining connection whose invitation is open and is
-   for `g`: else `forbidden`.
+1. The connection is a joining connection, for `g`, whose invitation is
+   open or whose code is the group's open code (2.6): else `forbidden`.
 2. A device log was presented on this connection (section 4, step 7), it
    is valid, and at its end the signer `k` is a valid device: else
    `forbidden`. The person is the `user` of that log. The home judges the
@@ -84,7 +84,7 @@ one transaction:
 - one `device` row per entry of the person's log, and the log in
   `device_log` (`contracts/storage.md` section 2);
 - a `system` message `member_joined` in the main line (section 6);
-- the invitation is used up.
+- the invitation is used up; a code is not.
 
 Then the home pushes `groups` to the connection, which from now on is the
 connection of a member's device (section 5).
@@ -121,6 +121,8 @@ Otherwise, in one transaction:
    unless the person is the node's owner or a member of another group
    homed here.
 4. A `system` message `member_removed` in the main line.
+5. When the command is not by that person, the group's code ends, if one
+   is open (2.6): the person removed may hold it.
 
 The home pushes the state rows of this change to every connected node of
 that person, as the last rows it pushes them of the group. It then pushes
@@ -158,7 +160,8 @@ The home accepts it when both hold:
 
 1. It holds the device log of `user`, which it does exactly while that
    person is a member of another group homed on this node (2.4, point 3):
-   else `not_found`. A person who is in no group here is invited by link.
+   else `not_found`. A person who is in no group here is invited by code or
+   by link.
 2. The person is not a member of `g`, and `name` is unused in it: else
    `conflict`.
 
@@ -183,6 +186,38 @@ There is no consent step: the person leaves with `member remove` on their
 own row (2.4), and no AI of theirs is in the group until they add it
 (`risks.md` K-36).
 
+### 2.6 `code`
+
+An invitation code admits any number of people for a limited time (the
+owner's decision of 2026-11-27). A group has at most one. It is a pairing
+secret in form (`contracts/envelope.md` section 6).
+
+`{"t":"code","n":"…","ts":…,"g":"…","op":"new","hours":24}`. By an admin.
+`op` is `new`, `off` or `show`; `hours` is there with `new` alone.
+
+| `op` | Effect | Result |
+| --- | --- | --- |
+| `new` | `hours` is an integer from 1 to 168, else `bad_request`. The group's code, if one is open, ends. The home creates a secret, marks it as the **code** of `g` made by that admin, with `expires` = its clock + `hours`, stores it (`contracts/storage.md` section 2, `invites`), and hosts the room of the secret, with its `pair` message as `data`, on its own handler and on each rendezvous it uses that says `hosts` (`contracts/rendezvous.md` 2.1) | `code`, `expires` |
+| `off` | the group's code ends; with none open, nothing changes | — |
+| `show` | nothing | `code`, `expires` while a code is open, no field otherwise |
+
+- `code` is the secret as shown, with hyphens.
+- A code is **open** from `new` until it **ends**: `off`; a later `new`;
+  the home's clock reaches `expires`; a person is removed by another
+  (2.4); the group moves (`contracts/step-2/export.md` section 3). Ending
+  deletes the stored entry, leaves the room, and closes the joining
+  connections of the code whose person is not a member. It removes nobody.
+- `new` is `ok` once the code is stored, whether or not a rendezvous is
+  connected. The home hosts the room on each path when that path
+  connects, also after a restart. Answered `full` on a path, it does not
+  host the code there until that path connects again; the code stays
+  open. While the home is off nothing answers the code.
+- The receipt of a `code` command records that it succeeded, never the
+  code. A repeat is answered `ok` with no field; the client sends a new
+  `show`.
+- The field a person types a code into removes white space; the result is
+  read as `contracts/envelope.md` section 6 reads a typed secret.
+
 ## 3. The invitation is not a device pairing
 
 Section 6 of `contracts/envelope.md` enrols a device into a person: roles
@@ -191,12 +226,15 @@ room, `pair` messages and `mac`, unchanged, and must never have that
 effect:
 
 1. **A secret has one purpose**, fixed by the device that created it:
-   pairing or invitation. The home remembers which, and handles a peer on
-   an invitation as a **joining peer**.
+   pairing, invitation or code. The home remembers which, and handles a peer
+   on an invitation or a code as a **joining peer**.
 2. **No log entry, no adoption.** The home writes no `add` entry for a
    joining peer and sends it no log before it is a member. A browser that
    opened a `#join=` link adopts nobody. Both logs stay as they were; the
    joiner's person becomes a member, with all its devices.
+3. **A code is the one secret used more than once.** While it is open the
+   home accepts a `pair` message under it from any number of devices, each
+   for 10 minutes from its own message.
 
 ## 4. Flow: joining
 
@@ -229,17 +267,40 @@ RV, the rendezvous service.
 Failure at any step is shown with the step and the reason. B closes the
 connection; the invitation stays open until its time is reached.
 
+### 4.1 Joining by code
+
+1. A sends `code new`, or reads the open code with `code show`, and gives
+   the code to people by a private channel. Who holds the code can join
+   while it is open.
+2. P opens "Join a group" in the web client P uses and types the code and
+   the name P takes. B must belong to a person (step 3).
+3. B contacts nobody unless the text is a secret. B joins the room of the
+   secret on every signalling path it has: its own rendezvous and the
+   addresses its nodes gave in `welcome`.
+4. On a path where H hosts the room, RV answers `joined` and H's `pair`
+   message, and passes B's to H. B accepts a message of role `a` and kind
+   `node` with the right `mac`; its `k` is the home.
+5. Steps 6 to 10 follow, with two differences: B reads the group id from
+   `join` in the `welcome` (`contracts/datachannel.md` section 3), and B
+   stores H with the signalling URL on which the room answered.
+
+While nothing answers, B waits, for at most 10 minutes, and says that the
+code may be wrong or ended, or the group's computer off. Up to two
+devices that wait in the room get H's message when H comes; a third was
+answered `full` and tries again.
+
 ## 5. What a node accepts from a joining peer and from a member
 
 Two rows of `contracts/datachannel.md` section 8 in step 2:
 
 | Peer is | Accepted |
 | --- | --- |
-| a joining peer: a device that passed the exchange of section 3 and whose person is not a member | `hello`; `devlog` for one person's log; `cmd` with a `join` payload for the group of its invitation. Every other request is answered `forbidden`. No `sync`, no `fetch`, no host surface |
+| a joining peer: a device that passed the exchange of section 3 and whose person is not a member | `hello`; `devlog` for one person's log; `cmd` with a `join` payload for the group of its invitation or code. Every other request is answered `forbidden`. No `sync`, no `fetch`, no host surface |
 | a device of another member of a group homed here | home surface for that group; `devlog` |
 
-- A joining connection whose person is no member when the invitation's
-  time is reached is closed.
+- A joining connection whose person is no member is closed when the
+  invitation's time is reached; on a code, 10 minutes after its device's
+  `pair` message, or when the code ends.
 - **A person added with `member add_person`** (2.5) has no joining
   connection. Their devices are those of the second row already, through
   another group homed here: the group they were added to is one more that
@@ -263,7 +324,7 @@ the home:
 
 | `code` | Always present | Optional |
 | --- | --- | --- |
-| `member_joined` | `member` (the new row), `by` (the admin who invited, or who added the person with `member add_person`) | — |
+| `member_joined` | `member` (the new row), `by` (the admin who invited, who made the code, or who added the person with `member add_person`) | — |
 | `member_removed` | `user`, `name` (of the removed row, which is gone) | `by`, the member who removed them; absent when the person left |
 
 A role change writes no message: the row shows it.
@@ -297,12 +358,26 @@ A role change writes no message: the row shows it.
    browser profile alone would be lost with it (`risks.md` K-20).
 5. **Who sets roles**: the owner alone (section 1), so that admins cannot
    promote or demote each other.
+6. **Limits of a code** (2026-11-27): 24 hours unless the admin chooses 1
+   hour or 7 days; never more than 7 days. A code is not extended: `new`
+   replaces it. One node hosts 16 codes on one rendezvous; one more is not
+   hosted there (`contracts/rendezvous.md` 2.2).
+7. **Same rendezvous, of this version.** A code finds the home only on a
+   rendezvous that the home and the joiner's browser or nodes both use, and
+   that says `hosts`. Otherwise the person is invited by link (point
+   3).
+8. **Who holds a code.** Everyone who joined by it knows it and can pass it
+   on while it is open. A holder who hosts the room on a rendezvous before the
+   home does keeps it there for as long as they stay connected, and the home
+   cannot host there meanwhile: who types the code on that rendezvous joins a
+   group of the holder's making. A link cannot be used so, because it names
+   the home's device. Nothing is built against it.
 
 ## 8. Where this goes after step 1
 
 | Part | Folded into |
 | --- | --- |
-| sections 1 and 2; section 7, point 2 | `contracts/commands.md` 1.2 (`add_person` is in its table), a section for `invite` and `join`, and section 2 (`home.add`); the link of `invite` among the results that live only in memory ("Once only"; `contracts/storage.md` section 2, `receipt`); `contracts/storage.md` section 2, `setting` key `homes` |
+| sections 1 and 2; section 7, point 2 | `contracts/commands.md` 1.2 (`add_person` is in its table), a section for `invite`, `join` and `code`, and section 2 (`home.add`); the link of `invite` among the results that live only in memory ("Once only"; `contracts/storage.md` section 2, `receipt`); `contracts/storage.md` section 2, `setting` key `homes` |
 | section 3 | `contracts/envelope.md` section 3 (check 2: a joining peer) and section 6 |
 | section 4 | a new `flows/joining.md` |
 | section 5; section 7, point 2 | `contracts/datachannel.md` sections 3.1, 7 (`homes`: the groups whose home the node knows, each entry with `home`) and 8 |

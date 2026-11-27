@@ -148,8 +148,8 @@ CREATE TABLE setting (
   written once per group so that it gets a group sequence number.
 - `receipt` is written in the transaction of the command it belongs to, for
   home commands and host commands alike. For `pair.browser` and
-  `takeover.start` it records only that the command succeeded
-  (`contracts/commands.md`, "Once only").
+  `takeover.start` it records only that the command succeeded; for `code`
+  likewise, never the code (`contracts/commands.md`, "Once only").
 - `processed_offer` remembers each applied offer by (`signer`, `conn`) across
   restarts ([rendezvous §2.3](rendezvous.md#23-signalling-payloads-inside-env)). Its
   expiry is the offer's `ts + 120000`; delete it only when the node's clock is strictly later.
@@ -157,7 +157,9 @@ CREATE TABLE setting (
   `retention_days` (90), `idle_minutes` (15), `max_open` (4),
   `default_level` (3, owner's decision of 2026-11-21), `all_level3` (false), `approvers` (list of user ids),
   `offline` (false), `homes` (the list `host.info` shows,
-  `contracts/datachannel.md` section 7).
+  `contracts/datachannel.md` section 7), `invites` (an object from group id
+  to that group's open invitation code: `code`, `by`, `expires`;
+  `contracts/step-2/people.md` 2.6).
 
 ## 3. Host tables
 
@@ -249,7 +251,8 @@ CREATE TABLE peer (               -- remembered signalling addresses (R-133)
   that item. `submit_review` reads it there, so a review session that is
   resumed after the node restarted still names the report it was given.
 
-Not stored: session tokens, relay credentials, the pairing secret, the
+Not stored: session tokens, relay credentials, the pairing secret (an
+invitation code is stored: `invites`), the
 hourly wake-up counts, and anything from a terminal.
 
 ## 4. Retention (R-135)

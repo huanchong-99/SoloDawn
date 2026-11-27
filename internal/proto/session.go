@@ -53,6 +53,9 @@ type Welcome struct {
 	Addrs   []string       `json:"addrs"`
 	Groups  []GroupSummary `json:"groups"`
 	Owner   bool           `json:"owner"`
+	// Join is the id of the group of the peer's invitation or code, in the
+	// welcome to a joining peer alone (contracts/datachannel.md section 3).
+	Join string `json:"join,omitempty"`
 }
 
 type Devlog struct {

@@ -51,6 +51,10 @@ answered `ok` with the original link while that link is still valid, or
 `ok` while that terminal is still open on this connection; otherwise
 `conflict`. A repeat never creates a new link or a new terminal.
 
+The code of `code new` and `code show` is stored by the home and is in no
+receipt: a repeat is answered `ok` with no field
+(`contracts/step-2/people.md` 2.6).
+
 **Results.** Effects are read from rows. A few commands also answer with
 named fields, listed in the tables as "Result"; an answer has only the
 result fields of its command.
@@ -69,7 +73,8 @@ ones:
   no fact to report);
 - in `push`: either `sub`, `vapid` and `on`, or `off` alone (1.7);
 - in `takeover.start`: `task`;
-- in `note_edit`: `name`, there exactly when the note has a `type`.
+- in `note_edit`: `name`, there exactly when the note has a `type`;
+- in `code`: `hours`, there with `op` `new` alone.
 
 A `post` always carries `kind`, `text`, `thread` (or `null`), `main`,
 `mentions`, `re` (or `null`) and `body`; what `body` must hold for each
@@ -113,7 +118,7 @@ On `add_ai` and on `set` with `approvers`, the home adds the owner's user id
 to `approvers` when it is missing (`contracts/rows.md` section 2); the owner
 is the person whose host signed `add_ai`.
 
-Step 2 adds people: `invite`, `join` and `add_person`
+Step 2 adds people: `invite`, `join`, `code` and `add_person`
 (`contracts/step-2/people.md` section 2), and `set` and `remove` on a
 person's row. `member set` never takes `workspace`: to move an AI to another
 folder its owner removes it and adds it again.

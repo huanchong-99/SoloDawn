@@ -1,0 +1,17 @@
+{
+  "t": "welcome",
+  "re": 1,
+  "ok": true,
+  "v": 3,
+  "device": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "name": "workstation",
+  "version": "v0.3.1",
+  "time": 1763600000000,
+  "addrs": [
+    "ws://192.0.2.10:47800/rv",
+    "wss://rv.example/rv"
+  ],
+  "groups": [],
+  "owner": false,
+  "join": "rZNvy-1jH6Z-BcPqA5U5BQ"
+}

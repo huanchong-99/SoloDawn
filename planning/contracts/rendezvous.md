@@ -2,7 +2,8 @@
 
 The rendezvous service lets two devices exchange the few messages needed to
 open a WebRTC connection, tells them their public address, and relays
-ciphertext when no direct path exists. It stores nothing.
+ciphertext when no direct path exists. It stores nothing; a hosted room's
+`data` is in memory while its host is connected.
 
 The same signalling handler runs in every node, so a peer that can reach a
 node's address needs no server at all.
@@ -40,7 +41,7 @@ most 90 frames in any 11 seconds per connection, queueing the rest, and no `to`
 over 16,382 bytes. The server closes a connection that sends a larger frame,
 more than 120 frames in 10 seconds, a frame it cannot read, an unknown `t`, a
 `k` in `to` or `watch` that is no device id (`contracts/envelope.md` section 2),
-a `watch` of more than 64 keys, a `join` of a 17th room, or a `to` whose `from`
+a `watch` of more than 64 keys, a `join` without `data` of a 17th room, or a `to` whose `from`
 would exceed 16 KiB (the target gets none). A receiver queues at most 128
 frames, 16 per sender and 32 from senders off its watch list; more are dropped
 for it, closing nothing; the sender's offer timeout and back-off cover it.
@@ -50,7 +51,7 @@ for it, closing nothing; the sender's offer timeout and back-off cover it.
 ```
 server -> {"t":"challenge","nonce":"q0J…"}
 client -> {"t":"auth","k":"<device id>","s":"<signature>"}
-server -> {"t":"ready","ice":[ … ],"ttl":3600}
+server -> {"t":"ready","ice":[ … ],"ttl":3600,"hosts":true}
 ```
 
 - `s` = Ed25519 signature over `"solodawn/rv/1\n"` and the nonce's base64url
@@ -70,8 +71,11 @@ server -> {"t":"ready","ice":[ … ],"ttl":3600}
 ```
 
 - Relay credentials expire after `ttl` seconds. `{"t":"ice"}` gets fresh ones:
-  `{"t":"ice","ice":[…],"ttl":3600}`. A client asks before a connection attempt
-  when its credentials are older than half their `ttl`.
+  `{"t":"ice","ice":[…],"ttl":3600,"hosts":true}`. A client asks before a
+  connection attempt when its credentials are older than half their `ttl`.
+- `hosts` is optional: `true`, in `ready` and in every answer to `ice`, from a
+  server that has hosted rooms (2.2). A device sends a `join` with `data`, or
+  a `leave`, only on a connection whose server says it.
 
 ### 2.2 Messages after `ready`
 
@@ -80,13 +84,18 @@ server -> {"t":"ready","ice":[ … ],"ttl":3600}
 | `{"t":"to","k":"<target>","env":{…}}` | if the target is connected, sends it `{"t":"from","k":"<sender>","env":{…}}`; otherwise answers `{"t":"offline","k":"<target>"}` |
 | `{"t":"watch","k":["<id>",…]}` (at most 64) | replaces the watch list; sends `{"t":"presence","k":"<id>","on":true}` or `false` now and on every change |
 | `{"t":"join","room":"<room id>"}` | puts the client in a pairing room of at most two; when the second arrives sends both `{"t":"joined","room":"<room id>"}`; a third gets `{"t":"full","room":"<room id>"}` and is not joined |
+| `{"t":"join","room":"<room id>","data":{…}}` | **hosts** the room and keeps `data`: each device waiting in it gets `joined` and `{"t":"room","room":"<room id>","data":{…}}` and is out of it. From then on every other client that joins gets those two frames and is not kept, and its `room` frame for this room goes to the host. A room that has a host, and the 17th room a connection would host: `full`. The host gets no `joined` |
+| `{"t":"leave","room":"<room id>"}` | ends the room when this connection hosts it; otherwise nothing |
 | `{"t":"room","room":"<room id>","data":{…}}` | forwards the same object to the other member of the room |
 | `{"t":"quota"}` | answers `{"t":"quota","used":3250000,"limit":52428800}` for this device, today |
 
 The server never reads `env` or `data`. A room id is the 32 lower-case hex
 characters of `contracts/envelope.md` section 6. Rooms disappear when empty or
-after 15 minutes; a connection is in at most 16. A device sends its `pair`
-message only after `joined`, and again after each later `joined`.
+after 15 minutes; a connection is in at most 16. A hosted room has no 15
+minutes: it lasts until `leave` or the end of its host's connection, and a
+connection hosts at most 16, beside those it is in. A device sends its `pair`
+message only after `joined`, and again after each later `joined`. A host
+sends it as the `data` of its `join`.
 
 ### 2.3 Signalling payloads (inside `env`)
 

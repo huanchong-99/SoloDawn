@@ -15,5 +15,6 @@
       "credential": "4mW29WRgGh_o3EJ4XNGKhg"
     }
   ],
-  "ttl": 3600
+  "ttl": 3600,
+  "hosts": true
 }

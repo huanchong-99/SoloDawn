@@ -98,10 +98,20 @@ type MemberSet struct {
 // HomeCommand alone, answered with link and expires in CmdResult.
 type Invite = HomeCommand
 
-// Join admits the person of a joining connection to the invitation's group.
+// Join admits the person of a joining connection to the group of its
+// invitation or code.
 type Join struct {
 	HomeCommand
 	Name string `json:"name"`
+}
+
+// Code makes, ends or shows the group's invitation code (contracts/step-2/
+// people.md 2.6). Op is new, off or show; Hours is there with new alone; new
+// and show are answered with code and expires in CmdResult.
+type Code struct {
+	HomeCommand
+	Op    string `json:"op"`
+	Hours *int   `json:"hours,omitempty"`
 }
 
 // A host event is the body of a system message without ai, which the home

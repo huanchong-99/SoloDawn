@@ -164,6 +164,10 @@ the type does not name, not with `Decode`.
   card states (`pending`, `confirmed`, `denied`, `expired`), `call` state `denied`
   (`TimedState`), `"confirm"` in `PushOn.On`, `Reminder.Kind` and `TaskWait.Kind`, and `Asked` on
   `TaskRow`.
+- Invitation codes (`step-2/people.md` 2.6) add `Code` (`HomeCommand` with `op` and `hours`, a
+  pointer so that 0 is told from left out; `new` and `show` are answered with `code` and
+  `expires` in `CmdResult`), `join` on `Welcome`, `hosts` on `ICEConfig`, and the host's `join`,
+  which is a `RoomData`; `leave` is a `RoomID`.
 - Presets and knowledge-base documents (`step-3/knowledge.md`) add optional `type`
   (the field `NoteType`, JSON `type`) and `name` on `NoteRow` and `Note` (answered with `id` and `replaced`
   in `CmdResult`), `preset` on `BriefBody`, and `q` on `FetchKind`. The tool lists in

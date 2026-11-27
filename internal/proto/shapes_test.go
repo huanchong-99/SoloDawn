@@ -29,6 +29,7 @@ var shapes = map[string]reflect.Type{
 	"answer":                         of[Answer](),
 	"beacon":                         of[Beacon](),
 	"cmd":                            of[Cmd](),
+	"cmd-code":                       of[CmdResult](),
 	"cmd-error":                      of[ErrorResponse](),
 	"cmd-invite-link":                of[CmdResult](),
 	"cmd-moved":                      of[ErrorResponse](),
@@ -37,6 +38,9 @@ var shapes = map[string]reflect.Type{
 	"cmd-pair-link":                  of[CmdResult](),
 	"cmd-reviewed":                   of[CmdResult](),
 	"cmd-started":                    of[CmdResult](),
+	"code-new":                       of[Code](),
+	"code-off":                       of[Code](),
+	"code-show":                      of[Code](),
 	"device-add":                     of[DeviceEntry](),
 	"device-revoke":                  of[DeviceEntry](),
 	"devlog":                         of[Devlog](),
@@ -176,7 +180,9 @@ var shapes = map[string]reflect.Type{
 	"rv-ice-answer":                  of[ICEConfig](),
 	"rv-ice-request":                 of[RVFrame](),
 	"rv-join":                        of[RoomID](),
+	"rv-join-host":                   of[RoomData](),
 	"rv-joined":                      of[RoomID](),
+	"rv-leave":                       of[RoomID](),
 	"rv-offline":                     of[Offline](),
 	"rv-presence":                    of[Presence](),
 	"rv-quota-answer":                of[Quota](),
@@ -201,6 +207,7 @@ var shapes = map[string]reflect.Type{
 	"watch-end":                      of[WatchEnd](),
 	"watch-start":                    of[WatchStart](),
 	"welcome":                        of[Welcome](),
+	"welcome-joining":                of[Welcome](),
 }
 
 // notExamples are the files of testdata that are not one wire example: test
