@@ -327,3 +327,44 @@ func TestLackingEntries(t *testing.T) {
 	check(t, err)
 	equal(t, envs, []json.RawMessage{json.RawMessage("2"), json.RawMessage("3")})
 }
+
+// The open invitation codes of the groups, in the setting invites
+// (storage.md section 2; people.md 2.6): an entry whose end is reached counts
+// as none wherever it is read, and the next write deletes it. The zero
+// Invite ends a group's code.
+func TestHomeKeepsTheInvitationCodes(t *testing.T) {
+	s := openDB(t, ":memory:")
+	codes := func(now int64) map[string]Invite {
+		got, err := within(t, s, func(tx *Tx) (map[string]Invite, error) { return tx.Invites(now) })
+		check(t, err)
+		return got
+	}
+	set := func(group string, code Invite, now int64) {
+		check(t, s.Write(func(tx *Tx) error { return tx.SetInvite(group, code, now) }))
+	}
+	stored := func() string { return scalar[string](t, s.db, "SELECT value FROM setting WHERE key='invites'") }
+	a, b := Invite{"7K2M9QXD4F8TWB3N", "m1", 200}, Invite{"0123456789ABCDEF", "m2", 100}
+	equal(t, codes(0), map[string]Invite{})
+	set("a", a, 0)
+	set("b", b, 0)
+	equal(t, stored(), `{"a":{"code":"7K2M9QXD4F8TWB3N","by":"m1","expires":200},"b":{"code":"0123456789ABCDEF","by":"m2","expires":100}}`)
+	equal(t, codes(99), map[string]Invite{"a": a, "b": b})
+	equal(t, codes(100), map[string]Invite{"a": a})
+	equal(t, stored(), `{"a":{"code":"7K2M9QXD4F8TWB3N","by":"m1","expires":200},"b":{"code":"0123456789ABCDEF","by":"m2","expires":100}}`)
+	renewed := Invite{"ZZZZZZZZZZZZZZZZ", "m1", 300}
+	set("a", renewed, 100)
+	equal(t, stored(), `{"a":{"code":"ZZZZZZZZZZZZZZZZ","by":"m1","expires":300}}`)
+	set("a", Invite{}, 100)
+	equal(t, []any{stored(), codes(0)}, []any{"{}", map[string]Invite{}})
+
+	_, err := s.db.Exec("UPDATE setting SET value='{' WHERE key='invites'")
+	check(t, err)
+	_, err = within(t, s, func(tx *Tx) (map[string]Invite, error) { return tx.Invites(0) })
+	equal(t, err.Error(), "unexpected end of JSON input")
+	_, err = s.db.Exec("DROP TABLE setting")
+	check(t, err)
+	_, err = within(t, s, func(tx *Tx) (map[string]Invite, error) { return tx.Invites(0) })
+	equal(t, strings.Contains(err.Error(), "no such table: setting"), true)
+	err = s.Write(func(tx *Tx) error { return tx.SetInvite("a", a, 0) })
+	equal(t, strings.Contains(err.Error(), "no such table: setting"), true)
+}

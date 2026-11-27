@@ -3,6 +3,7 @@ package home_test
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
@@ -29,17 +30,31 @@ func peopleApply(t *testing.T, s *home.State, d home.Disk, by identity.Key, join
 		equal(t, err, nil)
 		return res
 	}
-	c := home.Command{Env: env, Disk: d, Joining: join, Now: clock, Who: home.Who{Device: by.ID()}}
-	equal(t, json.Unmarshal([]byte(env.Payload), &c.PayloadHeader), nil)
+	return peopleRun(t, s, "join", home.Command{Env: env, Disk: d, Joining: join, Now: clock, Who: peopleJoiner(s, by, join)})
+}
+
+// peopleJoiner is who a join on a joining connection is by: the device, and
+// its person and their member id when the presented log holds it.
+func peopleJoiner(s *home.State, by identity.Key, join *home.Joining) home.Who {
+	who := home.Who{Device: by.ID()}
 	if join.Log != nil && join.Log.Valid(by.ID()) {
-		c.Who.User = join.Log.User
+		who.User = join.Log.User
 		for id, person := range s.People {
-			if person.User == c.Who.User {
-				c.Who.Human = id
+			if person.User == who.User {
+				who.Human = id
 			}
 		}
 	}
-	res, refusal := home.Commands["join"](s, c)
+	return who
+}
+
+// peopleRun runs the function of a key with c as the loop fills it in after
+// the checks: the header of its payload, and the group's open code read in
+// the command's transaction.
+func peopleRun(t *testing.T, s *home.State, key string, c home.Command) home.Result {
+	t.Helper()
+	equal(t, json.Unmarshal([]byte(c.Env.Payload), &c.PayloadHeader), nil)
+	res, refusal := home.Commands[key](s, c)
 	if refusal != nil {
 		return home.Result{Answer: store.Outcome{Code: refusal.Code}}
 	}
@@ -118,6 +133,8 @@ func TestPeopleJoinRefusals(t *testing.T) {
 	s.AIs[id(180)] = ai(id(180), laptop)
 	res := peopleApply(t, s, disk{}, nobody, &home.Joining{Group: groupID, Open: true, Log: logOf(t, nobody)}, "join", `,"name":"visitor"`)
 	equal(t, res.Answer, store.Outcome{Code: "conflict"})
+	// A member's join on a connection that is not joining.
+	equal(t, peopleApply(t, grpState(t), disk{}, browser, nil, "join", `,"name":"again"`).Answer, store.Outcome{Code: "forbidden"})
 }
 
 // people.md 2.5: an admin adds a person whose log the node holds. The rows are
@@ -293,10 +310,11 @@ func TestPeopleRemovalCascades(t *testing.T) {
 		d := peopleDisk{other: other}
 		res := peopleApply(t, s, d, browser, nil, "member", fmt.Sprintf(`,"op":"remove","id":%q`, person.ID))
 		equal(t, res.Answer, store.Outcome{OK: true})
-		equal(t, res.GroupsChanged, true)
-		wantWrites, wantForget := 1, person.User
+		equal(t, []any{res.GroupsChanged, res.CodeChanged}, []any{true, true})
+		// The code ends with a removal by another (people.md 2.4, step 5).
+		wantWrites, wantForget := 2, person.User
 		if other {
-			wantWrites, wantForget = 0, ""
+			wantWrites, wantForget = 1, ""
 		}
 		equal(t, res.Forget, wantForget)
 		equal(t, len(res.Rows), 6)
@@ -331,7 +349,106 @@ func TestPeopleRemovalBusyAndLeaving(t *testing.T) {
 			continue
 		}
 		equal(t, res.Answer, store.Outcome{OK: true})
+		// A person who leaves leaves the code open.
+		equal(t, []any{res.CodeChanged, len(res.Writes)}, []any{false, 1})
 		msg := res.Rows[len(res.Rows)-1].Value().(proto.MsgRow)
 		equal(t, string(msg.Body), fmt.Sprintf(`{"code":"member_removed","user":%q,"name":"guest-user"}`, device(6).ID()))
 	}
+}
+
+// A9.47 and A9.48, home half (people.md 2.6): an admin makes the code, ends it
+// and shows it. The answer carries the code with hyphens and its end beside
+// the receipt, which holds that it succeeded and nothing more.
+func TestPeopleCode(t *testing.T) {
+	shown := regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$`)
+	codes := map[string]bool{}
+	for _, tc := range []struct {
+		by    identity.Key
+		hours int64
+	}{{browser, 1}, {guest, 24}, {browser, 168}} {
+		res := peopleApply(t, grpState(t), disk{}, tc.by, nil, "code", fmt.Sprintf(`,"op":"new","hours":%d`, tc.hours))
+		equal(t, res.Answer, store.Outcome{OK: true})
+		equal(t, shown.MatchString(res.Code), true)
+		equal(t, []any{res.Expires, res.CodeChanged, len(res.Writes), len(res.Rows)}, []any{clock + tc.hours*3_600_000, true, 1, 0})
+		equal(t, res.Frame(4), any(proto.CmdResult{Success: proto.Success{Re: 4, OK: true}, Code: res.Code, Expires: res.Expires}))
+		codes[res.Code] = true
+	}
+	equal(t, len(codes), 3)
+
+	off := peopleApply(t, grpState(t), disk{}, guest, nil, "code", `,"op":"off"`)
+	equal(t, []any{off.Answer, off.Code, off.Expires, off.CodeChanged, len(off.Writes)}, []any{store.Outcome{OK: true}, "", int64(0), true, 1})
+
+	// show answers the group's open code, which the loop reads in the
+	// command's transaction, and no field while none is open.
+	open := store.Invite{Secret: "7K2M9QXD4F8TWB3N", By: grpAdmin, Expires: clock + 86_400_000}
+	admin := home.Who{Device: guest.ID(), User: guest.ID(), Human: grpAdmin}
+	show := func(code store.Invite) home.Result {
+		return peopleRun(t, grpState(t), "code/show", home.Command{Env: signed(guest, "code", 181, `,"op":"show"`), Code: code, Now: clock, Who: admin})
+	}
+	equal(t, show(open), home.Result{Answer: store.Outcome{OK: true}, Code: "7K2M-9QXD-4F8T-WB3N", Expires: open.Expires})
+	equal(t, show(store.Invite{}), home.Result{Answer: store.Outcome{OK: true}})
+	equal(t, peopleApply(t, grpState(t), disk{}, browser, nil, "code", `,"op":"show"`), home.Result{Answer: store.Outcome{OK: true}})
+}
+
+func TestPeopleCodeRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields, code string
+		by                 identity.Key
+	}{
+		{"new by a member", `,"op":"new","hours":24`, "forbidden", device(6)},
+		{"off by a member", `,"op":"off"`, "forbidden", device(6)},
+		{"show by a member", `,"op":"show"`, "forbidden", device(6)},
+		{"by an AI of the owner", `,"op":"new","hours":24,"as":"` + aiID + `"`, "forbidden", laptop},
+		{"without hours", `,"op":"new"`, "bad_request", browser},
+		{"for 0 hours", `,"op":"new","hours":0`, "bad_request", browser},
+		{"for 169 hours", `,"op":"new","hours":169`, "bad_request", browser},
+		{"for hours that are no integer", `,"op":"new","hours":1.5`, "bad_request", browser},
+		{"with an op it does not know", `,"op":"extend","hours":24`, "bad_request", browser},
+		{"without an op", ``, "bad_request", browser},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := peopleApply(t, grpState(t), disk{}, tc.by, nil, "code", tc.fields)
+			equal(t, []any{res.Answer, res.Code, res.CodeChanged, len(res.Writes)}, []any{store.Outcome{Code: tc.code}, "", false, 0})
+		})
+	}
+}
+
+// A9.47, A9.48 and A9.52, home half (people.md 2.2): a joining connection
+// that came by a code is open while that code is the group's open code, and
+// member_joined names the admin who made it. A code is not used up, a member
+// who types it gets ok with no row, and an invitation works beside it.
+func TestPeopleJoinByCode(t *testing.T) {
+	open := store.Invite{Secret: "7K2M9QXD4F8TWB3N", By: grpAdmin, Expires: clock + 86_400_000}
+	log := logOf(t, nobody, device(7))
+	byCode := &home.Joining{Group: groupID, Code: "7K2M9QXD4F8TWB3N", Log: log}
+	join := func(s *home.State, j *home.Joining, code store.Invite) home.Result {
+		return peopleRun(t, s, "join", home.Command{Env: signed(nobody, "join", 181, `,"name":"visitor"`), Disk: disk{}, Joining: j, Code: code, Now: clock, Who: peopleJoiner(s, nobody, j)})
+	}
+	s := grpState(t)
+	res := join(s, byCode, open)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, []any{res.InviteUsed, res.GroupsChanged, res.CodeChanged, len(res.Rows), len(res.Writes)}, []any{false, true, false, 4, 2})
+	msg := res.Rows[3].Value().(proto.MsgRow)
+	equal(t, string(msg.Body), fmt.Sprintf(`{"code":"member_joined","member":%q,"by":%q}`, id(181), grpAdmin))
+	s.Commit(res)
+	equal(t, join(s, byCode, open), home.Result{Answer: store.Outcome{OK: true}, GroupsChanged: true})
+
+	other := store.Invite{Secret: "0000000000000000", By: grpAdmin, Expires: open.Expires}
+	for name, tc := range map[string]struct {
+		join *home.Joining
+		code store.Invite
+	}{
+		"while no code is open":                {byCode, store.Invite{}},
+		"by a code that is not the open one":   {byCode, other},
+		"by a code, whatever Open and By hold": {&home.Joining{Group: groupID, By: grpAdmin, Open: true, Code: "0000000000000001", Log: log}, open},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := join(grpState(t), tc.join, tc.code)
+			equal(t, []any{res.Answer, len(res.Rows)}, []any{store.Outcome{Code: "forbidden"}, 0})
+		})
+	}
+
+	invited := join(grpState(t), &home.Joining{Group: groupID, By: grpOwnerID(groupID), Open: true, Log: log}, open)
+	equal(t, []any{invited.Answer, invited.InviteUsed}, []any{store.Outcome{OK: true}, true})
+	equal(t, string(invited.Rows[3].Value().(proto.MsgRow).Body), fmt.Sprintf(`{"code":"member_joined","member":%q,"by":%q}`, id(181), grpOwnerID(groupID)))
 }

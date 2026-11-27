@@ -20,7 +20,7 @@ const keyCreate = "group/create"
 
 // keySelector names the field of a payload that, with its t, makes the key of
 // a command.
-var keySelector = map[string]string{"group": "op", "member": "op", "task": "op", "post": "kind", "act": "action"}
+var keySelector = map[string]string{"group": "op", "member": "op", "task": "op", "post": "kind", "act": "action", "code": "op"}
 
 // Who is the principal behind a command. A signer without as is the person
 // whose log holds it and, where the table of a command names a host, also

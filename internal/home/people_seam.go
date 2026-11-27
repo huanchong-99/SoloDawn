@@ -13,7 +13,8 @@ import (
 
 // Seam for step 2 people commands (planning/contracts/step-2/people.md;
 // planning/steps/parallel-plan-step-2-3.md row X2-1): the joining context of a
-// connection on Command, and the Inviter hook the home calls for invite.
+// connection on Command, the Inviter hook the home calls for invite, and the
+// group's invitation code, read in the command's transaction.
 
 const (
 	keyInvite = "invite"
@@ -24,13 +25,18 @@ const (
 // (planning/contracts/step-2/people.md sections 2.2, 4 and 5): a non-nil
 // Joining says the connection is joining.
 type Joining struct {
-	Group string        // group id the invitation is for
+	Group string        // group id the invitation or code is for
 	By    string        // member id of the admin who created the invitation
 	Open  bool          // whether the invitation is open when the command runs
 	Log   *identity.Log // verified device log presented on this connection, or nil
+	// Code is the secret of the code the connection came by, empty on an
+	// invitation. On a code the home reads By and whether it is open from
+	// the group's open code (Command.Code), not from By and Open.
+	Code identity.Secret
 	// Admit, when non-nil, is called by the home after an accepted join
-	// commits; used is Result.InviteUsed (true when a new member joined,
-	// false when an existing member rejoined after a restore).
+	// commits; used is Result.InviteUsed (true when a new member joined by
+	// an invitation, false when one joined by a code or an existing member
+	// rejoined after a restore).
 	Admit func(used bool)
 }
 
@@ -77,19 +83,19 @@ func (c *Conn) seamJoining() *Joining {
 // applyJoining is Apply on a connection whose joining state is join (nil on an
 // ordinary connection).
 func (t Table) applyJoining(s *State, disk Disk, receipts Receipts, env proto.Envelope, join *Joining, now time.Time) (Result, error) {
-	res, _, err := t.seamRunTx(s, disk, receipts, env, join, now, false)
+	res, _, err := t.seamRunTx(s, disk, receipts, env, join, store.Invite{}, now, false)
 	return res, err
 }
 
-func (t Table) seamRunTx(s *State, disk Disk, receipts Receipts, env proto.Envelope, join *Joining, now time.Time, deferInvite bool) (Result, seamDeferred, error) {
+func (t Table) seamRunTx(s *State, disk Disk, receipts Receipts, env proto.Envelope, join *Joining, code store.Invite, now time.Time, deferInvite bool) (Result, seamDeferred, error) {
 	hdr, refusal := s.open(env, join, now)
 	if refusal != nil {
 		return refused(refusal), seamDeferred{}, nil
 	}
-	return t.seamAfterOpen(s, disk, receipts, hdr, env, join, now, deferInvite)
+	return t.seamAfterOpen(s, disk, receipts, hdr, env, join, code, now, deferInvite)
 }
 
-func (t Table) seamAfterOpen(s *State, disk Disk, receipts Receipts, hdr proto.PayloadHeader, env proto.Envelope, join *Joining, now time.Time, deferInvite bool) (Result, seamDeferred, error) {
+func (t Table) seamAfterOpen(s *State, disk Disk, receipts Receipts, hdr proto.PayloadHeader, env proto.Envelope, join *Joining, code store.Invite, now time.Time, deferInvite bool) (Result, seamDeferred, error) {
 	held, found, err := seamReceipt(receipts, env.Key, string(hdr.Nonce))
 	if err != nil {
 		return Result{}, seamDeferred{}, err
@@ -98,7 +104,7 @@ func (t Table) seamAfterOpen(s *State, disk Disk, receipts Receipts, hdr proto.P
 		res, def := seamHeld(hdr, env.Key, held, deferInvite)
 		return res, def, nil
 	}
-	res := t.run(s, Command{PayloadHeader: hdr, Env: env, Now: now.UnixMilli(), Disk: disk, Joining: join})
+	res := t.run(s, Command{PayloadHeader: hdr, Env: env, Now: now.UnixMilli(), Disk: disk, Joining: join, Code: code})
 	if deferInvite && res.InviteBy != "" {
 		return res, seamDeferred{create: true, hdr: hdr}, nil
 	}
@@ -201,9 +207,10 @@ func (g *runGroup) seamCommand(c *Conn, re int64, env proto.Envelope) {
 	res, err := g.transact(now, func(d Disk, tx *store.Tx) (Result, error) {
 		var out Result
 		var txErr error
-		out, def, txErr = g.loop.cfg.Tables.Commands.seamRunTx(g.state, d, tx, env, join, now, g.loop.cfg.Invite != nil)
+		codes, readErr := tx.Invites(now.UnixMilli())
+		out, def, txErr = g.loop.cfg.Tables.Commands.seamRunTx(g.state, d, tx, env, join, codes[g.state.ID], now, g.loop.cfg.Invite != nil)
 		out.byPerson = inboxByPerson(g.state, env.Key)
-		return out, txErr
+		return out, errors.Join(readErr, txErr)
 	})
 	res, err = g.seamResolveInvite(env.Key, res, def, err)
 	if err != nil {
@@ -216,6 +223,9 @@ func (g *runGroup) seamCommand(c *Conn, re int64, env proto.Envelope) {
 		seamAdmit(join, res)
 		if res.Forget != "" {
 			g.loop.cfg.Forget(res.Forget)
+		}
+		if res.CodeChanged {
+			g.loop.cfg.CodeChanged(g.state.ID)
 		}
 		g.loop.diagReply(c, g.state.ID, re, env, res.Answer.Code)
 		c.send(res.Frame(re))

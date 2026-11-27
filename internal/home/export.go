@@ -65,6 +65,7 @@ func (g *runGroup) exportGroup(file, to string) error {
 		return err
 	}
 	g.resetGroup(l.fresh(group))
+	l.cfg.CodeChanged(group)
 	l.mu.Lock()
 	l.moved[group] = to
 	delete(l.views, group)

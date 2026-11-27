@@ -56,10 +56,11 @@ func NodeTables() Tables {
 	return Tables{Commands: Commands, Timers: Timers, Events: Events, After: After}
 }
 
-// LoopConfig is what a loop is started with. The loop calls Logs, Now, Report
-// and Forget on the goroutines of its groups, and Logs and Now also on the
-// caller of Cmd. So none of the four may wait for a lock that is held
-// around a call of Attach, Sync, Close or Cmd, and none may call those.
+// LoopConfig is what a loop is started with. The loop calls Logs, Now,
+// Report, Forget and CodeChanged on the goroutines of its groups, and Logs and
+// Now also on the caller of Cmd. So none of the five may wait for a lock that
+// is held around a call of Attach, Sync, Close or Cmd, and none may call
+// those.
 type LoopConfig struct {
 	Store   *store.Store
 	Home    string        // this node's device id
@@ -74,6 +75,12 @@ type LoopConfig struct {
 	// Forget drops the device log of a removed person from what Logs holds,
 	// once the removal is committed and before anyone is pushed groups.
 	Forget func(user string)
+	// CodeChanged says that the invitation code of a group was made or may
+	// have ended: by code new or off, a removal by another, or a move. It is
+	// called after the commit, outside Store.Write, so the node reads the
+	// group's entry of the setting invites and hosts or leaves its room
+	// (planning/contracts/step-2/people.md 2.6).
+	CodeChanged func(group string)
 	// Now is the home's clock; time.Now when nil.
 	Now func() time.Time
 	// Report takes every failure that is answered internal or that has no
@@ -141,6 +148,9 @@ func runDefaults(cfg LoopConfig) LoopConfig {
 	}
 	if cfg.Forget == nil {
 		cfg.Forget = func(string) {}
+	}
+	if cfg.CodeChanged == nil {
+		cfg.CodeChanged = func(string) {}
 	}
 	return cfg
 }
