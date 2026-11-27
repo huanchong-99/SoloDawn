@@ -85,12 +85,13 @@ func (w *profileTurnWorld) checkRoster(doc *godog.DocString) error {
 
 func (w *profileTurnWorld) checkAssignmentRules() error {
 	return checkProfileInstructions(w.sessionFor("secretary"),
-		"follow each AI's tier, which says how much work its owner wants it given: give `strong` AIs more tasks and the hard ones, `light` AIs fewer tasks and simple ones, `standard` AIs a normal share.",
-		"Match the work to their skills",
-		"Spread independent tasks over different AIs",
-		"members with the same CLI on the same computer share one subscription",
-		"Prefer AIs with more of their window left",
-		"Do not choose an AI that is `limited` or `offline`",
+		"Choose assignee and reviewer task by task",
+		"Never an AI that is `limited` or `offline`.",
+		"The window first.",
+		"Members with the same CLI on the same computer share one subscription (not two external AIs).",
+		"The tier is the share of tasks its owner wants it given: `strong` more, `standard` a normal share, `light` fewer.",
+		"Skills say which tasks: the hard and the special ones go to the AIs whose skills name them; when skills say nothing, to the higher tier.",
+		"Spread independent tasks over different AIs, so several subscriptions work at once.",
 		"Each AI works in its own folder on its own computer; the member list in your turn names both.",
 		"choose a reviewer on the assignee's computer when the project has no shared remote")
 }

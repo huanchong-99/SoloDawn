@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · limitation · Escalation orders AIs by work-share tier rather than skills or model strength
+
+- Symptom: when a task fails twice in a row in review (`stuck.ask`), escalation chooses candidate AIs by comparing `tier` (`light < standard < strong`), even though `tier` means work share and hard or special task assignment now routes by `skills` first (`planning/product-rules.md` R-165, updated 2026-11-27).
+- Cause: `tier` is the only ordered capability field on the member row (`planning/contracts/step-3/profiles.md` section 4); separating a distinct strength field from work share touches the member row, commands, home rules, and frozen protocol shapes (`docs/decisions/implemented/feature/2026-11-27-r165-assignment-by-skills.md`).
+- Status: open, accepted for rc.2 until the owner has used work-share tiers in a real group.
+
 ### 2026-11-27 · limitation · The browser's bar keeps the untinted page colour
 
 - Symptom: where the browser colours its bar from `<meta name="theme-color">` (Android Chrome, Safari), the bar is the grey page colour of before the theme colours tinted the page (`#f5f6f8` light, `#0d0e11` dark), not the tinted `--bg` below it (for the default, `#ecf1fd` and `#090e1b`); the installed app's colours are fixed the same way.

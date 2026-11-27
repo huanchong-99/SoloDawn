@@ -23,7 +23,7 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     When C takes its next turn
     Then the turn lists every AI member with its folder, tier, state and skills as in section 3 of the profiles contract
     And the turn lists L as "limited" and S as "offline"
-    And C's instructions hold the four rules of assignment
+    And C's instructions hold the rules of assignment
     And list_members answers as in step 1, with each AI's folder
 
   Scenario: Escalation of a stuck assignee (A10.10)

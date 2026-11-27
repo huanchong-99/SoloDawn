@@ -3,7 +3,7 @@
   "profile.tier.light": "少",
   "profile.tier.standard": "适中",
   "profile.tier.strong": "多",
-  "profile.tier.hint": "秘书按这个给它派活：「多」多派，难活先给它；「少」少派，只派简单的。",
+  "profile.tier.hint": "秘书按这个决定给它派多少活。难活、特殊的活派给谁，看「擅长」里写的；没写就先给派活多的。",
   "profile.work": "派活与额度",
   "profile.quota": "额度",
   "profile.skills": "擅长",

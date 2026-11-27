@@ -49,13 +49,13 @@ func (c *turnCtx) profileMemberLine(ai proto.AIMemberRow) string {
 }
 
 func profileUsage(u proto.Usage, now time.Time) string {
-	if u.WindowPct == nil {
+	if u.WindowPct == nil || (u.WindowResets != nil && *u.WindowResets <= now.UnixMilli()) {
 		return ""
 	}
 	text := " · window " + strconv.FormatFloat(*u.WindowPct, 'f', -1, 64) + "% used"
 	if u.WindowResets != nil {
-		hours := math.Ceil(float64(*u.WindowResets-now.UnixMilli()) / float64(time.Hour.Milliseconds()))
-		text += fmt.Sprintf(", resets in %d h", int(max(hours, 0)))
+		hours := int(math.Ceil(float64(*u.WindowResets-now.UnixMilli()) / float64(time.Hour.Milliseconds())))
+		text += fmt.Sprintf(", resets in %d h", hours)
 	}
 	return text
 }

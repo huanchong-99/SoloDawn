@@ -22,7 +22,7 @@ const (
 
 func init() {
 	Register(Tools, "kb_put", Tool{
-		Description: "Write or replace a named document in the group's knowledge base.",
+		Description: "Write or replace a named document in the group's knowledge base. A document of the same name is replaced whole and its old text is gone: search for it first and keep what you are not changing.",
 		Schema:      kbPutSchema,
 		Call:        callKBPut,
 	})

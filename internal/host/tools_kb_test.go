@@ -19,6 +19,7 @@ func TestKBToolsSchemasVisibilityAndInstructions(t *testing.T) {
 			assertEqual(t, decodeJSONValue(t, Tools[name].Schema), decodeJSONValue(t, goldenRaw))
 		}
 	}
+	assertEqual(t, Tools["kb_put"].Description, "Write or replace a named document in the group's knowledge base. A document of the same name is replaced whole and its old text is gone: search for it first and keep what you are not changing.")
 
 	callers := []Caller{
 		talkCaller(GroupSession, talkSecID, "", true, Turn{}),
