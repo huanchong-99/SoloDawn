@@ -10,7 +10,7 @@ Feature: AI profiles and stronger-AI escalation
     Then the cards show exact tier and skills values with an empty-skills fallback
     And the other person's card has no profile editor
     When the browser switches to Chinese
-    Then the profile labels are 档位 and 擅长 and the strong tier is 强
+    Then the profile labels are 派活 and 擅长, the strong tier is 多, and the share sits with the quota
 
   Scenario: The owner edits a profile and cancels without losing focus
     When the owner opens the profile editor
@@ -23,7 +23,7 @@ Feature: AI profiles and stronger-AI escalation
     Then focus returns to Edit profile
 
   Scenario: A model suggestion is an explicit owner choice
-    Then the owner's card offers Strong and Use labelled Suggested: Strong
+    Then the owner's card offers More and Use labelled Suggested: More
     When the owner uses the suggestion
     Then exactly one member set sends only tier strong
     When the suggestion matches the stored tier

@@ -14,7 +14,7 @@ import type {
   TaskRow,
 } from './proto';
 import { hostHomeOf } from './terminal.svelte';
-import { clock, dayOf, now } from './when';
+import { clockOn, dayOf, now } from './when';
 
 /** The model, level and profile an AI member is added or edited with. */
 export type Draft = Pick<AIMemberRow, 'model' | 'effort' | 'tier' | 'skills'> &
@@ -218,7 +218,7 @@ export function usageMeter(ai: AIMemberRow, lang: string): UsageMeter | undefine
     note:
       resets === undefined
         ? undefined
-        : t('member.usage.resets').replace('{time}', clock(resets, lang)),
+        : t('member.usage.resets').replace('{time}', clockOn(resets, now(), lang)),
   };
 }
 

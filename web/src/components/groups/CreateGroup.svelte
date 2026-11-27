@@ -10,6 +10,7 @@
     nameClash,
     unavailable,
     type Candidate,
+    type Draft,
     type Refusal,
     type Stop,
   } from '../../lib/members';
@@ -19,11 +20,14 @@
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
   import FolderPicker from '../member/FolderPicker.svelte';
+  import ModelFields from '../model/ModelFields.svelte';
+  import { listedModels } from '../model/model';
+  import ProfileFields from '../profile/ProfileFields.svelte';
   import { newDraft } from '../profile/profile';
 
   /** The create-group dialog (contracts/commands.md 1.1): a name, the person's own name, the
    *  people already in one of their groups on the chosen computer, and their connected AIs, each
-   *  with its folder. The group is created first, then each person and each AI is added; a step
+   *  with its folder, model, level and tier, sent in its `host.join`. The group is created first, then each person and each AI is added; a step
    *  that fails is said beside its person or AI. `open` shows it. */
   let { open = $bindable(false) }: { open?: boolean } = $props();
   const uid = $props.id();
@@ -37,8 +41,8 @@
   let name = $state('');
   let member = $state('');
   let people = $state<Record<string, boolean>>({});
-  /** The AIs ticked, by candidate key, with their name and folder. */
-  let ais = $state<Record<string, { name: string; workspace: string }>>({});
+  /** The AIs ticked, by candidate key, with their name, folder, model, level and tier. */
+  let ais = $state<Record<string, { name: string; workspace: string; draft: Draft }>>({});
   let secretary = $state('');
   let busy = $state(false);
   let failed = $state('');
@@ -83,8 +87,10 @@
   function tick(candidate: Candidate, on: boolean) {
     // A newly ticked AI is named so that no other ticked AI has its name.
     const taken = Object.values(ais).map((ai) => ai.name);
-    if (on) ais[candidate.key] = { name: freeName(taken, cliName(candidate.agent)), workspace: '' };
-    else delete ais[candidate.key];
+    if (on) {
+      const name = freeName(taken, cliName(candidate.agent));
+      ais[candidate.key] = { name, workspace: '', draft: newDraft() };
+    } else delete ais[candidate.key];
     if (!ais[secretary]) secretary = Object.keys(ais)[0] ?? '';
   }
 
@@ -116,7 +122,7 @@
         name: ais[key].name.trim(),
         secretary: secretary === key,
         workspace: ais[key].workspace,
-        draft: newDraft(),
+        draft: ais[key].draft,
       })),
     });
     busy = false;
@@ -271,6 +277,13 @@
                   disabled={Boolean(outcome)}
                 />
               </label>
+              <ModelFields
+                bind:draft={ai.draft}
+                models={listedModels(candidate.home, candidate.agent) ?? []}
+                suggest
+                disabled={Boolean(outcome)}
+              />
+              <ProfileFields bind:draft={ai.draft} skills={false} disabled={Boolean(outcome)} />
               <label class="check">
                 <input
                   type="radio"

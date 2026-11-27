@@ -135,5 +135,5 @@ it('shows the turns of today as plain text and a share of the limit as a meter',
   expect(all('.member [role=meter]')).toEqual([]);
   group.apply([{ ...ai, usage: { turns_today: 15, window_pct: 40 }, seq: ai.seq + 1 }]);
   flushSync();
-  expect(texts('.member [role=meter]')).toEqual(['Window used40%']);
+  expect(texts('.member [role=meter]')).toEqual(['Quota used this window40%']);
 });

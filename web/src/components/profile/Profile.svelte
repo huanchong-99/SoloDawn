@@ -1,15 +1,18 @@
 <script lang="ts">
   import { tick, type Snippet } from 'svelte';
-  import type { Group } from '../../lib/groups.svelte';
+  import { homes, type Group } from '../../lib/groups.svelte';
   import { t } from '../../lib/prefs.svelte';
   import type { AIMemberRow } from '../../lib/proto';
+  import { hostHomeOf } from '../../lib/terminal.svelte';
   import Failure from '../Failure.svelte';
+  import ModelFields from '../model/ModelFields.svelte';
+  import { listedModels, modelChanges } from '../model/model';
   import ProfileFields from './ProfileFields.svelte';
   import TierMark from './TierMark.svelte';
   import { newDraft, profileChanges, tooLong, type Draft, type Tier } from './profile';
 
-  /** Tier and skills of an AI member card, with the suggestion and editor for its owner
-   *  (contracts/step-3/profiles.md section 2a). */
+  /** Tier and skills of an AI member card, with the suggestion, and its owner's editor of model,
+   *  level, tier and skills (contracts/step-3/profiles.md section 2a). */
   let {
     group,
     ai,
@@ -19,7 +22,7 @@
     group: Group;
     ai: AIMemberRow;
     suggested: string | undefined;
-    children: Snippet<[Snippet, Snippet]>;
+    children: Snippet<[Snippet, Snippet, Snippet]>;
   } = $props();
 
   let editing = $state(false);
@@ -31,7 +34,8 @@
 
   const mine = $derived(ai.user === group.home.me.user);
   const offline = $derived(!group.home.ctl);
-  const changes = $derived(profileChanges(ai, draft));
+  const models = $derived(listedModels(hostHomeOf(homes, ai.host), ai.cli) ?? []);
+  const changes = $derived({ ...modelChanges(ai, draft), ...profileChanges(ai, draft) });
   const offer = $derived(mine && suggested !== undefined && suggested !== ai.tier);
   const label = $derived(
     t('profile.suggest').replace('{tier}', t(`profile.tier.${suggested as Tier}`)),
@@ -68,7 +72,7 @@
   }
 </script>
 
-{#snippet profileRows()}
+{#snippet share()}
   <dt>{t('profile.tier')}</dt>
   <dd class="tier-row">
     <TierMark tier={ai.tier} />
@@ -85,6 +89,9 @@
       </button>
     {/if}
   </dd>
+{/snippet}
+
+{#snippet skillsRow()}
   <dt>{t('profile.skills')}</dt>
   <dd class="skills" class:muted={!ai.skills}>{ai.skills || t('profile.skills.none')}</dd>
 {/snippet}
@@ -97,7 +104,7 @@
   {/if}
 {/snippet}
 
-{@render children(profileRows, editProfile)}
+{@render children(share, skillsRow, editProfile)}
 
 {#if editing}
   <form
@@ -110,7 +117,10 @@
       if (await send(changes)) await close();
     }}
   >
-    <ProfileFields bind:draft disabled={busy || offline} />
+    {#if ai.cli !== 'external'}
+      <ModelFields bind:draft {models} disabled={busy || offline} />
+    {/if}
+    <ProfileFields bind:draft {ai} disabled={busy || offline} />
     <footer class="row">
       <span class="grow"></span>
       <button type="button" class="btn btn-sm btn-ghost" onclick={close}>

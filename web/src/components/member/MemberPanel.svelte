@@ -8,14 +8,13 @@
     pathLabel,
     personTags,
     terminalDisabledReason,
-    usageMeter,
     watchDisabledReason,
   } from '../../lib/members';
   import type { Points } from '../../lib/mounts.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { nodes } from '../../lib/nodes.svelte';
   import { accountLabel } from '../../lib/onboard.svelte';
-  import { prefs, t } from '../../lib/prefs.svelte';
+  import { t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
   import { statusIn } from '../../lib/stop';
   import { endTakeover, hostHomeOf, terminalTask } from '../../lib/terminal.svelte';
@@ -27,6 +26,7 @@
   import InvitationDialog from '../people/InvitationDialog.svelte';
   import PersonActions from '../people/PersonActions.svelte';
   import Profile from '../profile/Profile.svelte';
+  import Quota from '../profile/Quota.svelte';
   import { suggestedTier } from '../profile/profile';
   import AskToWatch from '../watch/AskToWatch.svelte';
   import AddAI from './AddAI.svelte';
@@ -74,7 +74,6 @@
     {@const termWhy = mine ? terminalDisabledReason(net, ai) : undefined}
     {@const terminal = offersTerminal(host, ai.cli)}
     {@const watchWhy = watchDisabledReason(net, ai)}
-    {@const meter = usageMeter(ai, prefs.lang)}
     <section class="card member">
       <header class="row">
         <span
@@ -94,7 +93,11 @@
         </div>
       </header>
       <Profile {group} {ai} suggested={suggestedTier(host, ai)}>
-        {#snippet children(profileRows, editProfile)}
+        {#snippet children(share, skillsRow, editProfile)}
+          <div class="work" role="group" aria-label={t('profile.work')}>
+            <dl class="share">{@render share()}</dl>
+            <Quota {ai} />
+          </div>
           <AllowEditor {group} {ai} {humans}>
             {#snippet children(accessRows, editAccess)}
               <dl class="kv">
@@ -112,26 +115,9 @@
                     </span>{/if}
                 </dd>
                 <Mount at="member.ai" props={{ group, ai }} />
-                {@render profileRows()}
+                {@render skillsRow()}
                 {@render accessRows()}
               </dl>
-              {#if meter?.fill !== undefined}
-                <div
-                  class="meter"
-                  role="meter"
-                  aria-label={meter.label}
-                  aria-valuenow={meter.fill}
-                  aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
-                  data-tone={meter.tone}
-                  style={`--v: ${meter.fill}%`}
-                >
-                  <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
-                      {meter.note}
-                    </small>{/if}
-                </div>
-              {:else if meter}
-                <p class="meter"><span>{meter.label}</span><b>{meter.value}</b></p>
-              {/if}
               {#if mine}
                 <footer class="card-foot">
                   {#if ai.state === 'takeover'}
@@ -346,6 +332,28 @@
   .kv :global(dt) {
     font-size: var(--fs-xs);
     line-height: calc(var(--fs-sm) * 1.5);
+  }
+  /* How much work the AI is given, beside how much of its quota is used: the first thing under
+     its name. */
+  .work {
+    display: grid;
+    gap: var(--sp-2);
+    padding: 10px var(--sp-3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+  }
+  .share {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--sp-3);
+    font-size: var(--fs-sm);
+  }
+  .share :global(dt) {
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    font-weight: 500;
   }
   .member :global(.card-foot) {
     gap: 6px;

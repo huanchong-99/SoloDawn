@@ -1,15 +1,24 @@
 <script lang="ts">
   import { t } from '../../lib/prefs.svelte';
+  import type { AIMemberRow } from '../../lib/proto';
   import Bars from './Bars.svelte';
+  import Quota from './Quota.svelte';
   import { tiers, tooLong, type Draft } from './profile';
 
-  /** Tier and skills of a draft profile, for the add-AI dialog and the owner's editor. */
-  let { draft = $bindable(), disabled = false }: { draft: Draft; disabled?: boolean } = $props();
+  /** Tier and skills of a draft profile, for the add-AI and create-group dialogs and the owner's
+   *  editor; with `ai`, its usage line under the tier; without `skills`, the tier alone. */
+  let {
+    draft = $bindable(),
+    ai,
+    skills = true,
+    disabled = false,
+  }: { draft: Draft; ai?: AIMemberRow; skills?: boolean; disabled?: boolean } = $props();
   const uid = $props.id();
 </script>
 
-<fieldset class="field" {disabled}>
+<fieldset class="field work" {disabled} aria-describedby={`${uid}-tier-hint`}>
   <legend>{t('profile.tier')}</legend>
+  <p id={`${uid}-tier-hint`} class="tier-hint">{t('profile.tier.hint')}</p>
   <div class="seg tiers" style:--at={(tiers as readonly string[]).indexOf(draft.tier)}>
     {#each tiers as tier (tier)}
       <label>
@@ -18,22 +27,25 @@
       </label>
     {/each}
   </div>
+  {#if ai}<Quota {ai} />{/if}
 </fieldset>
-<label class="field">
-  <span class="row">
-    <span class="grow">{t('profile.skills')}</span>
-    <small class="count" class:over={tooLong(draft)} aria-hidden="true">
-      {[...draft.skills].length}/200
-    </small>
-  </span>
-  <input
-    class="input"
-    bind:value={draft.skills}
-    aria-invalid={tooLong(draft)}
-    placeholder={t('profile.skills.hint')}
-    {disabled}
-  />
-</label>
+{#if skills}
+  <label class="field">
+    <span class="row">
+      <span class="grow">{t('profile.skills')}</span>
+      <small class="count" class:over={tooLong(draft)} aria-hidden="true">
+        {[...draft.skills].length}/200
+      </small>
+    </span>
+    <input
+      class="input"
+      bind:value={draft.skills}
+      aria-invalid={tooLong(draft)}
+      placeholder={t('profile.skills.hint')}
+      {disabled}
+    />
+  </label>
+{/if}
 
 <style>
   fieldset {
@@ -43,8 +55,18 @@
   }
   legend {
     padding: 0;
-    margin-bottom: 6px;
+    margin-bottom: 2px;
     font-weight: 500;
+  }
+  .tier-hint {
+    margin-bottom: 6px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    line-height: 1.45;
+  }
+  .work :global(.meter),
+  .work :global(.quota-none) {
+    margin-top: var(--sp-2);
   }
   .tiers {
     display: grid;

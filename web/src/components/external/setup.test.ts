@@ -245,12 +245,7 @@ it('renders live progress, reports duplicate responses and copies the complete p
 it('uses the unset profile label for external AI and keeps the default for managed AI', () => {
   show(MemberModel, { group, ai: { ...member, model: '', effort: '' } });
   show(MemberModel, { group, ai: { ...member, cli: 'codex', model: '', effort: '' } });
-  expect(texts('dd')).toEqual([
-    'Not set',
-    'Not set',
-    "The CLI's default Change",
-    "The CLI's default",
-  ]);
+  expect(texts('dd')).toEqual(['Not set', 'Not set', "The CLI's default", "The CLI's default"]);
 });
 
 it('keeps setup with the owner', async () => {

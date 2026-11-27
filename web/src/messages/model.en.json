@@ -1,15 +1,13 @@
 {
   "model.model": "Model",
-  "model.effort": "Level",
+  "model.effort": "Thinking level",
+  "model.effort.pick": "Choose a model to see its levels",
+  "model.effort.none": "This model has no levels",
   "model.default": "The CLI's default",
   "model.unset": "Not set",
   "model.notlisted": "Not listed",
   "model.fast": "Fast mode",
   "model.model.hint": "e.g. opus",
   "model.effort.hint": "e.g. high",
-  "model.refresh": "Refresh the models",
-  "model.edit": "Change model",
-  "model.save": "Save",
-  "model.cancel": "Cancel",
-  "model.change": "Change"
+  "model.refresh": "Refresh the models"
 }

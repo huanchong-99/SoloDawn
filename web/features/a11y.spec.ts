@@ -675,18 +675,19 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'each usage bar is a meter named "Window used" whose value text is its percentage, with its reset time when one is known',
+        'each usage bar is a meter named "Quota used this window" whose value text is its percentage, with its reset date and time when one is known',
         () => {
           const meters = all('.members [role="meter"]').map((meter) => [
             named(meter),
             meter.getAttribute('aria-valuenow'),
             meter.getAttribute('aria-valuetext'),
           ]);
-          const resets = expect.stringMatching(/^63% · Resets \d\d:\d\d$/);
+          // The golden's reset is on a day long past: its date is said.
+          const resets = expect.stringMatching(/^63% · Resets [A-Z][a-z]{2} \d{1,2}, \d\d:\d\d$/);
           expect(meters).toEqual([
-            ['Window used', '63', resets],
-            ['Window used', '100', '100%'],
-            ['Window used', '63', resets],
+            ['Quota used this window', '63', resets],
+            ['Quota used this window', '100', '100%'],
+            ['Quota used this window', '63', resets],
           ]);
         },
       );
