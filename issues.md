@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · bug · `TestNodeWatchGrantAdmission` reported the relay refusal as a missing field
+
+- Symptom: on a Mac whose firewall drops direct UDP to the test binary, both subtests failed at `internal/node/node_test.go:1283` with `proto: a field that is always present is missing`, on `rebuild` 47ae57c1e and equally before the protocol 3 change (b051eafef).
+- Cause: the connection was relayed, so the node answered `watch.start` with `{"re":2,"err":{"code":"relay","msg":"watch requires a direct path"}}` (`internal/host/watch.go:95`), as `planning/contracts/step-2/watch-team.md` section 4 requires. `checkWatchStart` decoded that error answer as a `proto.Success`, whose `ok` is always present. The product was right; the test hid the answer.
+- Status: resolved. `checkWatchStart` now fails with the error answer's code and text (`watch.start answered relay: watch requires a direct path`). The test also no longer starts a loopback TURN server (`startTestRVWithRelay`), which it never needed: it checks admission by grant, the `relay` refusal is covered by `internal/host/watch_test.go`, and with a TURN server ICE could nominate a relay pair first on a loaded runner. It now uses the plain rendezvous of the other node tests, so ICE has no relay candidate, and a host without a direct UDP path fails at the WebRTC connection's time-out. Should the node still answer `relay` (a path that is relayed, or not yet selected), the test now names that refusal instead of a missing field.
+
 ### 2026-11-27 · limitation · `takeover.go:210` (`== ""` to `!= ""`) decided a value nobody reads
 
 - Symptom: CONDITIONALS_NEGATION at `internal/host/takeover.go:210:58` lived in mutation run 45905182817 (shard host-s-takeover).

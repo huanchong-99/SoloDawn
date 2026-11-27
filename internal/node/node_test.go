@@ -1256,7 +1256,9 @@ func checkWatchersPush(t *testing.T, conn *fakeCtl, want []string) {
 func TestNodeWatchGrantAdmission(t *testing.T) {
 	for _, known := range []bool{false, true} {
 		t.Run(strconv.FormatBool(known), func(t *testing.T) {
-			rvURL := startTestRVWithRelay(t)
+			srv := httptest.NewServer(rendezvous.Handler(fstest.MapFS{}))
+			t.Cleanup(srv.Close)
+			rvURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/rv"
 			n, err := openNode(t.Context(), socketRoot(t))
 			mustNoErr(t, err)
 			t.Cleanup(n.Close)
@@ -1324,6 +1326,10 @@ func checkWatchStart(t *testing.T, conn *peer.Connection, group, member string) 
 		return proto.WatchStart{Request: proto.Request{Type: "watch.start", ID: id}, Group: proto.ID(group), Member: proto.ID(member)}
 	})
 	mustNoErr(t, err)
+	var refusal proto.ErrorResponse
+	if proto.Decode(raw, &refusal) == nil {
+		t.Fatalf("watch.start answered %s: %s", refusal.Err.Code, refusal.Err.Message)
+	}
 	var ok proto.Success
 	mustNoErr(t, proto.Decode(raw, &ok))
 	mustEqual(t, ok.OK, proto.True(true))
