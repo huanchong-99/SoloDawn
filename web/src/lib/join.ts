@@ -71,7 +71,7 @@ interface JoinOptions {
   url: string;
   /** Every signalling path this browser has, on each of which a code's room is joined. */
   urls: string[];
-  session: Pick<Session, 'watchRoom' | 'send'>;
+  session: Pick<Session, 'watchRoom' | 'send' | 'roomWait'>;
   dial(home: string, listen: () => Listener, onpath: (path: Path | undefined) => void): JoinPeer;
   signal: AbortSignal;
   /** Keeps the home that admitted this browser, with its name and the path it answered on. */
@@ -132,9 +132,9 @@ export async function addHome(node: Home, group: GroupHome, name: string, url: s
   await sendNotice(node, await homeNotice(node, group, name, url));
 }
 
-function abortPending(signal: AbortSignal, failed: (code: string) => void) {
+function abortPending(signal: AbortSignal, failed: (code: string) => void, wait = 600_000) {
   const abort = () => failed('cancelled');
-  const timer = setTimeout(() => failed('timeout'), 600_000);
+  const timer = setTimeout(() => failed('timeout'), wait);
   signal.addEventListener('abort', abort);
   return () => {
     clearTimeout(timer);
@@ -256,11 +256,15 @@ export async function joinGroup(invitation: Invitation, name: string, options: J
   checkCancel(signal, 'room');
   const found: Found = { ...invitation, url: options.url };
   const connection = open(found, options, id, pair);
-  const stop = abortPending(signal, (code) => {
-    connection.failed(code);
-    connection.stop();
-    connection.close();
-  });
+  const stop = abortPending(
+    signal,
+    (code) => {
+      connection.failed(code);
+      connection.stop();
+      connection.close();
+    },
+    options.session.roomWait,
+  );
   try {
     const { ctl, welcome } = await connection.ready;
     found.g ??= welcome.join;

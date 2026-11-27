@@ -21,6 +21,9 @@ export interface Memory {
   done: string[];
   /** Open invitations, by secret. */
   invites: Record<string, { g: string; expires: number }>;
+  /** Each group's invitation code, as a home stores it in `invites` (contracts/storage.md 2):
+   *  the secret, the admin who made it and when it ends. One past its end counts as none. */
+  codes: Record<string, { code: string; by: string; expires: number }>;
   /** Watch grants: who may watch which AI. */
   grants: { g: string; member: string; user: string }[];
   /** Open takeovers, by `g:member`: the task the terminal is on, if any. */
@@ -32,6 +35,7 @@ const emptyMemory = (): Memory => ({
   queue: {},
   done: [],
   invites: {},
+  codes: {},
   grants: [],
   takeovers: {},
 });
@@ -101,8 +105,10 @@ export class World implements NodeWorld {
     return [...this.nodes.values()].find((node) => node.groups.has(g));
   }
 
-  /** `group import` on `to`: the group that was exported from its home is its home's now. */
+  /** `group import` on `to`: the group that was exported from its home is its home's now. Its
+   *  invitation code ended with the move (contracts/step-2/export.md section 3). */
   arrive(g: string, to: SimNode) {
+    delete this.memory.codes[g];
     const from = this.home(g)!;
     const held = from.groups.get(g)!;
     from.groups.delete(g);
@@ -130,6 +136,12 @@ export class World implements NodeWorld {
   change(g: string, r: string, id: string, fields: Fields) {
     const held = this.find(g, r, id);
     return held && this.write(g, { ...held, ...fields } as Row);
+  }
+
+  /** The group's invitation code while it is open. */
+  code(g: string) {
+    const held = this.memory.codes[g];
+    return held && held.expires > Date.now() ? held : undefined;
   }
 
   /** Every group of every computer, with its home. */

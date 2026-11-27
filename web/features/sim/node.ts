@@ -36,7 +36,15 @@ export interface NodeSpec {
   agents: Agent[];
 }
 
-type Request = { t: string; env?: p.Envelope; g?: string; member?: string; agent?: string };
+type Request = {
+  t: string;
+  env?: p.Envelope;
+  g?: string;
+  member?: string;
+  agent?: string;
+  /** In the demo's own `hello` of a browser that came by an invitation or a code: its group. */
+  join?: string;
+};
 type Base = (req: Fields) => Promise<unknown>;
 
 /** One connection of a browser to the node. */
@@ -115,7 +123,7 @@ export class SimNode extends ActHome {
   }
 
   async #route(base: Base, req: Request): Promise<unknown> {
-    if (req.t === 'hello') return this.#welcome(await base(req));
+    if (req.t === 'hello') return this.#welcome(await base(req), req.join);
     if (req.t === 'host.info') return { ...this.#world.info(this), re: 0, ok: true };
     if (req.t === 'host.workspaces') return { re: 0, ...this.#world.workspaces(this, req.agent!) };
     if (req.t === 'watch.start')
@@ -133,9 +141,11 @@ export class SimNode extends ActHome {
     return host ? undefined : this.moved.get(gOf(req));
   }
 
-  #welcome(answer: unknown) {
+  /** A joining peer is told the group of its invitation or code (datachannel.md section 3). */
+  #welcome(answer: unknown, join: string | undefined) {
     const owner = this.owner === this.#world.me;
-    return { ...(answer as Fields), v: 3, device: this.device, owner, groups: this.listed() };
+    const groups = this.listed();
+    return { ...(answer as Fields), v: 3, device: this.device, owner, groups, join };
   }
 
   async #command(base: Base, req: Request) {

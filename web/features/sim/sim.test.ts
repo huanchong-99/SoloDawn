@@ -16,6 +16,10 @@ import { devices, ids, users } from './ids';
 import type { Line } from './node';
 import { task as taskRow, type Fields, type Row } from './rows';
 import { seed } from './seed';
+import { mac, room } from '../../src/lib/pairing';
+import type { Heard, Listener } from '../../src/lib/peer';
+import { endCode } from './people';
+import { fakeConnect } from './session';
 import { World } from './world';
 
 const g = ids.site;
@@ -390,5 +394,160 @@ describe('the demo world', () => {
     expect(await send({ t: 'forget', r: 'note', id: decision.id })).toMatchObject({ ok: true });
     expect(await send({ ...edit, id: decision.id })).toMatchObject({ err: { code: 'not_found' } });
     parses();
+  });
+});
+
+describe('the invitation code of the demo world', () => {
+  const hour = 3_600_000;
+  const code = (fields: Fields) => send({ t: 'code', ...fields });
+  const members = () => world.rows(g).filter((row) => row.r === 'member' && row.kind === 'human');
+  const nora = () => members().find((row) => row.user === users.nora);
+
+  it('makes, shows, replaces and turns off a code as a home does, and keeps it out of every row', async () => {
+    for (const hours of [0, 169, 1.5, undefined])
+      expect(await code({ op: 'new', hours })).toMatchObject({ err: { code: 'bad_request' } });
+    expect(await code({ op: 'mend' })).toMatchObject({ err: { code: 'bad_request' } });
+    expect(await code({ op: 'show' })).toEqual({ re: 0, ok: true });
+    const before = Date.now();
+    const made = (await code({ op: 'new', hours: 168 })) as { code: string; expires: number };
+    expect(made.code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+    expect(made.expires).toBe(before + 168 * hour);
+    expect(await code({ op: 'show' })).toMatchObject({ ok: true, ...made });
+    const rows = JSON.stringify(world.groups().map((each) => world.rows(each)));
+    expect(rows).not.toContain(made.code.replaceAll('-', ''));
+    expect(rows).not.toContain(made.code);
+    const again = (await code({ op: 'new', hours: 1 })) as { code: string };
+    expect(again.code).not.toBe(made.code);
+    expect(await code({ op: 'show' })).toMatchObject({ code: again.code });
+    expect(await code({ op: 'off' })).toEqual({ re: 0, ok: true });
+    expect(await code({ op: 'show' })).toEqual({ re: 0, ok: true });
+    const me = members().find((row) => row.user === world.me)!;
+    world.write(g, { ...me, role: 'member' });
+    expect(await code({ op: 'show' })).toMatchObject({ err: { code: 'forbidden' } });
+  });
+
+  it('lets Nora join by the code a moment later, joined by the admin who made it, not once it ended', async () => {
+    await code({ op: 'new', hours: 24 });
+    await vi.advanceTimersByTimeAsync(7900);
+    expect(nora()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(100);
+    const joined = rows('system').at(-1)!;
+    expect(joined.body).toEqual({ code: 'member_joined', member: nora()!.id, by: ids.me });
+    expect(nora()!.role).toBe('member');
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(rows('text').at(-1)).toMatchObject({ by: nora()!.id, text: words.addedHello });
+    parses();
+    expect(await send({ t: 'member', op: 'remove', id: nora()!.id })).toMatchObject({ ok: true });
+    expect(await code({ op: 'show' })).toEqual({ re: 0, ok: true });
+    await code({ op: 'new', hours: 24 });
+    await code({ op: 'off' });
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(nora()).toBeUndefined();
+  });
+
+  it('says nothing for a person removed before their hello', async () => {
+    const said = (by: unknown) => rows('text').filter((row) => row.by === by);
+    await code({ op: 'new', hours: 24 });
+    await vi.advanceTimersByTimeAsync(8000);
+    const id = nora()!.id;
+    expect(await send({ t: 'member', op: 'remove', id })).toMatchObject({ ok: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(said(id)).toEqual([]);
+    const add = { t: 'member', op: 'add_person', user: users.nora, name: 'Nora' };
+    expect(await send(add)).toMatchObject({ ok: true });
+    const added = nora()!.id;
+    expect(await send({ t: 'member', op: 'remove', id: added })).toMatchObject({ ok: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(said(added)).toEqual([]);
+  });
+
+  it('ends a code at its end, when the group moves and from the panel, and lets members in', async () => {
+    await code({ op: 'new', hours: 1 });
+    await vi.advanceTimersByTimeAsync(hour - 1000);
+    expect(world.code(g)).toBeDefined();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await code({ op: 'show' })).toEqual({ re: 0, ok: true });
+    await code({ op: 'new', hours: 24 });
+    endCode(world, g);
+    expect(world.code(g)).toBeUndefined();
+    expect(await send({ t: 'join', name: 'Alex' })).toMatchObject({ ok: true });
+    await code({ op: 'new', hours: 24 });
+    // A person who leaves by themself does not end it: they gave nobody else's code away.
+    const me = members().find((row) => row.user === world.me)!;
+    world.write(g, { ...me, role: 'admin' });
+    expect(await send({ t: 'member', op: 'remove', id: me.id })).toMatchObject({ ok: true });
+    expect(world.code(g)).toBeDefined();
+    world.arrive(g, world.node(devices.office)!);
+    expect(world.memory.codes[g]).toBeUndefined();
+  });
+
+  it('answers a typed code in its room from its home, which names the group, and gives up a room nobody answers', async () => {
+    const made = (await code({ op: 'new', hours: 24 })) as { code: string };
+    const secret = made.code.replaceAll('-', '');
+    const url = 'wss://rv.example/rv';
+    const session = fakeConnect(world)({
+      urls: [url],
+      device: {} as never,
+      known: () => true,
+      name: 'Browser',
+    });
+    expect(session.roomWait).toBe(20_000);
+    world.pace = 0.5;
+    expect(session.roomWait).toBe(10_000);
+    world.pace = 1;
+    const fields = { role: 'b', k: user, kind: 'browser', name: 'Browser' };
+    /** Joins the room of a typed text and sends the browser's pair message there: what is heard. */
+    const enter = async (text: string) => {
+      const heard: Heard[] = [];
+      const id = await room(crypto, text.replaceAll('-', ''));
+      session.watchRoom(url, id, (_, frame) => {
+        if ('room' in frame && frame.room === id) heard.push(frame);
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(heard).toEqual([{ t: 'joined', room: id }]);
+      const self = { t: 'pair' as const, ...fields, mac: await mac(crypto, text, fields) };
+      session.send(url, { t: 'room', room: id, data: self });
+      return heard;
+    };
+    const wrong = await enter('0000-0000-0000-0000');
+    const right = await enter(secret);
+    await vi.waitFor(() => expect(right).toHaveLength(2));
+    expect(right[1]).toMatchObject({
+      t: 'room',
+      data: { role: 'a', k: devices.macbook, kind: 'node' },
+    });
+    expect(wrong).toHaveLength(1);
+    const welcome = Promise.withResolvers<p.Welcome>();
+    const listener = {
+      online: (_: unknown, w: p.Welcome) => welcome.resolve(w),
+      push() {},
+      offline: vi.fn(),
+    };
+    const onpath = vi.fn();
+    session.peer(devices.macbook, () => listener as unknown as Listener, onpath);
+    await vi.advanceTimersByTimeAsync(300);
+    expect((await welcome.promise).join).toBe(g);
+    // The path is told again, for a join that follows it only once it was admitted.
+    expect(onpath).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onpath.mock.calls).toEqual([
+      [expect.objectContaining({ kind: 'direct' })],
+      onpath.mock.calls[0],
+    ]);
+    const later = Promise.withResolvers<p.Welcome>();
+    session.peer(
+      devices.macbook,
+      () =>
+        ({
+          ...listener,
+          online: (_: unknown, w: p.Welcome) => later.resolve(w),
+        }) as unknown as Listener,
+    );
+    // The peer it replaced reports its connection lost, as peer.ts does.
+    expect(listener.offline).toHaveBeenCalledOnce();
+    expect(onpath.mock.lastCall).toEqual([undefined]);
+    await vi.advanceTimersByTimeAsync(300);
+    expect((await later.promise).join).toBeUndefined();
+    session.close();
   });
 });
