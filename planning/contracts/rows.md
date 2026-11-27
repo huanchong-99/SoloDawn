@@ -73,7 +73,10 @@ AI:
 
 Optional, AI only: `task` (absent when its state names no task); every key
 of `usage`: `window_pct`, `window_resets`, `day_cap_pct`, `spend_today`,
-`spend_cap`, `turns_today`. A person's row has no optional field.
+`spend_cap`, `turns_today`. A person's row has no optional field. `follow`,
+`true` while the four profile fields follow the defaults of the AI's CLI on
+its host, absent when the group has its own (`contracts/step-3/profiles.md`
+section 1a).
 
 `state` and `task` describe the AI in this group as a whole, derived by the
 host as `sessions.md` section 3 says. `since` is the home time at which the

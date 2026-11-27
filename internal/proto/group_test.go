@@ -34,14 +34,18 @@ func TestGroupGoldens(t *testing.T) {
 		MemberRow: MemberRow{RowHeader{"member", human, 3}, group, "human", user, "owner", ts},
 		Role:      "owner", Online: true,
 	})
-	golden(t, "row-member-ai", AIMemberRow{
+	aiRow := AIMemberRow{
 		MemberRow: MemberRow{RowHeader{"member", ai, 789}, group, "ai", user, "Codex", ts},
 		CLI:       "codex", Host: host, HostName: "workstation", Workspace: workspace, Account: "personal", Allow: []string{},
 		Approvers: []string{user}, State: "working", Task: task, Since: ts - 2000, Path: "local",
 		Usage: Usage{WindowPct: new(62.5), WindowResets: new(ts + 10000), DayCapPct: new(80.0),
 			SpendToday: new(0.0), SpendCap: new(10.5), TurnsToday: new(14)},
 		Profile: Profile{"gpt-5.4", "high", "strong", "Go backend, protocol design"},
-	})
+	}
+	golden(t, "row-member-ai", aiRow)
+	aiFollow := aiRow
+	aiFollow.Follow = true
+	golden(t, "row-member-ai-follow", aiFollow)
 	golden(t, "row-member-ai-external", AIMemberRow{
 		MemberRow: MemberRow{RowHeader{"member", id("scout"), 812}, group, "ai", user, "Scout", ts},
 		CLI:       "external", Tool: "ZCode", Host: host, HostName: "workstation", Workspace: workspace, Account: "api_key",

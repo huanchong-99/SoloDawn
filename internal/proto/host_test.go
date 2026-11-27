@@ -16,14 +16,14 @@ func hostState() HostState {
 			{"claude", "2.1.311", new("personal"), true, Caps{Day: &Cap{"turns", 200}, Task: &Cap{"usd", 12.5}},
 				Driver{[]string{"personal", "team", "api_key"}, "new"},
 				[]AgentGroup{{ID(group), ID(agent), workspace, 2, "working", ID(taskID), 1, []string{user}}},
-				[]Model{{"opus", "Opus", []string{"low", "medium", "high", "xhigh", "max"}, true, "strong"}, {"haiku", "Haiku", []string{}, false, "light"}}},
+				[]Model{{"opus", "Opus", []string{"low", "medium", "high", "xhigh", "max"}, true, "strong"}, {"haiku", "Haiku", []string{}, false, "light"}}, nil},
 			{"codex", "0.164.0", nil, false, Caps{},
 				Driver{[]string{"personal", "team", "api_key"}, "resume"},
-				[]AgentGroup{}, []Model{}},
+				[]AgentGroup{}, []Model{}, nil},
 			{"external", "", nil, true, Caps{},
 				Driver{[]string{"personal", "team", "api_key"}, "none"},
 				[]AgentGroup{{ID(group), ID(id("scout")), workspace, 3, "waiting", "", 0, []string{}}},
-				[]Model{}},
+				[]Model{}, nil},
 		},
 		Settings: HostSettings{90, 15, 2, false, []string{}},
 	}
@@ -33,7 +33,9 @@ func TestHostSurfaceGoldens(t *testing.T) {
 	golden(t, "groups", Groups{"groups", []GroupSummary{{group, "Website", 812}}})
 
 	golden(t, "host-info-request", HostInfoRequest{Request{"host.info", 9}, true})
-	golden(t, "host-info-answer", HostInfo{"host.info", Success{9, true}, hostState()})
+	answer := hostState()
+	answer.Agents[0].Defaults = &Profile{"opus", "high", "strong", "Go backend"}
+	golden(t, "host-info-answer", HostInfo{"host.info", Success{9, true}, answer})
 	// The owner took all AIs offline after an update was installed, and the
 	// rendezvous is not reachable: what the answer showed changes in a push.
 	state := hostState()
@@ -59,6 +61,7 @@ func TestHostSettingsAndTakeoverGoldens(t *testing.T) {
 	golden(t, "settings-set", SettingsSet{to("settings.set"), new(30), new(20), new(3), new(2), new(false), &[]string{user},
 		&AgentCaps{Claude: &Caps{&Cap{"turns", 200}, &Cap{"turns", 60}}, Codex: &Caps{}}})
 	golden(t, "agent-set", AgentSet{to("agent.set"), "codex", "personal"})
+	golden(t, "agent-defaults", AgentDefaults{to("agent.defaults"), "claude", Profile{"opus", "high", "strong", "Go backend, protocol design"}})
 	golden(t, "perm-set", PermSet{to("perm.set"), "claude", ID(group), 3})
 	golden(t, "pair-browser", to("pair.browser"))
 	golden(t, "watch-start", WatchStart{Request{"watch.start", 7}, ID(group), ID(agent)})

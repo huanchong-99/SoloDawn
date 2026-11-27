@@ -58,6 +58,7 @@ type MemberAddAI struct {
 	Secretary bool     `json:"secretary"`
 	Approvers []string `json:"approvers"`
 	ProfileSet
+	Follow True `json:"follow,omitempty"`
 }
 
 // MemberAddPerson adds a person whose device log the home holds, as a member
@@ -92,6 +93,7 @@ type MemberSet struct {
 	Approvers *[]string `json:"approvers,omitempty"`
 	Role      *string   `json:"role,omitempty"`
 	ProfileSet
+	Follow True `json:"follow,omitempty"`
 }
 
 // Invite asks the home for an invitation link for its group; it is a
@@ -311,6 +313,7 @@ type HostJoin struct {
 	Account   string  `json:"account,omitempty"`
 	Tool      *string `json:"tool,omitempty"`
 	ProfileSet
+	Follow True `json:"follow,omitempty"`
 }
 
 // HostLeave names the member when the agent has more than one in the group.

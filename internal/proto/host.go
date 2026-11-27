@@ -84,6 +84,7 @@ type HostAgent struct {
 	Driver     Driver       `json:"driver"`
 	Groups     []AgentGroup `json:"groups"`
 	Models     []Model      `json:"models"`
+	Defaults   *Profile     `json:"defaults,omitempty"`
 }
 
 // Model is one model the CLI lists, with the tier the host suggests for it
@@ -209,6 +210,14 @@ type AgentSet struct {
 	HostCommand
 	Agent   string `json:"agent"`
 	Account string `json:"account"`
+}
+
+// AgentDefaults sets the default profile of a CLI on this machine
+// (contracts/commands.md section 2, contracts/step-3/profiles.md section 1a).
+type AgentDefaults struct {
+	HostCommand
+	Agent string `json:"agent"`
+	Profile
 }
 
 // PermSet sets the level of an agent's sessions in a group.

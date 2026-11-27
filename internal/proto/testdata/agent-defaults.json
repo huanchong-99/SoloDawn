@@ -1,0 +1,11 @@
+{
+  "t": "agent.defaults",
+  "n": "bmnYQqgsVRPy5rb6ZeqqFw",
+  "ts": 1763600000000,
+  "to": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "agent": "claude",
+  "model": "opus",
+  "effort": "high",
+  "tier": "strong",
+  "skills": "Go backend, protocol design"
+}

@@ -1,0 +1,13 @@
+{
+  "t": "member",
+  "n": "ZH4s7k6mUUaa-TqnHg-5qQ",
+  "ts": 1763600000000,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "op": "set",
+  "id": "1PC8WineBrUQ-apCjx7tug",
+  "model": "gpt-5.4",
+  "effort": "high",
+  "tier": "strong",
+  "skills": "Go backend, protocol design",
+  "follow": true
+}

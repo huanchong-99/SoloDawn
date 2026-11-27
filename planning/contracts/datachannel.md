@@ -258,6 +258,7 @@ and without `re` and `ok` (`contracts/conventions.md` section 3):
    "login_ok":true,"caps":{"day":{"unit":"turns","max":200}},
    "driver":{"accounts":["personal","team","api_key"],"takeover":"new"},
    "models":[{"model":"…","name":"…","efforts":["low","high"],"tier":"…"}],
+   "defaults":{"model":"opus","effort":"high","tier":"strong","skills":"Go backend"},
    "groups":[{"g":"Qm1…","member":"<member id>","workspace":"/home/dev/website","level":3,
               "state":"working","task":"<task id>","queued":0,"watchers":[]}]}],
  "settings":{"retention_days":90,"idle_minutes":15,"default_level":3,"all_level3":false,"approvers":[]}}
@@ -283,6 +284,9 @@ and without `re` and `ok` (`contracts/conventions.md` section 3):
   are those of `contracts/step-3/drivers.md` sections 6 and 10.3. `watchers`
   lists the people who hold a watch grant for that AI
   (`contracts/step-2/watch-team.md` section 5).
+- `defaults`: optional; the defaults of that CLI on this node, once the owner has set them with
+  `agent.defaults`, as four fields `model`, `effort`, `tier`, `skills`
+  (`contracts/step-3/profiles.md` section 1a). The `external` entry never has it.
 - In `groups`: `state` and `task` are the AI's derived state
   (`contracts/rows.md` section 2; `task` is optional), `level` is the level
   of its task sessions, and `queued` counts held items. `workspace` is the

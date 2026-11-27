@@ -280,6 +280,7 @@ export const AIMemberRow = v.object({
   effort: str,
   tier: str,
   skills: str,
+  follow: v.optional(v.literal(true)),
 });
 export type AIMemberRow = v.InferOutput<typeof AIMemberRow>;
 
@@ -633,6 +634,10 @@ export type GroupCommand = v.InferOutput<typeof GroupCommand>;
 
 const member = { t: v.literal('member'), ...HomeCommand, id: Id };
 
+/** A CLI's four profile defaults (contracts/step-3/profiles.md section 1a). */
+export const Profile = v.object({ model: str, effort: str, tier: str, skills: str });
+export type Profile = v.InferOutput<typeof Profile>;
+
 /** The four fields of the profile in a command, each optional (profiles.md section 2). */
 const ProfileSet = {
   model: optionalText,
@@ -653,6 +658,7 @@ export const MemberAddAI = v.object({
   secretary: bool,
   approvers: strs,
   ...ProfileSet,
+  follow: v.optional(v.literal(true)),
 });
 export type MemberAddAI = v.InferOutput<typeof MemberAddAI>;
 
@@ -693,6 +699,7 @@ export const MemberSet = v.object({
   approvers: v.optional(strs),
   role: optionalText,
   ...ProfileSet,
+  follow: v.optional(v.literal(true)),
 });
 export type MemberSet = v.InferOutput<typeof MemberSet>;
 
@@ -884,6 +891,7 @@ export const HostJoin = v.object({
   account: optionalText,
   tool: optionalText,
   ...ProfileSet,
+  follow: v.optional(v.literal(true)),
 });
 export type HostJoin = v.InferOutput<typeof HostJoin>;
 
@@ -932,6 +940,15 @@ export const AgentSet = v.object({
   account: str,
 });
 export type AgentSet = v.InferOutput<typeof AgentSet>;
+
+/** Sets a CLI's defaults on the node (profiles.md section 1a, commands.md section 2). */
+export const AgentDefaults = v.object({
+  t: v.literal('agent.defaults'),
+  ...HostCommand,
+  agent: str,
+  ...Profile.entries,
+});
+export type AgentDefaults = v.InferOutput<typeof AgentDefaults>;
 
 export const PermSet = v.object({
   t: v.literal('perm.set'),
@@ -1024,6 +1041,7 @@ const HostState = {
           tier: str,
         }),
       ),
+      defaults: v.optional(Profile),
       groups: v.array(
         v.object({
           g: Id,

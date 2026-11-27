@@ -69,17 +69,55 @@ AI, always present. A person's row has none of them.
   of an external AI, which are text set when it joins
   (`contracts/step-3/external.md` section 11).
 
+## 1a. Defaults
+
+Decided by the owner on 2026-11-27: each CLI on a computer has defaults, set once, and a group
+may change them for its own member.
+
+- **What has defaults.** Each agent of `contracts/step-3/drivers.md` on each node: the entry of
+  that agent in `host.info` (`contracts/datachannel.md` section 7). They are the four fields of
+  section 1. Every member of that CLI that the node hosts, in any group, may follow them. An
+  external AI has no defaults: its four fields are always its own.
+- **Never set.** Until the owner sets them, the defaults are model `""`, effort `""`, tier
+  `standard` and skills `""`, and `host.info` shows none.
+- **Where they live.** The node's setting `defaults` (`contracts/storage.md` section 2), written
+  only by `agent.defaults` (`contracts/commands.md` section 2).
+- **Following.** The member row of an AI that follows the defaults has `follow: true`
+  (`contracts/rows.md` section 2); a row without `follow` has its own profile. The four fields of
+  a row always hold the values in force, followed or not: the secretary's turn, the card and the
+  start of a CLI read the row, never the defaults.
+- **The host keeps following rows current.** After `agent.defaults`, after each sync of a group
+  with its home, and after each `rows` push of a group, the host compares each member row of its
+  own managed AIs in that group that has `follow` with the defaults of that AI's agent, and for
+  each row that differs sends `member set` with `follow` and the four fields. It sends nothing for
+  a row without `follow`. A home it cannot reach gets the `member set` after the next sync.
+- **Its own profile.** A `member set` by the AI's owner with any of the four and without
+  `follow` removes `follow` from the row: the fields sent change, the others keep their values.
+- **Restoring the defaults.** A `member set` by the AI's owner with `follow` sets `follow` on the
+  row; the host then sends the defaults as above.
+- **Adding.** `host.join` with `follow` adds an AI that follows: the node sends `member add_ai`
+  with `follow` and the four fields of the defaults, and reads none of the four from `host.join`.
+  Without `follow` the AI has its own profile from the start, from the four in `host.join`.
+- **The secretary** follows like any member. No view shows its tier (section 2a).
+- **Rows from before 2026-11-27** have no `follow`: they keep their own profile until their owner
+  restores the defaults.
+- Not built: following some of the four fields and not others; defaults for an external AI; a
+  history of defaults; copying a member's profile into the defaults.
+
 ## 2. Setting it (adds to `contracts/commands.md` 1.2 and section 2)
 
 | Command | Addition |
 | --- | --- |
-| `host.join` | optional `model`, `effort`, `tier`, `skills`, passed on in `member add_ai`. Joining with an `agent` that already has a member in `g` adds another member |
-| `member add_ai` | the same four, optional; what is absent gets the default of section 1 |
-| `member set` | the same four in its "any of" |
+| `host.join` | optional `model`, `effort`, `tier`, `skills`, passed on in `member add_ai`; optional `follow` (`true`), which takes the four from the defaults instead (section 1a). Joining with an `agent` that already has a member in `g` adds another member |
+| `member add_ai` | the same four, optional; what is absent gets the default of section 1. Optional `follow` (`true`) |
+| `member set` | the same four, and `follow` (`true`), in its "any of" |
 | `host.leave` | optional `member`, a member id: required when the `agent` has more than one member in `g`, else `bad_request` |
 
-- `member set` with any of the four is by the AI's owner only. The AI's
-  host may not send them.
+- `member set` with any of the four, or with `follow`, is by the AI's owner, with one exception:
+  the AI's host may send `follow` together with the four, and no other field, for a row that has
+  `follow` (section 1a). From the AI's host, any of the four without `follow`, or `follow` with
+  any field but the four, is `forbidden`; `follow` for a row without `follow` is `conflict`.
+- `follow` is `true` or absent; any other value is `bad_request`.
 - A `tier` that is not one of the three values, and a text that breaks a
   bound of section 1, are `bad_request`.
 - A new `tier` or `skills` takes effect for what happens next: the next
@@ -91,16 +129,26 @@ AI, always present. A person's row has none of them.
 
 ## 2a. What the owner sees
 
-The node lists and suggests; the owner chooses; rows change only by the
-owner's `member set`.
+The node lists and suggests; the owner chooses; rows change only by
+`member set` — the owner's, or the host's for a following member (section 2).
 
-- **Adding.** The dialog of `host.join`, and each AI ticked in the
-  create-group dialog, offers the models of that CLI from `host.info`
-  (`contracts/step-3/drivers.md` section 10), for the chosen model its
-  levels, and "the CLI's default" for both; what is chosen goes in that
-  AI's `host.join`. Choosing a
-  model fills the tier with that model's suggestion; the owner may change
-  it before sending, and, in the add-AI dialog only, write skills.
+- **Adding.** In the dialog of `host.join` and for each AI ticked in the create-group dialog, a
+  managed AI follows the defaults of its CLI on its computer: a switch, on, with the defaults in
+  one line under it, and the dialog sends `follow`. In the add-AI dialog the switch starts off
+  when the group already has a member of that CLI on that computer. With the switch off, the
+  dialog offers the models of that CLI from `host.info` (`contracts/step-3/drivers.md` section
+  10), for the chosen model its levels, and "the CLI's default" for both, filled from the
+  defaults; choosing a model fills the tier with that model's suggestion; what is chosen goes in
+  that AI's `host.join`. An external AI has no switch.
+- **Defaults.** The Computers page shows, under each CLI whose account type is declared, its
+  defaults in one line, or "not set" while `host.info` has none. The owner edits the four in one
+  editor, the fields of the member editor (the tier with the suggestion of the chosen model), and
+  saves them with `agent.defaults`. Under each group the CLI is in, the page says whether that
+  member follows the defaults or has its own setting.
+- **Following, on the card.** The card of an AI that follows says so, naming the computer; one
+  with its own setting says so and offers its owner "Restore defaults" (`member set` with
+  `follow`). An external AI's card says neither. On a member that follows, the profile editor says
+  before saving that saving gives the group its own setting.
 - **Editing.** The AI member panel shows model, level, tier and skills,
   the tier in one block with the usage line of section 3 (`window_pct`
   and when it resets, or the turns of today for a CLI that reports no
@@ -257,6 +305,8 @@ do today. Nothing else touches `stuck`: not a crash or a timeout (row 10).
   storage table. `stuck` is part of the task row.
 - No check that the answer helped, or that the stronger AI is reachable.
 - No list of models or levels kept by the host.
+- No `follow` in any turn text, in `list_members` or in any MCP tool: the roster shows the values
+  in force.
 
 ## 6. Shapes to freeze (unit P-6)
 
@@ -274,6 +324,11 @@ Changed golden examples, with the schema in `web/src/lib/proto.ts` and
 - `row-task.json` stays, without `stuck`; new `row-task-stuck.json` with
   `stuck` and `ask` `true`.
 
+Added on 2026-11-27 (section 1a): `row-member-ai-follow.json`, `member-add_ai-follow.json`,
+`member-set-follow.json` (the owner restores: `id` and `follow`), `member-set-follow-host.json`
+(the host: `follow` and the four), `host-join-follow.json`, `agent-defaults.json`, and `defaults`
+on the `claude` entry of `host-info-answer.json`.
+
 `tools.json` does not change.
 
 ## 7. What grows in the step 1 files
@@ -289,6 +344,11 @@ Changed golden examples, with the schema in `web/src/lib/proto.ts` and
 | `contracts/task-machine.md` section 3 | the effects of section 4 on rows 5, 7, 11, 13 and on a `reply` |
 | `contracts/drivers.md` sections 3, 4 | the member list, the escalation line, the instruction sentences |
 | `contracts/mcp-tools.md` section 1 | one more reason for `submit_task` to fail with `conflict` |
+| `contracts/rows.md` section 2 | the optional `follow` on an AI's row |
+| `contracts/commands.md` 1.2 | `follow` in `member add_ai` and `member set`, and who may send it |
+| `contracts/commands.md` section 2 | `follow` in `host.join`; the command `agent.defaults` |
+| `contracts/datachannel.md` section 7 | `defaults` in an `agents` entry of `host.info` |
+| `contracts/storage.md` section 2 | the setting `defaults` |
 
 ## 8. Decided, and not verified
 
