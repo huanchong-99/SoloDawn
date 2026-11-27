@@ -614,11 +614,57 @@ describe('web client connections against real nodes (I-8)', () => {
     await page.locator('input[name="acct-codex"][value="api_key"]').check();
     await page.locator('.done-btn').waitFor({ state: 'visible' });
 
+    expect(await page.getByText('If a direct connection fails, a relay takes over').count()).toBe(
+      0,
+    );
     expect(((await page.locator('.done-btn').textContent()) ?? '').trim()).toBe(
       "Next: set your AIs' defaults",
     );
     expect(await page.locator('.done-btn').getAttribute('href')).toBe('#/nodes');
   });
+
+  // Skipped on Firefox and WebKit: neither establishes loopback ICE without TURN (see issues.md,
+  // "Firefox and Safari/WebKit cannot pair over same-machine loopback without TURN while a host firewall holds LAN traffic").
+  test.skipIf(inject('browser') === 'firefox' || inject('browser') === 'webkit')(
+    'onboarding pairs over loopback when /rv offers no ICE servers and LAN candidates are dropped',
+    async () => {
+      net = await startNet({ nodes: 1 });
+      const [node] = net.nodes;
+      const proxy = await startSignallingProxy({
+        targetHttp: net.rendezvous.url,
+        targetWs: net.rendezvous.signal,
+        dropLan: true,
+      });
+      proxies.push(proxy);
+      const ctx = await newContext();
+      const page = await ctx.newPage();
+
+      await page.goto(`${proxy.url}#/onboarding`);
+      const code = await waitForPairingCode(page, proxy.signal);
+      expect(await page.getByText('If a direct connection fails, a relay takes over').count()).toBe(
+        0,
+      );
+
+      const paired = await node.run(
+        'solodawn',
+        'pair',
+        code,
+        '--name',
+        'workstation',
+        '--rendezvous',
+        proxy.signal,
+      );
+      expect(paired.code, paired.stderr).toBe(0);
+
+      await page.waitForFunction(() => {
+        const steps = document.querySelector('.link-steps')?.textContent ?? '';
+        return (
+          steps.includes('Direct connection established') &&
+          steps.includes('Found: Claude Code, Codex')
+        );
+      });
+    },
+  );
 
   test('A1.3: indicator reports direct and relay within 1 s and host.info succeeds throughout', async () => {
     net = await startNet({ nodes: 2 });
@@ -698,6 +744,9 @@ describe('web client connections against real nodes (I-8)', () => {
         steps.includes('Found: Claude Code, Codex')
       );
     });
+    expect(
+      await relayOnboardPage.getByText('If a direct connection fails, a relay takes over').count(),
+    ).toBe(1);
     await relayOnboardPage.close();
 
     const relayResult = await measureIndicator(

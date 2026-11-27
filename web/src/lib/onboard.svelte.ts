@@ -59,6 +59,9 @@ export const accountLabel = (account: string) =>
 export const signalUrlOf = (loc: Pick<Location, 'protocol' | 'host'> = location) =>
   `${loc.protocol === 'https:' ? 'wss:' : 'ws:'}//${loc.host}/rv`;
 
+const hasTurn = (ice: Extract<Heard, { t: 'ready' | 'ice' }>['ice']) =>
+  ice.some(({ urls }) => urls.some((url) => url.startsWith('turn')));
+
 /** Builds the onboarding prompt in `lang` with the page's install and signalling URLs. */
 export function promptFor(
   lang: Lang,
@@ -149,6 +152,7 @@ export class PairingSession {
   node = $state<NodeSummary | undefined>();
   path = $state<Path | undefined>();
   enrolled = $state<boolean>()!;
+  hasRelay = $state<boolean>()!;
   agents = $state<HostInfo['agents'] | undefined>();
   busy = $state<boolean>()!;
   error = $state<FailureInfo | undefined>();
@@ -233,6 +237,7 @@ export class PairingSession {
     this.node = undefined;
     this.path = undefined;
     this.enrolled = false;
+    this.hasRelay = false;
     this.agents = undefined;
     this.busy = false;
     this.error = undefined;
@@ -340,7 +345,13 @@ export class PairingSession {
     }
   }
 
+  #noteRelay(frame: Heard) {
+    if (frame.t === 'ready' || frame.t === 'ice') this.hasRelay = hasTurn(frame.ice);
+    else if (frame.t === 'closed') this.hasRelay = false;
+  }
+
   async #onHeard(run: symbol, url: string, frame: Heard) {
+    this.#noteRelay(frame);
     switch (frame.t) {
       case 'ready':
         return this.#joinRoom(url);

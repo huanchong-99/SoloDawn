@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"github.com/huanchong-99/SoloDawn/internal/store"
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 )
@@ -416,6 +417,60 @@ func TestListenFailures(t *testing.T) {
 	eq(t, err == nil, false)
 	_, err = listen(0, "127.0.0.1:-1", "test", loopbackEngine(), ice.UDPMuxFromPortWithLoopback(), ice.UDPMuxFromPortWithIPFilter(loopback))
 	eq(t, err == nil, false)
+}
+
+// Production Listen gathers loopback candidates so a browser-like offerer
+// whose .local candidates do not resolve can open ctl over 127.0.0.1 when
+// LAN traffic is filtered.
+func TestListenLoopback(t *testing.T) {
+	loSocks := sockets(t)
+	prodSocks, err := Listen(0, 0, "test")
+	check(t, err)
+	t.Cleanup(func() { prodSocks.Close() })
+	a, b := testKey(t), testKey(t)
+	aMail, bMail := mail(), mail()
+	opened := make(chan *Connection, 1)
+	dbA, err := store.Open(":memory:")
+	check(t, err)
+	t.Cleanup(func() { dbA.Close() })
+	dbB, err := store.Open(":memory:")
+	check(t, err)
+	t.Cleanup(func() { dbB.Close() })
+	allowAll := func(string) bool { return true }
+	pa := New(a, loSocks, dbA, allowAll, func(string) []Route { return []Route{aMail.route()} }, nil, nil)
+	pb := New(b, prodSocks, dbB, allowAll, func(string) []Route { return []Route{bMail.route()} }, func(c *Connection) { opened <- c }, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	c, err := pa.Offer(ctx, b.ID())
+	check(t, err)
+	t.Cleanup(func() { c.Close() })
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case env := <-aMail["offer"]:
+				_ = pb.Receive(ctx, bMail.route(), frame(env))
+			case <-aMail["ice"]:
+				// Omit offerer candidates (like an unresolved browser .local mDNS candidate).
+			case env := <-bMail["answer"]:
+				_ = pa.Receive(ctx, aMail.route(), frame(env))
+			case env := <-bMail["ice"]:
+				var cand proto.ICECandidate
+				check(t, proto.Decode([]byte(env.Payload), &cand))
+				if strings.Contains(cand.Candidate, " 127.0.0.1 ") {
+					_ = pa.Receive(ctx, aMail.route(), frame(env))
+				}
+			}
+		}
+	}()
+	select {
+	case <-c.Ready():
+	case <-ctx.Done():
+		t.Fatal("ctl did not open over loopback")
+	}
+	s := <-opened
+	t.Cleanup(func() { s.Close() })
 }
 
 // Ending the caller's context while the offer is being sent ends the attempt.

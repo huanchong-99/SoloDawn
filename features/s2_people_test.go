@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -1117,11 +1118,24 @@ func (w *s2PeopleWorld) waitP1DroppedQDevices(deadline time.Time) error {
 }
 
 func (w *s2PeopleWorld) expectQConnectedToP1() error {
-	devices, err := w.qDevicesOnP1(w.cast.Ctx)
-	if err == nil && len(devices) != 2 {
-		err = fmt.Errorf("P1 lists connections of %v, want Q's browser and Q1", devices)
-	}
-	return err
+	return awaitTwoDevices(w.cast.Ctx, w.qDevicesOnP1)
+}
+
+// followJoin returns once Q1 starts connectHome in the background, so P1 may
+// list only Q's browser at first while Q1's connection finishes opening.
+func awaitTwoDevices(ctx context.Context, poll func(context.Context) ([]string, error)) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return waitUntilCtx(ctx, 100*time.Millisecond, "Q's browser and Q1 connected to P1", func() error {
+		devices, err := poll(ctx)
+		if err != nil {
+			return err
+		}
+		if len(devices) != 2 {
+			return fmt.Errorf("P1 lists connections of %v, want Q's browser and Q1", devices)
+		}
+		return nil
+	})
 }
 
 func (w *s2PeopleWorld) qDevicesOnP1(ctx context.Context) ([]string, error) {
@@ -1327,4 +1341,29 @@ func (w *s2PeopleWorld) verifyQ1RefusesHostCmdAndTakeoverFromP(conn *peer.Connec
 			Member: proto.ID(w.qTeam.ID),
 		},
 	}, "forbidden")
+}
+
+func TestAwaitTwoDevicesWaitsForAsyncNodeConn(t *testing.T) {
+	calls := 0
+	err := awaitTwoDevices(t.Context(), func(context.Context) ([]string, error) {
+		calls++
+		if calls < 3 {
+			return []string{"browser"}, nil
+		}
+		return []string{"browser", "q1"}, nil
+	})
+	if err != nil {
+		t.Fatalf("awaitTwoDevices with delayed node connection: %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("polled %d times, want 3", calls)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	defer cancel()
+	err = awaitTwoDevices(ctx, func(context.Context) ([]string, error) {
+		return []string{"browser"}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "want Q's browser and Q1") {
+		t.Fatalf("timeout error = %v, want missing Q1 diagnosis", err)
+	}
 }

@@ -530,6 +530,57 @@ describe('PairingSession mock, countdown and storage checks', () => {
     expect(textIn('zh-CN', 'pairing.status.relay_note')).not.toMatch(/继续尝试/);
   });
 
+  it('tracks hasRelay from ready, ice and closed frames and resets on start', async () => {
+    const stun = [{ urls: ['stun:rv.example:3478'] }];
+    const turnUdp = [
+      { urls: ['stun:rv.example:3478'] },
+      {
+        urls: ['stun:rv.example:3478', 'turn:rv.example:3478?transport=udp'],
+        username: 'u',
+        credential: 'p',
+      },
+    ];
+    const turnTls = [
+      { urls: ['turns:turn.rv.example:443?transport=tcp'], username: 'u', credential: 'p' },
+    ];
+    const session = new PairingSession('live');
+    expect(session.hasRelay).toBe(false);
+    await until(() => expect(hubs).toHaveLength(1));
+    const hub = hubs[0];
+    const url = hub.options.urls[0];
+    const hear = hub.options.heard!;
+
+    hear(url, { t: 'ready', ice: [], ttl: 3600 });
+    expect(session.hasRelay).toBe(false);
+
+    hear(url, { t: 'ready', ice: stun, ttl: 3600 });
+    expect(session.hasRelay).toBe(false);
+
+    hear(url, { t: 'closed' });
+    expect(session.hasRelay).toBe(false);
+
+    hear(url, { t: 'ready', ice: turnUdp, ttl: 3600 });
+    expect(session.hasRelay).toBe(true);
+
+    hear(url, { t: 'joined', room: 'r1' });
+    expect(session.hasRelay).toBe(true);
+
+    hear(url, { t: 'ice', ice: [], ttl: 3600 });
+    expect(session.hasRelay).toBe(false);
+
+    hear(url, { t: 'ice', ice: turnTls, ttl: 3600 });
+    expect(session.hasRelay).toBe(true);
+
+    hear(url, { t: 'closed' });
+    expect(session.hasRelay).toBe(false);
+
+    hear(url, { t: 'ice', ice: turnTls, ttl: 3600 });
+    expect(session.hasRelay).toBe(true);
+    await session.start();
+    expect(session.hasRelay).toBe(false);
+    session.destroy();
+  });
+
   it('counts the mock window down and stops counting after destroy or a bad secret', () => {
     vi.useFakeTimers(countdownClock);
     vi.setSystemTime(1_000_000);

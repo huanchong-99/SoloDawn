@@ -38,6 +38,7 @@ export interface SignallingProxyOptions {
   targetWs: string;
   ice?: IceServer[];
   dropDirect?: boolean;
+  dropLan?: boolean;
   reorderEarly?: boolean;
 }
 
@@ -233,6 +234,21 @@ function isNonRelayIce(rawFrame: string): boolean {
   return inner?.t === 'ice' && !(inner.cand ?? '').includes(' typ relay');
 }
 
+function isLanHostIce(rawFrame: string): boolean {
+  const { inner } = parseSignallingEnvelope(rawFrame);
+  if (inner?.t !== 'ice') return false;
+  const cand = inner.cand ?? '';
+  if (!cand.includes(' typ host')) return false;
+  return !/\s(?:127\.0\.0\.1|\S+\.local)\s/.test(cand);
+}
+
+function dropIceFrame(rawFrame: string, opts: SignallingProxyOptions): boolean {
+  return (
+    (Boolean(opts.dropDirect) && isNonRelayIce(rawFrame)) ||
+    (Boolean(opts.dropLan) && isLanHostIce(rawFrame))
+  );
+}
+
 function injectIceServers(rawFrame: string, extra: IceServer[] | undefined): string {
   if (!extra?.length) return rawFrame;
   const parsed = JSON.parse(rawFrame) as { t?: string; ice?: IceServer[] };
@@ -376,7 +392,7 @@ function bridgeUpgrade(
   });
   upstream.addEventListener('message', (ev) => {
     const raw = injectIceServers(String(ev.data), opts.ice);
-    if (opts.dropDirect && isNonRelayIce(raw)) return;
+    if (dropIceFrame(raw, opts)) return;
     if (!reorder.interceptDown(isBrowserConn, raw, sendDown)) sendDown(raw);
   });
   upstream.addEventListener('close', shut);
@@ -385,7 +401,7 @@ function bridgeUpgrade(
     socket,
     head,
     (raw) => {
-      if (opts.dropDirect && isNonRelayIce(raw)) return;
+      if (dropIceFrame(raw, opts)) return;
       if (upstream.readyState === WebSocket.OPEN) upstream.send(raw);
       else pending.push(raw);
     },

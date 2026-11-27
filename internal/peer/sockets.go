@@ -32,12 +32,14 @@ type Sockets struct {
 	stop          context.CancelFunc // ends the back-off of the ICE-TCP accept
 }
 
-// Listen reserves udpPort on each eligible local address for the host
-// candidates of answered connections, and opens the passive ICE-TCP listener
-// on tcpPort for both roles (contracts/rendezvous.md section 5.1, point 3).
-// id is the node's device id.
+// Listen reserves udpPort on each eligible local address, loopback included,
+// for the host candidates of answered connections, and opens the passive
+// ICE-TCP listener on tcpPort for both roles (contracts/rendezvous.md
+// section 5.1, point 3). id is the node's device id.
 func Listen(udpPort, tcpPort int, id string) (*Sockets, error) {
-	return listen(udpPort, ":"+strconv.Itoa(tcpPort), id, webrtc.SettingEngine{LoggerFactory: PionLog})
+	engine := webrtc.SettingEngine{LoggerFactory: PionLog}
+	engine.SetIncludeLoopbackCandidate(true)
+	return listen(udpPort, ":"+strconv.Itoa(tcpPort), id, engine, ice.UDPMuxFromPortWithLoopback())
 }
 
 // listen builds on engine and passes opts to the UDP mux, so that tests can
