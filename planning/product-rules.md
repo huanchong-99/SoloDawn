@@ -319,7 +319,12 @@ By the owner's decision of 2026-11-26
   against a rendezvous that stands in for a home; the [deployment guide](../docs/cookbook/self-hosting.md) says
   to send the link privately and to use a trusted rendezvous.) A person who
   is already in another group on the same home is added by an admin without
-  a link and without a step of their own (2026-11-26).
+  a link and without a step of their own (2026-11-26). An invitation code
+  (2026-11-27) admits any number of people for at most 7 days, 24 hours
+  unless chosen otherwise. An admin turns it off or replaces it, and
+  removing a person turns it off. It has the 16 characters of the pairing
+  code (R-152). Unlike a link it does not name the home, so a holder can
+  stand in for the home; nothing is built against that.
 
 ## Distribution
 

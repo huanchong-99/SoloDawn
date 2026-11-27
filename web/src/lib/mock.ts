@@ -34,6 +34,7 @@ export const schemaOf: Record<string, GenericSchema> = {
   answer: p.Answer,
   beacon: p.Beacon,
   cmd: p.Cmd,
+  'cmd-code': p.CmdResult,
   'cmd-error': p.ErrorResponse,
   'cmd-invite-link': p.CmdResult,
   'cmd-moved': p.ErrorResponse,
@@ -42,6 +43,9 @@ export const schemaOf: Record<string, GenericSchema> = {
   'cmd-pair-link': p.CmdResult,
   'cmd-reviewed': p.CmdResult,
   'cmd-started': p.CmdResult,
+  'code-new': p.Code,
+  'code-off': p.Code,
+  'code-show': p.Code,
   'device-add': p.DeviceEntry,
   'device-revoke': p.DeviceEntry,
   devlog: p.Devlog,
@@ -181,7 +185,9 @@ export const schemaOf: Record<string, GenericSchema> = {
   'rv-ice-answer': p.RVICEAnswer,
   'rv-ice-request': p.RVICERequest,
   'rv-join': p.RVJoin,
+  'rv-join-host': p.RVJoinHost,
   'rv-joined': p.RVJoined,
+  'rv-leave': p.RVLeave,
   'rv-offline': p.RVOffline,
   'rv-presence': p.RVPresence,
   'rv-quota-answer': p.RVQuotaAnswer,
@@ -206,6 +212,7 @@ export const schemaOf: Record<string, GenericSchema> = {
   'watch-end': p.WatchEnd,
   'watch-start': p.WatchStart,
   welcome: p.Welcome,
+  'welcome-joining': p.Welcome,
 };
 
 /** The example that answers each request. */

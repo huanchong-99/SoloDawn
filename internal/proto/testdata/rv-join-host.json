@@ -1,0 +1,13 @@
+{
+  "t": "join",
+  "room": "23b3731de722f5b7425a41416cf5d30b",
+  "data": {
+    "t": "pair",
+    "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+    "kind": "node",
+    "name": "workstation",
+    "role": "a",
+    "mac": "wCzQ-sDqagt-Eafi91RHzBOweAxtxpkYIs7ZnE1Cl-M",
+    "exp": 1763686400000
+  }
+}

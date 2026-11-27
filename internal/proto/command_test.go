@@ -164,6 +164,9 @@ func TestCommandsLeaveOutWhatDoesNotApply(t *testing.T) {
 func TestOtherHomeCommandGoldens(t *testing.T) {
 	golden(t, "invite", command("invite", "invite"))
 	golden(t, "join", Join{command("join", "join"), "Mina"})
+	golden(t, "code-new", Code{command("code", "code new"), "new", new(24)})
+	golden(t, "code-off", Code{command("code", "code off"), "off", nil})
+	golden(t, "code-show", Code{command("code", "code show"), "show", nil})
 	golden(t, "jump", Jump{command("jump", "jump"), ID(id("text"))})
 	golden(t, "note", Note{HomeCommand: command("note", "note command"), ID: ID(id("note")), Text: "Path events include the connection id."})
 	golden(t, "note-preset", Note{
@@ -234,7 +237,7 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 		kind, _ := fields["t"].(string)
 		var want string
 		switch kind {
-		case "group", "member", "task":
+		case "group", "member", "task", "code":
 			want = kind + "-" + fields["op"].(string)
 			if event, there := fields["event"].(map[string]any); there {
 				want += "-" + event["code"].(string)

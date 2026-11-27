@@ -47,6 +47,59 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   theirs that connects later lists it. A person who is in no group on that
   computer is not offered, `add_person` for them is answered `not_found`,
   and they get a link.
+- In A9.47 to A9.52, Q and R are people whose browsers have never met `P1`,
+  each with a node.
+- **A9.47** P sends `code new` with 24 hours. The answer has a code of 16
+  characters in four groups and an end 24 hours on. Q and R each type it in
+  their own web client and join, one after the other and both at once: each
+  has a member row with role `member` and their device log on the home, and
+  `member_joined` names P. In the browser: Q pastes the code in lower case
+  with spaces and no hyphens, gives a name, and is in the chat with the
+  group's history, without a reload; a text with the letter O is refused on
+  the page and nothing is sent.
+- **A9.48** The code ends at `code off`, at a later `code new`, and when the
+  home's clock reaches its end. From then on a device that tries it gets no
+  answer, a `join` on a connection it opened before is `forbidden`, and that
+  connection is closed. Q and R stay members. `code` by a `member` is
+  `forbidden`; `hours` 0 and 169 are `bad_request`; `code show` with no code
+  open is `ok` with no field; a repeated `code new` is `ok` with no field and
+  makes no second code. In the browser: the dialog shows the code and its
+  end; "New code" shows another; "Turn off" shows none.
+- **A9.49** `P1` restarts, and its rendezvous connection is cut and comes
+  back: after each, R joins by the same code with no step by P. `code new`
+  with no rendezvous connected is `ok`, and the code answers once one
+  connects. No receipt and no row holds the code. An export of the group
+  holds none, and after a move the code has ended and its room is left.
+- **A9.50** P removes Q while a code is open: `code show` then has no field,
+  and Q typing the code gets no answer. When Q leaves by themself the code
+  stays open.
+- **A9.51** Q types the code while `P1` is off: the browser says that nothing
+  answers. `P1` starts within 10 minutes and Q is a member without typing
+  again. A wrong code says the same and never completes.
+- **A9.52** The one-time link of A9.1 works while a code is open, on its one
+  signalling URL and only for the home it names. A member who types the code
+  of their group gets `ok` from `join` and no row is written.
+- **A9.53** Rendezvous. `ready` and the answer to `ice` have `hosts`. A room
+  joined with `data` has a host. Each other device that joins gets `joined`
+  and the host's `data`, three devices one after another and three at once,
+  and the `room` frame of each reaches the host. A second host gets `full`.
+  Two devices that waited in the room get both frames when the host comes.
+  After the host's `leave`, and after the host's connection ends, a device
+  that joins waits as in an empty room; a `leave` by a device that is not the
+  host changes nothing. The hosting of a 17th room is answered `full` and the
+  connection stays. A room without a host is as before: two devices, a third
+  gets `full`.
+- **A9.54** In the browser: creating a group with "Also make an invitation
+  code" ticked shows the code before the dialog closes; the confirmation of
+  removing a person says that an open code is ended with it.
+- **A9.55** A node and a rendezvous that cannot host for it. On a rendezvous
+  that never says `hosts`, the node sends no `join` with `data` and no
+  `leave`; `pair.browser` and `invite` work there while a code is open, and
+  the connection is not closed. On a rendezvous where another device hosts
+  the code's room, the node is answered `full`, hosts the room on its other
+  paths, and hosts it there after that connection is made again. On a
+  rendezvous of this version, a code made, and a code ended, after the node
+  has asked for fresh ICE servers is hosted, and left, as before.
 
 ### Other people's hosts (`contracts/step-2/people.md`)
 

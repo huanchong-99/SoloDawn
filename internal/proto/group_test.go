@@ -139,6 +139,7 @@ func TestGroupGoldens(t *testing.T) {
 		Link:    "https://rv.example/#join=7K2M-9QXD-4F8T-WB3N&g=" + group + "&home=" + host,
 		Expires: ts + 600000,
 	})
+	golden(t, "cmd-code", CmdResult{Success: Success{4, true}, Code: "7K2M-9QXD-4F8T-WB3N", Expires: ts + 86_400_000})
 	golden(t, "cmd-error", ErrorResponse{8, WireError{Code: "conflict", Message: "This card has already been decided."}})
 	golden(t, "cmd-moved", ErrorResponse{8, WireError{Code: "moved", Message: "The group has moved.", Home: host}})
 }

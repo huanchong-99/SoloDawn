@@ -16,11 +16,11 @@ func rendezvousGoldens(t *testing.T, envelope Envelope, pair Pair) {
 		{URLs: []string{"stun:rv.example:3478"}},
 		{[]string{"turn:rv.example:3478?transport=udp", "turns:turn.rv.example:443?transport=tcp"}, "1763603600:" + user, id("credential")},
 	}
-	golden(t, "rv-ready", ICEConfig{"ready", ice, 3600})
+	golden(t, "rv-ready", ICEConfig{"ready", ice, 3600, true})
 	golden(t, "rv-ice-request", RVFrame{"ice"})
 	golden(t, "rv-quota-request", RVFrame{"quota"})
 	golden(t, "rv-quota-answer", Quota{"quota", 3250000, 52428800})
-	golden(t, "rv-ice-answer", ICEConfig{"ice", ice, 3600})
+	golden(t, "rv-ice-answer", ICEConfig{"ice", ice, 3600, true})
 	env := wireJSON(t, envelope)
 	golden(t, "rv-to", Route{"to", host, env})
 	golden(t, "rv-from", Route{"from", user, env})
@@ -32,4 +32,9 @@ func rendezvousGoldens(t *testing.T, envelope Envelope, pair Pair) {
 	golden(t, "rv-join", RoomID{"join", room})
 	golden(t, "rv-joined", RoomID{"joined", room})
 	golden(t, "rv-room", RoomData{RoomID{"room", room}, wireJSON(t, pair)})
+	// A home hosts the room of the same secret, as the code's room (people.md 2.6), with its pair message
+	// as the room's card (role a, exp the end of the code), and leaves it.
+	hostCard := Pair{"pair", host, "node", "workstation", "a", "wCzQ-sDqagt-Eafi91RHzBOweAxtxpkYIs7ZnE1Cl-M", ts + 86_400_000}
+	golden(t, "rv-join-host", RoomData{RoomID{"join", room}, wireJSON(t, hostCard)})
+	golden(t, "rv-leave", RoomID{"leave", room})
 }

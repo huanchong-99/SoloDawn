@@ -30,11 +30,14 @@ type ICEServer struct {
 	Credential string   `json:"credential,omitempty"`
 }
 
-// ICEConfig is the ready frame or the answer to an ice request.
+// ICEConfig is the ready frame or the answer to an ice request. Hosts is true
+// in both from a server that has hosted rooms, and left out by one that has
+// not (contracts/rendezvous.md 2.1).
 type ICEConfig struct {
-	Type string      `json:"t"`
-	ICE  []ICEServer `json:"ice"`
-	TTL  int         `json:"ttl"`
+	Type  string      `json:"t"`
+	ICE   []ICEServer `json:"ice"`
+	TTL   int         `json:"ttl"`
+	Hosts bool        `json:"hosts,omitempty"`
 }
 
 // Route carries an opaque envelope. Key is the target in to and the
@@ -61,12 +64,14 @@ type Presence struct {
 	On   bool   `json:"on"`
 }
 
-// RoomID names a room in join and joined frames.
+// RoomID names a room in join, joined, leave and full frames.
 type RoomID struct {
 	Type string `json:"t"`
 	Room string `json:"room"`
 }
 
+// RoomData is a room frame, or the join of a room's host, whose Data is the
+// room's card (contracts/rendezvous.md 2.2).
 type RoomData struct {
 	RoomID
 	Data json.RawMessage `json:"data"`

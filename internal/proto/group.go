@@ -72,6 +72,7 @@ type CmdResult struct {
 	Passed   *bool  `json:"passed,omitempty"`
 	Round    int    `json:"round,omitempty"`
 	Link     string `json:"link,omitempty"`
+	Code     string `json:"code,omitempty"`
 	Expires  int64  `json:"expires,omitempty"`
 	ID       string `json:"id,omitempty"`
 	Replaced *bool  `json:"replaced,omitempty"`

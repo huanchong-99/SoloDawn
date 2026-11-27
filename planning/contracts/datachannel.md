@@ -53,6 +53,7 @@ The client's first message, `hello`, and the node's answer, `welcome`:
 | `time` | the node's clock, in Unix milliseconds, when it sends `welcome` |
 | `groups` | groups homed on this node that the peer's person may read |
 | `owner` | true if the peer is a device of this node's owner; the host surface is then available |
+| `join` | optional; the id of the group of the peer's invitation or code. There only in the `welcome` to a joining peer (`contracts/step-2/people.md` section 5) |
 
 - When the list of groups for a connected peer changes, the node pushes
   the whole list again, entries as in `welcome`, `[]` when the peer may
@@ -168,9 +169,9 @@ serve (section 8), `forbidden`.
   `bad_request`.
   These leave no receipt. Then the receipt answers a command that was
   answered before. Then, with the outcome kept as the receipt: the type
-  and, for `group`, `member`, `task`, `post` and `act`, the `op`, `kind`
-  or `action` name a command, else `bad_request`, which is also the answer
-  when that field is missing or when `t` or that field holds a `/`; the
+  and, for `group`, `member`, `task`, `post`, `act` and `code`, the `op`,
+  `kind` or `action` name a command, else `bad_request`, which is also the
+  answer when that field is missing or when `t` or that field holds a `/`; the
   node is home to the group, else `not_found`, for every command but
   `group create`; `as` and the signer (`contracts/commands.md`, "Who");
   and what the command's own table says.

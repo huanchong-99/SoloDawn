@@ -30,8 +30,9 @@ changes (`contracts/step-2/people.md` section 1).
 One SQLite file with the schema of the home tables (`contracts/storage.md`
 section 1) and `device_log`, holding only that group: its `row` rows,
 `gone` markers included; its `grp` counters; its unacknowledged `inbox`
-items; the device logs and `push_sub` rows of its people. The node writes it
-in one read transaction, so the file is one consistent state of the group.
+items; the device logs and `push_sub` rows of its people. The file holds no
+invitation code. The node writes it in one read transaction, so the file is
+one consistent state of the group.
 Receipts are not in the file (section 5, limit 2). The file's
 `user_version` is the schema version of the node that wrote it
 (`contracts/storage.md` section 7). An AI's workspace is a path on its own
@@ -40,8 +41,8 @@ host: it is in the member row and does not move with the home.
 ## 3. Moving
 
 1. P runs `group export <g> <file> --to <P2>` on P1. In one transaction P1
-   writes the file, deletes the group's rows, and keeps a `setting` entry
-   `moved`: the group id and the device id of P2.
+   writes the file, deletes the group's rows, ends its invitation code, and
+   keeps a `setting` entry `moved`: the group id and the device id of P2.
 2. From then on P1 answers every request for that group, `cmd`, `sync` and
    `fetch`, with the new error `moved` and the field `home`, the device id
    of P2. `welcome` and `groups` no longer list the group.
@@ -64,8 +65,9 @@ If the import fails, the file can be imported on P1 again.
   choice: an operating-system timer (cron, launchd, Task Scheduler), which
   the user documentation shows. The product schedules nothing.
 - **Restore.** When P1 is lost, P imports the last copy on P2. P1 cannot
-  answer `moved`, so the others learn the new home by a link: an admin
-  sends `invite` on P2, and a person who is already a member and opens it
+  answer `moved`, so the others learn the new home by a link or a code: an
+  admin sends `invite` or `code new` on P2 (one code serves everyone), and a
+  person who is already a member and opens the link or types the code
   gets `ok` from `join` with no new row (`contracts/step-2/people.md` 2.2,
   point 3). Their browser replaces the group's home and sends `home.add` to
   the person's nodes, which replace the home they connect to for an AI in

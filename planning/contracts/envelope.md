@@ -224,7 +224,12 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
 - **Pairing secret**: 80 random bits, shown as 16 Crockford base32
   characters in four groups (`7K2M-9QXD-4F8T-WB3N`). Created by either side,
   valid for 10 minutes, used once. It travels inside the onboarding prompt
-  that the person copies, or as a link that the node prints.
+  that the person copies, or as a link that the node prints. An invitation
+  code (`contracts/step-2/people.md` 2.6) is a secret of this form that its
+  home keeps open for up to 7 days and accepts from many devices. The secret
+  bytes, room id, `pair` message and `mac` below hold for it, and it enrols no
+  device (`contracts/step-2/people.md` section 3); each device's 10 minutes
+  run from its own `pair` message, and `exp` is when the code ends.
 - **Secret bytes**, wherever the secret is hashed or used as a key: the 16
   characters in upper case, without the hyphens, as ASCII. A secret that a
   person typed is read by removing the hyphens and turning `a` to `z` into
@@ -290,7 +295,9 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   values.
 
 The code has 16 characters by decision (R-152, `risks.md` Q-2). Eight would
-need a password-authenticated key exchange, which is not added.
+need a password-authenticated key exchange, which is not added. The
+invitation code has 16 for the same reason: a shorter one could be found by
+trying rooms, and by the rendezvous from the room id.
 
 ## 7. What is deliberately absent
 
