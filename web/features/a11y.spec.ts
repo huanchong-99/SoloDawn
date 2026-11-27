@@ -9,7 +9,7 @@ import { expect, vi } from 'vitest';
 import { find, type Home, homes } from '../src/lib/groups.svelte';
 import type { Path, Source } from '../src/lib/net.svelte';
 import { nodes } from '../src/lib/nodes.svelte';
-import { prefs } from '../src/lib/prefs.svelte';
+import { accents, prefs } from '../src/lib/prefs.svelte';
 import * as p from '../src/lib/proto';
 import { ActHome, browser, example, ownedNode, owner, user } from './home';
 import { all, closePage, field, fill, go, one, openPage, read, text, texts, type } from './page';
@@ -114,6 +114,83 @@ function parsePalette(css: string, mode: 'light' | 'dark'): Record<string, Rgb> 
     palette[match[1]] = mixRgb(palette[match[2]], Number(match[3]) / 100, palette[match[4]]);
   }
   return palette;
+}
+
+// Text and badges: 4.5 to 1.
+const textPairs: [string, string][] = [
+  ['text', 'bg'],
+  ['text', 'surface'],
+  ['text', 'surface-2'],
+  ['text-2', 'bg'],
+  ['text-2', 'surface'],
+  ['text-2', 'surface-2'],
+  ['text-3', 'bg'],
+  ['text-3', 'surface'],
+  ['text-3', 'surface-2'],
+  ['text', 'mine'],
+  ['text-3', 'mine'],
+  ['sky', 'mine'],
+  ['sky', 'surface'],
+  ['sky', 'sky-soft'],
+  ['sky', 'surface-3'],
+  ['dawn-text', 'surface'],
+  ['dawn-text', 'dawn-soft'],
+  ['ok', 'surface'],
+  ['ok', 'ok-soft'],
+  ['danger', 'surface'],
+  ['danger', 'danger-soft'],
+  ['on-sky', 'sky'],
+  ['on-dawn', 'dawn'],
+  ['on-ok', 'ok'],
+  ['on-danger', 'danger'],
+  ['term-fg', 'term-bg'],
+  ['term-dim', 'term-bg'],
+  ['term-green', 'term-bg'],
+  ['term-yellow', 'term-bg'],
+  ['term-blue', 'term-bg'],
+  ['term-red', 'term-bg'],
+];
+// Control borders and the focus ring: 3 to 1. The accent against the hairline and the inset fill
+// keeps a chosen border and the ring seen with a neutral accent too.
+const uiPairs: [string, string][] = [
+  ['line-strong', 'bg'],
+  ['line-strong', 'surface'],
+  ['sky', 'bg'],
+  ['sky', 'surface'],
+  ['sky', 'surface-2'],
+  ['sky', 'line'],
+];
+
+function expectContrast(
+  where: string,
+  palette: Record<string, Rgb>,
+  pairs: [string, string][],
+  least: number,
+) {
+  for (const [fg, bg] of pairs) {
+    expect(contrast(palette[fg], palette[bg]), `${where} ${fg} on ${bg}`).toBeGreaterThanOrEqual(
+      least,
+    );
+  }
+}
+
+// The hue of a colour in degrees, as HSL has it.
+function hue([r, g, b]: Rgb): number {
+  const max = Math.max(r, g, b);
+  const span = max - Math.min(r, g, b);
+  if (span === 0) return 0;
+  const sector =
+    max === r
+      ? (g - b) / span + (g < b ? 6 : 0)
+      : max === g
+        ? (b - r) / span + 2
+        : (r - g) / span + 4;
+  return sector * 60;
+}
+
+function hueDistance(a: Rgb, b: Rgb): number {
+  const apart = Math.abs(hue(a) - hue(b));
+  return Math.min(apart, 360 - apart);
 }
 
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
@@ -296,7 +373,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           skip.focus();
           skip.click();
           expect(document.activeElement).toBe(main);
-          expect(texts('fieldset legend')).toEqual(['Theme', 'Language']);
+          expect(texts('fieldset legend')).toEqual(['Theme', 'Theme colour', 'Language']);
           const langMarks = all('input[name="lang"]').map((input) =>
             input.closest('[lang]')?.getAttribute('lang'),
           );
@@ -879,75 +956,42 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
   Scenario(
     'Design tokens meet WCAG 2.1 AA contrast in both themes and reduced motion stills scripted scrolling and transitions',
-    ({ When, Then }) => {
-      let light: Record<string, Rgb>;
-      let dark: Record<string, Rgb>;
+    ({ When, Then, And }) => {
+      let palettes: [string, 'light' | 'dark', Record<string, Rgb>][];
 
       When(
-        'the colour tokens of "src/styles/tokens.css" are evaluated in light and dark themes',
+        'the colour tokens of "src/styles/tokens.css" are evaluated in light and dark themes with each theme colour of "src/styles/accents.css"',
         () => {
-          const css = readFileSync(join(process.cwd(), 'src/styles/tokens.css'), 'utf8');
-          light = parsePalette(css, 'light');
-          dark = parsePalette(css, 'dark');
+          const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8');
+          const tokens = read('src/styles/tokens.css');
+          const blocks = [
+            ...read('src/styles/accents.css').matchAll(/\[data-accent='([\w-]+)'\]\s*\{([^}]*)\}/g),
+          ];
+          expect(blocks.map(([, accent]) => accent)).toEqual(accents);
+          palettes = blocks.flatMap(([, accent, body]) =>
+            (['light', 'dark'] as const).map(
+              (mode) => [accent, mode, parsePalette(tokens + body, mode)] as const,
+            ),
+          ) as typeof palettes;
         },
       );
       Then(
         'every text and badge colour pair meets at least 4.5 to 1 contrast and every control border and focus ring meets at least 3 to 1 contrast',
         () => {
-          const textPairs: [string, string][] = [
-            ['text', 'bg'],
-            ['text', 'surface'],
-            ['text', 'surface-2'],
-            ['text-2', 'bg'],
-            ['text-2', 'surface'],
-            ['text-2', 'surface-2'],
-            ['text-3', 'bg'],
-            ['text-3', 'surface'],
-            ['text-3', 'surface-2'],
-            ['text', 'mine'],
-            ['text-3', 'mine'],
-            ['sky', 'mine'],
-            ['sky', 'surface'],
-            ['sky', 'sky-soft'],
-            ['dawn-text', 'surface'],
-            ['dawn-text', 'dawn-soft'],
-            ['ok', 'surface'],
-            ['ok', 'ok-soft'],
-            ['danger', 'surface'],
-            ['danger', 'danger-soft'],
-            ['on-sky', 'sky'],
-            ['on-dawn', 'dawn'],
-            ['on-ok', 'ok'],
-            ['on-danger', 'danger'],
-            ['term-fg', 'term-bg'],
-            ['term-dim', 'term-bg'],
-            ['term-green', 'term-bg'],
-            ['term-yellow', 'term-bg'],
-            ['term-blue', 'term-bg'],
-            ['term-red', 'term-bg'],
-          ];
-          const uiPairs: [string, string][] = [
-            ['line-strong', 'bg'],
-            ['line-strong', 'surface'],
-            ['sky', 'bg'],
-            ['sky', 'surface'],
-          ];
-          for (const [mode, palette] of [
-            ['light', light],
-            ['dark', dark],
-          ] as const) {
-            for (const [fg, bg] of textPairs) {
-              expect(
-                contrast(palette[fg], palette[bg]),
-                `${mode} ${fg} on ${bg}`,
-              ).toBeGreaterThanOrEqual(4.5);
-            }
-            for (const [fg, bg] of uiPairs) {
-              expect(
-                contrast(palette[fg], palette[bg]),
-                `${mode} ${fg} on ${bg}`,
-              ).toBeGreaterThanOrEqual(3);
-            }
+          for (const [accent, mode, palette] of palettes) {
+            expectContrast(`${accent} ${mode}`, palette, textPairs, 4.5);
+            expectContrast(`${accent} ${mode}`, palette, uiPairs, 3);
+          }
+        },
+      );
+      And(
+        'the waiting signal stays at least 45 degrees of hue away from the accent in every theme colour',
+        () => {
+          for (const [accent, mode, palette] of palettes) {
+            expect(
+              hueDistance(palette.dawn, palette.sky),
+              `${accent} ${mode} dawn from sky`,
+            ).toBeGreaterThanOrEqual(45);
           }
         },
       );

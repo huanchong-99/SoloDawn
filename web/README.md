@@ -255,19 +255,23 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `src/lib/payload.ts` reads the fields those checks need, with `JSON.parse`: exact names, the
   last of a repeated name, integers as safe integers by value, no `null`, and `n` and `g` as
   random ids. Signing is left to WebCrypto, so in Safari two signatures of one payload differ.
-- **Preferences.** `prefs.theme` is `auto`, `light` or `dark`; `prefs.lang` is `zh-CN` or `en`.
+- **Preferences.** `prefs.theme` is `auto`, `light` or `dark`; `prefs.accent`, the theme colour,
+  is one of `accents` (`daybreak`, the default, `rain`, `pool`, `shallows`, `shade`, `hills`,
+  `glow`, `firstlight`, `nightfall`); `prefs.lang` is `zh-CN` or `en`.
   Until the person changes a setting, the client follows the system theme and the browser
   language (any `zh` locale opens Chinese) on every visit: nothing is stored on load.
-  `localStorage` (`sd-theme`, `sd-lang`) gets a value only when the person changes that setting,
-  on the settings page or with a top-bar button. The preferences are always written to
-  `<html data-theme lang>`. A stored value the client does not know, from another version for
+  `localStorage` (`sd-theme`, `sd-accent`, `sd-lang`) gets a value only when the person changes
+  that setting, on the settings page or with a top-bar button. The preferences are always written
+  to `<html data-theme data-accent lang>`. A stored value the client does not know, from another version for
   instance, is ignored. When the browser blocks site storage, the client opens with the defaults
   and applies changes without remembering them. A part of the client keeps a preference of its own
   the same way with `preference(name, allowed, fallback)`: its `value` is the default until set,
   and setting it stores `sd-<name>`. Made again with the same values, as a module the development
-  server reloads is, it is the same preference; made with other values, or as `theme` or `lang`,
-  it throws. `tokens.css` turns `data-theme` into
-  `color-scheme`; every colour is a `light-dark()` pair. The browser's own bar
+  server reloads is, it is the same preference; made with other values, or as `theme`, `accent`
+  or `lang`, it throws. `tokens.css` turns `data-theme` into
+  `color-scheme`; every colour is a `light-dark()` pair. `accents.css` turns `data-accent` into
+  `--sky` and `--on-sky` (and, for `firstlight`, the waiting colours), from which `tokens.css` mixes the
+  soft fills, `--mine` and the focus ring; a swatch carries its own `data-accent`. The browser's own bar
   (`<meta name="theme-color">`) takes the colour `index.html` gives the theme shown, so a chosen
   theme wins over the system scheme; the manifest colours stay fixed.
 - **Wire types.** `src/lib/proto.ts` mirrors `internal/proto`: one `valibot` schema per message,

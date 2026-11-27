@@ -21,9 +21,8 @@
   --text-2: light-dark(#4a505b, #b6bac3); /* secondary */
   --text-3: light-dark(#5c6270, #8f949f); /* auxiliary, still >= 4.5:1 */
 
-  /* The one accent (the name --sky stays): actions, links, focus, an AI at work, own bubbles. */
-  --sky: light-dark(#3a57e8, #8fa3ff);
-  --on-sky: light-dark(#ffffff, #0b1030);
+  /* The one accent, --sky, and --on-sky that stands on it: actions, links, focus, an AI at work,
+     own bubbles. They are the theme colour the person chose, in accents.css. */
   /* Dawn: something needs a person. A signal only: pills, dots, counts, a tinted card border. */
   --dawn: light-dark(#f2a23a, #f4b256); /* fill */
   --on-dawn: #2a1a00; /* text on the fill */

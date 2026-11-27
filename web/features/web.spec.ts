@@ -67,6 +67,10 @@ function choose(label: string) {
   svelte.flushSync();
 }
 
+/** A colour as the browser computes it. */
+const rgb = (hex: string) =>
+  `rgb(${[1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)).join(', ')})`;
+
 function go(hash: string) {
   location.hash = hash;
   dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
@@ -206,6 +210,72 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       expect(document.documentElement.dataset.theme).toBe('dark');
     });
   });
+
+  Scenario('The theme colour choice is applied and remembered', ({ Given, When, Then, And }) => {
+    const swatches = () => [...document.querySelectorAll<HTMLInputElement>('input[name=accent]')];
+    Given('the browser supports Ed25519 in WebCrypto', supported);
+    And('the person opens the client at "#/settings"', () => open('#/settings'));
+    Then(
+      'the theme colours are radios named "黎明", "雨后", "深潭", "浅湾", "林荫", "远山", "朝霞", "晨曦", "夜幕", and "黎明" is chosen',
+      () => {
+        expect(swatches().map((radio) => radio.labels![0].textContent!.trim())).toEqual([
+          '黎明',
+          '雨后',
+          '深潭',
+          '浅湾',
+          '林荫',
+          '远山',
+          '朝霞',
+          '晨曦',
+          '夜幕',
+        ]);
+        expect(swatches().filter((radio) => radio.checked)).toEqual([swatches()[0]]);
+        expect(document.documentElement.dataset.accent).toBe('daybreak');
+      },
+    );
+    When('the person chooses the theme colour "晨曦"', () => choose('晨曦'));
+    Then(
+      'the page uses the "firstlight" theme colour and the settings name "晨曦" as chosen',
+      () => {
+        expect(document.documentElement.dataset.accent).toBe('firstlight');
+        expect(swatches()[7].checked).toBe(true);
+        expect(swatches()[7].closest('.set-row')!.querySelector('p')!.textContent).toBe('晨曦');
+      },
+    );
+    And(
+      'the page uses the "firstlight" theme colour after the client is opened again',
+      async () => {
+        delete document.documentElement.dataset.accent;
+        await open();
+        expect(document.documentElement.dataset.accent).toBe('firstlight');
+      },
+    );
+  });
+
+  Scenario(
+    'A theme colour repaints the page at once when the system asks for reduced motion',
+    ({ Given, When, Then, And }) => {
+      let moved: Awaited<ReturnType<typeof motion.accentByArrow>>;
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the browser has view transitions', motion.viewTransitions);
+      And('the system asks for reduced motion', motion.reduce);
+      And('the person opens the client at "#/settings"', () => motion.open('#/settings'));
+      When(
+        'the person moves the theme colour from "黎明" to "夜幕" with the left arrow key',
+        async () => {
+          moved = await motion.accentByArrow('黎明');
+        },
+      );
+      Then('the accent is "#434a57" and the page has not cross-faded', async () => {
+        expect(moved).toEqual({ chosen: '夜幕', crossFades: 0, animations: 0 });
+        expect(await motion.colours('sky')).toEqual([rgb('#434a57')]);
+      });
+      When('the person chooses the theme colour "晨曦"', () => motion.choose('晨曦'));
+      Then('the accent is "#985800" and the waiting signal is "#d94aa3"', async () => {
+        expect(await motion.colours('sky', 'dawn')).toEqual([rgb('#985800'), rgb('#d94aa3')]);
+      });
+    },
+  );
 
   Scenario('The top bar switches theme and language', ({ Given, When, Then, And }) => {
     Given('the browser supports Ed25519 in WebCrypto', supported);

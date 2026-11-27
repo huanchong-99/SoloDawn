@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · limitation · With the nightfall theme colour, links read as secondary text
+
+- Symptom: under 夜幕 Nightfall, links and the "更改" actions of the side panel are a neutral grey close to `--text-2` (`web/src/styles/accents.css`, `nightfall` block).
+- Cause: a neutral accent has no hue to set it apart, which is what the person chooses it for; the contrast test still holds the accent 3:1 off the hairline and the inset fill, so the focus ring and chosen borders stay seen (`web/features/a11y.spec.ts`).
+- Status: accepted (M4, `web/design/README.md` "Theme colours"); links keep their underline on hover.
+
+### 2026-11-27 · limitation · Some theme colours sit near the colour of a result or of the waiting signal
+
+- Symptom: the status dots of "AI working" (filled accent circle) and "passed" (filled green circle) differ by colour, the working pulse and the text label beside them (`web/src/styles/base.css`, `.st`). Measured hue distances: 浅湾 Shallows 17° (light) and 15° (dark) from the green of a passed result, 深潭 Deep pool 39° and 45°, 林荫 Tree shade 48°; 朝霞 Morning glow 26° and 24° from the red of a failure; the magenta waiting colour of 晨曦 First light 40° and 41° from that red (the default amber is 31° and 30°).
+- Cause: nine accents across the hue circle cannot all stay far from green, red and the waiting colour; the a11y test holds only the waiting colour 45° from the accent (`web/features/a11y.spec.ts`).
+- Status: accepted (M4 review, `web/design/README.md` "Theme colours"): the text label and the state glyph carry the state, as the design requires ("state is never carried by colour alone").
+
 ### 2026-11-27 · deviation · The tier read as a thinking setting, the quota was hard to find, and new groups took no model
 
 - Symptom: the owner, clicking the demo, read "档位: 轻量 / 标准 / 强" in "编辑档案" as a thinking setting, could not find the AI's quota, found no thinking level in that editor, and could choose an AI's model and level only after the group was made.
