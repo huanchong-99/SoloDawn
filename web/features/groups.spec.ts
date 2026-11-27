@@ -403,7 +403,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(row().querySelector('.gprev')!.textContent).toBe('');
         },
       );
-      And('its chat says neither its kind nor how many members it has', () => {
+      And('its chat says neither its home nor how many members it has', () => {
         go(`#/groups/${docs}`);
         expect([text('.chat-head h2'), text('.chat-head p')]).toEqual(['Docs', '']);
         go('#/groups');

@@ -55,7 +55,7 @@ Run on a clean user account on macOS, Linux and Windows. `P1` is already done by
   2. When the AI is done, run `solodawn version` and `solodawn status`; compare the fingerprint with the one on the browser page.
   3. Find the start-at-login entry: macOS `~/Library/LaunchAgents/org.solodawn.node.plist`; Linux `~/.config/systemd/user/solodawn.service`; Windows the scheduled task `\SoloDawn-<SID>` that runs `conhost.exe --headless "<exe>" node`.
   4. Log out and in again, then reboot the machine. Wait 30 seconds after login.
-- **See:** the AI downloads the binary and `SHA256SUMS` from the same release and checks the digest (on macOS the quarantine mark is cleared only after it matches), and runs `solodawn pair`, which prints `<label> (<fingerprint>) direct` or `relay`. `install.md` has no Git step and no `git` or `gh` is needed for SoloDawn itself; the prompt still tells the AI to check the Git identity, which is a known leftover ([issues.md](../../issues.md), 2026-11-27): write whether the AI asked. `solodawn version` is `v3.0.0-rc.2` and the fingerprints agree. After the re-login and after the reboot the node runs with no terminal window, `solodawn status` answers, and **Computers** shows it **Online**.
+- **See:** the AI downloads the binary and `SHA256SUMS` from the same release and checks the digest (on macOS the quarantine mark is cleared only after it matches), and runs `solodawn pair`, which prints `<label> (<fingerprint>) direct` or `relay`. `install.md` and the onboarding prompt have no Git step, and no `git` or `gh` is needed for SoloDawn itself. `solodawn version` is `v3.0.0-rc.2` and the fingerprints agree. After the re-login and after the reboot the node runs with no terminal window, `solodawn status` answers, and **Computers** shows it **Online**.
 - **Write:** `A8.1` per system: release tag, OS version, anything the AI had to ask you.
 
 ### 3. Connect your AIs and choose their account types
@@ -111,7 +111,7 @@ Use two AIs in `Alpha` that are in different folders (`F1` on `P1`, `F2` on `P2`
 ### 8. Pause and reassign: who did it (`A5.23`)
 
 - **Do:**
-  1. Give a task that takes a minute or two. While it is **Working**, open its menu (the `⋯` of the card) and press **Pause**.
+  1. Give a task that takes a minute or two. While it is **In progress**, open its menu (the `⋯` of the card) and press **Pause**.
   2. Read the card. Press **Resume**.
   3. Ask the secretary in the main line to pause the task, and read the card again; resume it.
   4. Open the menu, press **Reassign**, choose the AI in the other folder as who does it, read what the dialog says, and confirm.
@@ -201,7 +201,7 @@ Pair each node OS with the browsers of the table.
   3. Open a second tab of the same browser; use **Use here** to take the connection back (`A1.12`).
   4. One-person group (`A9.40`): in a group with only you, run a brief, a task and a review as in step 6. In dark and light, English and Chinese. Then a message that appears in both browsers of the pair with no reload (`A9.41`); the invitation link is step 9.
   5. On desktop Chrome, Android Chrome and iOS Safari added to the Home Screen: allow notifications (`A8.3`), close the page, leave the node running, make something need you: ask an AI of the group to reply with a mention of you, read the notification and tap it.
-- **See:** no upgrade notice on a supported browser; the second tab shows **SoloDawn is open in another tab.** and **Use here** moves the connection; no `confirm` card in the one-person group; no layout break. The closed-page notification for the mention reads `<group> · Mentioned you` with the name of who mentioned you as its text, never message text or a command, and tapping it opens that message. (The other kinds, `Approval`, `Confirm start`, `Confirm`, `Your call` and `Task done`, add `who: <one-line title>`.) On iOS the push service accepts the node's VAPID `sub` claim ([issues.md](../../issues.md), Web Push).
+- **See:** no upgrade notice on a supported browser; the second tab shows **SoloDawn is open in another tab.** and **Use here** moves the connection; no `confirm` card in the one-person group; no layout break. The closed-page notification for the mention reads `<group> · Mention` with the name of who mentioned you as its text, never message text or a command, and tapping it opens that message. (The other labels are `Approval`, `Decision`, `Task brief`, `Request for your AI`, `Task done`, `Task stopped` and `Sign-in no longer valid`; `Request for your AI` shows `who` alone, and the rest with a title show `who: <one-line title>`.) On iOS the push service accepts the node's VAPID `sub` claim ([issues.md](../../issues.md), Web Push).
 - **Write:** `A8.5` one line per pair (node OS, browser and version, OS version); `A8.3` per device; `A9.40`; `A9.41` per pair.
 
 ### 15. CLI model lists and selected models (`A10.13` to `A10.16`)
@@ -323,7 +323,7 @@ If a direct path fails on macOS, look at System Settings, Network, Firewall, Opt
 - [install.md](../../install.md) — install, update, backup, failure archive
 - [self-hosting.md](self-hosting.md) — the rendezvous and its checks
 - [issues.md](../../issues.md) — known limits and unverified items
-- [2026-11-26-groups-workspaces.md](../decisions/proposed/feature/2026-11-26-groups-workspaces.md) — the model: one kind of group, connected AIs and their folders
+- [2026-11-26-groups-workspaces.md](../decisions/implemented/feature/2026-11-26-groups-workspaces.md) — the model: one kind of group, connected AIs and their folders
 - [diagnostics.md](../../planning/contracts/diagnostics.md) — log paths, events, archive lines
 - [drivers.md](../../planning/contracts/drivers.md) and [step-3/drivers.md](../../planning/contracts/step-3/drivers.md) — CLI drivers, levels, models
 - [step-3/profiles.md](../../planning/contracts/step-3/profiles.md) and [step-3/external.md](../../planning/contracts/step-3/external.md) — profiles, external AI

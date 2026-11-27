@@ -28,8 +28,9 @@ themselves from `internal/node`; this package does not name them.
 - An empty command line and an unknown first word print `usage: solodawn <command> [arguments]` to
   stderr and exit 2; so does a wrong argument of any command registered in `main.go` except
   `rendezvous` (and `service` in `service.go`). `rendezvous` prints the flag package's own message
-  and usage for a bad flag or an extra argument and exits 2. `mcp` (`internal/node`), `group`,
-  `wait` and `done` print their own usage. Success exits 0 and a failed command exits 1; its error
+  and usage for a bad flag or an extra argument and exits 2. `group` prints its own usage
+  (`usage: solodawn group export ...`); `mcp` (`internal/host`), `wait` and `done` print
+  `usage: solodawn <command> [arguments]` and exit 2. Success exits 0 and a failed command exits 1; its error
   is printed to stderr on one line (CR and LF become spaces).
 - `version`, `node`, `status`, `pair-browser` and `open` take no arguments. `status`,
   `pair-browser` and `open` talk to the running node through its local socket and fail when none

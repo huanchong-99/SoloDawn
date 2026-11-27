@@ -31,7 +31,7 @@
   "terminal.handback": "Hand back",
   "terminal.hint.branch": "What you change here stays in the AI's folder. When you hand back, the AI writes in the thread what was done.",
   "terminal.hint.newTask": "This AI has no task now: the terminal opens on its group session in its folder, and no task is created.",
-  "terminal.hint.secretary": "The secretary's session is read-only and changes no files.",
+  "terminal.hint.secretary": "Opens the secretary's group session in its folder. Its instructions say not to edit files.",
   "terminal.info.session": "This session",
   "terminal.key.down": "Down",
   "terminal.key.enter": "Enter",
@@ -46,12 +46,12 @@
   "terminal.link.linking": "Connecting",
   "terminal.link.relay": "Relayed · limited",
   "terminal.note.keys": "Tab types into the terminal. To leave the terminal with the keyboard, press Ctrl+M.",
-  "terminal.note.privacy": "SoloDawn does not read what is in the terminal. When you hand back, the AI posts in the thread its own account of what was asked and done.",
+  "terminal.note.privacy": "SoloDawn does not read what is in the terminal. When you hand back, the AI posts its own account of what was asked and done in the thread, or in the main line for a group session.",
   "terminal.note.relay.body": "When this computer uses a relay, Open terminal is disabled until a direct connection is established.",
   "terminal.note.relay.lead": "The terminal works over a direct connection only.",
   "terminal.queue.body": "Messages sent to this AI during the takeover are delivered in order when you hand back.",
   "terminal.queue.title": "Queued messages",
   "terminal.session.resume": "Continues the AI's session",
-  "terminal.session.secretary": "Read-only group session",
+  "terminal.session.secretary": "Secretary's group session",
   "terminal.title": "Terminal"
 }

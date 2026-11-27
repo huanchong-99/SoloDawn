@@ -23,7 +23,7 @@ Feature: Terminal takeover page and handback summary
     When the owner clicks "Hand back" and the home writes a handback message in the main line
     Then the channel closes, "workstation" receives a signed "takeover.end", and the main line shows the AI's own account of the takeover
 
-  Scenario: Opening an AI without a task opens its group session and creates no task, route task ids are forwarded, and the secretary is read-only
+  Scenario: Opening an AI without a task opens its group session and creates no task, route task ids are forwarded, and the secretary opens its group session
     Given "Claude Code" has no task and "Secretary" is the group's secretary on a direct path
     When the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug"
     Then the session card says "This AI has no task now: the terminal opens on its group session in its folder, and no task is created."
@@ -32,7 +32,7 @@ Feature: Terminal takeover page and handback summary
     When the owner navigates to "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug/O21RWBqThVezWCWeVoSoSQ"
     Then "workstation" receives "takeover.end" for the previous session and "takeover.start" naming task "O21RWBqThVezWCWeVoSoSQ"
     When the owner navigates to "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/qBSFMsr2hHYKOMblEA_kdA"
-    Then the session card shows "Read-only group session" and "The secretary's session is read-only and changes no files."
+    Then the session card shows "Secretary's group session" and "Opens the secretary's group session in its folder. Its instructions say not to edit files."
 
   Scenario: A task card opens the terminal on its own task
     Given "Claude Code" is working on task 12 "Fix path events" in its folder with a direct path of 4 ms

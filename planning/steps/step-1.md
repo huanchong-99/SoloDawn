@@ -15,7 +15,10 @@ English; dark and light.
 
 Out (later steps): more than one person in a group, invitations, confirming
 other people's requests, watching a terminal, CLIs other than Claude Code
-and Codex, phone app.
+and Codex, phone app. (Multi-person groups, invitations, confirmations,
+terminal watching, OpenCode, Qwen Code and external AIs were later built in
+steps 2 and 3, `contracts/step-2/` and `contracts/step-3/`; a phone app
+stays out of 1.0.)
 
 Step 1 is done when every acceptance test of `steps/step-1-acceptance.md`
 passes on these pairs, at the browser baseline that spike S-7 fixed

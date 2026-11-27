@@ -78,7 +78,7 @@ func homePostSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the host receives "([^"]*)" for that message$`, w.hostGetsItem)
 	sc.Step(`^"([^"]*)" posts the progress "([^"]*)" in the thread of task 1 mentioning "([^"]*)"$`, w.aiPostsProgress)
 	sc.Step(`^the second browser receives that "([^"]*)" message and task 1 with (\d+) thread messages?$`, w.secondGetsThreadMsg)
-	sc.Step(`^"([^"]*)" posts a completion report for commit "([^"]*)" in the thread of task 1$`, w.aiPostsReport)
+	sc.Step(`^"([^"]*)" posts a completion report in the thread of task 1$`, w.aiPostsReport)
 	sc.Step(`^the group holds an old text message, an old review message and an old note$`, w.seedMemory)
 	sc.Step(`^(\d+) days pass and daily retention runs for a (\d+)-day window$`, w.runRetention)
 	sc.Step(`^the old text message is gone from the store while the old review message and the old note remain$`, w.checkRetained)
@@ -276,7 +276,7 @@ func (w *homePostWorld) aiPostsProgress(ai, text, mentioned string) error {
 	return w.sendOK("host", cmd)
 }
 
-func (w *homePostWorld) aiPostsReport(ai, _ string) error {
+func (w *homePostWorld) aiPostsReport(ai string) error {
 	id, thread := w.nextID(), proto.ID(w.task)
 	w.lastMsg = string(id)
 	cmd := proto.Post[proto.EmptyBody]{

@@ -114,9 +114,9 @@ func TestPauseRefusesAllButAdmins(t *testing.T) {
 }
 
 // Row 24 and the B-18 note: resuming clears group.paused, writes
-// group_resumed, and in task-id order wakes active tasks with no wait before
-// step merge and reviewers whose review is not already queued. A task that
-// waits for an approval is not woken (A4.7).
+// group_resumed, and in task-id order wakes active tasks with no wait and
+// reviewers whose review is not already queued. A task that waits for an
+// approval is not woken (A4.7).
 func TestPauseResumeWakesTasksByRow24(t *testing.T) {
 	s := pauState(t)
 	s.Group.Paused = &proto.GroupPause{By: ownerID, At: clock - 5000}

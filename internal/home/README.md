@@ -271,9 +271,14 @@ start with `rnd`, their tests too, and their test functions start with `TestRoun
 (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test functions
 start with `TestRetention`.
 The step-2 people seam (`people_seam.go`) takes the unexported names that start with `seam` and
-`keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining` (with `Code`), `InviteLink`,
-`Inviter` and `(*Conn).SetJoining`. Web Push (`webpush.go`) takes the names that start with
-`wpush`, its tests too, and its test functions start with `TestWebPush`.
+`keyInvite` / `keyJoin`, and exports `Joining` (with `Code`), `InviteLink`,
+`Inviter` and `(*Conn).SetJoining`. Group people handlers (`cmd_people.go`) take the names that
+start with `people`, their tests too, and their test functions start with `TestPeople`. Confirmation
+gating and role cards (`cmd_confirm.go`, `cmd_confirm_task.go`) take `cfm` and `cft`, their tests
+too, and their test functions start with `TestConfirm` and `TestRole` (plus
+`TestNewRoleAuthorityAndDuplicates`, `TestFinishedTaskWritesNoCardAgain` and
+`TestTaskItemWithoutRowsIsGated` in `cmd_confirm_task_internal_test.go`). Web Push (`webpush.go`) takes the names
+that start with `wpush`, its tests too, and its test functions start with `TestWebPush`.
 Style presets (`preset.go`) take the names that start with `preset`, their tests too, and their test
 functions start with `TestPreset`.
 
@@ -531,18 +536,23 @@ function that moves a task calls it and adds nothing to its rules.
   `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home` and `direct`
   otherwise, `allow` `[]` and `usage` `{}`; when `secretary` is true, any previous secretary loses
   the flag and `group.secretary` becomes `id`.
-- **`member/set`.** Sending none of `name`, `account`, `allow` and `approvers`, an empty `name`, or
-  an unknown `account` is `bad_request`. An unknown `id` is `not_found`; a human member row is
-  `forbidden` in step 1. The signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User ==
-  ai.User`) or, when `approvers` is the only field sent, the AI's host (`s.Hosts`), else
-  `forbidden`. A `name` held by another member in the group is `conflict`; keeping the AI's own
-  `name` is accepted.
-- **`member/remove`.** An unknown `id` is `not_found`; a human member row is `forbidden` in step 1.
-  The signer must be the AI's owner or an admin, else `forbidden`. Removing an AI that is assignee
-  or reviewer of an open task is `conflict`. Otherwise the member row becomes a `gone` marker and
-  any queued inbox items for that AI (`c.Disk.Queued`) are retired in `Result.Retire`. Removing the
-  secretary also clears `group.secretary` and writes `system` `no_secretary` in the main line with
-  id `n`.
+- **`member/set`.** Handles both a person's `role` (`peopleSet`, `cmd_people.go:136-145`: only the
+  group owner changes another person's `role`, to `admin` or `member`, else `forbidden` or
+  `bad_request`; the owner's own row cannot be changed) and AI settings: sending none of `name`,
+  `account`, `allow`, `approvers`, `tool` and `ProfileSet` (`model`, `effort`, `tier`, `skills`),
+  an empty `name`, or an unknown `account` is `bad_request`. An unknown `id` is `not_found`. For an
+  AI, the signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User == ai.User`) or, when
+  `approvers` is the only field sent, the AI's host (`s.Hosts`), else `forbidden`. A `name` held
+  by another member in the group is `conflict`; keeping the AI's own `name` is accepted.
+- **`member/remove`.** An unknown `id` is `not_found`. Removes either a human member
+  (`peopleMayRemove`, `peopleRemove` in `cmd_people.go:147-167`: an owner is never removed; the
+  person themselves or the group owner may remove anyone else, and an admin removes only a person
+  whose role is `member`, else `forbidden`; refused with `conflict` while one of the person's AIs
+  has an unfinished task) or an AI member (by the AI's owner or an admin, else `forbidden`).
+  Removing an AI that is assignee or reviewer of an open task is `conflict`. Otherwise the member row
+  becomes a `gone` marker and any queued inbox items for that AI (`c.Disk.Queued`) are retired in
+  `Result.Retire`. Removing the secretary also clears `group.secretary` and writes `system`
+  `no_secretary` in the main line with id `n`.
 
 ## Briefs
 
@@ -590,8 +600,9 @@ Watch admission checks `body.what`, target ownership and empty `mentions`, not `
   an assignee or reviewer who is no working AI (an AI member other than the secretary), and a
   `replaces` that names no brief that is `pending` or `revise`.
   The row is a main-line card with `main` false, `ts` as signed, `state` `pending`, and a body
-  encoded again from the checked fields. A post creates no task and queues no item (A5.2). The
-  replaced brief keeps its state with `status` `superseded`.
+  encoded again from the checked fields; an optional `preset` is validated with `presetBriefCheck`
+  (`cmd_brief.go`, `preset.go`). A post creates no task and queues no item (A5.2). The replaced
+  brief keeps its state with `status` `superseded`.
 - **Act.** `confirm` has neither `arg` nor `text`, `revise` no `arg` and at most a `text` that is
   not empty and is at most 1,024 bytes as a JSON string, its quotes included; else `bad_request`.
   Then an act names no message: `not_found`; a message that is no brief: `bad_request`; a signer
@@ -723,7 +734,9 @@ this:
   `handback` posted in a thread queues `notice` (`code: "handback"`) for `Group.Secretary` when
   set.
 - **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
-  `State.Tasks` is `not_found`, and the `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is
+  `State.Tasks` is `not_found`, and the `NoteRow` gets `ts` as signed (`c.Timestamp`). When
+  `type` is set (`preset` or `kb`), `notePut` calls `presetNotePut` (`cmd_note.go`, `preset.go`,
+  `kb.go`) to check `name` and replace an existing live note of that `(type, name)`. `forget` is
   by an admin only (`forbidden`); `r` must be `note` or `msg` (`bad_request`); a missing or already
   forgotten row is `not_found`; a `msg` whose `kind` is not `review` is `conflict`; otherwise a
   `GoneRow` (`gone: true`) replaces it.
@@ -760,10 +773,10 @@ HM-9's `tskPending`, and checks mentions with HM-6's `postMentions`. Where the c
 
 `ev_device.go` registers `Events["device"]`, which receives a `[]proto.DeviceRow` slice accepted by
 the node for one person ([envelope](../../planning/contracts/envelope.md), section 4;
-[rows](../../planning/contracts/rows.md), section 2). In step 1 it ignores users other than
-`State.Owner`, appends rows whose `ver` exceeds the entries already held in `State.Logs[State.Owner]`,
-and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
-served and unserved.
+[rows](../../planning/contracts/rows.md), section 2). It accepts `State.Owner` and any human
+member of the group (`user != s.Owner && s.human(user) == ""`, `ev_device.go:17`), ignoring other users, appends rows whose `ver` exceeds the
+entries already held in `State.Logs[user]`, and sets `Result.GroupsChanged` when an `Online`
+device's access (`State.Serves`) changes between served and unserved.
 
 ## Submissions and reviews
 
@@ -965,12 +978,6 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
 
 ## Known limitations
 
-- The table of commands holds the groups, group pause and resume, members, briefs, the task
-  commands of HM-9, the four kinds of `post` of HM-6, `note` and `forget`, the cards, the
-  submissions and reviews, the summaries, the host events, `push`, the calls, and `jump` and thread rounds
-  of HM-13, and no node starts a loop yet: the remaining command files and the wiring of the node
-  are separate units
-  ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -986,7 +993,7 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
 fakes of `Receipts`, `Disk` and `Write` in the test files and one test on an in-memory store.
 `features/home.feature` holds acceptance tests A2.3 and A2.4
 ([acceptance](../../planning/steps/step-1-acceptance.md)); its steps apply a command of their own
-to a store in memory, because no command file exists yet. The choices behind the seam are in
+to a store in memory to test the seam independently of the command handlers. The choices behind the seam are in
 [the decision record](../../docs/decisions/implemented/architecture/2026-11-20-home-command-seam.md).
 
 The run loop is covered through its entries by `run_test.go`, `run_push_test.go` and
@@ -1043,7 +1050,8 @@ acceptance tests A4.1 and A4.2, decision priority and free-text override.
 `Disk`, covering the body the home fills, every refusal and the thread preview.
 
 `ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
-types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
+types, empty, human-member and unknown-user slices, version boundaries and online/offline
+`GroupsChanged` transitions.
 
 `cmd_review_test.go` sends `post/report` and `post/review` through
 `Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every refusal, boundary, retirement,
@@ -1072,7 +1080,7 @@ each result to a store in memory, commits it, and records the answer, the `rows`
 that; `go test ./internal/home -run TestTaskTraces -update` writes it, and
 `go test ./internal/proto -update` then writes the facts of that example into `wire.json`.
 
-`fetch_test.go` exercises `Loop.Fetch` across thread pages, `note` and `review` pages, single-row
+`fetch_test.go` exercises `Loop.Fetch` across thread pages, `note`, `review`, `preset` and `kb` pages, single-row
 reads, exact 61,440-byte boundaries, page bounds checks, group access checks, detached connections
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.

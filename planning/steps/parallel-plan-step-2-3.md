@@ -1,5 +1,7 @@
 # Parallel plan: steps 2 and 3
 
+> Historical task breakdown. Steps 1 to 3 are built; `planning/contracts/` and `planning/flows/` are the current specification.
+
 The design points with their answers, the units of step 2 as lanes that
 can be built at the same time, the units of step 3, the questions left for
 the coordinator, and the cuts of 2026-11-22. The outline being refined is
@@ -469,7 +471,7 @@ The owner changed the model of groups on 2026-11-26: one kind of group,
 made of people and connected AIs; each AI works in a folder of its owner;
 no Git, no checks and no merge by the platform. The decision, its reasons
 and what the coordinator decided under it are in the
-[decision record](../../docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md).
+[decision record](../../docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md).
 The contracts and flows are already written for it (unit C-1).
 
 **What ends of this plan.** Design points D-3, D-10 and D-15 (the team

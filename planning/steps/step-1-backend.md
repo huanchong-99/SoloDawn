@@ -1,5 +1,7 @@
 # Step 1: backend task list
 
+> Historical task breakdown. Steps 1 to 3 are built; `planning/contracts/` and `planning/flows/` are the current specification.
+
 For the backend implementer. Read first, in this order: `README.md`,
 `product-rules.md`, `architecture.md`, `sessions.md`, every file in
 `contracts/`, then the flow each task names. Milestones and acceptance tests

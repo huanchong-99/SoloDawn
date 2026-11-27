@@ -33,8 +33,9 @@ answering node; RV, any signalling path.
    candidate that arrives before its description is held ("Trickle").
 5. ICE checks compatible candidate pairs as they become available: IPv6
    and IPv4 host addresses, server-reflexive (UDP hole punching), ICE-TCP
-   to a port the node has open, forwarded or mapped on its router, and
-   relay (UDP, and TLS on port 443). It nominates a working pair from
+   to a port the node has open or forwarded on its router (automatic router port
+   mapping was cut; R-131), and relay (UDP, and TLS on port 443). It nominates a
+   working pair from
    those valid at the time; relay has the lowest priority. A
    higher-priority path found later takes effect only if ICE moves to it
    itself or at the next reconnect (section B). TCP simultaneous open
@@ -167,15 +168,15 @@ and leaves alone the connection N itself offered
 | State | Indicator | Extra |
 | --- | --- | --- |
 | path `direct` | green, latency | — |
-| path `relay` | warm colour, "relayed, limited" | terminal button disabled with the reason; "ask the AI to diagnose the network" |
+| path `relay` | warm colour, "relayed, limited" | terminal button disabled with the reason |
 | reconnecting | blue, breathing | — |
 | home unreachable | red hollow ring | the group is read-only until the home returns |
 | some homes unreachable (outside a group) | warm hollow ring, "some computers unreachable" | the groups homed on those are read-only until they return |
 
-"Ask the AI to diagnose" posts an ordinary message that mentions an AI on
-that computer; the AI uses the `net_status` tool (`contracts/mcp-tools.md`)
-and guides the owner (R-132, and the rule that the user's own AI fixes
-network configuration).
+There is no dedicated diagnosis button in the UI; a person may mention an AI
+on that computer in chat, and the AI uses the `net_status` tool
+(`contracts/mcp-tools.md`) to guide the owner (R-132, and the rule that the
+user's own AI fixes network configuration).
 
 ## F. One active tab per browser
 

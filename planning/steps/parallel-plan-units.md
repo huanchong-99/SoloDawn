@@ -1,5 +1,7 @@
 # Parallel plan: units of step 1
 
+> Historical task breakdown. Steps 1 to 3 are built; `planning/contracts/` and `planning/flows/` are the current specification.
+
 The units of step 1, by lane. Rules, lanes, waves and the critical path are
 in `steps/parallel-plan.md`; steps 2 and 3 are in
 `steps/parallel-plan-step-2-3.md`.

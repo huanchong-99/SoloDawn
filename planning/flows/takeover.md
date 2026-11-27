@@ -16,10 +16,10 @@ terminal continues:
 | The AI is | S is |
 | --- | --- |
 | a working AI, and `takeover.start` names a task it is assigned | that task session |
-| a working AI, and `takeover.start` names a task it reviews | that review session, still at level 1. The hand-back turn leaves out the sentence about the task, and no task command is sent |
+| a working AI, and `takeover.start` names a task it reviews | that review session, at the same level as its structured session (default 3 in 1.0, told by its instructions not to edit files; `contracts/drivers.md` sections 1 and 4). The hand-back turn leaves out the sentence about the task, and no task command is sent |
 | a working AI, no task named, with an unfinished task that is not queued | the task session it used last |
 | a working AI with no such task | its group session. No task is created (the owner's decision of 2026-11-26): the node reads no facts from the folder, so it could not tell afterwards whether anything changed and whether a task was needed. A group session that has never run is started in the terminal by a CLI that can start a new session there, with the new session id. For one that cannot (`contracts/drivers.md` 1.3 says which) N first delivers one turn in structured mode, which says only that the owner is about to work with the AI in the terminal, and takes over when it has ended |
-| the secretary | its group session, still read only: the secretary changes no file, in the terminal either (R-21) |
+| the secretary | its group session, at the same level as its structured session (default 3 in 1.0); its instructions say not to edit files (R-21, `contracts/drivers.md` sections 1 and 4) |
 
 A queued task is left untouched: a takeover gives it no session and does
 not start it, and a `takeover.start` that names one is answered `conflict`.
@@ -95,17 +95,21 @@ account of a group session goes to the main line, and no item follows it.
 
 ## F. What spike S-4 showed, and what is still open
 
-- `[verified]` On both CLIs, at levels 1, 2 and 3: structured, then the
-  terminal, then structured again on one session id, history intact both
+- `[verified]` On Claude Code and Codex, at levels 1, 2 and 3: structured, then
+  the terminal, then structured again on one session id, history intact both
   ways, with the level holding in the terminal and the MCP token naming
   the right session in each phase. The commands, and what each CLI does
-  and cannot do in the terminal, are in `contracts/drivers.md` 1.3.
-- `[unverified]` Pseudo-terminal behaviour on Windows (ConPTY) with both
-  CLIs. Spike S-5 measured ConPTY with another program; go-pty is measured
-  in HS-19 (`risks.md` T-4).
+  and cannot do in the terminal, are in `contracts/drivers.md` 1.3. OpenCode,
+  Qwen Code and external AIs declare `takeover: "none"`
+  (`contracts/step-3/drivers.md` section 4, `contracts/step-3/external.md`).
+- `[unverified]` Pseudo-terminal behaviour on Windows (ConPTY) with real
+  CLIs. Spike S-5 measured ConPTY with another program, and `HS-19` wired
+  `go-pty` in `internal/host/pty_*.go`; real-machine checks are tracked in
+  `docs/cookbook/i11-real-machine-checklist.md`.
 
 ## G. Watching (step 2)
 
 Someone other than the owner may ask to watch. The owner confirms on their
 own device; the watcher's browser then opens a receive-only terminal channel
-to N. Not part of step 1.
+to N (`contracts/step-2/watch-team.md`, `internal/host/watch.go`,
+`web/src/components/watch/`).

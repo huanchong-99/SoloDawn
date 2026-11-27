@@ -45,9 +45,10 @@ that is waiting for them.
    the turn, not authority.
 3. N holds the item, unacknowledged, while any of these is true: the group
    is paused; the item's task is `paused` or `failed`; N is offline by the
-   owner's command; the AI is `limited` by a cap or a rate limit; the
-   target session is in `takeover`; the AI is already running a turn in
-   this group, in any of its sessions. The home queues `decided` and
+   owner's command; the AI is `limited` by a vendor rate limit (owner usage
+   caps via `settings.set` are postponed after 1.0, `contracts/commands.md`
+   section 2); the target session is in `takeover`; the AI is already running a
+   turn in this group, in any of its sessions. The home queues `decided` and
    `mention` items for a paused or failed task too; N holds every item of
    such a task and delivers them when the task is `active` again. N starts
    no turn in the session of a `failed` task.
@@ -145,7 +146,7 @@ an `event` in `member status`, which H turns into a `system` row
 | a turn lasts longer than `limits.turn_minutes`, or a Codex turn is silent (`contracts/drivers.md` 1.2 step 6) | interrupts it; reports `turn_interrupted` (`timeout`); in a task session also sends `task fail` |
 | the CLI cannot resume the session id | starts a fresh session in the same folder; its first turn carries what the first turn of that session kind carries, plus the last 20 messages of the thread (R-123); reports `session_replaced` |
 | the CLI reports a vendor rate limit | state `limited`; reports `rate_limited` with the reset time; items are held until then |
-| the owner's cap is reached (R-61) | state `limited`; reports `cap_reached`; items are held until the cap is released (`contracts/commands.md` section 2) |
+| the owner's cap is reached (R-61; `settings.set` and caps are postponed after 1.0, `contracts/commands.md` section 2) | state `limited`; reports `cap_reached`; items are held until the cap is released (`contracts/commands.md` section 2) |
 | the CLI reports that sign-in is not valid in this mode | state `limited`; reports `login_invalid` only when the AI enters `limited`, at the first failed start after a success; later failed tries are not reported again. N never changes how the CLI authenticates (R-56). Sending `agent.set` for that CLI sets `login_ok` back to `true` in `host.info`, while the member's `limited` state ends at its next completed turn (the start for the next item is still tried, and a completed turn also restores `login_ok`) |
 | group paused | interrupts running turns of the group's sessions (`turn_interrupted`, `stop`); the sessions stay open; items are held |
 | task paused (`contracts/task-machine.md` row 12) | interrupts a running turn of that task's sessions (`turn_interrupted`, `stop`); the sessions stay open; items are held |
@@ -171,9 +172,12 @@ an `event` in `member status`, which H turns into a `system` row
 - Exactly one process is attached to a session id while the state is
   `working`, `waiting` or `takeover`. Every switch (dormant, takeover,
   hand-back, restart) closes the current process and waits for its exit
-  before anything else starts (C-6). A structured CLI, Claude Code or
-  Codex, is closed by closing its stdin; an interactive CLI by closing its
-  pseudo-terminal.
+  before anything else starts (C-6). Claude Code and Codex are closed by
+  closing their stdin; OpenCode (`opencode serve`) and Qwen Code (`qwen
+  serve`) are local HTTP servers whose process trees `Close` terminates
+  (`contracts/step-3/drivers.md`, `internal/host/serve.go`); an interactive
+  CLI is closed by closing its pseudo-terminal; an external AI runs without a
+  driver process (`contracts/step-3/external.md`).
 - A CLI that does not answer an interrupt or a close within 10 s gets its
   process tree killed. During a turn that is a crash (section E, first
   row). Outside a turn (an idle close) N writes an audit row and nothing

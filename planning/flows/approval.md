@@ -15,10 +15,11 @@ B, a browser of the AI's owner.
 
 The node does not decide what is dangerous and does not inspect commands
 (C-10). Every CLI session — group, review or task — defaults to level 3
-(the highest permission level, owner override 2 of 2026-11-21), unless
-`perm` or `default_level` sets another level and `all_level3` is off. Even
-at level 3, the CLIs stop and ask for multiple-choice questions and for
-actions that still require confirmation (owner override 1 of 2026-11-21):
+(the highest permission level, owner override 2 of 2026-11-21); `perm.set` and
+`settings.set` (`default_level`, `all_level3`) are postponed after 1.0
+(`contracts/commands.md` section 2). Even at level 3, the CLIs stop and ask for
+multiple-choice questions and for actions that still require confirmation
+(owner override 1 of 2026-11-21):
 
 - Claude Code calls the node's MCP tool `approve` (its permission prompt
   tool) for tool permission prompts and for `AskUserQuestion`.
@@ -26,6 +27,9 @@ actions that still require confirmation (owner override 1 of 2026-11-21):
   `item/fileChange/requestApproval` permission requests (answered through
   `Runner.Answer`) and `item/tool/requestUserInput` multiple-choice
   questions (answered through `Ask.Reply`) on the app-server connection.
+- OpenCode, Qwen Code and external AIs handle approvals and questions as
+  specified in `contracts/step-3/drivers.md` section 4 (`approvals`) and
+  `contracts/step-3/external.md`.
 
 Permission requests arrive at N with session, tool, input, and any
 justification the CLI attached (`contracts/messages.md` 2.3). CLI
@@ -160,7 +164,7 @@ place for it.
   itself does nothing for a session by level but answer its requests
   (section 2 there): it runs no command of a project.
 - Work that someone other than the owner triggered never runs above level 2
-  (R-44, step 2).
+  (R-44, step 2; postponed after 1.0 in `product-rules.md`).
 
 ## H. What the spikes showed, and what is still open
 

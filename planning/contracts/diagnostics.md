@@ -58,7 +58,7 @@ today; the builder may move a line to the nearest place that has the fields.
 | `home.dial` | `node`: `dialHome` starts the dial of a home | `home` |
 | `home.attach` | `home`: `Loop.Attach` | `dev` |
 | `home.detach` | `home`: `Loop.Detach` | `dev`, `why`: `gave_up` (the queue was full or a send failed), `ended` |
-| `cmd.reply` | `home`: where a command's answer is queued, a refusal too | `g`, `dev`, `re`, `t` (the key of the command table, `task/checked`), `code` (`ok` or the error code) |
+| `cmd.reply` | `home`: where a command's answer is queued, a refusal too | `g`, `dev`, `re`, `t` (the key of the command table, `task/start`), `code` (`ok` or the error code) |
 | `rows.send` | `home`: `runGroup.pushRows` | `g`, `seq` (first and last), `to` (connections sent to) |
 | `inbox.send` | `home`: `runGroup.deliver`, per connection | `g`, `dev`, `items` |
 | `ack.recv` | `home`: `runGroup.ack` | `g`, `dev`, `item` |

@@ -1,42 +1,37 @@
 # SoloDawn rebuild: planning
 
-Status: **plan converged after three review rounds; implementation
-started.**
+Status: **steps 1 to 3 and the 2026-11-26 workspace model are built on `rebuild`.**
 
 Three review rounds are answered in `reviews/`; the last ended with "ready
-to start". The coordinator has settled Q-1 to Q-28 (`risks.md`). Next:
+to start". The coordinator settled Q-1 to Q-28 (`risks.md`). Overview:
 
-1. Work proceeds by `steps/step-1.md`: the backend by
-   `steps/step-1-backend.md`, starting with B-00; the frontend by
-   `steps/step-1-frontend.md`, starting with F-00.
-2. Five points from the last review are fixed inside the tasks that
-   implement them (`steps/step-1-backend.md`, "Fix in the task (round 3)").
-3. The files in `contracts/` are the statement of record. A pull request
-   that needs a contract changed says so in its description; the planning
-   lead changes the contract. Code does not silently depart from it.
-4. The answers of the spikes (M0) are recorded here by the planning lead.
+1. Implementation followed `steps/step-1.md`, `steps/step-2-3.md`,
+   `steps/parallel-plan.md`, and `steps/parallel-plan-step-2-3.md`; steps 1
+   to 3 are built on `rebuild` in `cmd/solodawn/`, `internal/`, and `web/`.
+2. The files in `contracts/` and `flows/` are the statement of record for
+   current behaviour. A pull request that changes behaviour updates the
+   owning contract in the same change.
+3. The answers of the spikes (M0) are recorded here by the planning lead.
    S-1, S-2, S-3, S-4 and S-7 are answered and recorded
    (`steps/step-1.md`, M0). S-5 has reported, and Q-4 is settled
    (`risks.md`).
-5. Questions that implementation raises about a contract are settled in
+4. Questions that implementation raised about a contract are settled in
    the contract itself. The first batches, from the reviews of backend
    tasks B-01 and B-02, are in `contracts/conventions.md`,
    `contracts/messages.md` and `contracts/envelope.md`.
-6. On 2026-11-26 the owner changed the model of groups: one kind of group,
+5. On 2026-11-26 the owner changed the model of groups: one kind of group,
    made of people and connected AIs; each AI works directly in a folder of
    its owner, its workspace; the platform runs no Git and no checks and
    merges nothing. The rules, contracts and flows here are written for
    that model. Why, what was given up and what the coordinator decided
    under it is the
-   [decision record](../docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md).
+   [decision record](../docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md).
 
-SoloDawn is being rebuilt from an empty tree. This directory holds the plan
-that the implementation will follow. It is written for two readers: the
-backend implementer, who starts from `contracts/` and
-`steps/step-1-backend.md`, and the frontend implementer, who starts from
-`contracts/datachannel.md`, `steps/step-1-frontend.md` and the
-design mock-ups (kept outside the repository; every field the mock-ups need is
-listed in the contracts).
+SoloDawn is built in `cmd/solodawn/`, `internal/`, and `web/`. This directory
+holds the planning specification that guided the rebuild and remains the
+contract reference: backend readers start from `contracts/` and
+`architecture.md`, and frontend readers start from `contracts/datachannel.md`,
+`web/README.md`, and `web/design/`.
 
 ## One-paragraph summary
 

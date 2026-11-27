@@ -40,72 +40,19 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: under 夜幕 Nightfall, links and the "更改" actions of the side panel are a neutral grey close to `--text-2` (`web/src/styles/accents.css`, `nightfall` block).
 - Cause: a neutral accent has no hue to set it apart, which is what the person chooses it for; the contrast test still holds the accent 3:1 off the hairline and the inset fill, so the focus ring and chosen borders stay seen (`web/features/a11y.spec.ts`).
-- Status: accepted (M4, `web/design/README.md` "Theme colours"); links keep their underline on hover.
+- Status: accepted (batch M, PR #426; `web/design/README.md` "Theme colours"); links keep their underline on hover.
 
 ### 2026-11-27 · limitation · Some theme colours sit near the colour of a result or of the waiting signal
 
 - Symptom: the status dots of "AI working" (filled accent circle) and "passed" (filled green circle) differ by colour, the working pulse and the text label beside them (`web/src/styles/base.css`, `.st`). Measured hue distances: 浅湾 Shallows 17° (light) and 15° (dark) from the green of a passed result, 深潭 Deep pool 39° and 45°, 林荫 Tree shade 48°; 朝霞 Morning glow 26° and 24° from the red of a failure; the magenta waiting colour of 晨曦 First light 40° and 41° from that red (the default amber is 31° and 30°).
 - Cause: nine accents across the hue circle cannot all stay far from green, red and the waiting colour; the a11y test holds only the waiting colour 45° from the accent (`web/features/a11y.spec.ts`).
-- Status: accepted (M4 review, `web/design/README.md` "Theme colours"): the text label and the state glyph carry the state, as the design requires ("state is never carried by colour alone").
-
-### 2026-11-27 · deviation · The tier read as a thinking setting, the quota was hard to find, and new groups took no model
-
-- Symptom: the owner, clicking the demo, read "档位: 轻量 / 标准 / 强" in "编辑档案" as a thinking setting, could not find the AI's quota, found no thinking level in that editor, and could choose an AI's model and level only after the group was made.
-- Cause: the tier was worded as a strength although the secretary uses it to share out work (`internal/host/instructions/secretary.md:18`); the usage meter sat at the bottom of the card, apart from the tier; model and level had their own "更改" editor, and `web/src/components/model/ModelFields.svelte` hid the level whenever the chosen model listed none, which includes "the CLI's default", every new AI's model; `web/src/components/groups/CreateGroup.svelte` sent `newDraft()` for every AI.
-- Status: resolved on branch `m/ai-settings`: the tier is worded "派活: 少 / 适中 / 多" ("Work share: Less / Normal / More") in the client, the secretary's instructions and the contracts (stored values unchanged); it sits first on the card in one block with the usage line; "编辑档案" edits model, thinking level, work share and skills; the level is always shown, with its reason when there is none to choose; the create-group dialog gives each ticked AI model, level and work share, sent in its `host.join`.
-
-### 2026-11-27 · bug · The demo panel refused a typed or pasted pairing code on the first try
-
-- Symptom: in `?demo=fresh`, a reviewer typed the onboarding page's code into the demo panel's pairing field and pressed **交给 MacBook Pro**; the panel said 「这不是配对码」. The same code paired on the second try. Reproduced on 47ae57c1e in 3 of 3 runs that click into the field and then type or paste the code (one of them after clearing the field and clicking on the page for 3 s); 0 of 4 runs that hand over the prefilled field as it is or select it before typing.
-- Cause: every render of the panel wrote the page's code into the field (`web/features/sim/panel.ts:113` on 47ae57c1e, `input.value = codeOnPage()`), and an open panel renders every 2 s while it is neither hovered nor focused (`panel.ts:55-57`). A click into the field puts the caret after that code, so typing or pasting the code made 38 characters, which `parseSecret` refuses (`panel.ts:131-133`). The refusal renders the panel again, which puts the bare code back, so the second try hands it over. `codeOnPage` also read the panel's own text, so once the page showed no code it took the example code of the panel's message. Demo only: the real client has no field for a code (the browser creates the secret, or reads it from a join link in `web/src/lib/join.ts:48`), and a real node reads the code once from `solodawn pair <code>` (`internal/node/node.go:758`, `internal/node/pair.go:212`).
-- Status: resolved on branch `fix/pairing-first-try`: the field holds only what the person typed, kept across renders and emptied once the computer heard the code; the page's code is the placeholder and is handed over from an empty field; `codeOnPage` reads the page outside the panel (`web/features/sim/panel.ts:31-37,50-53,118-147`). Test: `web/features/sim/panel.test.ts`.
-
-### 2026-11-27 · bug · Four OS-specific functions failed the CRAP limit on any other system
-
-- Symptom: `gate.py --stage merge` on macOS failed the crap gate on `internal/node/service_linux.go:25 InstallService` (CRAP 20, CC 4), `:47 RemoveService` (12, CC 3), `internal/node/socket_windows.go:30 privateDir` (20, CC 4) and `internal/rendezvous/truncated_windows.go:15 readDatagram` (12, CC 3), each "no coverage data for this file".
-- Cause: a file that does not build on the host has no coverage data, and `.project-standard/scripts/crap.py` (`measure`) counts it as 0%; at 0% only CC 2 or less passes the limit of 6. CI runs these files' tests on Linux and Windows, but the limit is enforced locally. Found on the way: a copy of `.project-standard/` into a worktree also copies `state/` of the main checkout, whose session file and `base_commit` make `crap.py` measure against another session's base; remove the copied `state/` before measuring a worktree.
-- Status: resolved by the commit "Node, rendezvous: OS-specific functions are shims; their decisions are portable and tested everywhere": the branching is in `installServiceFile` and `removeServiceFile` (`internal/node/service.go`), `createDir` (`internal/node/socket.go`) and `readSkipping` (`internal/rendezvous/truncated.go`), at 100% on every system; the OS functions are CC 1. Code in a file built for one system keeps CC 2 or less.
-
-### 2026-11-27 · bug · `TestNodeWatchGrantAdmission` reported the relay refusal as a missing field
-
-- Symptom: on a Mac whose firewall drops direct UDP to the test binary, both subtests failed at `internal/node/node_test.go:1283` with `proto: a field that is always present is missing`, on `rebuild` 47ae57c1e and equally before the protocol 3 change (b051eafef).
-- Cause: the connection was relayed, so the node answered `watch.start` with `{"re":2,"err":{"code":"relay","msg":"watch requires a direct path"}}` (`internal/host/watch.go:95`), as `planning/contracts/step-2/watch-team.md` section 4 requires. `checkWatchStart` decoded that error answer as a `proto.Success`, whose `ok` is always present. The product was right; the test hid the answer.
-- Status: resolved. `checkWatchStart` now fails with the error answer's code and text (`watch.start answered relay: watch requires a direct path`). The test also no longer starts a loopback TURN server (`startTestRVWithRelay`), which it never needed: it checks admission by grant, the `relay` refusal is covered by `internal/host/watch_test.go`, and with a TURN server ICE could nominate a relay pair first on a loaded runner. It now uses the plain rendezvous of the other node tests, so ICE has no relay candidate, and a host without a direct UDP path fails at the WebRTC connection's time-out. Should the node still answer `relay` (a path that is relayed, or not yet selected), the test now names that refusal instead of a missing field.
-
-### 2026-11-27 · limitation · `takeover.go:210` (`== ""` to `!= ""`) decided a value nobody reads
-
-- Symptom: CONDITIONALS_NEGATION at `internal/host/takeover.go:210:58` lived in mutation run 45905182817 (shard host-s-takeover).
-- Cause: `target.kind` is read only by `createSession` (`internal/host/deliver.go:1312,1315`), which runs only when `Sessions.Get(target.key)` misses (`prepareTargetSession`, `deliver.go:1276-1278`). With no task the key is the group session's, and its absence returns `not_found` at `deliver.go:1306-1309` before `kind` is read; with a task, `lastTask` has just read that task session from `Sessions.All()`, so it exists. Only a session ended between those two calls on another goroutine could tell the mutant apart.
-- Status: resolved by the commits "Mutation: tests kill the batch's survivors; guards and a takeover branch that could never matter go" and "CI: every product file is mutated; node shards stay within the runner's memory": `takeoverTarget` sets only the task from `lastTask`. The one difference left is under a race, a group session that appears between `followMember` and `createSession`: `createSession` then also runs `cleanupTaskSessions`, which ends only sessions of done, cancelled or reassigned tasks, before `Create` refuses the existing key.
-
-### 2026-11-27 · bug · The node-admit-local mutation shard ran the runner out of memory
-
-- Symptom: `go node-admit-local` of mutation run 45905182817 failed after 9 minutes with the annotation "Out of memory."; its log was never uploaded. A rerun of the same commit passed (126 killed, 13 timed out, the rest on the filter list).
-- Cause: gremlins ran four mutants at once (`--workers 8`), each test binary capped at 4 GiB by `ulimit -v`. The shard's timed-out mutants come one after another (seven `local.go` mutants in a row), so four runaways at 4 GiB fill the runner's 16 GiB.
-- Status: resolved by the same commit: the shard is split into node-admit-dir and node-export-local, and those and the other node shards whose timed-out mutants come in runs (node-node, node-pair, node-socket-update) take `--workers 4`, two mutants at once and at most 8 GiB (`.github/workflows/mutation.yml`, matrix key `workers`).
-
-### 2026-11-27 · limitation · Equivalent web mutants of the model batch, and a gremlins blind spot
-
-- Symptom: Stryker survivors that no test can kill: `groups.svelte.ts:143` (`id === undefined` guard; `member(undefined)` and `#former.get(undefined)` find nothing), `members.ts:254,381` (the `[]` of a missing group is only read through `m.host` and `p.user`), `nodes.svelte.ts:110` (`group.home !== node`: `infos` holds owner homes only, `#read` via `activeCtl`, and `unheard` keeps groups of non-owner homes), `taskops.ts:66` (`other !== task`: a `busy` wait is only on a queued task, which `hasSession` excludes, `planning/contracts/rows.md` section 4) and `taskops.ts:88` (`task.wait?.by`: the manual hold exists only when `task.wait.kind` is `manual`). gremlins reported `internal/home/cmd_task.go:418:99` NOT COVERED: Go's cover tool ends a block at a function literal, so the condition after it in an `if` init had no block.
-- Status: resolved by the commit "Mutation: tests kill the batch's survivors; guards and a takeover branch that could never matter go": the guards are gone with no change of behaviour, and the `IndexFunc` call is its own statement (as `internal/node/schedule.go` in b4e9fda48).
-
-### 2026-11-27 · bug · Four files of the model batch belonged to no mutation shard
-
-- Symptom: mutation run 45905182817 failed "Files in exactly one shard": `internal/home/cmd_summary.go`, `internal/host/tools_workspaces.go`, `internal/host/tree_unix.go` and `tree_windows.go` were never mutated.
-- Cause: the `own` regexes of `.github/workflows/mutation.yml` did not match their names.
-- Status: resolved by the commit "CI: every product file is mutated; node shards stay within the runner's memory" (home-cmd-task-ev `^(cmd_[st]|e)`, host-mcp-merge `^(mc|me|tr|tools_w)`). Their mutants are first seen in the next run.
-
-### 2026-11-27 · deviation · The onboarding prompt still tells the AI to check the Git identity
-
-- Symptom: the prompt that **Add a computer** gives for an AI CLI has a step "Check `git config --global user.email`; if it is empty, ask me for a name and an email and set them". `install.md` no longer has that step, and SoloDawn commits nothing and needs no Git.
-- Cause: the texts `pairing.prompt.text_rv` of `web/src/messages/pairing.en.json:15` and `pairing.zh-CN.json:15` were not changed with the model, and `web/src/lib/onboard.test.ts:242-253` and `web/e2e/connect.spec.ts:577` assert the line.
-- Status: resolved by this commit: the prompt now has three steps and no `git config` check; the three tests assert the new steps. Found while rewriting the real-machine checklist (unit DOC-1).
+- Status: accepted (batch M, PR #426; `web/design/README.md` "Theme colours"): the text label and the state glyph carry the state, as the design requires ("state is never carried by colour alone").
 
 ### 2026-11-27 · limitation · An AI works in its owner's own folder, with no isolation
 
 - Symptom: an AI runs at permission level 3 in the folder it was given, which is often the folder its owner uses. Uncommitted work of the owner is within its reach, and every session of the AI in the group (group, task and review) sees the same files. Before the model change a task had a worktree of its own.
 - Cause: the folder is the AI's workspace and nothing is copied (`planning/contracts/local.md` section 7; plan `MODEL-1126/plan.md` risk 1). The prompt forbids stash, reset, clean, `git add -A`, `git commit -a`, checking out over files, rebase, switching branches and a force push in the folder (`internal/host/instructions/task.md:19`); that is an instruction, not a barrier. The node reads and changes no Git state, so it cannot tell whether the owner's changes are in the way.
-- Status: open, accepted by the coordinator's decision of 2026-11-26 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)). `install.md` and the release notes tell the owner to commit or set aside their own changes before giving a folder to an AI.
+- Status: open, accepted by the coordinator's decision of 2026-11-26 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)). `install.md` and the release notes tell the owner to commit or set aside their own changes before giving a folder to an AI.
 
 ### 2026-11-27 · limitation · Half-finished work stays in the folder after a failure, a cancel or a reassignment
 
@@ -131,72 +78,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the case of the entry "On a Mac with the Application Firewall, a UDP write can block every connection on one local address". Q1 offered 4 ms after `home.add`; P1 answered, both exchanged candidates within 10 ms and went to ICE `connecting`, and neither logged anything more in the 15 s. P1's goroutine dump holds that connection's agent loop in a write to `127.0.0.1` that waits for the socket (`sendBindingRequest` → pion ice v4.4.8 `udp_mux.go:337` → `WriteToInet4`). An answered attempt is left to ICE (`flows/connect.md` step 15), which fails it after 30 s, so Q1 offers again after `host.join` has stopped waiting for the home (`joinAttachTimeout`, `internal/host/join.go:19`; `joinWaitHome`, `join.go:340-350`). The step and the product do what their contracts say: the cast sends `host.join` after `home.add` answers, and `host.join` waits for the attachment. Two `timed out after 3m0s waiting for ctl` failures of A9.19 in the same runs had the same write blocked in P1 (under `sendBindingSuccess` and `sendBindingRequest`).
 - Status: open, accepted for the local machine with the parent entry: CI decides; nothing changed.
 
-### 2026-11-27 · bug · A node of the step-2 cast sometimes exits at start: its own rendezvous answers 400 or 404
+### 2026-11-26 · limitation · A removed member's name lasts only while the page is open
 
-- Symptom: in the same repeats, 9 of about 2,700 casts failed in `Given the confirmation cast with Q` because P1 or Q1 never opened its socket; the node's stderr held only `failed to WebSocket dial: expected handshake response status code 101 but got 400` (or `404`). Also seen in the stress of FLAKY-33 above.
-- Cause: when port 47800 is taken, `listenNodeHTTP` fell back to `:0`, and macOS could hand out a port that another program held on `127.0.0.1`; the node then dialled it (`internal/node/node.go:430` and `:308` before the fix) and ended on that error.
-- Fix: the fallback picks a port that is free on `127.0.0.1` and listens on all addresses with it, picking again (up to 3 times) when that port is in use.
-- Status: resolved.
-
-### 2026-11-27 · limitation · Acceptance scenarios of the old model fail until units AC-1 to AC-3 rewrite them
-
-- Symptom: after unit AC-0 of MODEL-1126 `features/` compiles and its fixtures follow the new model (every AI joins with a workspace folder of its own, no bare repository, no fake `gh` or forge program, hello and welcome at version 3), but scenarios of the old model fail. The steps whose bodies the model took away fail on purpose with `rewritten by AC-<n>: <reason>` (`rewritten`, `features/helpers_test.go`); others fail because their expectations name the old model: step names `branch`, `local_check` and `merge` (`home_task`, `home_machine`, `home_review`), the roster line without the folder (`host_turn`, `host_profile`, `a10_profiles`, `a10_external`), the review checkout in the turn text (`host_turn.feature:2`), and a second task of one AI that now waits as `busy` (`m4.feature:33`, `m4.feature:48`, `m6.feature:26-39`, `s3_drivers.feature:20`).
-- Cause: plan `MODEL-1126/plan.md` section 4 gives the rewrite of these scenarios to AC-1 (M3 to M8), AC-2 (host and node) and AC-3 (home, step 2, step 3); the list by unit is `MODEL-1126/ac0-failing.md`.
-- Status: resolved on `batch/model-1126`: AC-1 to AC-3 rewrote the scenarios (commits `c038a82e9`, `b0fb4fbe6`, `591d32812`), and no step calls `rewritten` any more.
-
-### 2026-11-26 · bug · A task's menu stays open after one of its items is picked
-
-- Symptom: in headless Chromium (Playwright 1.64, a trusted click) on the demo world at `?demo`, opening the `⋯` menu of a running task and pressing 暂停, 换人 or 取消任务 carries the action out but leaves the popover open over the card (`.menu:popover-open` still matches, and no `toggle` event follows the click). The next press on `⋯` then closes it instead of opening it. Seen while taking the screenshots of the redesign; it is the same with the menu's styles as they were before the redesign (`web/src/components/task/TaskMenu.svelte` at fe89a231b and at 51aee6673).
-- Cause: the items closed the menu through `popovertarget` + `popovertargetaction="hide"`, which the browser runs as the button's activation behaviour, after the click listeners and the microtask checkpoint that follows them, and skips when the pressed button is no longer connected or is disabled. The demo answers a request through promises alone, so for 暂停 and 恢复 the task's new row arrived inside that checkpoint, the keyed `{#each ops as op (op)}` (`web/src/components/task/TaskMenu.svelte:90`) replaced the pressed item, and the hide never ran (reproduced 2026-11-26 in headless Chromium at 1440: no `toggle` event, a MutationObserver saw the item replaced and `isConnected` false before the activation). 换人 and 取消任务 closed normally in that run, since they only open a question. A real home answers in a later task, which is why the e2e of M5 did not see it; the menu depended on that timing.
-- Fix: each item hides the menu itself before it hands on the pick (`hide()` at `web/src/components/task/TaskMenu.svelte:99`); the two attributes are gone. The `pick` helper of `web/features/taskops.spec.ts:46` now expects the menu to hide on every pick; with the old menu it fails in 9 steps. After the fix all four items close the menu in the same Chromium probe at 1440 and 390.
-- Status: resolved on `web/redesign` (commit `web: redesign review fixes`).
-
-### 2026-11-26 · deviation · Rough edges of the web client seen while walking every flow of the demo
-
-- Symptom: walking every flow of `?demo` (`web/features/sim`, branch `web/demo-sim`) in the built-in browser showed, in the client itself:
-  1. OpenCode and Qwen Code show as `opencode` and `qwen` in Add AI, on the Computers page and in onboarding, and Add AI suggests the name `qwen`: `cliLabels` knows Claude Code and Codex only (`web/src/lib/onboard.svelte.ts:37`).
-  2. A refused join says only `无法加入（join：conflict）` (`web/src/components/people/JoinForm.svelte:56`, `people.join.failure`).
-  3. After a person is removed, their earlier messages and the `member_joined` line name "已离开的成员"; removing a person takes no confirmation (`web/src/components/people/PersonActions.svelte:50`).
-  4. An approval made void by the owner's own reassignment says the secretary reassigned it (`approval.hint.reassigned`); a task the owner paused says the secretary or an admin paused it (`task.hold.manual`).
-  5. A takeover of an idle AI shows the host's task title `Owner takeover` in English (flows/takeover.md A names it).
-  6. A watcher's terminal page is titled "终端接管".
-  7. The group list previews a task message as "系统：任务" and a system row as "系统：通知".
-  8. Onboarding's "创建第一个项目群" opens the group list without the create dialog.
-  9. The composer of a group without a secretary still suggests "发需求给 @秘书".
-  10. The connection indicator stays "直连" while one of two computers is down (`indicator` summarises online homes only, `web/src/lib/nodes.svelte.ts`).
-  11. A team bulletin reads "来自Alex的电脑" without a space.
-- Cause (lines as of `ea96a5ce7`): `cliLabels` knew two CLIs (`web/src/lib/onboard.svelte.ts:37`); `JoinForm.svelte:56` showed `people.join.failure` for every code; display names came from `group.member(id)` (`web/src/lib/groups.svelte.ts:131`), which forgets a removed row, and `PersonActions.svelte:50` removed at the first press; the texts `approval.hint.reassigned` (`approval.zh-CN.json:18`) and `task.hold.manual` (`task.en.json:63`, `task.zh-CN.json:63`); the title is the host's (`internal/host/takeover.go:261`, `planning/flows/takeover.md` A); `App.svelte:44` titled every terminal page `page.terminal`; `GroupList.svelte:29` used `subject`, the text of the row, empty for a task or a notice; `StatusPanel.svelte:179` only linked to `#/groups`; the composer hint ignored `group.secretary` (`Composer.svelte:50`); `indicator` summarised the connected homes only (`web/src/lib/nodes.svelte.ts:50`); `team.computer` had no spaces (`team.zh-CN.json:7`).
-- Status: resolved on `fix/demo-findings`; the actor of a pause or reassignment is the separate open entry "No row says who paused or reassigned a task, and a removed member's name lasts only while the page is open".
-
-### 2026-11-26 · limitation · No row says who paused or reassigned a task, and a removed member's name lasts only while the page is open
-
-- Symptom: a task paused by hand says only that it was paused by hand, and an approval made void by a reassignment only that the task was reassigned, even when the reader did it; before 2026-11-26 the Chinese texts named the secretary. A member removed before this page was opened is shown as "Former member" on what they wrote.
-- Cause: the wait `manual` of a task row and the approval state `reassigned` carry no actor (`planning/contracts/rows.md` section 4, `planning/contracts/messages.md` 3.2; `waitFor`, `internal/home/machine.go:362`, and `tskCardRows`, `internal/home/cmd_task.go:349`), and a member's `gone` marker carries no name (`rows.md`, `gone`). The web client keeps the last row it held of each member that left (`Group.nameOf`, `web/src/lib/groups.svelte.ts:142`), and a browser cache lives in memory (`planning/flows/sync.md` G).
-- Status: the first half is resolved by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the wait `manual` carries `wait.by` (`internal/home/machine.go:589`) and the approval state `reassigned` carries `by` (`tskCardRows`, `internal/home/cmd_task.go:386-396`), and the client says who paused or reassigned. The second half stays open, accepted: a member removed before the page was opened is shown as "Former member".
+- Symptom: a member removed before this page was opened is shown as "Former member" on what they wrote. (Split from the resolved entry "No row says who paused or reassigned a task".)
+- Cause: a member's `gone` marker carries no name (`planning/contracts/rows.md`, `gone`). The web client keeps the last row it held of each member that was present while the page was open (`Group`, `web/src/lib/groups.svelte.ts`), and writes nothing else when a member leaves.
+- Status: open, accepted: a member removed before the page was opened is shown as "Former member".
 
 ### 2026-11-26 · bug · A9.27 fails in its set-up and connections when six copies run at once on a Mac
 
 - Symptom: 60 runs of the unchanged A9.27 on this Mac, six processes in parallel (1-minute load up to about 17): 40 passed, 20 failed before or after the export, never with `group rows differ`: 10 × `timed out after 16s waiting for ctl connection`, 7 × `home_unreachable` from `JoinAI` in the step "the group has a secretary on P1, P-work on P2 ...", 2 × the browser peers following P2 in 5.9 and 6.2 s (want 5), 1 × `EOF`, 1 × `timed out after 3m0s waiting for ctl`.
 - Cause: not looked into. The connection time-outs fit the entry "On a Mac with the Application Firewall, a UDP write can block every connection on one local address"; the `home_unreachable` ones may be the class of `features/s2_watch_test.go` `prepareBulletin` (a command sent before P2's host attached to P1).
 - Status: open; found while reproducing the entry "A9.27 failed once on Linux: P2 held a later member row than the export".
-
-### 2026-11-26 · limitation · A hand-back or continue turn whose CLI must start in a folder that is gone is not reported
-
-- Symptom: the host checks a session's folder where delivery prepares a turn, where an external hand-out is made and at `takeover.start` (`prepareTargetSession`, `internal/host/deliver.go`). A structured start that no item causes is not checked: the hand-back turn after a takeover, a continue turn of a session that went dormant, the replacement of a session the CLI could not resume. There the CLI fails to start, the session goes `dormant` and the error is logged, with no `turn_interrupted` and no `task fail`. The check also runs before every turn, not only before a start: a session whose CLI is still open gets no turn in a folder that is gone, and stays `waiting`.
-- Cause: `planning/contracts/local.md` section 7 puts the check "before a CLI starts". Unit HS-A put it where delivery already records the outcome of a batch (delivered, acknowledged, failure reported), which is one place for managed AIs, external hand-outs and takeovers. The runtime's own starts (`startFromDormant`, `internal/host/run.go`) report no failed start of any kind.
-- Status: resolved by the review of HS-A: the check is in `startFromDormant` (`internal/host/run.go`), the one place every start of the runtime passes, and reports the crash there; delivery no longer checks before a turn, so a session whose CLI is still open gets its turn. `TestMissingFolderFailsTheStart` (`internal/host/run_test.go`) covers a turn for items, a continue turn and a hand-back.
-
-### 2026-11-26 · deviation · Between HS-A and HS-B: a Codex group session that has never run cannot be taken over, and the instructions name removed tools
-
-- Symptom: `takeover.start` for a working AI without an unfinished task opens its group session and creates no task. For a CLI whose takeover is `resume` (Codex) and a group session that has never run, the start answers `cli` (`codex: interactive takeover requires an existing thread id`). `internal/host/instructions/*.md` and the hand-back sentence of `ownTurnBody` (`internal/host/turn.go`) still name `push_branch`, `run_checks`, the review diff and "run the checks".
-- Cause: unit HS-A removed the takeover task, its structured `assign` turn and the Git facts (`internal/host/takeover.go`) only as far as package `host` needed to compile. The structured first turn of a group session, the turn texts and the instructions are unit HS-B's.
-- Status: resolved by unit HS-B: a session that has never run of a `resume` CLI gets one `TakeoverTurn` in structured mode before the terminal opens (`readyForTerminal`, `internal/host/takeover.go`), and the instructions and the hand-back sentence name no removed tool or check.
-
-### 2026-11-26 · bug (test) · The owed-turn line of `delivery.forget` was covered by a race
-
-- Symptom: with the merge steps gone from `afterGroupState`, `go test -cover ./internal/host/` reported `forget` (`internal/host/deliver.go`) at 85.7%: the line that drops the owed turns of a forgotten group did not run.
-- Cause: `TestGroupItsOwnerWasRemovedFromIsLeft` opens a pre-emption and then lets two background goroutines race: `afterGroupState`, whose sweep drops a pre-emption that has not ended (`dropUninterrupted`), and `leaveGroup`, which calls `forget`. Whichever came first removed the owed turn, and the test accepts both.
-- Status: resolved. `TestGroupWhoseHomeRefusesItIsLeft` calls `forget` with a turn owed in the group and one owed in another group, and checks that the first alone is dropped.
 
 ### 2026-11-26 · bug · FLAKY-33: A9.8 failed once: a browser's ICE agent stood still for 5 × 7.8 s
 
@@ -206,24 +98,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
   2. The client's read loop ended: `Client.Listen` (`pion/turn/v5 client.go:286-312`) exits for good at any error of `HandleInbound`, and one STUN request from anyone at the client's socket is such an error (`client.go:679-760`). Every later request of that client then times out. `TestStrayRequestAtTURNClient` (`internal/peer/relay_test.go`) showed it with our own sockets: one Binding request at each end's TURN client socket, and the relayed connection never came up (`turnc ... unexpected STUN request message ... Exiting loop`). A product node behind a relay would have lost its relay path for good from one stray datagram. No sender of such a request was found in the CI run.
 - Status: open until a failure with the new diagnostics names the trigger. Cause 2 is removed on `fix/turn-client`: the socket of a TURN client over UDP, the only socket pion ICE opens with `ListenPacket`, passes on datagrams from the address it last sent to, its TURN server, and drops the rest as `turn.stray` (`turnNet`, `serverOnly`, `internal/peer/sockets.go`). Nothing else legitimately reaches that socket: a peer's relayed data comes through the server, as pion's own client already requires for data and channel data (`isTURNServer`), and host and server-reflexive candidates have their own sockets (the UDP mux of `Listen`, or pion's `ListenUDP`). The acceptance harness now writes pion's debug lines of the test TURN server (`turn`), the TURN clients (`turnc`) and the ICE agents (`ice`) of the test process into `nodes.log` (`peer.PionLog`, `features/diag_test.go`): cause 1 shows as `Failed to handle datagram: ... no allocation found`, a read loop that ends as `Exiting loop`. The child nodes' pion lines are not captured. The block of the whole agent per unanswered permission stays: it is pion's.
 - Stress on this Mac, `-race`, 10 processes in parallel with busy loops, 1-minute load 13 to 27: the outline 165 times with the change, 115 times without it. No `turn.stray`, no TURN request that timed out, no TURN read loop that ended before its close. 4 runs with the change (all at load 21 to 27) and 1 without it (load about 20) failed in `Q opens a second confirmation browser` with `not ready after 8s` twice: the browser's agent was silent for the 8 seconds and a UDP write of it to a peer address ended only at the close (`use of closed network connection`), the form of the entry "On a Mac with the Application Firewall, a UDP write can block every connection on one local address". 1 run with the change failed in the cast's set-up: Q1's node got 404 from its rendezvous and never came online (`failed to WebSocket dial: expected handshake response status code 101 but got 404`); not looked into, nothing in it touches TURN or ICE.
-
-### 2026-11-26 · deviation · The Computers page says a relayed node switches back to direct by itself
-
-- Symptom: a relayed computer shows "The node keeps trying a direct connection and switches back automatically." (`nodes.relay.body`, `web/src/messages/nodes.en.json:23`, `nodes.zh-CN.json:23`, shown by `web/src/routes/Nodes.svelte:190`). No code tries: the relay-free probe and move were cut on 2026-11-21 ([connect](planning/flows/connect.md) B).
-- Cause: the text predates the cut. A relayed connection becomes direct only when ICE finds a direct pair itself; a reconnect runs ICE again and stays relayed if direct is still blocked.
-- Status: resolved on 2026-11-26: `nodes.relay.body` (en and zh) now says the connection may turn direct after a reconnect or if the browser finds a direct path itself, and otherwise stays relayed. No test or e2e spec carries the text.
-
-### 2026-11-26 · limitation · A task handed to an AI of another node can start without the last commits
-
-- Symptom: the new assignee's node creates its worktree from the published branch while the old assignee's node still pushes its last commits. The new AI's own push is then refused, and `push_branch` or `submit_task` fetches the branch under the clone's lock and tells it to merge `origin/<br>`, run the checks and push again (`planning/contracts/mcp-tools.md`). If the old node is off when the task moves, its unpushed commits stay on it: it pushes them when it comes back, and if the new AI has pushed by then, that push is refused, told once in the task's thread, and the commits stay on the old node's local branch.
-- Cause: the home sends the task row to one node and the `assign` item to the other at the same time, and no message says that a branch has been published (`planning/flows/task.md`, "Reassignment": two nodes do not wait for each other).
-- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): a task has no branch and no worktree, so nothing is published or created from a branch when it is reassigned. The new assignee's instructions tell it to find where the earlier work is before it starts (`internal/host/instructions/task.md`); what the old AI left in its own folder is the new entry "Half-finished work stays in the folder after a failure, a cancel or a reassignment".
-
-### 2026-11-26 · limitation · A push holds the clone's lock, its hook included
-
-- Symptom: while an AI's `push_branch` or `submit_task` pushes, every other Git command of the group's clone waits: the fetch before a dormant group session's turn, a new task or review worktree, a local merge, a branch deletion. A project `pre-push` hook that runs the tests makes that minutes, up to the push's 60-minute limit.
-- Cause: a push moves `refs/remotes/origin/<br>` of the clone, which a concurrent fetch also locks ("cannot lock ref"), so it runs under the clone's lock (`PushBranch`, `internal/host/forge.go`; `planning/contracts/local.md` section 7). A push to `origin`'s push URL instead of its name was tried: it left the ref alone with Git 2.54.0 but updated it with Git 2.56.1 on CI.
-- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the node makes no clone and runs no Git push; an AI that pushes does it in its own folder by the project's rules.
 
 ### 2026-11-26 · limitation · A node that missed its owner's removal and shares no other group with that home keeps the group
 
@@ -245,7 +119,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-25 · limitation · `group set` has no range for its numbers
 
-- Symptom: a home stores any integer as `pass`, `pass_foundation` or a limit, also 0 and negative ones. Some have an effect nobody chose: `turn_minutes` 0 ends every check command at once.
+- Symptom: a home stores any integer as `pass`, `pass_foundation` or a limit, also 0 and negative ones. Some have an effect nobody chose: `rounds` 0 pauses a task on its first AI round (`internal/home/machine.go:655`) and `ask_wait_s` 0 times out every `ask` call at once (`internal/host/tools_ask.go:87`).
 - Cause: `planning/contracts/commands.md` 1.1 names no range and `grpSetValid` (`internal/home/cmd_group.go`) checks only that a field is there.
 - Status: open, accepted: only an admin sends it. The web client's settings take 1 to 100 for the scores and at least 1 for a limit (0 for `review_rounds` and `ask_depth`, where it means something: a failed review stops the task for a person, AIs do not ask each other), at most 4 for `ask_depth` (R-114), 55 seconds for `ask_wait_s` (`flows/ask.md` D) and 10 minutes for `approval_wait_s` (`flows/approval.md` H) (`limitFields`, `web/src/lib/groupset.ts`).
 
@@ -261,15 +135,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: nothing in `welcome.groups` says which copy is the newer (`planning/contracts/step-2/export.md` section 4 speaks of a lost home); `Home.#list` (`web/src/lib/groups.svelte.ts`) leaves a group to the home within reach that listed it first.
 - Status: open, accepted: version 1 has no command or button that deletes a group, so a returned old home's copy stays; the owner treats it as a used scratch group (`docs/cookbook/i11-real-machine-checklist.md` step 20).
 
-### 2026-11-26 · bug · The fixtures of the confirmation scenarios did not match the contracts
-
-- Symptom: the first run of A9.8 to A9.19 and A9.42 to A9.44 failed in A9.9, A9.11, A9.42 and A9.44 with nothing wrong in the product.
-- Cause, in `features/s2_confirm*`: `state.by` of a card was expected to be a user id, it is a member id (`contracts/messages.md` section 3); a scripted tool without arguments sent `"arguments": null`, which the host refuses; a `choose` had an empty `arg`; the group had `forge: none`, which is one machine only, so a reviewer on another node could not fetch the commit; the scripted results of a Claude Code tool call were not compared; the one-person quiet-task scenario needed the secretary's tools ("A changed secretary gets no secretary tools on its host").
-- Status: resolved in the change that enables the scenarios. The cast's group now has the fake forge of A9.24.
-
 ### 2026-11-26 · bug · FLAKY-32: A5.15 hung once: the fake Claude's MCP shim never connected
 
-- Symptom: one run of A5.15 with forge `none` (`features/m5.feature`) waited for the secretary's brief until it timed out; the MCP shim of the fake Claude never reached the bridge.
+- Symptom: one run of A5.15 (`features/m5.feature`; the forge `none` example from before MODEL-1126 no longer exists) waited for the secretary's brief until it timed out; the MCP shim of the fake Claude never reached the bridge.
 - Cause: not proven. A listener that ended silently fits ("FLAKY-32, found on the way: an accept error ended the node's listeners" below; `acceptMCPLoop` had the same form), and nothing would have shown it: the fixture hid the accept error and the fake CLI dropped the shim's stderr.
 - Status: open, not reproduced: about 1000 runs under `-race` with those diagnostics, 6 to 14 in parallel (665 of the scenario as it is here, 340 of the `none` example of `acc/m5-remote`; 1-minute load 17 to 44), without a failure; the slowest of the first 300 took 2.8 s. `acceptMCPLoop` (`features/m5_test.go`) now fails the scenario with the accept error and goes on, and the shim's stderr is in `SOLODAWN_FAKECLI_LOG` (`internal/host/fakecli/mcp.go`), which the folder of a failed scenario holds; the next occurrence names its place.
 
@@ -294,12 +162,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Bounded in the product: nothing closes the stuck side by itself, but the peer's next offer does (`internal/peer/signal.go:185`, `old.Close()`), and pion then aborts the write after a 5 second grace (`udp_mux.go` `scheduleWriteAbort`/`checkWriteAborts`, through `Agent.Close`). `signal.go:185` runs under `p.mu`, so the node's signalling pauses for up to about 5 seconds in that case; no other peer code waits for the agent loop under the lock (`AddRemoteCandidate` runs in its own goroutine). No product change is needed.
 - Status: open, accepted for the local machine: CI decides. In the product the attempt is retired and offered again (`flows/connect.md` step 15).
 
-### 2026-11-26 · bug · The A9.2 fixture sent each signalling frame twice
-
-- Symptom: A9.2 waited for a signalling turn in 2 of 2 runs (8.9 s) and failed on this Mac in some runs (cause 2 of the entry above).
-- Cause: `peerNode.routesFor` in `features/helpers_test.go` added the node's rendezvous path and then every route of `Pairer.Routes`, which holds the same path, so each frame to a joining browser went twice over one WebSocket. The product skips such a route (`internal/node/node.go` `routesFor`, #373).
-- Status: resolved on `s2/lift-people`: the fixture skips a route whose ID is already there. A9.2 then passed 21 of 22 runs under `-race -tags acceptance`; the one failure is cause 1 (its goroutine dump holds the blocked `WriteToInet4` under `sendBindingSuccess`).
-
 ### 2026-11-25 · limitation · A paired node's rendezvous addresses cannot be changed
 
 - Symptom: `solodawn pair <secret> --rendezvous <new>` on a node that already has an owner prints "this node already has an owner; to add a browser, run solodawn pair-browser", exits 1 and leaves the saved addresses as they were. Version 1 has no other command that writes them, so a node cannot be moved to another rendezvous.
@@ -311,18 +173,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a message of one's own can stop saying that it waits although the AI has not taken it: when the AI's row changed in the middle of a turn (its model edited, a status sent), or when the AI's next turn took older items of another session first.
 - Cause: no row tells what a home has queued; `waiting` (`web/src/lib/queue.ts`) compares the sequence of the message with that of the AI's row, which changes when a turn starts or ends.
 - Status: open, accepted: the message is delivered as before, only the choice to let it go first is gone.
-
-### 2026-11-23 · deviation · An agent without a driver cannot join a group
-
-- Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
-- Cause: only the second tier was planned and built. The MCP shim takes only the session token that the node creates when it starts a CLI itself ([local.md](planning/contracts/local.md), section 3), `host.join` takes only an agent with a driver (`agtValidAgent`, `internal/host/agents.go:258`), and nothing lets an agent take an inbox item.
-- Status: open, found 2026-11-23 and planned as the external AI (R-166, [external.md](planning/contracts/step-3/external.md); [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2). The implementation supports joining, setup and member-scoped MCP without a driver. The [browser test](web/e2e/external.spec.ts) and [I3-3 scenarios](features/a10_external.feature) cover waiting, queued work, the owner-only tool label, managed replies, task and review checkouts, usage, and presence expiration. A10.28 needs a live agent. The agent writes its own runner around `solodawn wait`.
-
-### 2026-11-23 · deviation · An intermittent failure cannot be explained from one occurrence
-
-- Symptom: several tests called flaky were product races (A9.24 twice, the A9.23 bulletin attach, the A10.3 pause read, a host teardown race). Each took hours of stress runs to find, and the first Windows A7.9 failure contained no candidate-pair trace. The owner's rule of 2026-11-23: an intermittent failure must not depend on being reproduced; the logs of its one occurrence, in CI or on the owner's machines, must point at the cause.
-- Cause: the node logs only errors, in prose (`log.Printf` in `internal/host/deliver.go`, `internal/home/run.go`, `internal/node/session.go`). A wait in a test that times out says only that it did (`features/m4_test.go:70`, "timed out waiting on M4 home frames"). CI keeps nothing from a failed scenario (`.github/workflows/backend.yml`).
-- Status: resolved by DG-1 to DG-7 of `planning/steps/parallel-plan-step-2-3.md` section 4.3, of which DG-4 (the node's events, the level file, "After a failure" in `install.md`) was the last. The contract is [diagnostics](planning/contracts/diagnostics.md); its section 6 lists what is not verified, the Windows `tar` line of `install.md` among it (I-11).
 
 ### 2026-11-23 · limitation · A required escalation can outlast its last stronger candidate
 
@@ -348,23 +198,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the [OpenAPI](https://opencode.ai/docs/openapi.json) documents `POST /api/session/{sessionID}/model` with `{"model":{"id":"…","providerID":"…","variant":"…"}}`. `openCodeProcess.selectModel` in `internal/host/opencode.go:245` splits the public `provider/model` id on the first `/`, omits an empty variant, and skips an empty model. Discovery reads `{data: Model.Info[]}`; unknown shapes yield `[]`.
 - Status: accepted for T3-10; the coordinator will flag the contract in the PR. Fixtures are synthetic, with no real CLI capture.
 
-### 2026-11-23 · limitation · Remembered project homes without local AIs stay connected
+### 2026-11-23 · limitation · Remembered group homes without local AIs stay connected
 
-- Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
-- Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no group kind. State-only sync supplies it after connection, as specified in [watch-team.md section 10 ("Which home")](planning/contracts/step-2/watch-team.md#10-a-secretarys-notice-r-14).
-- Status: the coordinator accepted keeping the connection on 2026-11-23.
+- Symptom: remembering a group home retains a connection even when no AI is hosted locally in that group.
+- Cause: `EnsureHomeConnections` (`internal/host/join.go`) reconciles all remembered homes and runs state-only `sync` (`internal/host/deliver.go`) to keep group rows updated after connection.
+- Status: open, accepted by the coordinator on 2026-11-23.
 
 ### 2026-11-22 · limitation · Stored AI rows written before profiles are not migrated
 
 - Symptom: syncing an untouched AI row written before profiles may omit the four fields, or carry an empty tier if written after the wire freeze but before the home assigned defaults.
 - Cause: home sync sends stored state and deltas without rewriting them (`internal/home/sync.go`). The home treats an empty stored tier as standard for escalation and writes the default on the next member edit.
 - Status: open for existing rows. New AI rows always have all four fields, and saved owner edits survive a home restart.
-
-### 2026-11-22 · limitation · Custom forge results depend on the template program
-
-- Symptom: a checks template can report an older request head, and a successful merge can name a later merge on the base branch.
-- Cause: `internal/host/forge_tmpl.go:124-147` supplies the submitted `{commit}` but cannot verify its use by the forge program. After merging it fetches `origin` and reads the base tip, as specified in `checks-forge.md` section 3.
-- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): forge templates, hosted checks and the merge are removed.
 
 ### 2026-11-22 · limitation · Group moves follow replies, not unsolicited pushes
 
@@ -376,7 +220,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a foreign home with no matching device row shows its computer name but says its owner was not provided.
 - Cause: `welcome` carries the device name and an owner boolean, not its owner's user id. Group details use a matching live `device` row rather than guessing from a person's group role.
-- Status: the home now writes the owner's `device` rows too (2026-11-26), so the row is there for every home whose owner's log names it. Real-host custom forge execution and Windows program resolution are not verified by the browser UI.
+- Status: open, mitigated on 2026-11-26: the home writes its owner's `device` rows too, so the row is there for every home whose owner's log names it; `welcome` still carries no owner user id.
 
 ### 2026-11-22 · limitation · The Qwen Code driver is declared from documentation, not from a capture
 
@@ -388,38 +232,14 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `contracts/step-3/drivers.md` section 3 requires the repository's configuration to be kept out of group sessions. `qwenDriver` cannot do that: a Qwen Code group session may load the project's `.qwen/settings.json`, `QWEN.md` and extensions (`internal/host/qwen.go`).
 - Cause: Qwen Code 0.28.0 documents no switch for all of it. Folder trust is not one: in an untrusted folder Qwen Code asks before every tool, even at `yolo`, which would turn level 3 into approval cards.
-- Read again 2026-11-26 (`docs/users/features/hooks.md` and `headless.md` at tag v0.28.0, not run): hooks do have a switch, `disableAllHooks` in the system settings file that the driver already writes (it also ends the person's own hooks; `QWEN.md` and MCP servers stay). `--safe-mode` drops the rest too, but with it the solodawn MCP server. And a project's hooks run only after a person approved them in an interactive session; non-interactive runs leave unapproved ones out, and an approval mode from settings does not change that. So the first half of A3.8 may hold already, and its second half ("runs in task and review sessions") likely fails in a fresh worktree.
-- Status: accepted by the coordinator (2026-11-22): Qwen Code ships with this limitation, the risk R-45 already accepts (only trusted repositories go into a group; `install.md`). Open until a capture shows a switch that keeps the configuration out and leaves approvals alone. The scenario of A10.4 for Qwen Code stays `@pending`: it needs the real program, an owner key, and a decision on the second half of A3.8 (`docs/cookbook/i11-real-machine-checklist.md` step 17).
-
-### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
-
-- Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
-- Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the home had no registered handler for it (`internal/home/check.go:109`).
-- Status: resolved. #382 registered `invite`, the cast admits Q with `JoinGroup` (`features/s2_cast_test.go`), and the scenarios of A9.12 and A9.42 are enabled.
-
-### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
-
-- Symptom: A9.44 remains pending after HM-13. With the scenario enabled, the brief proposed by the replacement secretary never appeared in either acceptance run (`features/s2_confirm.feature:560`).
-- Cause: the replacement secretary had no secretary tools on its host (entry of 2026-11-26 in Resolved), so its `propose_brief` was refused.
-- Status: resolved. The first secretary proposes the brief before the change, and the scenario is enabled; the timer itself is also covered by `features/home_rounds.feature:40`.
-
-### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
-
-- Symptom: the I2-1b scenarios exercise the card and member commands over the browser connection but do not check the rendered buttons, expired card or member editor.
-- Cause: the cast supplies protocol clients, not a rendered browser (`features/s2_cast_test.go:762`); the confirmation controls and member editor are planned in U2-2.
-- Status: open; verify the UI cases of A9.8, A9.9, A9.11 and A9.14 with U2-2.
+- Read again 2026-11-26 (`docs/users/features/hooks.md` and `headless.md` at tag v0.28.0, not run): hooks do have a switch, `disableAllHooks` in the system settings file that the driver already writes (it also ends the person's own hooks; `QWEN.md` and MCP servers stay). `--safe-mode` drops the rest too, but with it the solodawn MCP server. And a project's hooks run only after a person approved them in an interactive session; non-interactive runs leave unapproved ones out, and an approval mode from settings does not change that. So the first half of A3.8 may hold already, and its second half ("runs in task and review sessions") likely fails in an unapproved folder.
+- Status: accepted by the coordinator (2026-11-22): Qwen Code ships with this limitation, the risk R-45 already accepts (give an AI only folders of projects you trust; `install.md`). Open until a capture shows a switch that keeps the configuration out and leaves approvals alone. The scenario of A10.4 for Qwen Code stays `@pending`: it needs the real program, an owner key, and a decision on the second half of A3.8 (`docs/cookbook/i11-real-machine-checklist.md` step 17).
 
 ### 2026-11-22 · limitation · The cast's approval fixture does not execute shell commands
 
 - Symptom: A9.19 verifies the approval tool returns allow and the fake CLI resumes; it does not verify that the command runs in a real CLI.
 - Cause: the replay fixture supports protocol I/O only (`internal/host/fakecli/replay.go:98`).
 - Status: open; actual command execution is unverified.
-
-### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
-
-- Symptom: a new brief cannot replace a confirmed one, although A9.13 and `labels.md` section 4 said it did.
-- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors, as `planning/contracts/commands.md` 1.3 says.
-- Status: resolved by decision (2026-11-25): the code stays. A started task's direction changes by cancelling the task and confirming a new brief, and `labels.md` section 4 and A9.13 in `planning/steps/step-2-3-acceptance.md` now say so. The A9.13 scenario follows that sequence and is enabled.
 
 ### 2026-11-22 · limitation · The OpenCode driver is declared from documentation, not from a capture
 
@@ -432,12 +252,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
 - Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
 - Status: open for the OS timer. Both scenarios run since 2026-11-26 and pass at the protocol boundary: Q's peer asks P1, gets `moved` and dials P2 itself. The owner-only commands in the group info are covered by `web/e2e/s2.spec.ts` (A9.27), the browser's following by `features/web_move.feature` and `web/src/lib/{groups,net}.test.ts`.
-
-### 2026-11-26 · bug · The web client does not follow a moved group and does not replace the old home on a rejoin
-
-- Symptom: against A9.27, a browser whose group left the list is not sent to the new home; against A9.28, a rejoin of the group on another home does not replace the old home.
-- Cause: after the export P1 pushes `groups` without the group, `Home.#list` (`web/src/lib/groups.svelte.ts:391`) drops it and nothing asks P1 again, so `moved` (`web/src/lib/groups.svelte.ts:357`) is never seen. The rejoin gap was not traced.
-- Status: fixed by [#403](https://github.com/huanchong-99/SoloDawn/pull/403) (merged), both gaps; see "An idle browser lost a moved group, and an open tab stayed on a lost home".
 
 ### 2026-11-22 · limitation · Task participation history is inferred from current fields
 
@@ -523,18 +337,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: xterm.js halves the opacity of faint text (`DomRenderer.ts`, the `.xterm-dim` rules); `web/src/routes/Terminal.svelte` replaces only the default colour's rule with `--term-dim`, since one grey for every colour would drop the colour.
 - Status: open, accepted in U-16b: the colours are the CLI's own.
 
-### 2026-11-22 · limitation · A denied call draws as waiting
-
-- Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.
-- Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
-- Status: resolved in U2-2. The call block shows “Denied” without a waiting timer or reply.
-
-### 2026-11-22 · deviation · A9.26 live M5 forge coverage awaits a configured live run
-
-- Symptom: the original live fixture checked two remote filenames without reusing M5's forge steps or inspecting request heads.
-- Cause: A9.26 used the subprocess fixture instead of M5's two-task forge flow.
-- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the forge and A9.26 are removed, and the real-machine checklist has no forge step.
-
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
 - Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
@@ -600,29 +402,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `decision` cards (`planning/contracts/messages.md` section 2.4, `planning/contracts/commands.md` section 1.4) take a single `arg` option id plus optional `text`, and owner override 1 of 2026-11-21 does not add multi-select cards.
 - Status: open, accepted for 1.0 (`planning/contracts/mcp-tools.md` section 3); multiple picks are given in the free-text field.
 
-### 2026-11-21 · limitation · An immediate `submit_task` after `run_checks` can read `checks.local` before the home's row push
-
-- Symptom: a scripted CLI that calls `submit_task` immediately after `run_checks` returns can read a stale `task` row in `Host.Rows` and fail with `conflict` (`local checks have not passed`), whereas with a real model the gap between the two tool calls is seconds.
-- Cause: the home answers `task checked` before pushing the `rows` frame that carries the updated `checks.local` (`internal/home/README.md`), and `tskPrepareSubmit` (`internal/host/tools_task.go:318`) reads `checks.local` from `Host.Rows`.
-- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): `run_checks` and `checks.local` are removed; `submit_task` is the submission and reads no check result.
-
 ### 2026-11-21 · deviation · Host derives the data folder from SQLite's `pragma_database_list`
 
-- Symptom: for an in-memory store (`:memory:`), `projectDir` returns `""` and delivery skips disk clone and worktree creation; for a disk store it derives `projects/<group>` from the directory of the `main` database file (`filepath.Join(filepath.Dir(dbFile), "projects", group)`), tying the host to the store's file layout.
-- Cause: `host.Host` (`internal/host/host.go:75`) has no `Dir` field yet, so `projectDir` (`internal/host/run.go`, shared by `sessionDir`, `deliver.go` and `join.go`) reads `file` from `pragma_database_list WHERE name = 'main'`.
-- Status: open for the one place left, `dataDir` in `internal/host/tools_workspaces.go`, which leaves the node's own data folder out of the folder list. The delivery, clone and worktree uses are ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)). `node` setting a `Dir` field on `Host` can replace the `pragma_database_list` lookup.
+- Symptom: `dataDir` (`internal/host/tools_workspaces.go:69-76`) derives the node's data folder from the directory of the `main` SQLite database file (`SELECT file FROM pragma_database_list WHERE name = 'main'`) so `listWorkspaces` can omit the node's own data folder (for an in-memory `:memory:` store, `file` is empty so `filepath.Dir("")` and `filepath.EvalSymlinks` give `"."`), tying `host` to the store's file layout.
+- Cause: `host.Host` (`internal/host/host.go:76`) has no `Dir` field, so `dataDir` queries `pragma_database_list` on `h.Store`.
+- Status: open for `dataDir` in `internal/host/tools_workspaces.go` (the earlier `projectDir` clone and worktree uses in `run.go`, `deliver.go` and `join.go` ended with the product-model change MODEL-1126, [decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)). `node` setting a `Dir` field on `Host` can replace the `pragma_database_list` lookup.
 
-### 2026-11-22 · limitation · Step 17 cleanup leaves narrow turn-start windows and retries dirty merged worktrees
+### 2026-11-22 · limitation · Step 17 cleanup leaves narrow turn-start windows
 
-- Symptom: a `notice` or `mention` arriving during step 17 cleanup can start one more turn in an obsolete session (whose CLI then stays open until `idle_minutes` expires), and a merged task worktree left with untracked files fails the non-forced `git worktree remove` and retries one Git call on each later `rows` push.
-- Cause: `finishSessionClose` (`internal/host/run.go`) starts `go Deliver` before the caller's `Sessions.End` (`internal/host/deliver.go`), `Runner.Close` finds no `liveProc` while `startFromDormant` is between `Move(Dormant, Working)` and `rt.procs[key] = lp`, and `RemoveTaskWorkspace(..., TaskMerged)` omits `--force` so unsaved files in a merged worktree are preserved (`planning/contracts/local.md` section 7).
-- Status: open, accepted on 2026-11-22 (`HS-23` review), for the turn-start windows only. The retry of a dirty merged worktree is ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): a task has no worktree to remove.
-
-### 2026-11-21 · limitation · `reportWorkspaceFailure` duplicates `member status` assembly from the session runtime
-
-- Symptom: on a task or review workspace Git failure, `reportWorkspaceFailure` (`internal/host/deliver.go:934`) builds `member status` (`turn_interrupted`) by hand and infers `state` (`waiting` when any session of the AI is `waiting`, else `dormant`) instead of sharing the session runtime's status builder.
-- Cause: HS-13 (#186) and HS-15 (#187) were built on separate branches without a shared status helper on `host.Runtime`.
-- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): `reportWorkspaceFailure` is removed with the task and review workspaces.
+- Symptom: a `notice` or `mention` arriving during step 17 cleanup can start one more turn in an obsolete session, whose CLI then stays open until `idle_minutes` expires.
+- Cause: `finishSessionClose` (`internal/host/run.go:795`) wakes delivery before the caller's `Sessions.End` (`internal/host/deliver.go`), and `Runner.Close` finds no `liveProc` while `startFromDormant` (`internal/host/run.go:413`) is between `Move(Dormant, Working)` and `rt.procs[key] = lp`.
+- Status: open, accepted on 2026-11-22 (`HS-23` review), for the turn-start windows only. An earlier second half (retrying non-forced `git worktree remove` on dirty merged worktrees) ended with the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): a task has no worktree to remove.
 
 ### 2026-11-21 · limitation · `max_open` is enforced in the session runtime rather than in delivery
 
@@ -672,11 +462,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `*peer.Connection` (`internal/peer/sockets.go`) exposes `Path()` without ICE candidate-pair round-trip statistics (the field and its reporter were removed until it does), and router port mapping (`PR-3`) was cut from step 1 on 2026-11-21 (`planning/contracts/mcp-tools.md` section 1).
 - Status: open, accepted for step 1 (`N-8`).
 
-### 2026-11-21 · limitation · `host.info` is pushed for `watchers` only and reports `queued` as `0`
+### 2026-11-21 · limitation · `host.info` is pushed for `watchers` and explicit refresh only
 
-- Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and pushes `host.info` only after a request with `refresh` and when `watchers` change, and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`). A browser that stays connected therefore hears of a group that the person joined in another browser only at its next `host.info`, which is its next connection.
-- Cause: `settings.set` is postponed with `U-12`, the 1.0 web client requests `host.info` on connect and after `agent.set`, and held items are held on the home (`not_before`, `HM-7`) rather than counted on the host.
-- Status: open for the push of the other fields, accepted for 1.0 (`N-3`). `watchers` is pushed when a watch grant is added or ends (`Host.WatchersChanged`, `internal/host/watch.go`; `Surface.pushHostInfo`, `internal/node/surface.go`). `queued` counts the items the host holds since HS-20 (`Host.QueuedCount`, `internal/host/deliver.go`). The web client shows no held count: the terminal page and the card of an AI in takeover say that messages to it wait until hand-back (`U-11`, coordinator 2026-11-22; `planning/flows/takeover.md` step 9).
+- Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and pushes `host.info` only after a request with `refresh` and when `watchers` change. A browser that stays connected therefore hears of a group that the person joined in another browser only at its next `host.info`, which is its next connection.
+- Cause: `settings.set` is postponed after 1.0, and the 1.0 web client requests `host.info` on connect and after `agent.set`.
+- Status: open for the push of non-watcher fields, accepted for 1.0 (`N-3`). `watchers` is pushed when a watch grant is added or ends (`Host.WatchersChanged`, `internal/host/watch.go`; `Surface.pushHostInfo`, `internal/node/surface.go`), and `queued` counts the items the host holds since HS-20 (`Host.QueuedCount`, `internal/host/deliver.go`). The web client shows no held count: the terminal page and the card of an AI in takeover say that messages to it wait until hand-back (`U-11`, coordinator 2026-11-22; `planning/flows/takeover.md` step 9).
 
 ### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
 
@@ -687,21 +477,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
 - Status: open, postponed off the step-1 main line (`N-6`). Version 1 ships without self-update; `install.md` says how to update by hand.
 
-### 2026-11-21 · limitation · `Sessions` handlers and runtime pairing/surface wiring across `HM-2`, `HM-3`, `N-3` and `N-4`
-
-- Symptom: before runtime assembly, inbound `ctl` requests for `sync`, `fetch` and `host.info` were answered `bad_request` on a bare `Sessions` hub (`internal/node/session.go`), and `Pairer.Serve`, `Pairer.Known`/`Pairer.Routes`, `Pairer.HandleEvent`/`PairConfig.Paths`, `Pairer.Peer`, local socket `pair`/`pair-browser`/`open`, and `SurfaceConfig.Agents` (`(*Host).Agents`) awaited assembly in `internal/node/node.go`.
-- Cause: `Sessions`, `HM-2`, `HM-3`, `HM-7`, `N-3` and `N-4` were built as separate units (`settings.set` is postponed with `U-12`).
-- Status: resolved in `HM-7` (#221), `HM-2` (#205), `HM-3` (#207), `N-3` (#223) and `N-4` (#226).
-
-### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
-
-- Symptom: the step-2 planning documents (`planning/contracts/step-2/authority.md:36, 85, 92-93, 104, 108`, `planning/contracts/step-2/confirm.md:145-147, 196-223, 244`, `planning/contracts/step-2/watch-team.md:46-67` and `planning/steps/parallel-plan-step-2-3.md:20-21, 27`) require an inbox item to carry a signed `cause` when a group home belongs to another person, whereas `P-1b` removed `cause` from step-1 items.
-- Cause: step 2 is postponed while step 1 ships with plain unsigned items under the owner's 2026-11-21 decision.
-- Status: resolved in T2-13; the step-2 contracts now use plain items and host-written context labels, without an item-level `cause`.
-
 ### 2026-11-21 · limitation · Group and review sessions default to permission level 3 and rely on instructions not to edit files
 
-- Symptom: at the default permission level of 3 (owner's decision of 2026-11-21), a group session or a review session starts its CLI with full tool access rather than a CLI-enforced read-only sandbox, so a model that ignores its prompt could edit files in `repo/` or `review/<num>/`.
+- Symptom: at the default permission level of 3 (owner's decision of 2026-11-21), a group session or a review session starts its CLI with full tool access rather than a CLI-enforced read-only sandbox, so a model that ignores its prompt could edit files in its workspace folder (`planning/contracts/local.md` section 7).
 - Cause: `readLaunchConfig` (`internal/host/run.go`) applies `perm.level` or `default_level` (default 3) to every session kind so that group and review sessions keep the CLI's ask-the-user tool and their multiple-choice questions reach the owner as decision cards (`planning/sessions.md` section 1). At level 1 Claude Code runs with `--tools Read,Glob,Grep` (`planning/contracts/drivers.md` section 1.1), which strips that tool.
 - Status: open, accepted by the coordinator's decision of 2026-11-21 (#187). Each session's instructions (`planning/contracts/drivers.md` section 4) tell group and review sessions not to change code.
 
@@ -741,17 +519,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `grpOwnerID` (`internal/home/cmd_group.go:89`) and `briefTaskID` (`internal/home/cmd_brief.go:286`). Each id has the form of a random id, and nobody knows it before the command arrives, because `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
 - Status: open, decided by units HM-8 and HM-5 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivations can go.
 
-### 2026-11-21 · deviation · A `task_failed` row written beside a `checks` or `review` row has an id derived from the command's nonce
+### 2026-11-21 · deviation · A `task_failed` row written beside a `review` row has an id derived from the command's nonce
 
-- Symptom: when `task cloud` reaches `limits.failures` (row 6 into row 14) or `post` of kind `review` exceeds `limits.review_rounds` (row 7 into row 14), the command writes two message rows in the task's thread: the `checks` or `review` row under `n`, and the `task_failed` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn task failed <n>` in base64url.
-- Cause: `n` already names the `checks` or `review` message row, and a command function is pure and has no randomness (`revDerivedID` in `internal/home/cmd_review.go:149`).
+- Symptom: when `post` of kind `review` exceeds `limits.review_rounds` (row 7 into row 14), the command writes two message rows in the task's thread: the `review` row under `n`, and the `task_failed` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn task failed <n>` in base64url.
+- Cause: `n` already names the `review` message row, and a command function is pure and has no randomness (`revDerivedID` in `internal/home/cmd_review.go:149`). (Before `MODEL-1126`, PR #424, the same helper served `task cloud` row 6 into row 14 beside a `checks` row.)
 - Status: open, decided in unit HM-11 on 2026-11-21, for the same reason as `briefTaskID` above.
-
-### 2026-11-21 · deviation · Passed hosted checks write a `checks` message in the task's thread
-
-- Symptom: `task cloud` with `ok: true` writes a `checks` message (`stage: "cloud"`, `ok: true`) in the task's thread, where `planning/contracts/task-machine.md` row 6 and `planning/flows/trace-task.md` step 8 mention a `checks` message only when hosted checks do not pass.
-- Cause: `planning/contracts/commands.md` 1.5 and `planning/contracts/messages.md` 2.8 state that the home writes a `checks` message from `task checked` (`local`) and `task cloud` (`cloud`), and `internal/proto/testdata/task-cloud.json` carries `items` when `ok` is `true`, which `TaskRow.Checks.Cloud` does not store (`revCloud` in `internal/home/cmd_review.go:39`).
-- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): hosted checks, `task cloud` and the `checks` message are removed.
 
 ### 2026-11-20 · limitation · `tools.json` freezes JSON Schema keywords that the MCP SDK may write otherwise
 
@@ -767,33 +539,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
 
-- Symptom: after the sixth failed review a task is `failed` at step `review`. When an admin resumes or reassigns it, the reviewer is asked to review the same commit again, although that commit has just failed.
-- Cause: row 7 of `contracts/task-machine.md` above the limit is row 14 alone, which leaves the step (`internal/home/machine.go:560`); section 2 then gives a task that becomes active at step `review` its `review` item (`internal/home/machine.go:428`). Row 6 is different: failed hosted checks set step `local_check` before they stop the task.
-- Status: open. No change, by the coordinator's decision of 2026-11-20: the contract says so explicitly, and it lets a person resume the task with another reviewer for the same commit.
-
-### 2026-11-20 · limitation · A child of a Windows check can start before the job holds the shell
-
-- Symptom: on Windows a check's `cmd.exe` joins its job object only after it has started, so a process it starts in that moment is outside the job and survives the check.
-- Cause: Go starts the process before `killCheckTree` assigns it (`internal/host/checks_tree_windows.go`, `newCheckJob`).
-- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the node runs no check commands, and `checks_tree_windows.go` is removed.
-
-### 2026-11-20 · limitation · A key in a UTF-16 file passes the secrets check
-
-- Symptom: a UTF-16LE file holding a private key or a token passes the secrets hard check: with `--text`, Git shows its bytes, and every second byte is NUL, so no pattern matches.
-- Cause: the patterns of `local.md` §8 match ASCII text (`internal/host/secret.go`); `checkAddedLines` reads the diff as it comes.
-- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the hard check on a task's diff is removed. The scan of what an AI sends to the group stays (`internal/host/secret.go`); the loss of the diff scan is in the entry "What was reviewed and what is delivered are no longer guaranteed the same".
-
-### 2026-11-20 · limitation · Files hidden by ignore rules can change what a check runs
-
-- Symptom: a file ignored through `.git/info/exclude` or `core.excludesFile`, not through the project's `.gitignore`, is shown by neither `git status` nor `git ls-files`; it can change what a project check does, so a passing check may not describe the commit alone (L5).
-- Cause: `run_checks` runs in the task's worktree (`internal/host/checks.go`, `cleanCheckHead`), where such files can exist.
-- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/proposed/feature/2026-11-26-groups-workspaces.md)): the node runs no check commands; the AI tests the way the project does.
-
-### 2026-11-20 · bug · Two nodes starting together could each remove the other's socket
-
-- Symptom: two nodes that started together on one data directory both ran over a stale `sock`: one removed the other's live socket, and the first one's close then removed the second's (89 of 3000 rounds in the independent review of `internal/node`).
-- Cause: the dial of `sock` and its removal were not one step (`internal/node/socket.go`, before this fix).
-- Status: resolved. `local.md` section 3, "One node per data directory", now holds the rule: an exclusive lock on `lock` in the data directory, taken by `ListenLocal` (`internal/node/socket.go:38`, `lockData` at `:61`) before the socket is touched.
+- Symptom: after the sixth failed review a task is `failed` at step `review`. When an admin resumes or reassigns it, the reviewer is asked to review the same report again, although that report has just failed (`TaskRow.Report`, `internal/home/machine.go`).
+- Cause: row 7 of `contracts/task-machine.md` above the limit is row 14 alone, which leaves the step (`internal/home/machine.go:530-533`, `stop` at `:441-445`); section 2 then gives a task that becomes active at step `review` its `review` item (`internal/home/machine.go:404-419`).
+- Status: open. No change, by the coordinator's decision of 2026-11-20: the contract says so explicitly, and it lets a person resume the task with another reviewer for the same report.
 
 ### 2026-11-20 · limitation · Windows scheduled task expands `%VAR%` in the executable path
 
@@ -815,12 +563,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: the node checks the binary against `SHA256SUMS` from the same release (`local.md` section 9). Whoever can replace the binary there can replace `SHA256SUMS` too, so the check catches a damaged or cut download, not a forged release.
 - Cause: the contract has no signature over releases; binaries are not signed (decided). The download itself is https only, follows at most five redirects, each to https, is limited in size, and is given up after 60 s without data, whatever its total time (`internal/node/update.go`, `get`).
 - Status: accepted trade-off of the contract.
-
-### 2026-11-20 · bug · go-nat v0.2.0 gets four things wrong in port mapping
-
-- Symptom: against NET-1's gateway (miniupnpd 2.3.9) in spike S-8 ([#134](https://github.com/huanchong-99/SoloDawn/pull/134)), go-nat failed four ways. (1) NAT-PMP returns the external port it asked for, not the one the router granted: it reported 55459 where the router mapped 30000, so a node would publish an unreachable port. (2) NAT-PMP `DeletePortMapping` leaves the mapping in place. (3) NAT-PMP calls ignore the context: with the router silent, a call with a 2 s context had not returned after 10 s. (4) UPnP asks only for random external ports and fails with 606 where the router restricts ports. Discovery also always takes 5 s.
-- Cause: in go-nat v0.2.0, `natpmp.go:106` and `:115` discard the mapping result; `natpmp.go:125-127` only forgets the port; `natpmp.go:43` uses `natpmp.NewClient`, which retries for about 128 s (go-nat-pmp v1.0.2 `natpmp.go:34-35`); `nat.go:123-125` draws random ports and `upnp.go:250-275` never tries `AddAnyPortMapping`; `upnp.go:152` waits 5 s. Details in [`spikes/S-8/results.md`](https://github.com/huanchong-99/SoloDawn/blob/spike/S-8-portmap/spikes/S-8/results.md), section 1.
-- Status: open, external. Avoided by the coordinator's decision of 2026-11-20: PR-3 uses go-nat-pmp (`NewClientWithTimeout`) and goupnp's `internetgateway2` (IGDv2 first, then IGDv1) directly, not go-nat, and replaces the go-nat pin in `deps_test.go` with these two.
 
 ### 2026-11-20 · limitation · pion drops `tcptype` from server-reflexive candidates
 
@@ -955,12 +697,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the rendezvous answers each `to` it cannot deliver with `{"t":"offline","k":…}`, which names the target but not the `conn` (`planning/contracts/rendezvous.md` section 2.2). `internal/peer/path.go:140-145` passes every such report to `Peer.Offline`, which takes it for each unanswered offer to that target and removes the reporting path (`internal/peer/unanswered.go:38-43`). A report for an earlier frame (the earlier offer or one of its candidates) still on its way when the next offer leaves therefore counts against the new one. The back-off of at least one second makes this rare; a presence report can end the back-off sooner (`planning/flows/connect.md` step 16).
 - Status: open, accepted by the coordinator on 2026-11-20 with no contract change.
 
-### 2026-11-20 · deviation · No receiver check or shared vector for a beacon yet
-
-- Symptom: `planning/contracts/envelope.md` section 3, checks 4 and 5, now gives a beacon (`planning/contracts/rendezvous.md` section 4) a third set of receiver checks: no `to`, and a two-minute window. The code and the vectors know two kinds only. `OpenSignal` requires `to`, and `OpenCommand` allows 24 hours. So neither reads a beacon as the contract says.
-- Cause: the rule was settled after B-02c and F-01d (#136). The identity code has the two kinds only: `internal/identity/envelope.go:30` and `:37`, and `web/src/lib/identity.ts:185-195`. `planning/contracts/vectors.md` section 3 lets `received` be `command` or `signal` only, and `internal/proto/testdata/crypto.json` has no beacon case.
-- Status: open. PR-2 adds a beacon case to `received` in `vectors.md` and `crypto.json`, and a third envelope kind in both identity implementations, before it reads beacons.
-
 ### 2026-11-20 · deviation · The web client does not handle `full` yet
 
 - Symptom: a browser that joins a pairing room that already has two members is answered `{"t":"full","room":"<room id>"}` (`planning/contracts/rendezvous.md` section 2.2), but the web client drops the frame without telling the page, so a third browser keeps waiting for `joined`.
@@ -996,12 +732,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: not observed. If the store fails to commit a transaction whose function succeeded (an I/O error at `COMMIT`), the session table in memory keeps the changes the store lost, until the node restarts and reads the table again.
 - Cause: `Sessions.Write` puts a change into memory inside the transaction and takes it out again only when the transaction's function returns an error (`internal/host/session.go:180`, `Write`). The store reports a failed commit only after the next transaction may have started (`internal/store/store.go:76-86`, `:88-92`), and has no hook that runs before it.
 - Status: open, accepted for step 1. A store hook that runs on the writer after a failed commit would close it.
-
-### 2026-11-20 · limitation · Cards and home-written rows are one line each in the chat main line
-
-- Symptom: in the main line of the web client a brief, an approval, a decision, a summary and a call are one outlined line that names the kind and the card's subject, with the dawn edge and "Waiting on you" when the card waits for the reader. It has no buttons: the reader cannot confirm, approve or choose there. A row the home wrote (`task`, `system`) is a quiet centred line; a `system` row shows its `code` as it is on the wire, not a sentence.
-- Cause: F-07 is the row layout and text messages (`planning/steps/step-1-frontend.md`). The line is drawn in `web/src/components/chat/Message.svelte`; `subject` in `web/src/lib/groups.svelte.ts` gives the subject.
-- Status: open. The card units replace the line (U-4 approvals, U-7 brief, decision and summary, U-8 task, U-9 the wording of `system` rows, U-10 calls).
 
 ### 2026-11-20 · limitation · In Safari the main line moves when a message arrives while the reader is scrolled back
 
@@ -1053,6 +783,287 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `go test -tags acceptance -race` on "People who type one invitation code meet the home in its room and join, at once (A9.47)" failed one run in three with `WARNING: DATA RACE` (`testing.go: race detected during execution of test`); the two writes were the two browsers' clean-ups.
 - Cause: the function `afterScenario` returns appended to a plain slice (`features/acceptance_test.go:136`, before the fix), and `twoJoin` (`features/node_pair_code_test.go:458`, `twoJoin`) opens one browser (`newPeerBrowser`, which registers its clean-up) in each of two goroutines.
 - Status: resolved in unit M3-7: the list is guarded by a mutex in `afterScenario`; `-race -count=3` of the invitation-code scenarios passes.
+### 2026-11-27 · bug · The demo world wrote a second document when a preset or knowledge-base document was saved again
+
+- Symptom: in `?demo`, saving a style preset or a knowledge-base document under a name that already existed added a second entry of that name instead of replacing the first, which `planning/contracts/step-3/knowledge.md` section 2 requires.
+- Cause: the demo's `note` handler (`web/features/sim/director.ts`, `#note`, before M2) wrote every `note` under the command's new `id` and never looked up the note of that type and name.
+- Status: resolved in batch M (PR #426): `notePut` in `web/features/sim/memory.ts` replaces the note of that type and name, keeping its id and place (`features/sim/sim.test.ts`, "writes, edits, searches and pages the project memory and the knowledge base").
+
+### 2026-11-27 · deviation · The tier read as a thinking setting, the quota was hard to find, and new groups took no model
+
+- Symptom: the owner, clicking the demo, read "档位: 轻量 / 标准 / 强" in "编辑档案" as a thinking setting, could not find the AI's quota, found no thinking level in that editor, and could choose an AI's model and level only after the group was made.
+- Cause: the tier was worded as a strength although the secretary uses it to share out work (`internal/host/instructions/secretary.md:18`); the usage meter sat at the bottom of the card, apart from the tier; model and level had their own "更改" editor, and `web/src/components/model/ModelFields.svelte` hid the level whenever the chosen model listed none, which includes "the CLI's default", every new AI's model; `web/src/components/groups/CreateGroup.svelte` sent `newDraft()` for every AI.
+- Status: resolved in batch M (PR #426): the tier is worded "派活: 少 / 适中 / 多" ("Work share: Less / Normal / More") in the client, the secretary's instructions and the contracts (stored values unchanged); it sits first on the card in one block with the usage line; "编辑档案" edits model, thinking level, work share and skills; the level is always shown, with its reason when there is none to choose; the create-group dialog gives each ticked AI model, level and work share, sent in its `host.join`.
+
+### 2026-11-27 · bug · The demo panel refused a typed or pasted pairing code on the first try
+
+- Symptom: in `?demo=fresh`, a reviewer typed the onboarding page's code into the demo panel's pairing field and pressed **交给 MacBook Pro**; the panel said 「这不是配对码」. The same code paired on the second try. Reproduced on 47ae57c1e in 3 of 3 runs that click into the field and then type or paste the code (one of them after clearing the field and clicking on the page for 3 s); 0 of 4 runs that hand over the prefilled field as it is or select it before typing.
+- Cause: every render of the panel wrote the page's code into the field (`web/features/sim/panel.ts:113` on 47ae57c1e, `input.value = codeOnPage()`), and an open panel renders every 2 s while it is neither hovered nor focused (`panel.ts:55-57`). A click into the field puts the caret after that code, so typing or pasting the code made 38 characters, which `parseSecret` refuses (`panel.ts:131-133`). The refusal renders the panel again, which puts the bare code back, so the second try hands it over. `codeOnPage` also read the panel's own text, so once the page showed no code it took the example code of the panel's message. Demo only: the real client has no field for a code (the browser creates the secret, or reads it from a join link in `web/src/lib/join.ts:48`), and a real node reads the code once from `solodawn pair <code>` (`internal/node/node.go:758`, `internal/node/pair.go:212`).
+- Status: resolved in batch M (PR #426): the field holds only what the person typed, kept across renders and emptied once the computer heard the code; the page's code is the placeholder and is handed over from an empty field; `codeOnPage` reads the page outside the panel (`web/features/sim/panel.ts:31-37,50-53,118-147`). Test: `web/features/sim/panel.test.ts`.
+
+### 2026-11-27 · bug · Four OS-specific functions failed the CRAP limit on any other system
+
+- Symptom: `gate.py --stage merge` on macOS failed the crap gate on `internal/node/service_linux.go:25 InstallService` (CRAP 20, CC 4), `:47 RemoveService` (12, CC 3), `internal/node/socket_windows.go:30 privateDir` (20, CC 4) and `internal/rendezvous/truncated_windows.go:15 readDatagram` (12, CC 3), each "no coverage data for this file".
+- Cause: a file that does not build on the host has no coverage data, and `.project-standard/scripts/crap.py` (`measure`) counts it as 0%; at 0% only CC 2 or less passes the limit of 6. CI runs these files' tests on Linux and Windows, but the limit is enforced locally. Found on the way: a copy of `.project-standard/` into a worktree also copies `state/` of the main checkout, whose session file and `base_commit` make `crap.py` measure against another session's base; remove the copied `state/` before measuring a worktree.
+- Status: resolved in batch M (PR #426): the branching is in `installServiceFile` and `removeServiceFile` (`internal/node/service.go`), `createDir` (`internal/node/socket.go`) and `readSkipping` (`internal/rendezvous/truncated.go`), at 100% on every system; the OS functions are CC 1. Code in a file built for one system keeps CC 2 or less.
+
+### 2026-11-27 · bug · `TestNodeWatchGrantAdmission` reported the relay refusal as a missing field
+
+- Symptom: on a Mac whose firewall drops direct UDP to the test binary, both subtests failed at `internal/node/node_test.go:1283` with `proto: a field that is always present is missing`, on `rebuild` 47ae57c1e and equally before the protocol 3 change (b051eafef).
+- Cause: the connection was relayed, so the node answered `watch.start` with `{"re":2,"err":{"code":"relay","msg":"watch requires a direct path"}}` (`internal/host/watch.go:95`), as `planning/contracts/step-2/watch-team.md` section 4 requires. `checkWatchStart` decoded that error answer as a `proto.Success`, whose `ok` is always present. The product was right; the test hid the answer.
+- Status: resolved in batch M (PR #426). `checkWatchStart` now fails with the error answer's code and text (`watch.start answered relay: watch requires a direct path`). The test also no longer starts a loopback TURN server (`startTestRVWithRelay`), which it never needed: it checks admission by grant, the `relay` refusal is covered by `internal/host/watch_test.go`, and with a TURN server ICE could nominate a relay pair first on a loaded runner. It now uses the plain rendezvous of the other node tests, so ICE has no relay candidate, and a host without a direct UDP path fails at the WebRTC connection's time-out. Should the node still answer `relay` (a path that is relayed, or not yet selected), the test now names that refusal instead of a missing field.
+
+### 2026-11-27 · limitation · `takeover.go:210` (`== ""` to `!= ""`) decided a value nobody reads
+
+- Symptom: CONDITIONALS_NEGATION at `internal/host/takeover.go:210:58` lived in mutation run 45905182817 (shard host-s-takeover).
+- Cause: `target.kind` is read only by `createSession` (`internal/host/deliver.go:1312,1315`), which runs only when `Sessions.Get(target.key)` misses (`prepareTargetSession`, `deliver.go:1276-1278`). With no task the key is the group session's, and its absence returns `not_found` at `deliver.go:1306-1309` before `kind` is read; with a task, `lastTask` has just read that task session from `Sessions.All()`, so it exists. Only a session ended between those two calls on another goroutine could tell the mutant apart.
+- Status: resolved in PR #424 (`95c1962f8`, `8398319e2`): `takeoverTarget` sets only the task from `lastTask`. The one difference left is under a race, a group session that appears between `followMember` and `createSession`: `createSession` then also runs `cleanupTaskSessions`, which ends only sessions of done, cancelled or reassigned tasks, before `Create` refuses the existing key.
+
+### 2026-11-27 · bug · The node-admit-local mutation shard ran the runner out of memory
+
+- Symptom: `go node-admit-local` of mutation run 45905182817 failed after 9 minutes with the annotation "Out of memory."; its log was never uploaded. A rerun of the same commit passed (126 killed, 13 timed out, the rest on the filter list).
+- Cause: gremlins ran four mutants at once (`--workers 8`), each test binary capped at 4 GiB by `ulimit -v`. The shard's timed-out mutants come one after another (seven `local.go` mutants in a row), so four runaways at 4 GiB fill the runner's 16 GiB.
+- Status: resolved in PR #424 (`8398319e2`): the shard is split into node-admit-dir and node-export-local, and those and the other node shards whose timed-out mutants come in runs (node-node, node-pair, node-socket-update) take `--workers 4`, two mutants at once and at most 8 GiB (`.github/workflows/mutation.yml`, matrix key `workers`).
+
+### 2026-11-27 · limitation · Equivalent web mutants of the model batch, and a gremlins blind spot
+
+- Symptom: Stryker survivors that no test can kill: `groups.svelte.ts:143` (`id === undefined` guard; `member(undefined)` and `#former.get(undefined)` find nothing), `members.ts:254,381` (the `[]` of a missing group is only read through `m.host` and `p.user`), `nodes.svelte.ts:110` (`group.home !== node`: `infos` holds owner homes only, `#read` via `activeCtl`, and `unheard` keeps groups of non-owner homes), `taskops.ts:66` (`other !== task`: a `busy` wait is only on a queued task, which `hasSession` excludes, `planning/contracts/rows.md` section 4) and `taskops.ts:88` (`task.wait?.by`: the manual hold exists only when `task.wait.kind` is `manual`). gremlins reported `internal/home/cmd_task.go:418:99` NOT COVERED: Go's cover tool ends a block at a function literal, so the condition after it in an `if` init had no block.
+- Status: resolved in PR #424 (`95c1962f8`): the guards are gone with no change of behaviour, and the `IndexFunc` call is its own statement (as `internal/node/schedule.go` in b4e9fda48).
+
+### 2026-11-27 · bug · Four files of the model batch belonged to no mutation shard
+
+- Symptom: mutation run 45905182817 failed "Files in exactly one shard": `internal/home/cmd_summary.go`, `internal/host/tools_workspaces.go`, `internal/host/tree_unix.go` and `tree_windows.go` were never mutated.
+- Cause: the `own` regexes of `.github/workflows/mutation.yml` did not match their names.
+- Status: resolved in PR #424 (`8398319e2`) (home-cmd-task-ev `^(cmd_[st]|e)`, host-mcp-merge `^(mc|me|tr|tools_w)`). Their mutants are first seen in the next run.
+
+### 2026-11-27 · deviation · The onboarding prompt still tells the AI to check the Git identity
+
+- Symptom: the prompt that **Add a computer** gives for an AI CLI has a step "Check `git config --global user.email`; if it is empty, ask me for a name and an email and set them". `install.md` no longer has that step, and SoloDawn commits nothing and needs no Git.
+- Cause: the texts `pairing.prompt.text_rv` of `web/src/messages/pairing.en.json:15` and `pairing.zh-CN.json:15` were not changed with the model, and `web/src/lib/onboard.test.ts:242-253` and `web/e2e/connect.spec.ts:577` assert the line.
+- Status: resolved in PR #424 (`6aa36a145`, unit DOC-1): the prompt now has three steps and no `git config` check; the three tests assert the new steps. Found while rewriting the real-machine checklist (unit DOC-1).
+
+### 2026-11-27 · bug · A node of the step-2 cast sometimes exits at start: its own rendezvous answers 400 or 404
+
+- Symptom: in the same repeats, 9 of about 2,700 casts failed in `Given the confirmation cast with Q` because P1 or Q1 never opened its socket; the node's stderr held only `failed to WebSocket dial: expected handshake response status code 101 but got 400` (or `404`). Also seen in the stress of FLAKY-33 above.
+- Cause: when port 47800 is taken, `listenNodeHTTP` fell back to `:0`, and macOS could hand out a port that another program held on `127.0.0.1`; the node then dialled it (`internal/node/node.go:430` and `:308` before the fix) and ended on that error.
+- Fix: the fallback picks a port that is free on `127.0.0.1` and listens on all addresses with it, picking again (up to 3 times) when that port is in use.
+- Status: resolved in PR #424 (`cc7a1f647`).
+
+### 2026-11-27 · limitation · Acceptance scenarios of the old model fail until units AC-1 to AC-3 rewrite them
+
+- Symptom: after unit AC-0 of MODEL-1126 `features/` compiles and its fixtures follow the new model (every AI joins with a workspace folder of its own, no bare repository, no fake `gh` or forge program, hello and welcome at version 3), but scenarios of the old model fail. The steps whose bodies the model took away fail on purpose with `rewritten by AC-<n>: <reason>` (`rewritten`, `features/helpers_test.go`); others fail because their expectations name the old model: step names `branch`, `local_check` and `merge` (`home_task`, `home_machine`, `home_review`), the roster line without the folder (`host_turn`, `host_profile`, `a10_profiles`, `a10_external`), the review checkout in the turn text (`host_turn.feature:2`), and a second task of one AI that now waits as `busy` (`m4.feature:33`, `m4.feature:48`, `m6.feature:26-39`, `s3_drivers.feature:20`).
+- Cause: plan `MODEL-1126/plan.md` section 4 gives the rewrite of these scenarios to AC-1 (M3 to M8), AC-2 (host and node) and AC-3 (home, step 2, step 3); the list by unit is `MODEL-1126/ac0-failing.md`.
+- Status: resolved in PR #424: AC-1 to AC-3 rewrote the scenarios (commits `c038a82e9`, `b0fb4fbe6`, `591d32812`), and no step calls `rewritten` any more.
+
+### 2026-11-26 · bug · A task's menu stays open after one of its items is picked
+
+- Symptom: in headless Chromium (Playwright 1.64, a trusted click) on the demo world at `?demo`, opening the `⋯` menu of a running task and pressing 暂停, 换人 or 取消任务 carries the action out but leaves the popover open over the card (`.menu:popover-open` still matches, and no `toggle` event follows the click). The next press on `⋯` then closes it instead of opening it. Seen while taking the screenshots of the redesign; it is the same with the menu's styles as they were before the redesign (`web/src/components/task/TaskMenu.svelte` at fe89a231b and at 51aee6673).
+- Cause: the items closed the menu through `popovertarget` + `popovertargetaction="hide"`, which the browser runs as the button's activation behaviour, after the click listeners and the microtask checkpoint that follows them, and skips when the pressed button is no longer connected or is disabled. The demo answers a request through promises alone, so for 暂停 and 恢复 the task's new row arrived inside that checkpoint, the keyed `{#each ops as op (op)}` (`web/src/components/task/TaskMenu.svelte:90`) replaced the pressed item, and the hide never ran (reproduced 2026-11-26 in headless Chromium at 1440: no `toggle` event, a MutationObserver saw the item replaced and `isConnected` false before the activation). 换人 and 取消任务 closed normally in that run, since they only open a question. A real home answers in a later task, which is why the e2e of M5 did not see it; the menu depended on that timing.
+- Fix: each item hides the menu itself before it hands on the pick (`hide()` at `web/src/components/task/TaskMenu.svelte:99`); the two attributes are gone. The `pick` helper of `web/features/taskops.spec.ts:46` now expects the menu to hide on every pick; with the old menu it fails in 9 steps. After the fix all four items close the menu in the same Chromium probe at 1440 and 390.
+- Status: resolved in PR #423 (`web/redesign`, commit `web: redesign review fixes`).
+
+### 2026-11-26 · deviation · Rough edges of the web client seen while walking every flow of the demo
+
+- Symptom: walking every flow of `?demo` (`web/features/sim`, branch `web/demo-sim`) in the built-in browser showed, in the client itself:
+  1. OpenCode and Qwen Code show as `opencode` and `qwen` in Add AI, on the Computers page and in onboarding, and Add AI suggests the name `qwen`: `cliLabels` knows Claude Code and Codex only (`web/src/lib/onboard.svelte.ts:37`).
+  2. A refused join says only `无法加入（join：conflict）` (`web/src/components/people/JoinForm.svelte:56`, `people.join.failure`).
+  3. After a person is removed, their earlier messages and the `member_joined` line name "已离开的成员"; removing a person takes no confirmation (`web/src/components/people/PersonActions.svelte:50`).
+  4. An approval made void by the owner's own reassignment says the secretary reassigned it (`approval.hint.reassigned`); a task the owner paused says the secretary or an admin paused it (`task.hold.manual`).
+  5. A takeover of an idle AI shows the host's task title `Owner takeover` in English (flows/takeover.md A names it).
+  6. A watcher's terminal page is titled "终端接管".
+  7. The group list previews a task message as "系统：任务" and a system row as "系统：通知".
+  8. Onboarding's "创建第一个项目群" opens the group list without the create dialog.
+  9. The composer of a group without a secretary still suggests "发需求给 @秘书".
+  10. The connection indicator stays "直连" while one of two computers is down (`indicator` summarises online homes only, `web/src/lib/nodes.svelte.ts`).
+  11. A team bulletin reads "来自Alex的电脑" without a space.
+- Cause (lines as of `ea96a5ce7`): `cliLabels` knew two CLIs (`web/src/lib/onboard.svelte.ts:37`); `JoinForm.svelte:56` showed `people.join.failure` for every code; display names came from `group.member(id)` (`web/src/lib/groups.svelte.ts:131`), which forgets a removed row, and `PersonActions.svelte:50` removed at the first press; the texts `approval.hint.reassigned` (`approval.zh-CN.json:18`) and `task.hold.manual` (`task.en.json:63`, `task.zh-CN.json:63`); the title is the host's (`internal/host/takeover.go:261`, `planning/flows/takeover.md` A); `App.svelte:44` titled every terminal page `page.terminal`; `GroupList.svelte:29` used `subject`, the text of the row, empty for a task or a notice; `StatusPanel.svelte:179` only linked to `#/groups`; the composer hint ignored `group.secretary` (`Composer.svelte:50`); `indicator` summarised the connected homes only (`web/src/lib/nodes.svelte.ts:50`); `team.computer` had no spaces (`team.zh-CN.json:7`).
+- Status: resolved in PR #422 (`fix/demo-findings`); the actor of a pause or reassignment is the entry "No row says who paused or reassigned a task" (resolved).
+
+### 2026-11-26 · limitation · No row says who paused or reassigned a task
+
+- Symptom: a task paused by hand said only that it was paused by hand, and an approval made void by a reassignment only that the task was reassigned, even when the reader did it; before 2026-11-26 the Chinese texts named the secretary.
+- Cause: the wait `manual` of a task row and the approval state `reassigned` carried no actor (`planning/contracts/rows.md` section 4, `planning/contracts/messages.md` 3.2; `waitFor`, `internal/home/machine.go`, and `tskCardRows`, `internal/home/cmd_task.go`).
+- Status: resolved by MODEL-1126 (PR #424, [decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): the wait `manual` carries `wait.by` (`internal/home/machine.go`) and the approval state `reassigned` carries `by` (`tskCardRows`, `internal/home/cmd_task.go`), and the client says who paused or reassigned. The second half stays open under "A removed member's name lasts only while the page is open".
+
+### 2026-11-26 · limitation · A hand-back or continue turn whose CLI must start in a folder that is gone is not reported
+
+- Symptom: the host checks a session's folder where delivery prepares a turn, where an external hand-out is made and at `takeover.start` (`prepareTargetSession`, `internal/host/deliver.go`). A structured start that no item causes is not checked: the hand-back turn after a takeover, a continue turn of a session that went dormant, the replacement of a session the CLI could not resume. There the CLI fails to start, the session goes `dormant` and the error is logged, with no `turn_interrupted` and no `task fail`. The check also runs before every turn, not only before a start: a session whose CLI is still open gets no turn in a folder that is gone, and stays `waiting`.
+- Cause: `planning/contracts/local.md` section 7 puts the check "before a CLI starts". Unit HS-A put it where delivery already records the outcome of a batch (delivered, acknowledged, failure reported), which is one place for managed AIs, external hand-outs and takeovers. The runtime's own starts (`startFromDormant`, `internal/host/run.go`) report no failed start of any kind.
+- Status: resolved by the review of HS-A: the check is in `startFromDormant` (`internal/host/run.go`), the one place every start of the runtime passes, and reports the crash there; delivery no longer checks before a turn, so a session whose CLI is still open gets its turn. `TestMissingFolderFailsTheStart` (`internal/host/run_test.go`) covers a turn for items, a continue turn and a hand-back.
+
+### 2026-11-26 · deviation · Between HS-A and HS-B: a Codex group session that has never run cannot be taken over, and the instructions name removed tools
+
+- Symptom: `takeover.start` for a working AI without an unfinished task opens its group session and creates no task. For a CLI whose takeover is `resume` (Codex) and a group session that has never run, the start answers `cli` (`codex: interactive takeover requires an existing thread id`). `internal/host/instructions/*.md` and the hand-back sentence of `ownTurnBody` (`internal/host/turn.go`) still name `push_branch`, `run_checks`, the review diff and "run the checks".
+- Cause: unit HS-A removed the takeover task, its structured `assign` turn and the Git facts (`internal/host/takeover.go`) only as far as package `host` needed to compile. The structured first turn of a group session, the turn texts and the instructions are unit HS-B's.
+- Status: resolved by unit HS-B: a session that has never run of a `resume` CLI gets one `TakeoverTurn` in structured mode before the terminal opens (`readyForTerminal`, `internal/host/takeover.go`), and the instructions and the hand-back sentence name no removed tool or check.
+
+### 2026-11-26 · bug (test) · The owed-turn line of `delivery.forget` was covered by a race
+
+- Symptom: with the merge steps gone from `afterGroupState`, `go test -cover ./internal/host/` reported `forget` (`internal/host/deliver.go`) at 85.7%: the line that drops the owed turns of a forgotten group did not run.
+- Cause: `TestGroupItsOwnerWasRemovedFromIsLeft` opens a pre-emption and then lets two background goroutines race: `afterGroupState`, whose sweep drops a pre-emption that has not ended (`dropUninterrupted`), and `leaveGroup`, which calls `forget`. Whichever came first removed the owed turn, and the test accepts both.
+- Status: resolved. `TestGroupWhoseHomeRefusesItIsLeft` calls `forget` with a turn owed in the group and one owed in another group, and checks that the first alone is dropped.
+
+### 2026-11-26 · deviation · The Computers page says a relayed node switches back to direct by itself
+
+- Symptom: a relayed computer shows "The node keeps trying a direct connection and switches back automatically." (`nodes.relay.body`, `web/src/messages/nodes.en.json:23`, `nodes.zh-CN.json:23`, shown by `web/src/routes/Nodes.svelte:190`). No code tries: the relay-free probe and move were cut on 2026-11-21 ([connect](planning/flows/connect.md) B).
+- Cause: the text predates the cut. A relayed connection becomes direct only when ICE finds a direct pair itself; a reconnect runs ICE again and stays relayed if direct is still blocked.
+- Status: resolved on 2026-11-26: `nodes.relay.body` (en and zh) now says the connection may turn direct after a reconnect or if the browser finds a direct path itself, and otherwise stays relayed. No test or e2e spec carries the text.
+
+### 2026-11-26 · limitation · A task handed to an AI of another node can start without the last commits
+
+- Symptom: the new assignee's node creates its worktree from the published branch while the old assignee's node still pushes its last commits. The new AI's own push is then refused, and `push_branch` or `submit_task` fetches the branch under the clone's lock and tells it to merge `origin/<br>`, run the checks and push again (`planning/contracts/mcp-tools.md`). If the old node is off when the task moves, its unpushed commits stay on it: it pushes them when it comes back, and if the new AI has pushed by then, that push is refused, told once in the task's thread, and the commits stay on the old node's local branch.
+- Cause: the home sends the task row to one node and the `assign` item to the other at the same time, and no message says that a branch has been published (`planning/flows/task.md`, "Reassignment": two nodes do not wait for each other).
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): a task has no branch and no worktree, so nothing is published or created from a branch when it is reassigned. The new assignee's instructions tell it to find where the earlier work is before it starts (`internal/host/instructions/task.md`); what the old AI left in its own folder is the new entry "Half-finished work stays in the folder after a failure, a cancel or a reassignment".
+
+### 2026-11-26 · limitation · A push holds the clone's lock, its hook included
+
+- Symptom: while an AI's `push_branch` or `submit_task` pushes, every other Git command of the group's clone waits: the fetch before a dormant group session's turn, a new task or review worktree, a local merge, a branch deletion. A project `pre-push` hook that runs the tests makes that minutes, up to the push's 60-minute limit.
+- Cause: a push moves `refs/remotes/origin/<br>` of the clone, which a concurrent fetch also locks ("cannot lock ref"), so it runs under the clone's lock (`PushBranch`, `internal/host/forge.go`; `planning/contracts/local.md` section 7). A push to `origin`'s push URL instead of its name was tried: it left the ref alone with Git 2.54.0 but updated it with Git 2.56.1 on CI.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): the node makes no clone and runs no Git push; an AI that pushes does it in its own folder by the project's rules.
+
+### 2026-11-26 · bug · The fixtures of the confirmation scenarios did not match the contracts
+
+- Symptom: the first run of A9.8 to A9.19 and A9.42 to A9.44 failed in A9.9, A9.11, A9.42 and A9.44 with nothing wrong in the product.
+- Cause, in `features/s2_confirm*`: `state.by` of a card was expected to be a user id, it is a member id (`contracts/messages.md` section 3); a scripted tool without arguments sent `"arguments": null`, which the host refuses; a `choose` had an empty `arg`; the group had `forge: none`, which is one machine only, so a reviewer on another node could not fetch the commit; the scripted results of a Claude Code tool call were not compared; the one-person quiet-task scenario needed the secretary's tools ("A changed secretary gets no secretary tools on its host").
+- Status: resolved in the change that enables the scenarios. The cast's group used the fake forge of A9.24 (later removed in MODEL-1126, PR #424).
+
+### 2026-11-26 · bug · The A9.2 fixture sent each signalling frame twice
+
+- Symptom: A9.2 waited for a signalling turn in 2 of 2 runs (8.9 s) and failed on this Mac in some runs (cause 2 of the entry above).
+- Cause: `peerNode.routesFor` in `features/helpers_test.go` added the node's rendezvous path and then every route of `Pairer.Routes`, which holds the same path, so each frame to a joining browser went twice over one WebSocket. The product skips such a route (`internal/node/node.go` `routesFor`, #373).
+- Status: resolved on `s2/lift-people`: the fixture skips a route whose ID is already there. A9.2 then passed 21 of 22 runs under `-race -tags acceptance`; the one failure is cause 1 (its goroutine dump holds the blocked `WriteToInet4` under `sendBindingSuccess`).
+
+### 2026-11-23 · deviation · An agent without a driver cannot join a group
+
+- Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
+- Cause: only the second tier was planned and built. The MCP shim takes only the session token that the node creates when it starts a CLI itself ([local.md](planning/contracts/local.md), section 3), `host.join` takes only an agent with a driver (`agtValidAgent`, `internal/host/agents.go:258`), and nothing lets an agent take an inbox item.
+- Status: resolved by the external AI units (R-166, [external.md](planning/contracts/step-3/external.md); [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2): joining (`internal/host/external.go`), setup (`internal/node/external.go`), and member-scoped MCP (`internal/host/shim.go`) work without a driver. The [browser test](web/e2e/external.spec.ts) and [I3-3 scenarios](features/a10_external.feature) cover waiting, queued work, the owner-only tool label, managed replies, workspace folders, usage, and presence expiration. A10.28 remains a live manual check (`docs/cookbook/i11-real-machine-checklist.md`, step 18), where the agent runs its own loop around `solodawn wait`.
+
+### 2026-11-23 · deviation · An intermittent failure cannot be explained from one occurrence
+
+- Symptom: several tests called flaky were product races (A9.24 twice, the A9.23 bulletin attach, the A10.3 pause read, a host teardown race). Each took hours of stress runs to find, and the first Windows A7.9 failure contained no candidate-pair trace. The owner's rule of 2026-11-23: an intermittent failure must not depend on being reproduced; the logs of its one occurrence, in CI or on the owner's machines, must point at the cause.
+- Cause: the node logs only errors, in prose (`log.Printf` in `internal/host/deliver.go`, `internal/home/run.go`, `internal/node/session.go`). A wait in a test that times out says only that it did (`features/m4_test.go:70`, "timed out waiting on M4 home frames"). CI keeps nothing from a failed scenario (`.github/workflows/backend.yml`).
+- Status: resolved by DG-1 to DG-7 of `planning/steps/parallel-plan-step-2-3.md` section 4.3, of which DG-4 (the node's events, the level file, "After a failure" in `install.md`) was the last. The contract is [diagnostics](planning/contracts/diagnostics.md); its section 6 lists what is not verified, the Windows `tar` line of `install.md` among it (I-11).
+
+### 2026-11-22 · limitation · Custom forge results depend on the template program
+
+- Symptom: a checks template can report an older request head, and a successful merge can name a later merge on the base branch.
+- Cause: `internal/host/forge_tmpl.go:124-147` supplies the submitted `{commit}` but cannot verify its use by the forge program. After merging it fetches `origin` and reads the base tip, as specified in `checks-forge.md` section 3.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): forge templates, hosted checks and the merge are removed.
+
+### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
+
+- Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
+- Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the home had no registered handler for it (`internal/home/check.go:109`).
+- Status: resolved. #382 registered `invite`, the cast admits Q with `JoinGroup` (`features/s2_cast_test.go`), and the scenarios of A9.12 and A9.42 are enabled.
+
+### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
+
+- Symptom: A9.44 remains pending after HM-13. With the scenario enabled, the brief proposed by the replacement secretary never appeared in either acceptance run (`features/s2_confirm.feature:560`).
+- Cause: the replacement secretary had no secretary tools on its host (entry of 2026-11-26 in Resolved), so its `propose_brief` was refused.
+- Status: resolved. The first secretary proposes the brief before the change, and the scenario is enabled; the timer itself is also covered by `features/home_rounds.feature:40`.
+
+### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
+
+- Symptom: the I2-1b scenarios exercise the card and member commands over the browser connection but do not check the rendered buttons, expired card or member editor.
+- Cause: the cast supplies protocol clients, not a rendered browser (`features/s2_cast_test.go:762`); the confirmation controls and member editor are planned in U2-2.
+- Status: resolved by U2-2 (`web/features/confirm.spec.ts`) and I2-2 (`web/e2e/s2.spec.ts`).
+
+### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
+
+- Symptom: a new brief cannot replace a confirmed one, although A9.13 and `labels.md` section 4 said it did.
+- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors, as `planning/contracts/commands.md` 1.3 says.
+- Status: resolved by decision (2026-11-25): the code stays. A started task's direction changes by cancelling the task and confirming a new brief, and `labels.md` section 4 and A9.13 in `planning/steps/step-2-3-acceptance.md` now say so. The A9.13 scenario follows that sequence and is enabled.
+
+### 2026-11-26 · bug · The web client does not follow a moved group and does not replace the old home on a rejoin
+
+- Symptom: against A9.27, a browser whose group left the list is not sent to the new home; against A9.28, a rejoin of the group on another home does not replace the old home.
+- Cause: after the export P1 pushes `groups` without the group, `Home.#list` (`web/src/lib/groups.svelte.ts:391`) drops it and nothing asks P1 again, so `moved` (`web/src/lib/groups.svelte.ts:357`) is never seen. The rejoin gap was not traced.
+- Status: fixed by [#403](https://github.com/huanchong-99/SoloDawn/pull/403) (merged), both gaps; see "An idle browser lost a moved group, and an open tab stayed on a lost home".
+
+### 2026-11-22 · limitation · A denied call draws as waiting
+
+- Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.
+- Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
+- Status: resolved in U2-2. The call block shows “Denied” without a waiting timer or reply.
+
+### 2026-11-22 · deviation · A9.26 live M5 forge coverage awaits a configured live run
+
+- Symptom: the original live fixture checked two remote filenames without reusing M5's forge steps or inspecting request heads.
+- Cause: A9.26 used the subprocess fixture instead of M5's two-task forge flow.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): the forge and A9.26 are removed, and the real-machine checklist has no forge step.
+
+### 2026-11-21 · limitation · An immediate `submit_task` after `run_checks` can read `checks.local` before the home's row push
+
+- Symptom: a scripted CLI that calls `submit_task` immediately after `run_checks` returns can read a stale `task` row in `Host.Rows` and fail with `conflict` (`local checks have not passed`), whereas with a real model the gap between the two tool calls is seconds.
+- Cause: the home answers `task checked` before pushing the `rows` frame that carries the updated `checks.local` (`internal/home/README.md`), and `tskPrepareSubmit` (`internal/host/tools_task.go:318`) reads `checks.local` from `Host.Rows`.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): `run_checks` and `checks.local` are removed; `submit_task` is the submission and reads no check result.
+
+### 2026-11-21 · limitation · `reportWorkspaceFailure` duplicates `member status` assembly from the session runtime
+
+- Symptom: on a task or review workspace Git failure, `reportWorkspaceFailure` (`internal/host/deliver.go:934`) builds `member status` (`turn_interrupted`) by hand and infers `state` (`waiting` when any session of the AI is `waiting`, else `dormant`) instead of sharing the session runtime's status builder.
+- Cause: HS-13 (#186) and HS-15 (#187) were built on separate branches without a shared status helper on `host.Runtime`.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): `reportWorkspaceFailure` is removed with the task and review workspaces.
+
+### 2026-11-21 · limitation · `Sessions` handlers and runtime pairing/surface wiring across `HM-2`, `HM-3`, `N-3` and `N-4`
+
+- Symptom: before runtime assembly, inbound `ctl` requests for `sync`, `fetch` and `host.info` were answered `bad_request` on a bare `Sessions` hub (`internal/node/session.go`), and `Pairer.Serve`, `Pairer.Known`/`Pairer.Routes`, `Pairer.HandleEvent`/`PairConfig.Paths`, `Pairer.Peer`, local socket `pair`/`pair-browser`/`open`, and `SurfaceConfig.Agents` (`(*Host).Agents`) awaited assembly in `internal/node/node.go`.
+- Cause: `Sessions`, `HM-2`, `HM-3`, `HM-7`, `N-3` and `N-4` were built as separate units (`settings.set` is postponed with `U-12`).
+- Status: resolved in `HM-7` (#221), `HM-2` (#205), `HM-3` (#207), `N-3` (#223) and `N-4` (#226).
+
+### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
+
+- Symptom: the step-2 planning documents (`planning/contracts/step-2/authority.md:36, 85, 92-93, 104, 108`, `planning/contracts/step-2/confirm.md:145-147, 196-223, 244`, `planning/contracts/step-2/watch-team.md:46-67` and `planning/steps/parallel-plan-step-2-3.md:20-21, 27`) require an inbox item to carry a signed `cause` when a group home belongs to another person, whereas `P-1b` removed `cause` from step-1 items.
+- Cause: step 2 is postponed while step 1 ships with plain unsigned items under the owner's 2026-11-21 decision.
+- Status: resolved in T2-13; the step-2 contracts now use plain items and host-written context labels, without an item-level `cause`.
+
+### 2026-11-21 · deviation · Passed hosted checks write a `checks` message in the task's thread
+
+- Symptom: `task cloud` with `ok: true` writes a `checks` message (`stage: "cloud"`, `ok: true`) in the task's thread, where `planning/contracts/task-machine.md` row 6 and `planning/flows/trace-task.md` step 8 mention a `checks` message only when hosted checks do not pass.
+- Cause: `planning/contracts/commands.md` 1.5 and `planning/contracts/messages.md` 2.8 state that the home writes a `checks` message from `task checked` (`local`) and `task cloud` (`cloud`), and `internal/proto/testdata/task-cloud.json` carries `items` when `ok` is `true`, which `TaskRow.Checks.Cloud` does not store (`revCloud` in `internal/home/cmd_review.go:39`).
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): hosted checks, `task cloud` and the `checks` message are removed.
+
+### 2026-11-20 · limitation · A child of a Windows check can start before the job holds the shell
+
+- Symptom: on Windows a check's `cmd.exe` joins its job object only after it has started, so a process it starts in that moment is outside the job and survives the check.
+- Cause: Go starts the process before `killCheckTree` assigns it (`internal/host/checks_tree_windows.go`, `newCheckJob`).
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): the node runs no check commands, and `checks_tree_windows.go` is removed.
+
+### 2026-11-20 · limitation · A key in a UTF-16 file passes the secrets check
+
+- Symptom: a UTF-16LE file holding a private key or a token passes the secrets hard check: with `--text`, Git shows its bytes, and every second byte is NUL, so no pattern matches.
+- Cause: the patterns of `local.md` §8 match ASCII text (`internal/host/secret.go`); `checkAddedLines` reads the diff as it comes.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): the hard check on a task's diff is removed. The scan of what an AI sends to the group stays (`internal/host/secret.go`); the loss of the diff scan is in the entry "What was reviewed and what is delivered are no longer guaranteed the same".
+
+### 2026-11-20 · limitation · Files hidden by ignore rules can change what a check runs
+
+- Symptom: a file ignored through `.git/info/exclude` or `core.excludesFile`, not through the project's `.gitignore`, is shown by neither `git status` nor `git ls-files`; it can change what a project check does, so a passing check may not describe the commit alone (L5).
+- Cause: `run_checks` runs in the task's worktree (`internal/host/checks.go`, `cleanCheckHead`), where such files can exist.
+- Status: ended by the product-model change MODEL-1126 ([decision](docs/decisions/implemented/feature/2026-11-26-groups-workspaces.md)): the node runs no check commands; the AI tests the way the project does.
+
+### 2026-11-20 · bug · Two nodes starting together could each remove the other's socket
+
+- Symptom: two nodes that started together on one data directory both ran over a stale `sock`: one removed the other's live socket, and the first one's close then removed the second's (89 of 3000 rounds in the independent review of `internal/node`).
+- Cause: the dial of `sock` and its removal were not one step (`internal/node/socket.go`, before this fix).
+- Status: resolved. `local.md` section 3, "One node per data directory", now holds the rule: an exclusive lock on `lock` in the data directory, taken by `ListenLocal` (`internal/node/socket.go:38`, `lockData` at `:61`) before the socket is touched.
+
+### 2026-11-20 · bug · go-nat v0.2.0 gets four things wrong in port mapping
+
+- Symptom: against NET-1's gateway (miniupnpd 2.3.9) in spike S-8 ([#134](https://github.com/huanchong-99/SoloDawn/pull/134)), go-nat failed four ways. (1) NAT-PMP returns the external port it asked for, not the one the router granted: it reported 55459 where the router mapped 30000, so a node would publish an unreachable port. (2) NAT-PMP `DeletePortMapping` leaves the mapping in place. (3) NAT-PMP calls ignore the context: with the router silent, a call with a 2 s context had not returned after 10 s. (4) UPnP asks only for random external ports and fails with 606 where the router restricts ports. Discovery also always takes 5 s.
+- Cause: in go-nat v0.2.0, `natpmp.go:106` and `:115` discard the mapping result; `natpmp.go:125-127` only forgets the port; `natpmp.go:43` uses `natpmp.NewClient`, which retries for about 128 s (go-nat-pmp v1.0.2 `natpmp.go:34-35`); `nat.go:123-125` draws random ports and `upnp.go:250-275` never tries `AddAnyPortMapping`; `upnp.go:152` waits 5 s. Details in [`spikes/S-8/results.md`](https://github.com/huanchong-99/SoloDawn/blob/spike/S-8-portmap/spikes/S-8/results.md), section 1.
+- Status: ended when automatic router port mapping (PR-3) was cut on 2026-11-21 (`planning/product-rules.md` R-131, `planning/steps/parallel-plan-units.md`). Historical note kept for reference: PR-3 would have used go-nat-pmp (`NewClientWithTimeout`) and goupnp's `internetgateway2` instead of go-nat.
+
+### 2026-11-20 · deviation · No receiver check or shared vector for a beacon yet
+
+- Symptom: `planning/contracts/envelope.md` section 3, checks 4 and 5, now gives a beacon (`planning/contracts/rendezvous.md` section 4) a third set of receiver checks: no `to`, and a two-minute window. The code and the vectors know two kinds only. `OpenSignal` requires `to`, and `OpenCommand` allows 24 hours. So neither reads a beacon as the contract says.
+- Cause: the rule was settled after B-02c and F-01d (#136). The identity code has the two kinds only: `internal/identity/envelope.go:30` and `:37`, and `web/src/lib/identity.ts:185-195`. `planning/contracts/vectors.md` section 3 lets `received` be `command` or `signal` only, and `internal/proto/testdata/crypto.json` has no beacon case.
+- Status: ended when LAN discovery beacons (PR-2) were cut on 2026-11-21 (`planning/product-rules.md` R-133, `planning/steps/parallel-plan-units.md`).
+
+### 2026-11-20 · limitation · Cards and home-written rows are one line each in the chat main line
+
+- Symptom: in the main line of the web client a brief, an approval, a decision, a summary and a call are one outlined line that names the kind and the card's subject, with the dawn edge and "Waiting on you" when the card waits for the reader. It has no buttons: the reader cannot confirm, approve or choose there. A row the home wrote (`task`, `system`) is a quiet centred line; a `system` row shows its `code` as it is on the wire, not a sentence.
+- Cause: F-07 is the row layout and text messages (`planning/steps/step-1-frontend.md`). The line is drawn in `web/src/components/chat/Message.svelte`; `subject` in `web/src/lib/groups.svelte.ts` gives the subject.
+- Status: resolved by U-4, U-7, U-8, U-9, U-10 and U2-2 (`web/src/components/{approval,brief,task,call,confirm}/`, `web/src/lib/system.ts`); the full card components and formatted system rows are implemented (`web/README.md`).
 
 ### 2026-11-26 · bug · Scroll-back stopped after a jump to the top: the edge's observer read its oldest entry
 
@@ -1097,6 +1108,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
   1. Pages that arrive while a row still rises: `Message.svelte:97-99` runs `rise`, a transform (`base.css:1263`), on every newly drawn message, the fetched card too. A running transform between the anchor and the scroller turns scroll anchoring off for that layout, in both engines, and the page inserted below is not compensated. With 10 older held rows and pages 90 ms apart: Firefox -1301, Chromium -1428 (374 is right).
   2. A page that goes past the card (deterministic, both engines): the first row in view is the anchor, a held row above the card, the day or the edge. Messages older than the card are inserted between it and the card, so the card goes down: with 40 messages before it 1473 to 1495, with 120 3713 to 3735. Safari has no scroll anchoring at all, so there every page below the card moved it up.
 - Status: resolved on branch `web/jump-anchor`. `jumpToMessage` (`web/src/lib/jump.ts`) no longer leaves the card to the browser's anchoring: in the main line it scrolls the card to the middle, as far as the line reaches, turns `overflow-anchor` off on the scroller, and on every change of the line's size (a `ResizeObserver`) scrolls it back to the same offset from the scroller's top, measured from layout offsets, which a running `rise` does not move; a smooth jump still on its way is sent to the new place instead. It ends on any scroll that is not the hold's own once the card has landed (keys, scrollbar, focus, assistive technology, find; wheel and touch also during the smooth scroll), when the person sends a message, jumps elsewhere or goes to the latest message; a card the jump puts at the end of the line is not held, so the line keeps following new messages. The hold never scrolls while the line has not moved the card, so the first call of its `ResizeObserver` does not end a smooth jump at once. This entry said before that a scroll in that frame left `edge`'s observer stale in Chromium; it was not stale: `Chat.svelte:69` read the oldest of its entries (entry "Scroll-back stopped after a jump to the top"). `rise` stays: it no longer matters. `web/e2e/jump.spec.ts` jumps to a card 160 back with 39 before it, through a reminder's address, and lets the three pages go after the jump: before the fix the card went down by 1134 px (1280x720) and 1144 px (390x844) with the page that goes past it, in Chromium, with and without reduced motion; after it, by 1 px at most.
+
 ### 2026-11-26 · bug · A Qwen Code task session of A10.3 lost its event stream before the first turn
 
 - Symptom: `acceptance-race` on Linux, run 45739795462 on `rebuild` 267c4adf: the qwen row of A4.4 in `features/s3_drivers.feature` (example #19) failed with `step 1: step 2: timed out after 10s waiting for home pushes`. In `nodes.log` the CLI process ended 16 ms after `proc.start` and before `turn.begin` (`proc.exit why=""`), the turn failed with `Post ".../session/s3-session/prompt": connection refused`, and `fakecli.log` holds `start qwen s3-session` without its `exit`: the host killed a CLI whose script was still running. Reproduced once on Linux under load (the level 3 half of the same case), with the host's read of the stream ending in `unexpected EOF`, then `signal: killed`.
@@ -2228,6 +2240,7 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: `diag_test.go:73: context canceled` from `n.peer.Offer`; 2 of 200 serial `-race` runs on a Mac, once of three in a CI baseline run (mutation run 45724118458). Not seen in 240 runs under load, nor with `GOMAXPROCS=1`.
 - Cause: the test offered to the owner's key, which was not connected to the node's local rendezvous. `SetLocalDescription` starts gathering before `Offer` sends the offer (`internal/peer/signal.go:263-279`), so a candidate is written first; the server answers `offline` (`internal/rendezvous/server.go:292`), `Peer.Offline` retires the offer (`internal/peer/unanswered.go:35-45`, flows/connect.md step 15) and cancels its context, and the offer's `pacer.turn` then returns `context.Canceled` (`internal/peer/path.go:80`) when the offer goroutine runs after that reply. A 100 ms delay before the offer send in `Offer` makes the old test fail 5 of 5 and the fixed one pass 5 of 5. The product is as designed (an offer to an offline target is retired); the empty `node=` lines in the CI log are from a test harness that starts a home loop with no `Home` (`internal/node/devlog_test.go:280`); the node always sets `Home` (`internal/node/node.go:240`), and they are unrelated to the failure.
 - Status: resolved. The test connects the owner's key to the local rendezvous first (`internal/node/diag_test.go`, `peer.Dial` on `n.httpPort`), so the target is online and no `offline` reply exists.
+
 ### 2026-11-26 · bug · A node exited at startup when another process held its web port on 127.0.0.1
 
 - Symptom: in a stress run a node failed at startup with `failed to WebSocket dial: expected handshake response status code 101 but got 404` and exited.
@@ -2239,6 +2252,7 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: mutation run 45739942536 left `internal/host/limits.go:258` (`<` to `<=`), `takeover.go:251` and `codex.go:600` (`>` to `>=`) alive.
 - Cause: `holdLimits` compared the clock with `rateUntil`, but the timer of `onRateLimited` deletes the entry at the reset, so only the entry's presence decides the hold. `lastTask` and `selectRateWindow` differ under the mutants only on a tie (equal `LastActive`, equal `usedPercent`), which no contract defines.
 - Status: resolved. `holdLimits` checks that the entry exists; `lastTask` and `selectRateWindow` use `slices.MaxFunc`, which keeps the first on a tie as before and has no comparison to mutate.
+
 ### 2026-11-26 · bug · The web mutation job's step summary passed GitHub's 1 MiB limit
 
 - Symptom: `$GITHUB_STEP_SUMMARY upload aborted ... got 1056k` in the shard "web rest" of `mutation.yml`.
@@ -2273,19 +2287,19 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 
 - Symptom: with X external and the reviewer of a task, `solodawn wait --member X` exits 1 with `not_found: report not found` once the assignee has submitted (`features/a10_external.feature`, the reviewer example of A10.22 and "Two tasks run from brief to done with X as one of the two AIs").
 - Cause: `extHandOut` (`internal/host/external.go:310`) composes the hand-out's context with `Compose(h, s, ReplacedTurn, nil)` before `commitTurnItems` records the item's report on the session (`noteReport`, `internal/host/deliver.go:1377-1389`). For a new review session `s.Report` is empty, so `replacedSessionLines` (`internal/host/turn.go:822`) fetches the message with id "" and fails.
-- Status: resolved by the commit "Host: an external AI's review hand-out reads the report recorded for it". Cause `internal/host/external.go:310`: the context was composed before `noteReport` recorded the report. `extHandOut` now composes it from the recorded row after the acknowledgement.
+- Status: resolved in PR #424 (`5eb0e3f91`). Cause `internal/host/external.go:310`: the context was composed before `noteReport` recorded the report. `extHandOut` now composes it from the recorded row after the acknowledgement.
 
 ### 2026-11-27 · bug (test) · A9.46's later browser of Q could not connect to P1: "connection ended before it was ready"
 
 - Symptom: on Linux CI (PR #424, run 45906913476) the step "a browser of Q that connects to P1 later lists \"Beta\"" failed after 10 s with `timed out after 3m0s waiting for ctl to <P1>; saw 1: connection ended before it was ready`; locally 4 of 64 runs failed the same way with eight runs in parallel.
 - Cause: `laterBrowserLists` (`features/s2_people_groups_test.go:93`) enrolled the browser with `AddBrowser`, which sends Q's new device entry as a `devlog` push and does not wait, then offered a ctl connection to P1 at once. The offer travels through the rendezvous and can reach P1 before P1 has applied the entry from Q's connected browser; `identity.OpenSignal` (`internal/peer/signal.go:110`) then drops it as `unknown_device` (`planning/contracts/envelope.md` section 3), as the contract requires, and the browser's offer ends unanswered after 10 s. P1's log shows the browser's ICE candidates received but no offer, and the entry's device rows sent just after the offer arrived. Not a product race: a device is admitted only once the home holds its entry. The "3m0s" in the message is `openS2PeopleCtl`'s budget, not the time waited.
-- Status: resolved by the commit "Acceptance: a later browser connects only once its device is known (A9.46)". The step waits for the entry's device row on Q's connected browser (`awaitQJoinedOnView`), as `s2_confirm_test.go` `awaitSecondBrowser` does, before it connects.
+- Status: resolved in PR #424 (`bc31d5615`). The step waits for the entry's device row on Q's connected browser (`awaitQJoinedOnView`), as `s2_confirm_test.go` `awaitSecondBrowser` does, before it connects.
 
 ### 2026-11-27 · expectation mismatch · An AI announced work in the group and nothing ran it
 
 - Symptom: an AI posted that it would do something (the secretary: "I'll arrange the merge") and ended its turn; nothing followed. The owner's rule (2026-11-27): whoever posts that they will do something must do it; a report of what is done is fine, a promise in it must be kept.
 - Cause: a session runs only when a new item reaches it, and a turn ends after the post. The instructions stated no duty to act before ending the turn, and the secretary's closing-step line (`internal/host/instructions/secretary.md:23`) said "arrange" without saying when or how.
-- Status: resolved in branch `m/follow-through`. Every role's instructions say "Never end a turn with a promise": do it in the same turn, or hand it to a tool that makes it run (`start_task`, `set_task`, `propose_brief`, `ask`, a mention, `request_decision`) and say which (`planning/contracts/drivers.md` section 4). The secretary requests the closing step in the same turn. No code looks for promises in the text; the duty is not enforced (`planning/risks.md` K-26).
+- Status: resolved in batch M (PR #426). Every role's instructions say "Never end a turn with a promise": do it in the same turn, or hand it to a tool that makes it run (`start_task`, `set_task`, `propose_brief`, `ask`, a mention, `request_decision`) and say which (`planning/contracts/drivers.md` section 4). The secretary requests the closing step in the same turn. No code looks for promises in the text; the duty is not enforced (`planning/risks.md` K-26).
 
 ### 2026-11-27 · deviation · The demo world kept the old model's wording
 

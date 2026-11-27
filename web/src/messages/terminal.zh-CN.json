@@ -31,7 +31,7 @@
   "terminal.handback": "交还",
   "terminal.hint.branch": "你在这里改的内容留在 AI 的文件夹里。交还后，AI 会在话题里写清做了什么。",
   "terminal.hint.newTask": "这个 AI 现在没有任务：终端打开的是它在群里的会话，就在它的文件夹里，不会新建任务。",
-  "terminal.hint.secretary": "秘书会话是只读的，在终端里也不会修改文件。",
+  "terminal.hint.secretary": "打开秘书在自己文件夹里的群会话；它的提示词要求它不改动文件。",
   "terminal.info.session": "这次接管",
   "terminal.key.down": "下",
   "terminal.key.enter": "回车",
@@ -46,12 +46,12 @@
   "terminal.link.linking": "连接中",
   "terminal.link.relay": "中继 · 受限",
   "terminal.note.keys": "Tab 键会输入到终端里。要用键盘离开终端，请按 Ctrl+M。",
-  "terminal.note.privacy": "SoloDawn 不读取终端里的内容。交还时，AI 会在任务话题里自己写一条说明：你让它做了什么、它做了什么。",
+  "terminal.note.privacy": "SoloDawn 不读取终端里的内容。交还时，AI 会在任务话题里（群会话则在主线里）自己写一条说明：你让它做了什么、它做了什么。",
   "terminal.note.relay.body": "这台电脑走中继时，「打开终端」会变灰，并提示先打通直连。",
   "terminal.note.relay.lead": "终端画面只走直连。",
   "terminal.queue.body": "接管期间发给它的消息会排队，交还后按顺序送达",
   "terminal.queue.title": "排队中的消息",
   "terminal.session.resume": "接着 AI 原来的那个会话",
-  "terminal.session.secretary": "群会话（只读）",
+  "terminal.session.secretary": "秘书的群会话",
   "terminal.title": "终端"
 }

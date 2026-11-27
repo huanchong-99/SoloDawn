@@ -1,5 +1,7 @@
 # Steps 2 and 3: outline
 
+> Historical task breakdown. Steps 1 to 3 are built; `planning/contracts/` and `planning/flows/` are the current specification.
+
 Step 1 is specified in detail. These two are outlines: what is added, what
 it rests on in step 1, and which contracts grow. They are refined when step
 1 is close to done. Rules referenced are in `product-rules.md`.

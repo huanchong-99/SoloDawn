@@ -52,15 +52,20 @@ home. NA and NB may be the same node; nothing below changes.
 - A call whose depth would exceed 4 is refused with `limit`; the tool
   returns that text to A.
 - The 45-second wait is below the shortest documented default tool timeout
-  of the two CLIs. `[documented]` Codex: 60 seconds; Claude Code: tools move
-  to the background after 120 seconds.
+  of Claude Code and Codex (`[documented]` Codex: 60 seconds; Claude Code:
+  tools move to the background after 120 seconds); the `ask` tool timeouts
+  of OpenCode, Qwen Code and external AIs are not documented
+  (`contracts/step-3/external.md` lists the approval tool's timeout against
+  `limits.approval_wait_s`, not tool timeouts in general, as unverified).
 
 ## E. Authority
 
 - The call is a message signed by NA for A. The `mention` item that carries
-  it to B is signed by the home, like every item. NB accepts the item
-  because the home is a device of its owner (`contracts/datachannel.md`
-  section 6); the call's own signature tells NB who is asking.
+  it to B is a plain unsigned frame from the group's home on the
+  authenticated home channel (`contracts/datachannel.md` section 6, `P-1b`);
+  in step 2 the home may belong to another member of the group
+  (`contracts/step-2/authority.md`), and the call's own signature tells NB who
+  is asking.
 - Step 1: every AI in the group belongs to the same person, so nothing more
   is needed.
 - Step 2: a call to someone else's personal-subscription AI waits for that
@@ -72,6 +77,6 @@ home. NA and NB may be the same node; nothing below changes.
 - No direct host-to-host connection. Two messages through the home are
   enough, and the home must see them anyway to show them (R-113) and count
   them.
-- No file or diff transfer in a call. Text only; code goes through Git
-  (R-111).
+- No file or diff transfer in a call. Text only; projects share files their own
+  way (R-111).
 - No streaming of B's partial output to A.

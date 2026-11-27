@@ -527,7 +527,7 @@ type Usage struct {
 	WindowResets *int64   // when that window resets, in Unix milliseconds
 }
 
-// An Ask is a permission request of a CLI in the one form both CLIs' requests
+// An Ask is a permission request of a CLI in the one form all CLIs' requests
 // take (flows/approval.md A). Tool, Category, Command and Why are the fields
 // of the approval card (contracts/messages.md 2.3), not yet shortened.
 type Ask struct {
