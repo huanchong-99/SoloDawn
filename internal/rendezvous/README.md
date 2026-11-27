@@ -25,7 +25,7 @@ and certificates. The protocol is in [rendezvous](../../planning/contracts/rende
 | `quota.go` | the daily relay ledger of each device |
 | `standalone.go` | `Options`, `PortRange`, `Serve` |
 | `tls.go` | certificates (supplied or ACME), the shared port that hands a TLS connection to HTTPS or TURN, idle stream limits |
-| `truncated_*.go` | reading one datagram where a long one is cut or fails |
+| `truncated*.go` | reading one datagram where a long one is cut or fails (on Windows, `truncated.go` skips the failed reads) |
 
 ## Invariants
 

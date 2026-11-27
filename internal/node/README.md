@@ -16,7 +16,7 @@ kind: reference
 - `cmd.go`: the `Subcommands` table, `MCP` (`solodawn mcp --token <t>` or `--member <id>`), and local command exchange (`solodawn pair` auto-starts a detached background node when `sock` is absent).
 - `export.go`: `solodawn group export <group id> <file> [--to <device id>]` and `solodawn group import <file>` use the running node's local socket. Export without `--to` keeps the group on the old node; export with it makes the old node answer `moved`. Import requires a node of the same owner and no existing rows for that group. Files resolve relative to the CLI's working directory.
 - `external.go`: `solodawn wait --member <id> [--timeout <s>]` prints one hand-out line and exits 0, exits 3 when there is none, 1 on a node or member error and 2 on bad arguments; `solodawn done --member <id> --run <n> [--failed <text>]` ends the run. Both go over the local socket to `Host.ExternalWaitLines` and `Host.ExternalEnd` ([external.md](../../planning/contracts/step-3/external.md) section 3).
-- `service_*.go`: start-at-login registration on macOS, Linux and Windows ([local](../../planning/contracts/local.md), section 1).
+- `service*.go`: start-at-login registration on macOS, Linux and Windows ([local](../../planning/contracts/local.md), section 1); `service.go` writes and registers, or unregisters and removes, the Linux unit file.
 - `update.go`: `Updater` for SHA-256-verified self-update outside running turns and takeovers ([local](../../planning/contracts/local.md), section 9; postponed off the main line).
 - `rendezvous.go`: standalone signalling, static web assets and ICE service.
 - `devlog.go`: `Logs`, loading and persisting `setting` (`key = 'owner'`, JSON-encoded string) and `device_log` for the node's owner, unowned-node adoption across split frames, node-signed device additions during browser pairing, forwarding accepted entries in `devlog` frames up to 61,440 bytes, and delivering accepted `device` rows to `home.Loop.Event("device", rows)` ([envelope](../../planning/contracts/envelope.md), sections 4 and 6; [datachannel](../../planning/contracts/datachannel.md), section 3.1).
@@ -41,7 +41,7 @@ Startup probes the host's CLI versions and model listings. `host.info` reuses th
 | read the first line of a local socket client | `AcceptOpening(conn)`, `ReadOpening(r)`, `ReadPair(line, owner, configured)` |
 | register or send a local CLI subcommand | `Subcommands`, `Command.Run(stdout)`, `MCP(args, stdin, stdout, stderr)` |
 | run the assembled foreground node | `Foreground()` ([local.md](../../planning/contracts/local.md) sections 1-3, 10) |
-| install or remove start-at-login | `InstallService`, `RemoveService` (`service_*.go`, [local.md](../../planning/contracts/local.md) section 1) |
+| install or remove start-at-login | `InstallService`, `RemoveService` (`service*.go`, [local.md](../../planning/contracts/local.md) section 1) |
 | check and apply signed-sum release updates | `(*Updater).Check(ctx, now)`, `(*Updater).Apply()` ([local.md](../../planning/contracts/local.md) section 9) |
 | run the standalone rendezvous and static web service | `Rendezvous(opts)` |
 | pair a node over a rendezvous room or issue a browser pairing link | `NewPairer(cfg)`, `(*Pairer).Pair(ctx, req)`, `(*Pairer).PairBrowser(ctx, webURL)`, `(*Pairer).HandleEvent(ctx, path, kind, data)`, `(*Pairer).Serve(ctx, device, raw)` ([pairing.md](../../planning/flows/pairing.md)) |

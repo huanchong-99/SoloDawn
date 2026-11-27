@@ -414,3 +414,57 @@ func TestOpeningLimits(t *testing.T) {
 		t.Fatalf("stream after the opening = %q, %v", rest, err)
 	}
 }
+
+// createDir makes the folders above dir and dir itself, and secures only a
+// dir it made; the answer of secure is returned.
+func TestCreateDirSecuresANewDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "a", "b", "solodawn")
+	var secured []string
+	failed := errors.New("security not set")
+	secure := func(d string) error {
+		if info, err := os.Stat(d); err != nil || !info.IsDir() {
+			t.Fatalf("secured %s before it was made: %v", d, err)
+		}
+		secured = append(secured, d)
+		return failed
+	}
+	if err := createDir(dir, secure); err != failed {
+		t.Fatalf("createDir = %v; want %v", err, failed)
+	}
+	if !reflect.DeepEqual(secured, []string{dir}) {
+		t.Fatalf("secured %q; want %q", secured, []string{dir})
+	}
+	if runtime.GOOS != "windows" {
+		for _, d := range []string{filepath.Dir(dir), dir} {
+			if info, err := os.Stat(d); err != nil || info.Mode().Perm() != 0o700 {
+				t.Fatalf("%s: %v, %v; want mode 0700", d, info, err)
+			}
+		}
+	}
+	if err := createDir(dir, secure); err != nil {
+		t.Fatalf("createDir on an existing directory = %v", err)
+	}
+	if len(secured) != 1 {
+		t.Fatalf("an existing directory was secured again: %q", secured)
+	}
+}
+
+// A failure to make a folder is returned as it is, and nothing is secured.
+func TestCreateDirErrors(t *testing.T) {
+	secure := func(d string) error {
+		t.Fatalf("secured %s after a failure", d)
+		return nil
+	}
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var pathErr *os.PathError
+	if err := createDir(filepath.Join(file, "child", "solodawn"), secure); !errors.As(err, &pathErr) || pathErr.Op != "mkdir" || pathErr.Path != file {
+		t.Fatalf("createDir beneath a file = %v; want mkdir %s", err, file)
+	}
+	invalid := filepath.Join(t.TempDir(), "invalid\x00name")
+	if err := createDir(invalid, secure); !errors.As(err, &pathErr) || pathErr.Op != "mkdir" || pathErr.Path != invalid {
+		t.Fatalf("createDir with an invalid name = %v; want mkdir %q", err, invalid)
+	}
+}

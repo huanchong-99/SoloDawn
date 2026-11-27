@@ -1,12 +1,9 @@
 package node
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"net"
 	"os"
-	"path/filepath"
 
 	"golang.org/x/sys/windows"
 )
@@ -28,15 +25,10 @@ func ownerDACL(inherit string) *windows.ACL {
 // one there would rewrite the security of every file below it, the clones
 // included.
 func privateDir(dir string) error {
-	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
-		return err
-	}
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return nil
-		}
-		return err
-	}
+	return createDir(dir, setOwnerDACL)
+}
+
+func setOwnerDACL(dir string) error {
 	return windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, ownerDACL("OICI"), nil)
 }
 
