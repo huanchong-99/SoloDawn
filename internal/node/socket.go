@@ -51,6 +51,21 @@ func ListenLocal(dir string) (*Local, error) {
 	return &Local{l, lock}, nil
 }
 
+// createDir creates dir and the folders above it, mode 0700. An existing dir
+// is kept as it is; one that it creates is passed to secure.
+func createDir(dir string, secure func(string) error) error {
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		return err
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return nil
+		}
+		return err
+	}
+	return secure(dir)
+}
+
 // lockFile takes the lock without waiting; a test replaces it.
 var lockFile = lockExclusive
 

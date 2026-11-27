@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · bug · Four OS-specific functions failed the CRAP limit on any other system
+
+- Symptom: `gate.py --stage merge` on macOS failed the crap gate on `internal/node/service_linux.go:25 InstallService` (CRAP 20, CC 4), `:47 RemoveService` (12, CC 3), `internal/node/socket_windows.go:30 privateDir` (20, CC 4) and `internal/rendezvous/truncated_windows.go:15 readDatagram` (12, CC 3), each "no coverage data for this file".
+- Cause: a file that does not build on the host has no coverage data, and `.project-standard/scripts/crap.py` (`measure`) counts it as 0%; at 0% only CC 2 or less passes the limit of 6. CI runs these files' tests on Linux and Windows, but the limit is enforced locally. Found on the way: a copy of `.project-standard/` into a worktree also copies `state/` of the main checkout, whose session file and `base_commit` make `crap.py` measure against another session's base; remove the copied `state/` before measuring a worktree.
+- Status: resolved by the commit "Node, rendezvous: OS-specific functions are shims; their decisions are portable and tested everywhere": the branching is in `installServiceFile` and `removeServiceFile` (`internal/node/service.go`), `createDir` (`internal/node/socket.go`) and `readSkipping` (`internal/rendezvous/truncated.go`), at 100% on every system; the OS functions are CC 1. Code in a file built for one system keeps CC 2 or less.
+
 ### 2026-11-27 · bug · `TestNodeWatchGrantAdmission` reported the relay refusal as a missing field
 
 - Symptom: on a Mac whose firewall drops direct UDP to the test binary, both subtests failed at `internal/node/node_test.go:1283` with `proto: a field that is always present is missing`, on `rebuild` 47ae57c1e and equally before the protocol 3 change (b051eafef).

@@ -23,37 +23,28 @@ func unitPath() (string, error) {
 // login, with path as its PATH: the user manager's own PATH lacks the
 // directories where the CLIs usually are.
 func InstallService(executable, path string) error {
-	unit, err := unitPath()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(unit), 0700); err != nil {
-		return err
-	}
+	return installServiceFile(unitPath, unitText(executable, path), enableUnit)
+}
+
+// unitText is the user unit that runs executable with path as its PATH.
+func unitText(executable, path string) string {
 	// systemd rejects quotes even in an escaped executable name, so the path
 	// is an argument of sh, never shell source. In ExecStart, "%%" and "$$"
 	// are a literal % and $; Environment expands specifiers only.
 	execArg := strings.NewReplacer("%", "%%", "$", "$$").Replace(executable)
-	text := "[Unit]\nDescription=SoloDawn node\n\n[Service]\n" +
+	return "[Unit]\nDescription=SoloDawn node\n\n[Service]\n" +
 		"Environment=" + strconv.Quote("PATH="+strings.ReplaceAll(path, "%", "%%")) + "\n" +
 		"ExecStart=/bin/sh -c 'exec \"$$0\" node' " + strconv.Quote(execArg) + "\n\n[Install]\nWantedBy=default.target\n"
-	if err := os.WriteFile(unit, []byte(text), 0600); err != nil {
-		return err
-	}
-	return setUnitEnabled("enable")
 }
 
 // RemoveService removes start-at-login without stopping a running node.
 func RemoveService() error {
-	path, err := unitPath()
-	if err != nil {
-		return err
-	}
-	if err := setUnitEnabled("disable"); err != nil {
-		return err
-	}
-	return os.Remove(path)
+	return removeServiceFile(unitPath, disableUnit)
 }
+
+func enableUnit() error { return setUnitEnabled("enable") }
+
+func disableUnit() error { return setUnitEnabled("disable") }
 
 func setUnitEnabled(operation string) error {
 	// With --root the links are edited on disk, not via the running user bus.

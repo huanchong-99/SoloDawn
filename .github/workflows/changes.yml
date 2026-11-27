@@ -17,7 +17,7 @@ name: Changes
 #           identity/ and rendezvous/. web also starts vitest and the browser vectors, which these
 #           Go changes cannot affect
 #   netsim  network simulation: internal/peer/, internal/rendezvous/, features/netsim/, go.mod, go.sum
-#   smoke   service smoke tests: internal/node/service_*, cmd/solodawn/
+#   smoke   service smoke tests: internal/node/service*, cmd/solodawn/
 #
 # Documentation changes (*.md, planning/, docs/, issues.md) touch none of them, except the *.md
 # files that are built into the binary (internal/host/instructions/) and install.md.
@@ -103,7 +103,7 @@ jobs:
                 internal/peer/* | internal/rendezvous/* | features/netsim/* | go.mod | go.sum) netsim=true known=true ;;
               esac
               case "$f" in
-                internal/node/service_* | cmd/solodawn/*) smoke=true known=true ;;
+                internal/node/service* | cmd/solodawn/*) smoke=true known=true ;;
               esac
               if [[ "$known" == false ]]; then
                 echo "::notice::$f is not a file this list knows; every job runs."

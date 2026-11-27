@@ -16,7 +16,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# A pull request runs the smoke tests only when it changes internal/node/service_*, cmd/solodawn/ or
+# A pull request runs the smoke tests only when it changes internal/node/service*, cmd/solodawn/ or
 # anything under .github/ (see changes.yml); a push to rebuild always runs them. The job-level
 # condition, not a "paths" filter, so that a skipped job is reported as skipped, not as missing.
 
