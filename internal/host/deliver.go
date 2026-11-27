@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"maps"
 	"slices"
@@ -258,15 +259,25 @@ func (d *delivery) beginSingleGroupSync(h *Host, device string, conn Home, group
 	return entry.ctx, d.startGroupJobLocked(group, device), true
 }
 
+// errSyncReplaced is what syncOneGroup returns when a later sync of the group
+// took its place: the group's rows are what that sync leaves.
+var errSyncReplaced = errors.New("a later sync of the group replaced this one")
+
+// syncGroupState returns once the group's rows are those of a sync that no
+// later sync replaced. Rows read while a sync of the group is in flight do not
+// count: its reset can still empty them.
 func syncGroupState(ctx context.Context, h *Host, conn Home, device, group string) error {
 	d := deliv(h)
 	for {
-		if _, ok := joinCachedGroup(h, group); ok {
+		if d.groupSettled(h, group) {
 			return nil
 		}
 		job, waitCh := d.claimOrWaitGroupSync(device, group)
 		if waitCh == nil {
-			return syncOneGroup(ctx, h, d, conn, device, job)
+			if err := syncOneGroup(ctx, h, d, conn, device, job); !errors.Is(err, errSyncReplaced) {
+				return err
+			}
+			continue
 		}
 		if !joinWaitChannel(ctx, waitCh) {
 			d.removeGroupWaiter(group, waitCh)
@@ -289,6 +300,18 @@ func (d *delivery) claimOrWaitGroupSync(device, group string) (syncJob, chan str
 	return d.startGroupJobLocked(group, device), nil
 }
 
+// groupSettled reports whether the rows hold the group while no sync of it is
+// in flight, whose reset could still empty them.
+func (d *delivery) groupSettled(h *Host, group string) bool {
+	if _, ok := joinCachedGroup(h, group); !ok {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	gs := d.groups[group]
+	return gs == nil || !gs.syncing
+}
+
 func (d *delivery) removeGroupWaiter(group string, ch chan struct{}) {
 	match := func(cur chan struct{}) bool { return cur == ch }
 	d.mu.Lock()
@@ -309,6 +332,7 @@ func syncOneGroup(ctx context.Context, h *Host, d *delivery, conn Home, device s
 	current, refresh, unlisted := d.finishGroupSync(job, device, synced.Seq, ok)
 	switch {
 	case !current:
+		return errSyncReplaced
 	case ok && unlisted && ownerLeft(h, job.group):
 		leaveGroup(h, d, job.group)
 	default:
