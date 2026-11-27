@@ -97,6 +97,7 @@ func memNewAI(s *State, c Command, p proto.MemberAddAI, hostName string) proto.A
 		Account: p.Account, Allow: []string{}, Approvers: memApprovers(c.Who.User, p.Approvers),
 		State: "dormant", Since: c.Now, Path: path, Usage: proto.Usage{},
 		Profile: profileUpdate(proto.Profile{}, p.ProfileSet),
+		Follow:  p.Follow,
 	}
 	grpSetOpt(&ai.Tool, p.Tool)
 	return ai
@@ -155,8 +156,8 @@ func memSetAI(s *State, c Command) (Result, *Refusal) {
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	if !s.memMaySet(c.Who, ai, p) {
-		return Result{}, &Refusal{"forbidden", "only the AI's owner, or its host for approvers alone, changes the member"}
+	if refusal := s.memMaySet(c.Who, ai, p); refusal != nil {
+		return Result{}, refusal
 	}
 	return s.memFinishSet(ai, p)
 }
@@ -169,7 +170,11 @@ func memSetValid(p proto.MemberSet) *Refusal {
 }
 
 func memSetPresent(p proto.MemberSet) bool {
-	return p.Name != nil || p.Account != nil || p.Allow != nil || p.Approvers != nil || p.Tool != nil || profilePresent(p.ProfileSet)
+	return p.Name != nil || p.Account != nil || p.Allow != nil || p.Approvers != nil || p.Tool != nil || memFollowOrProfile(p)
+}
+
+func memFollowOrProfile(p proto.MemberSet) bool {
+	return bool(p.Follow) || profilePresent(p.ProfileSet)
 }
 
 func memSetFieldsOK(p proto.MemberSet) bool {
@@ -179,14 +184,36 @@ func memSetFieldsOK(p proto.MemberSet) bool {
 	return p.Account == nil || slices.Contains(memAccounts, *p.Account)
 }
 
-func (s *State) memMaySet(w Who, ai proto.AIMemberRow, p proto.MemberSet) bool {
-	if w.Device == ai.Host && profilePresent(p.ProfileSet) {
-		return false
+func (s *State) memMaySet(w Who, ai proto.AIMemberRow, p proto.MemberSet) *Refusal {
+	if s.Hosts(w, ai.ID) && memFollowOrProfile(p) {
+		return memHostProfileSet(ai, p)
 	}
-	if w.AI == "" && w.User == ai.User {
-		return true
+	if s.memOwnerOrHostApprovers(w, ai, p) {
+		return nil
 	}
-	return s.Hosts(w, ai.ID) && memApproversOnly(p)
+	return &Refusal{"forbidden", "only the AI's owner, or its host for approvers or followed profile, changes the member"}
+}
+
+func (s *State) memOwnerOrHostApprovers(w Who, ai proto.AIMemberRow, p proto.MemberSet) bool {
+	return w.AI == "" && w.User == ai.User || s.Hosts(w, ai.ID) && memApproversOnly(p)
+}
+
+func memHostProfileSet(ai proto.AIMemberRow, p proto.MemberSet) *Refusal {
+	if !memHostFollowSet(p) {
+		return &Refusal{"forbidden", "the AI's host may only set follow together with all four profile fields"}
+	}
+	if !bool(ai.Follow) {
+		return &Refusal{"conflict", "the member has its own profile"}
+	}
+	return nil
+}
+
+func memHostFollowSet(p proto.MemberSet) bool {
+	return bool(p.Follow) && memAllProfile(p.ProfileSet) && memApproversOnly(p) && p.Approvers == nil
+}
+
+func memAllProfile(p proto.ProfileSet) bool {
+	return p.Model != nil && p.Effort != nil && p.Tier != nil && p.Skills != nil
 }
 
 func memApproversOnly(p proto.MemberSet) bool {
@@ -209,6 +236,9 @@ func memUpdated(ai proto.AIMemberRow, p proto.MemberSet) proto.AIMemberRow {
 	grpSetOpt(&ai.Allow, p.Allow)
 	grpSetOpt(&ai.Tool, p.Tool)
 	ai.Profile = profileUpdate(ai.Profile, p.ProfileSet)
+	if memFollowOrProfile(p) {
+		ai.Follow = p.Follow
+	}
 	if p.Approvers != nil {
 		ai.Approvers = memApprovers(ai.User, *p.Approvers)
 	}
