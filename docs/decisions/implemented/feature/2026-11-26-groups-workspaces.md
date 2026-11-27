@@ -14,15 +14,10 @@ request, polled the hosted checks and, after a scored review, merged. A second k
 there. That machinery was built so that what was reviewed was exactly the commit that was merged,
 and so that an AI never touched its owner's own working tree.
 
-The owner tried the product in the browser simulation on 2026-11-26 and found that this is not
-what making a group is. In the owner's words, translated from the decision log (which is kept
-outside the repository): there should be only one kind of group, and "when I need to bring in a
-colleague I add a person right here"; check commands "and so on" should not be asked for, and "a
-Git repository is all wrong: what is making a group? I choose my friends or myself, and which AIs,
-the ones that are already connected"; "only an AI that was connected can be added", and for that
-AI one chooses "which workspace it is in: even for one repository there may be five or six on one
-computer, and on different computers the repository is in different places", so that "as I add
-the AI, the AI tells me which workspaces it can start in".
+The owner evaluated the prototype in the browser simulation on 2026-11-26 and decided that creating
+and using a group must follow a simpler model without required Git repositories, check commands,
+or per-task cloning: one kind of group made by picking people and already connected AIs, each AI
+assigned a workspace folder (from folders its CLI reports or named manually).
 
 The same simulation showed a second, smaller gap: when a task was paused by hand or given to
 another AI, the client could not say who had done it, because neither the wait nor the card state
@@ -30,9 +25,8 @@ recorded the actor.
 
 ## Decision
 
-**The owner's decision (2026-11-26), shipped in PR #424 (`MODEL-1126`).** The owner originated the
-change and, when the coordinator asked follow-up questions, chose these points. The decision log
-records the answers and not the options that were not chosen.
+**The owner's decision (2026-11-26), shipped in PR #424.** The owner originated the change and
+settled these six core points:
 
 1. There is one kind of group. A group is created by choosing people and connected AIs, each AI
    with one workspace; people and AIs can be added at any time afterwards.
@@ -46,8 +40,7 @@ records the answers and not the options that were not chosen.
    system prompt tells them to keep in sync themselves.
 6. No check commands are registered: the AI tests the way the project does.
 
-**The coordinator's decisions under it.** The owner has delegated every project decision to the
-coordinator (the main session), who decides and reports. These were decided on 2026-11-26, the
+**The coordinator's decisions under it.** These were decided on 2026-11-26, the
 first five on the recommendation of the plan's author, the next two on questions raised by its
 independent review, row 8 in the demo walk-through, rows 9 and 11 in the review's second pass and
 row 10 in the first review; the owner was told and may change any of them. Row 11's folder-discovery
@@ -56,7 +49,7 @@ servers as specified in [local interfaces](../../../../planning/contracts/local.
 
 | # | Question | Decided | Reason given |
 | --- | --- | --- | --- |
-| 1 | Choosing friends when a group is created | a person who is already in one of the creator's groups on the same home is added at once (`member add_person`); anyone else gets a one-time link, as before | the owner's words: "I choose my friends or myself" |
+| 1 | Choosing friends when a group is created | a person who is already in one of the creator's groups on the same home is added at once (`member add_person`); anyone else gets a one-time link, as before | the owner decided a group starts by choosing known people or oneself alongside AIs |
 | 2 | After a review passes | the task is done at once; the secretary arranges the closing step the project needs, such as a merge | the platform runs no Git, so it cannot perform or observe that step |
 | 3 | The terminal of an AI that has no task | it opens in the AI's folder, on its group session, and creates no task card | the node reads no facts from the folder, so the old rule "cancel the task if nothing changed" cannot be kept |
 | 4 | Two AIs of one group with the same folder on one computer | allowed; the dialog says which AI has the folder, and the folder takes one task at a time | none is recorded |
@@ -131,8 +124,8 @@ here):
 under Problem. It lost: the owner tried it in the demo walk-through and rejected it, and the
 platform then needs a Git operation for every step of a task.
 
-**For the owner's six points** the decision log records what the owner said and chose, and not
-the options the coordinator offered in its follow-up questions.
+**Variations within the core points.** Once the owner settled the six core points, alternative
+combinations within those points were not tracked individually.
 
 **One folder shared by AIs of two groups, stated as a limit** (question 6). Raised by the review
 as the alternative to refusing. It lost because two groups, possibly with different homes, would
@@ -190,8 +183,10 @@ The limits this decision accepts are K-26 to K-38 of [risks](../../../../plannin
 
 ## Verification
 
-- Shipped on `rebuild` in PR #424 (`MODEL-1126`) across `internal/proto`, `internal/store`,
-  `internal/host`, `internal/home`, `internal/node`, `web/`, `features/`, and `docs/`.
+- Shipped on `rebuild` in PR #424 across commits `b051eafef`, `e88848b0a`, `143b0edff`, `9b060e39f`,
+  `c035aaef6`, `794c86e69`, `39184fb26`, `d721e8584`, `2f4c0eb70`, `0bc50580f`, `fda85309e`,
+  `25482a009`, `db117b7f2`, `585defa16`, `404106569`, `c325a6cc2`, `5eb0e3f91`, `5659384eb`,
+  `5118123e5`, `848afbacd`, `6aa36a145`, and `e554528b2`.
 - Acceptance scenarios pass in Go (`features/`) and web (`web/features/`, `web/e2e/`) suites for
   A2.1, A2.8 to A2.10, A3.3, A3.11 to A3.13, A5.1, A5.2, A5.4 to A5.7, A5.12, A5.19 to A5.24, A7.1,
   A7.7, A9.22, A9.46, A10.10, A10.12, A10.17, A10.18, A10.21, and A10.22.
