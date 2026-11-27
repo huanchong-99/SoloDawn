@@ -65,6 +65,9 @@ test.each(layouts)(
       { lang, theme },
     );
     await page.goto(`${server.resolvedUrls!.local[0]}?nomock`);
+    await page
+      .getByRole('button', { name: lang === 'en' ? 'Look around first' : '先随便看看' })
+      .click();
     await page.addScriptTag({ type: 'module', url: fixture });
     await page.waitForFunction(() => window.externalCast);
     const { g, id, exe, host } = await page.evaluate(() => window.externalCast.cast());

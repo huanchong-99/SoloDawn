@@ -469,14 +469,14 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     Then(
       'one frame later the later parts of the page have not moved from where they arrive',
       () => {
-        expect(parts.map((part) => part.travel)).toEqual(['8.63', '12.00', '12.00']);
+        expect(parts.map((part) => part.travel)).toEqual(['8.63', '12.00', '12.00', '12.00']);
       },
     );
     And('every part has faded in as far as the others', () => {
-      expect(parts.map((part) => part.opacity)).toEqual(['0.42', '0.42', '0.42']);
+      expect(parts.map((part) => part.opacity)).toEqual(['0.42', '0.42', '0.42', '0.42']);
     });
     And('every part is seen in full when no animation runs', () => {
-      expect(parts.map((part) => part.still)).toEqual(['1', '1', '1']);
+      expect(parts.map((part) => part.still)).toEqual(['1', '1', '1', '1']);
     });
   });
 

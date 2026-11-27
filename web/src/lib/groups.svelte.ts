@@ -526,7 +526,7 @@ export class Home {
 export const homes: Home[] = $state([]);
 
 /** The end of onboarding asks the group list to open the create-group dialog when it shows. */
-export const creating = { open: false };
+export const creating = $state({ open: false });
 
 /** Whether the create-group dialog was asked for since the group list last showed; clears it. */
 export function takeCreate() {

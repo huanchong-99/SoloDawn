@@ -283,6 +283,7 @@ describe('AI profiles with fake CLIs', () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     contexts.push(page.context());
     await page.goto(`${server.resolvedUrls!.local[0]}?nomock`);
+    await page.getByRole('button', { name: /^(Look around first|先随便看看)$/ }).click();
     await page.addScriptTag({ type: 'module', url: '/features/s2_cast.ts' });
     await page.waitForFunction(() => window.s2);
     await page.evaluate(async (as) => {

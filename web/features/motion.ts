@@ -37,6 +37,12 @@ export async function newPage() {
 export async function open(hash = '') {
   await page.goto(server.resolvedUrls!.local[0] + hash);
   await page.getByRole('navigation').waitFor();
+  if (!hash || hash === '#/groups') {
+    const welcome = page.getByRole('dialog', { name: '欢迎使用 SoloDawn' });
+    await welcome.waitFor({ state: 'visible' });
+    await welcome.getByRole('button', { name: '先随便看看' }).click();
+    await welcome.waitFor({ state: 'hidden' });
+  }
 }
 
 // Read the first frame of the destination heading, even on a slow test machine.

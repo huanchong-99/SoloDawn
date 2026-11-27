@@ -1,0 +1,280 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beacon, clearBeacon, setBeaconHost } from './beacon';
+
+function mockRect(target: HTMLElement, rect: Partial<DOMRect>) {
+  const full = {
+    x: 0,
+    y: 0,
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 36,
+    right: 100,
+    bottom: 36,
+    toJSON: () => ({}),
+    ...rect,
+  } as DOMRect;
+  return vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(full);
+}
+
+function setReducedMotion(matches: boolean) {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)' ? matches : false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  );
+}
+
+describe('beacon', () => {
+  let host: HTMLDivElement;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    setReducedMotion(false);
+    document.body.innerHTML = '';
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    setBeaconHost(host);
+  });
+
+  afterEach(() => {
+    clearBeacon();
+    setBeaconHost(undefined);
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('positions a beacon around an immediate target inside the registered host', async () => {
+    const target = document.createElement('button');
+    target.dataset.guide = 'defaults';
+    target.style.borderTopLeftRadius = '8px';
+    target.scrollIntoView = vi.fn();
+    mockRect(target, { left: 20, top: 30, width: 120, height: 40 });
+    document.body.appendChild(target);
+
+    await beacon('[data-guide="defaults"]');
+
+    expect(target.scrollIntoView).toHaveBeenCalledWith({
+      block: 'center',
+      behavior: 'smooth',
+    });
+    const el = host.querySelector<HTMLElement>('.guide-beacon');
+    expect(el).not.toBeNull();
+    expect(el?.getAttribute('aria-hidden')).toBe('true');
+    expect(el?.dataset.reduced).toBeUndefined();
+    expect(el?.style.left).toBe('16px');
+    expect(el?.style.top).toBe('26px');
+    expect(el?.style.width).toBe('128px');
+    expect(el?.style.height).toBe('48px');
+    expect(el?.style.borderRadius).toBe('12px');
+    expect(el?.querySelector('.guide-beacon-ring')).not.toBeNull();
+    expect(el?.querySelector('.guide-beacon-pulse')).not.toBeNull();
+
+    target.style.borderTopLeftRadius = '';
+    await beacon('[data-guide="defaults"]');
+    expect(host.querySelector<HTMLElement>('.guide-beacon')?.style.borderRadius).toBe('4px');
+  });
+
+  it('waits via requestAnimationFrame for delayed targets and gives up at 3000 ms', async () => {
+    const callbacks = new Map<number, FrameRequestCallback>();
+    let nextId = 1;
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      const id = nextId++;
+      callbacks.set(id, cb);
+      return id;
+    });
+    const cancelSpy = vi.fn((id: number) => {
+      callbacks.delete(id);
+    });
+    vi.stubGlobal('cancelAnimationFrame', cancelSpy);
+
+    const flushFrame = () => {
+      const entries = [...callbacks.entries()];
+      callbacks.clear();
+      for (const [, cb] of entries) cb(performance.now());
+    };
+
+    const pending = beacon('#later');
+    await vi.advanceTimersByTimeAsync(2999);
+    flushFrame();
+    const target = document.createElement('div');
+    target.id = 'later';
+    mockRect(target, { left: 0, top: 0, width: 10, height: 10 });
+    document.body.appendChild(target);
+    flushFrame();
+    await pending;
+    expect(host.querySelector('.guide-beacon')).not.toBeNull();
+
+    clearBeacon();
+    const missing = beacon('#never');
+    await vi.advanceTimersByTimeAsync(2999);
+    flushFrame();
+    expect(callbacks.size).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    flushFrame();
+    await missing;
+    expect(host.querySelector('.guide-beacon')).toBeNull();
+    expect(callbacks.size).toBe(0);
+
+    const aborted = beacon('#aborted');
+    expect(callbacks.size).toBe(1);
+    const pendingId = [...callbacks.keys()][0]!;
+    clearBeacon();
+    expect(cancelSpy).toHaveBeenCalledWith(pendingId);
+    await aborted;
+    expect(host.querySelector('.guide-beacon')).toBeNull();
+  });
+
+  it('does not mount if aborted before or during poll continuation', async () => {
+    const callbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      callbacks.push(cb);
+      return callbacks.length;
+    });
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+
+    const stalePoll = beacon('#stale-poll');
+    clearBeacon();
+    callbacks[0]?.(0);
+    await stalePoll;
+    expect(callbacks).toHaveLength(1);
+    expect(host.querySelector('.guide-beacon')).toBeNull();
+
+    const p = beacon('#race');
+    const target = document.createElement('div');
+    target.id = 'race';
+    mockRect(target, { left: 0, top: 0, width: 10, height: 10 });
+    document.body.appendChild(target);
+    callbacks[1]?.(0);
+    clearBeacon();
+    await p;
+    expect(host.querySelector('.guide-beacon')).toBeNull();
+  });
+
+  it('tracks capture scroll/resize with passive listeners and cleans them up on remove', async () => {
+    const addSpy = vi.spyOn(window, 'addEventListener');
+    const removeSpy = vi.spyOn(window, 'removeEventListener');
+    const scroller = document.createElement('div');
+    const target = document.createElement('button');
+    target.id = 'move';
+    scroller.appendChild(target);
+    document.body.appendChild(scroller);
+    let left = 20;
+    const rectSpy = vi
+      .spyOn(target, 'getBoundingClientRect')
+      .mockImplementation(() => ({ left, top: 40, width: 80, height: 30 }) as DOMRect);
+
+    await beacon('#move');
+    expect(addSpy).toHaveBeenCalledWith('scroll', expect.any(Function), {
+      capture: true,
+      passive: true,
+    });
+    expect(addSpy).toHaveBeenCalledWith('resize', expect.any(Function), { passive: true });
+    expect(addSpy).toHaveBeenCalledWith('animationend', expect.any(Function), {
+      capture: true,
+      passive: true,
+    });
+    const el = host.querySelector<HTMLElement>('.guide-beacon')!;
+    expect(el.style.left).toBe('16px');
+
+    left = 60;
+    window.dispatchEvent(new Event('resize'));
+    expect(el.style.left).toBe('56px');
+
+    left = 90;
+    scroller.dispatchEvent(new Event('scroll', { bubbles: false }));
+    expect(el.style.left).toBe('86px');
+
+    left = 110;
+    scroller.dispatchEvent(new Event('animationend', { bubbles: false }));
+    expect(el.style.left).toBe('106px');
+
+    clearBeacon();
+    expect(removeSpy).toHaveBeenCalledWith('scroll', expect.any(Function), true);
+    expect(removeSpy).toHaveBeenCalledWith('animationend', expect.any(Function), true);
+    rectSpy.mockClear();
+    scroller.dispatchEvent(new Event('scroll', { bubbles: false }));
+    scroller.dispatchEvent(new Event('animationend', { bubbles: false }));
+    window.dispatchEvent(new Event('resize'));
+    expect(rectSpy).not.toHaveBeenCalled();
+
+    await beacon('#move');
+    target.remove();
+    window.dispatchEvent(new Event('scroll'));
+    expect(host.querySelector('.guide-beacon')).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('dismisses once via capture click, focusin, auto-dismiss, or reduced motion without leaking timers or listeners', async () => {
+    const target = document.createElement('button');
+    const removeTargetSpy = vi.spyOn(target, 'removeEventListener');
+    const child = document.createElement('span');
+    child.addEventListener('click', (event) => event.stopPropagation());
+    target.id = 'act';
+    target.appendChild(child);
+    mockRect(target, { left: 10, top: 10, width: 40, height: 20 });
+    document.body.appendChild(target);
+
+    await beacon('#act');
+    expect(vi.getTimerCount()).toBe(1);
+    const first = host.querySelector<HTMLElement>('.guide-beacon')!;
+    child.click();
+    expect(first.classList.contains('leaving')).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+    target.dispatchEvent(new FocusEvent('focusin'));
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(139);
+    expect(host.querySelector('.guide-beacon')).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.querySelector('.guide-beacon')).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+
+    await beacon('#act');
+    await vi.advanceTimersByTimeAsync(5999);
+    expect(host.querySelector('.guide-beacon')?.classList.contains('leaving')).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.querySelector('.guide-beacon')?.classList.contains('leaving')).toBe(true);
+    await vi.advanceTimersByTimeAsync(140);
+    expect(host.querySelector('.guide-beacon')).toBeNull();
+
+    await beacon('#act');
+    target.dispatchEvent(new FocusEvent('focusin'));
+    expect(host.querySelector('.guide-beacon')?.classList.contains('leaving')).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+    clearBeacon();
+    expect(host.querySelector('.guide-beacon')).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+
+    await beacon('#act');
+    expect(vi.getTimerCount()).toBe(1);
+    clearBeacon();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(removeTargetSpy).toHaveBeenCalledWith('click', expect.any(Function), true);
+    child.click();
+    target.dispatchEvent(new FocusEvent('focusin'));
+    expect(vi.getTimerCount()).toBe(0);
+
+    setReducedMotion(true);
+    target.scrollIntoView = vi.fn();
+    await beacon('#act');
+    expect(target.scrollIntoView).toHaveBeenCalledWith({
+      block: 'center',
+      behavior: 'instant',
+    });
+    const reducedEl = host.querySelector<HTMLElement>('.guide-beacon')!;
+    expect(reducedEl.dataset.reduced).toBe('true');
+    expect(reducedEl.querySelector('.guide-beacon-pulse')).toBeNull();
+    target.click();
+    expect(host.querySelector('.guide-beacon')).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});

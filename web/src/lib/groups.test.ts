@@ -1604,7 +1604,12 @@ describe('ids and lost answers', () => {
 });
 
 describe('the request to open the create-group dialog', () => {
-  it('is taken once', () => {
+  it('starts closed and is taken once', async () => {
+    vi.resetModules();
+    const fresh = await import('./groups.svelte');
+    expect(fresh.creating).toEqual({ open: false });
+    expect(fresh.takeCreate()).toBe(false);
+
     expect(takeCreate()).toBe(false);
     creating.open = true;
     expect(takeCreate()).toBe(true);

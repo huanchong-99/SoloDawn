@@ -1,10 +1,11 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Chat from '../components/chat/Chat.svelte';
   import CreateGroup from '../components/groups/CreateGroup.svelte';
   import GroupList from '../components/groups/GroupList.svelte';
   import Waiting from '../components/groups/Waiting.svelte';
   import Icon from '../components/Icon.svelte';
-  import { find, takeCreate } from '../lib/groups.svelte';
+  import { creating as createAsk, find, takeCreate } from '../lib/groups.svelte';
   import type { Net } from '../lib/net.svelte';
   import { t } from '../lib/prefs.svelte';
   import { href } from '../lib/route.svelte';
@@ -14,6 +15,9 @@
 
   const open = $derived(find(params.g));
   let creating = $state(takeCreate());
+  $effect(() => {
+    if (createAsk.open && untrack(takeCreate)) creating = true;
+  });
   // The address names a chat: the page is laid out for it, whether or not the group has been read.
 </script>
 

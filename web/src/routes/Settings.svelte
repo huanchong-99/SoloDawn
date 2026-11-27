@@ -1,4 +1,5 @@
 <script lang="ts">
+  import GuideCard from '../components/guide/GuideCard.svelte';
   import ReminderCard from '../components/reminder/ReminderCard.svelte';
   import { accents, choose, langs, prefs, t, themes } from '../lib/prefs.svelte';
   import type { PageProps } from '../lib/route.svelte';
@@ -79,6 +80,8 @@
       </fieldset>
     </div>
   </section>
+
+  <GuideCard {net} />
 </div>
 
 <style>
