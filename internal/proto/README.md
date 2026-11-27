@@ -126,9 +126,11 @@ alone reads four things differently from a browser. An error from `Decode` is
   this type, and so has every id in a command payload, in an `Item`, and `g` of `inbox` and `ack`.
   Of the bodies a `post` carries, a review's and a confirm card's ids are checked:
   `task` and `report` of `ReviewSigned`, `ai` of `ConfirmSigned`.
-  The host surface uses it too: `g` of `Home`, `AuditRow`, `PTYResize`, `WatchStart`, `WatchEnd`,
-  `HostJoin`, `HostLeave` and `Reminder`, `msg` of `Reminder`, `ai` of `PTYResize`, `member` of
-  `WatchStart`, `WatchEnd` and `HostLeave`, and `g`, `member` and `task` of `AgentGroup`.
+  The host and rendezvous surfaces use it too: `n` of `HostCommand` and `Beacon`, `g` of `Home`,
+  `PTYResize`, `WatchStart`, `WatchEnd`, `HostJoin`, `HostLeave`, `HomeAdd`, `PermSet`,
+  `Takeover` and `Reminder`, `msg` of `Reminder`, `ai` of `PTYResize`, `member` of `WatchStart`,
+  `WatchEnd`, `HostLeave` and `Takeover`, `task` of `TakeoverStart`, and `g`, `member` and
+  `task` of `AgentGroup`.
   Rows, the other message bodies and the frames that read
   a group still hold ids as plain strings ([issues](../../issues.md)).
 
@@ -193,7 +195,3 @@ the type does not name, not with `Decode`.
   and delivers; `go test ./internal/home -run TestTaskTraces -update` writes it
   again. `web/src/lib/trace.test.ts` verifies it on its own: the device log,
   every command signature, the rows, and the inbox items with their acknowledgements.
-  Until the home follows P-8, the file is the old transcript with only its typed parts
-  (the group, the AI members, the inbox items and the task rows beside them) brought to
-  the new shapes, so that this package reads it; its signed commands and pushed rows are
-  still the old flow.

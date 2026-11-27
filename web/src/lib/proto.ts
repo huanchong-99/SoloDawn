@@ -1279,8 +1279,8 @@ export interface PtyChannel {
  *  that id. A frame with `re` is the answer to the request of that id: it is read with
  *  `decodeAnswer(t, text)`, settles that request, and the id is forgotten. A frame without `re` is
  *  read with `Frame` and goes to the push handler given when the connection was made. Every request
- *  type has an overload, so its answer is typed. Implemented by `mock.ts`, and by the real
- *  connection later. */
+ *  type has an overload, so its answer is typed. Implemented by `mock.ts` and by `Peer` in
+ *  `peer.ts`. */
 export interface Ctl {
   request(req: Ask<Hello>): Promise<AnswerTo<'hello'> | ErrorResponse>;
   request(req: Ask<Sync>): Promise<AnswerTo<'sync'> | ErrorResponse>;
