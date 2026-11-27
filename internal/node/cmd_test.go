@@ -13,6 +13,15 @@ import (
 	"time"
 )
 
+// TestMain keeps every test from starting a node in the background: that node
+// is this test binary, which runs the tests again, without a time limit and
+// in a session of its own, and can start the next. A test of the start sets
+// spawnNode itself.
+func TestMain(m *testing.M) {
+	spawnNode = func() error { return errors.New("a test started a node in the background") }
+	m.Run()
+}
+
 func TestCannotSendCommand(t *testing.T) {
 	c := Command{Cmd: "status"}
 	// No socket: the dial fails (not found; Windows says refused).

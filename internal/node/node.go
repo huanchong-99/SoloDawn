@@ -41,16 +41,16 @@ var Version = "dev"
 const (
 	defaultWebPort = 47800
 	defaultTCPPort = 47801
+	maxLogBytes    = 10 << 20 // the size at which logs/node.log is rotated
 )
 
 var (
-	maxLogBytes       int64 = 10 << 20
-	peerListen              = peer.Listen
-	tcpListen               = net.Listen
-	ifaceAddrs              = net.InterfaceAddrs
-	installService          = InstallService
-	openURL                 = openBrowserURL
-	foregroundContext       = func() (context.Context, context.CancelFunc) {
+	peerListen        = peer.Listen
+	tcpListen         = net.Listen
+	ifaceAddrs        = net.InterfaceAddrs
+	installService    = InstallService
+	openURL           = openBrowserURL
+	foregroundContext = func() (context.Context, context.CancelFunc) {
 		return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	}
 )
@@ -72,17 +72,18 @@ func browserCommand(goos, u string) (string, []string) {
 }
 
 type logFile struct {
-	mu   sync.Mutex
-	path string
-	file *os.File
-	size int64
+	mu    sync.Mutex
+	path  string
+	limit int64 // the size at which the file is rotated
+	file  *os.File
+	size  int64
 }
 
-func openLog(dir string) (*logFile, error) {
+func openLog(dir string, limit int64) (*logFile, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o700); err != nil {
 		return nil, err
 	}
-	lf := &logFile{path: filepath.Join(dir, "logs", "node.log")}
+	lf := &logFile{path: filepath.Join(dir, "logs", "node.log"), limit: limit}
 	return lf, lf.openCurrent()
 }
 
@@ -99,7 +100,7 @@ func (l *logFile) openCurrent() error {
 func (l *logFile) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.size > 0 && l.size+int64(len(p)) > maxLogBytes {
+	if l.size > 0 && l.size+int64(len(p)) > l.limit {
 		if err := l.rotate(); err != nil {
 			return 0, err
 		}
@@ -199,7 +200,7 @@ func openNode(parent context.Context, dir string) (*nodeRuntime, error) {
 }
 
 func (n *nodeRuntime) stepLog() error {
-	lf, err := openLog(n.dir)
+	lf, err := openLog(n.dir, maxLogBytes)
 	if err != nil {
 		return err
 	}

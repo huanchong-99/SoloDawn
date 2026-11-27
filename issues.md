@@ -778,6 +778,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-27 · bug · A data race on the log rotation size in the node tests
+
+- Symptom: once in `go test -race -count=20 ./internal/node/` (at 45803ffbd): `checkLogRotation` wrote `maxLogBytes` (`node_test.go:82`) while a Pion callback goroutine that `TestNetStatusLiveNodeRuntime` left behind read it in `logFile.Write` (`node.go:102`). The three tests involved, run 6 times under `-race`, show it once.
+- Cause: two. Every `logFile.Write` read the package variable `maxLogBytes`, which the test changed. And the process-wide log output stayed on a closed node's `node.log` for every later test: `TestMultiNodePortFallbackWebAndLocalCommands` opened n1 then n2 and closed n1 first, so n2's close put back n1's file (`diagOutput`, `diag.go:29`, restores what it found). The goroutine that logs is Pion's: it reports a connection's closed state on a new goroutine (`peerconnection.go:553`, `go handler(cs)`), after `peer.Connection.Close` has returned, and nothing in `internal/peer` lets a caller wait for it. From iteration 2 on, `TestNetStatusLiveNodeRuntime` also took 31 s instead of 1 s; with the order fixed it takes 1 s (cause of the 30 s not traced).
+- Status: resolved on `fix/node-admit-flake`: the size is a field of the log file, set by `openLog` (`node.go:84`), and the test closes its nodes in reverse order. The late Pion line still comes, now to stderr, and touches no shared state.
+
+### 2026-11-27 · bug · A mutant of `pair` made the CLI tests start copies of themselves until the runner died
+
+- Symptom: the mutation shard `go node-admit-dir` ended with "The runner has received a shutdown signal" after 22 minutes (run 45967319415), and before with "lost communication with the server" (run 45959040172). The last mutant started, `cmd.go:91:9` (`err == nil` to `err != nil` in `dialOrStart`), never reported.
+- Cause: gremlins' integration mode runs `go test ./...` of the whole module for each mutant. The mutant makes `pair` start a node also when the socket answers. `TestLocalArgumentsReachTheSocket` (`cmd/solodawn/main_test.go`) sends `pair` with the real `spawnNode`, so `startBackgroundNode` (`internal/node/cmd.go:45`) started the test binary itself as `solodawn.test node`, detached in a session of its own: outside gremlins' kill and without `-test.timeout`. The copy runs the same tests, starts the next copy and then hangs on a connection nobody serves. `ulimit -v` bounds each process, not their number: a guarded local run reached 54 processes and 1.2 GB in 2 seconds. `internal/node`'s own tests used the real `spawnNode` too (`checkRoomFullPairError`), so a mutant that breaks the local socket could do the same there.
+- Status: resolved on `fix/node-admit-flake`. `internal/node`'s `TestMain` (`cmd_test.go`) gives the tests a `spawnNode` that fails, and `cmd/solodawn`'s `TestMain` runs no test in a copy started as `node`. `replyToCommand` closes the listener when a connection brings no command, so the waiting command ends. The mutant now fails both packages in under 8 seconds with no process left. `admit.go:346:23` of the same run timed out without using resources: the test panics in `dropPeer` holding `Pairer.mu`, and its clean-up waits on goroutines blocked on that lock.
+
+### 2026-11-27 · bug · Invitation-code tests asserted the order of timers set on different goroutines
+
+- Symptom: `TestCodeEndsForADeviceOfTwoCodes` failed on Windows CI (`admit_test.go:1338`, PR #428): a 10-minute timer came before the second code's 1-hour one. With `GOMAXPROCS=1`, 3 of 60 runs failed it, and `TestCodeTypedAgainAfterAnotherCode` and `TestCodePeerHasTenMinutesFromItsMessage` failed too.
+- Cause: the node sets a code's timer in `watchCode` and a peer's 10 minutes in `watchPeer`, each on a goroutine of its own (`internal/node/admit.go:215`, `:311`), and the `code new` reply goes out before the code's goroutine runs. Nothing orders them, and nothing needs to: `watchCode` measures what is left against the home's clock. The tests asserted an order the product does not give, and `runOut(i)` picked a timer by that order.
+- Status: resolved on `fix/node-admit-flake`: the test rig's `newCode` and `pairs` return once the timer they cause is set (`heldTimers.beyond`). With every timer delayed 0 to 25 ms at random, the old tests failed 26 of 30 runs and the new ones pass 10 of 10.
+
 ### 2026-11-27 · bug · The acceptance suite's clean-up list raced when two people joined at once
 
 - Symptom: `go test -tags acceptance -race` on "People who type one invitation code meet the home in its room and join, at once (A9.47)" failed one run in three with `WARNING: DATA RACE` (`testing.go: race detected during execution of test`); the two writes were the two browsers' clean-ups.

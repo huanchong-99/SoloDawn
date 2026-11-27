@@ -559,6 +559,23 @@ func (h *heldTimers) runOut(i int) {
 	h.held[i].run <- time.Time{}
 }
 
+func (h *heldTimers) count() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.held)
+}
+
+// beyond waits for a timer after the first n.
+func (h *heldTimers) beyond(t *testing.T, n int) {
+	t.Helper()
+	poll(t, 5*time.Second, fmt.Sprintf("a timer after the first %d", n), func() string {
+		if h.count() <= n {
+			return "none"
+		}
+		return ""
+	})
+}
+
 // rvProxy stands before a rendezvous for one device: it passes the frames
 // both ways, changed by fromServer on the way to the device, and keeps them.
 type rvProxy struct {
@@ -689,12 +706,16 @@ func (r *codeRig) code(t *testing.T, op string, hours int) proto.CmdResult {
 	return r.cmd(t, cmd)
 }
 
-// newCode makes a code and returns its secret and its end.
+// newCode makes a code and returns its secret and its end, once the code's
+// timer is set: the node sets it on a goroutine of its own, so nothing else
+// orders it before the timers that come after.
 func (r *codeRig) newCode(t *testing.T, hours int) (identity.Secret, int64) {
 	t.Helper()
+	n := r.timers.count()
 	res := r.code(t, "new", hours)
 	secret, err := identity.ParseSecret(res.Code)
 	mustNoErr(t, err)
+	r.timers.beyond(t, n)
 	return secret, res.Expires
 }
 
@@ -737,10 +758,16 @@ func (r *codeRig) serve(t *testing.T, device identity.Key) *fakeCtl {
 }
 
 // pairs hands the node the pair message of a device that typed a code, as
-// the room frame that came on path.
+// the room frame that came on path. A message that makes the device a peer
+// returns once the timer of the peer's 10 minutes is set, which the node
+// does on a goroutine of its own.
 func (r *codeRig) pairs(t *testing.T, path *peer.Path, device identity.Key, secret identity.Secret) {
 	t.Helper()
+	n, was := r.timers.count(), r.codePeer(device)
 	r.pairer.HandleEvent(t.Context(), path, "room", codePairFrame(secret, secret.Room(), device, "b"))
+	if r.codePeer(device) != was {
+		r.timers.beyond(t, n)
+	}
 }
 
 func codePairFrame(secret identity.Secret, room string, device identity.Key, role string) []byte {

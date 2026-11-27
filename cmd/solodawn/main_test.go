@@ -13,6 +13,15 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/node"
 )
 
+// TestMain runs no test in a copy of this binary that pair started as the
+// node: the copy would run the same tests and start the next copy.
+func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "node" {
+		return
+	}
+	m.Run()
+}
+
 func TestMainUsesCommandExitCode(t *testing.T) {
 	previous, args, stderr := exit, os.Args, os.Stderr
 	t.Cleanup(func() { exit, os.Args, os.Stderr = previous, args, stderr })
@@ -175,6 +184,8 @@ func TestNodeErrorIsOneLine(t *testing.T) {
 	}
 }
 
+// A connection that brings no command closes the listener, which ends a
+// command waiting on any other connection.
 func replyToCommand(l *node.Local) <-chan string {
 	received := make(chan string, 1)
 	go func() {
@@ -188,6 +199,7 @@ func replyToCommand(l *node.Local) <-chan string {
 		conn.SetDeadline(time.Now().Add(2 * time.Second))
 		line, err := bufio.NewReader(conn).ReadString('\n')
 		if err != nil {
+			l.Close()
 			received <- err.Error()
 			return
 		}
