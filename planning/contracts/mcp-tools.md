@@ -119,8 +119,9 @@ The secretary has the tools of section 1 too, except `start_task`,
 
 There is no merge tool, and nothing is merged by the platform. When a
 review passes the task is done, and the home tells the secretary (R-24),
-who arranges the closing step the project needs: it asks the assignee in
-the thread, or brings it to a person.
+who requests the closing step the project needs in that same turn: it
+asks the assignee with `ask`, or brings it to a person with
+`request_decision` (`contracts/drivers.md` section 4).
 
 ## 3. The permission prompt tool (Claude Code only)
 

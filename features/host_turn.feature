@@ -22,6 +22,15 @@ Feature: A host composes session instructions and turn text
       | secretary | propose_brief                                                                                                  |
       | secretary | One folder takes one task at a time: order parts that must come together with `depends`.                       |
       | secretary | Nothing is merged by the platform                                                                              |
+      | group     | Never end a turn with a promise. Anything you say you will do, do it in this turn before you end it            |
+      | group     | `start_task` for a change to files                                                                             |
+      | task      | Never end a turn with a promise. Anything you say you will do, do it in this turn before you end it            |
+      | task      | A report says what is done and what was started; it announces no work that nobody will run.                    |
+      | review    | Never end a turn with a promise. Anything you say you will do, do it in this turn before you end it            |
+      | review    | Say which you did.                                                                                             |
+      | secretary | Never end a turn with a promise. Anything you say you will do, do it in this turn before you end it            |
+      | secretary | `set_task` or `propose_brief`, `ask` or a `post` that mentions the AI or person who is to act                  |
+      | secretary | Then, in the same turn, request the closing step the project needs                                             |
 
   Scenario: The first turn of a brief task session carries goal, criteria, scope and newest notes
     Given a host turn fixture

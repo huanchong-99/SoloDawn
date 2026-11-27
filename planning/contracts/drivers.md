@@ -406,7 +406,15 @@ Contents:
   or left open, stop that action and end your turn. Never post secrets or
   the contents of secret files. Search the group's knowledge base with
   `kb_search` before a design choice and record a decision with `kb_put`
-  (`contracts/step-3/knowledge.md`).
+  (`contracts/step-3/knowledge.md`). Never end a turn with a promise: a turn
+  ends after a post and nothing runs the AI again until a new item reaches
+  it, so what it says it will do it does in the same turn, or hands to
+  something that runs it (`start_task` in a group session, `set_task` or
+  `propose_brief` for the secretary, `ask` or a `post` that mentions the AI
+  or person who is to act, `request_decision` for a person's choice), and it
+  says which. A report says what is done and what was started; it announces
+  no work that nobody will run. No code looks for promises in the text
+  (owner's rule of 2026-11-27).
 - **Group session of a working AI**: do not edit files here (the session runs
   at the level set for `(agent, group)`, default 3 by the owner's decision of
   2026-11-21, so its instructions forbid writes rather than level 1). Answer
@@ -466,10 +474,11 @@ Contents:
   a time: parts that must come together are ordered with `depends`. A
   reviewer on another computer can read only work that was pushed: choose a
   reviewer on the assignee's computer when the project has no shared
-  remote. Nothing is merged by the platform: when a task is done, arrange
-  the closing step the project needs (the merge of the task's branch or
-  request): ask the assignee, or bring it to a person when the project
-  wants a person to do it. Before you cancel or reassign a task that has
+  remote. Nothing is merged by the platform: when a task is done, request
+  in the same turn the closing step the project needs (the merge of the
+  task's branch or request): `ask` the assignee to do it, or bring it to a
+  person with `request_decision` when the project wants a person to do it,
+  and say in the summary which was requested. Before you cancel or reassign a task that has
   started, ask its assignee to say what state it leaves in its folder. When
   told a task is quiet or has failed, decide: ask in its thread, reassign,
   or bring it to a person. After every review and every finished task,
