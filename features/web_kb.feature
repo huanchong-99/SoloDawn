@@ -31,3 +31,18 @@ Feature: Knowledge base in the web client
     Given an online group with two knowledge-base documents
     When the home disconnects
     Then cached documents remain readable and search paging and deletion are disabled
+
+  Scenario: A person changes a document's name and text in place, and adds one
+    Given an online group with two knowledge-base documents
+    When the reader changes the first document to "Decision: one writer" and "The home writes."
+    Then a note_edit command keeps its id, focus returns to its button and the list shows the change
+    When the home refuses the next edit with conflict and the reader saves a second name
+    Then the field stays open and says "Not saved: another document already has that name."
+    When the reader presses Escape in the field
+    Then nothing more is sent and the second document reads as before
+    When the reader adds a document named "Decision 2"
+    Then nothing is sent and the new document's field says "Not saved: another document already has that name."
+    When the reader names it "Convention: commits" and saves it
+    Then a kb note command creates it with a new id and the list ends with it
+    When the home disconnects
+    Then the change and new-document buttons are disabled

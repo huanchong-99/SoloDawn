@@ -23,6 +23,11 @@ export class Knowledge {
     return [...this.group.rows.values()].filter(isDocument).sort((a, b) => a.pos - b.pos);
   }
 
+  /** Whether this browser holds a document of `name`. */
+  has(name: string): boolean {
+    return [...this.group.rows.values()].some((row) => isDocument(row) && row.name === name);
+  }
+
   sync(): void {
     const epoch = this.group.paging();
     if (!this.group.home.ctl || epoch === this.#epoch) return;

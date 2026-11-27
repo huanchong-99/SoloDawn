@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { lost, newId, type Group } from '../../lib/groups.svelte';
+import { lost, type Group } from '../../lib/groups.svelte';
 import type { NoteRow, Row } from '../../lib/proto';
 
 const isPreset = (row: Row): row is NoteRow =>
@@ -7,27 +7,6 @@ const isPreset = (row: Row): row is NoteRow =>
 
 export function presets(group: Group): NoteRow[] {
   return [...group.rows.values()].filter(isPreset).sort((a, b) => a.pos - b.pos);
-}
-
-export function canWrite(group: Group): boolean {
-  return Boolean(group.home.ctl && group.me);
-}
-
-export function validName(name: string): boolean {
-  return name.length > 0 && [...name].length <= 80 && !/\p{Cc}/u.test(name);
-}
-
-export async function savePreset(group: Group, name: string, text: string): Promise<string> {
-  const answer = await group.home.command({
-    t: 'note',
-    g: group.g,
-    id: newId(),
-    task: null,
-    type: 'preset',
-    name,
-    text,
-  });
-  return answer.err ? answer.err.code : '';
 }
 
 export class PresetView {

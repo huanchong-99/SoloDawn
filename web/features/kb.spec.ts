@@ -13,14 +13,29 @@ let held: NoteRow[];
 let fetches: Record<string, unknown>[];
 let commands: Record<string, unknown>[];
 
+let refuse = '';
+
+/** What the home writes for a command: an edited or a new document, or a deletion marker. */
+function written(cmd: Record<string, unknown>): Row {
+  const note = held.find((row) => row.id === cmd.id);
+  const pos = note?.pos ?? held.length + 1;
+  if (cmd.t === 'forget') return { r: 'note', id: cmd.id as string, seq: 10000, gone: true };
+  const { name, text } = cmd as { name: string; text: string };
+  return { ...(note ?? held[0]), id: cmd.id as string, seq: 10000 + pos, pos, name, text };
+}
+
+function command(env: Envelope) {
+  const cmd = JSON.parse(env.p);
+  commands.push(cmd);
+  if (refuse) return { re: 1, err: { code: refuse, msg: 'refused by the test' } };
+  const row = written(cmd);
+  held = [...held.filter((each) => each.id !== cmd.id), ...('gone' in row ? [] : [row as NoteRow])];
+  group.apply([row]);
+  return { re: 1, ok: true };
+}
+
 async function request(req: Record<string, unknown>) {
-  if (req.t === 'cmd') {
-    const cmd = JSON.parse((req.env as Envelope).p);
-    commands.push(cmd);
-    held = held.filter((row) => row.id !== cmd.id);
-    group.apply([{ r: 'note', id: cmd.id, seq: 10000, gone: true }]);
-    return { re: 1, ok: true };
-  }
+  if (req.t === 'cmd') return command(req.env as Envelope);
   if (req.t === 'fetch' && req.kind === 'kb') {
     fetches.push(req);
     if (req.q !== undefined) {
@@ -41,6 +56,7 @@ async function request(req: Record<string, unknown>) {
 function setup(count: number) {
   fetches = [];
   commands = [];
+  refuse = '';
   held = Array.from(
     { length: count },
     (_, i) =>
@@ -87,6 +103,25 @@ async function search(q: string) {
   flushSync();
   one('.kb form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await settle();
+}
+
+const button = (label: string) => one<HTMLButtonElement>(`.kb button[aria-label="${label}"]`);
+const field = (label: string) => one<HTMLInputElement>(`.kb [aria-label="${label}"]`);
+
+function type(label: string, value: string) {
+  field(label).value = value;
+  field(label).dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
+async function saved(count: number) {
+  one<HTMLFormElement>('.kb .edit-field').requestSubmit();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(commands).toHaveLength(count);
+  });
+  await tick();
+  flushSync();
 }
 
 function clear() {
@@ -222,4 +257,122 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       ]);
     });
   });
+  Scenario(
+    "A person changes a document's name and text in place, and adds one",
+    ({ Given, When, Then }) => {
+      Given('an online group with two knowledge-base documents', async () => {
+        setup(2);
+        await open();
+      });
+      When(
+        'the reader changes the first document to "Decision: one writer" and "The home writes."',
+        async () => {
+          button('Change document: Decision 1').click();
+          flushSync();
+          expect(document.activeElement).toBe(field('Document name'));
+          expect(texts('.kb .mem-item > b')).toEqual(['Decision 2']);
+          type('Document name', ' Decision: one writer ');
+          type('Document text', 'The home writes.');
+          await saved(1);
+        },
+      );
+      Then(
+        'a note_edit command keeps its id, focus returns to its button and the list shows the change',
+        async () => {
+          expect(commands[0]).toEqual({
+            t: 'note_edit',
+            g: gid,
+            id: 'document-1',
+            name: 'Decision: one writer',
+            text: 'The home writes.',
+            n: expect.any(String),
+            ts: expect.any(Number),
+          });
+          expect(texts('.kb .mem-item > b')).toEqual(['Decision: one writer', 'Decision 2']);
+          expect(texts('.kb .mem-text')).toEqual(['The home writes.', 'Writer decision 2.']);
+          await vi.waitFor(() =>
+            expect(document.activeElement).toBe(button('Change document: Decision: one writer')),
+          );
+        },
+      );
+      When(
+        'the home refuses the next edit with conflict and the reader saves a second name',
+        async () => {
+          refuse = 'conflict';
+          button('Change document: Decision 2').click();
+          flushSync();
+          type('Document name', 'Decision: one writer');
+          await saved(2);
+        },
+      );
+      Then(
+        'the field stays open and says "Not saved: another document already has that name."',
+        () => {
+          expect(texts('.kb .edit-field [role=alert]')).toEqual([
+            'Not saved: another document already has that name.',
+          ]);
+        },
+      );
+      When('the reader presses Escape in the field', async () => {
+        field('Document text').dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+        );
+        await tick();
+        flushSync();
+      });
+      Then('nothing more is sent and the second document reads as before', () => {
+        expect(commands).toHaveLength(2);
+        expect(all('.kb .edit-field')).toEqual([]);
+        expect(texts('.kb .mem-item > b')).toEqual(['Decision: one writer', 'Decision 2']);
+      });
+      When('the reader adds a document named "Decision 2"', async () => {
+        refuse = '';
+        one<HTMLButtonElement>('.kb .add').click();
+        flushSync();
+        type('Document name', 'Decision 2');
+        type('Document text', 'Another.');
+        one<HTMLFormElement>('.kb .edit-field').requestSubmit();
+        await vi.waitFor(() => {
+          flushSync();
+          expect(all('.kb .edit-field [role=alert]')).toHaveLength(1);
+        });
+      });
+      Then(
+        'nothing is sent and the new document\'s field says "Not saved: another document already has that name."',
+        () => {
+          expect(commands).toHaveLength(2);
+          expect(texts('.kb .edit-field [role=alert]')).toEqual([
+            'Not saved: another document already has that name.',
+          ]);
+        },
+      );
+      When('the reader names it "Convention: commits" and saves it', async () => {
+        type('Document name', 'Convention: commits');
+        await saved(3);
+      });
+      Then('a kb note command creates it with a new id and the list ends with it', () => {
+        expect(commands[2]).toEqual({
+          t: 'note',
+          g: gid,
+          id: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
+          task: null,
+          type: 'kb',
+          name: 'Convention: commits',
+          text: 'Another.',
+          n: expect.any(String),
+          ts: expect.any(Number),
+        });
+        expect(texts('.kb .mem-item > b').at(-1)).toBe('Convention: commits');
+        expect(all('.kb .edit-field')).toEqual([]);
+      });
+      When('the home disconnects', () => {
+        group.home.ctl = undefined;
+        flushSync();
+      });
+      Then('the change and new-document buttons are disabled', () => {
+        const buttons = all<HTMLButtonElement>('.kb .edit, .kb .add');
+        expect(buttons.map((each) => each.disabled)).toEqual([true, true, true, true]);
+      });
+    },
+  );
 });

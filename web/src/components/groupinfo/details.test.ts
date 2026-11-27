@@ -173,7 +173,15 @@ it('shows the foreign home and secretary warning without blocking settings', asy
     p.decode(p.DeviceRow, goldens['row-device']),
   ]);
   show(GroupDetails, { group });
-  expect(all('section.field > dl dd').map((el) => el.textContent)).toEqual([
+  expect(all('section.field > dl dt').map((el) => el.textContent)).toEqual([
+    'Group name',
+    'Secretary',
+    'Home computer',
+    'Computer owner',
+  ]);
+  expect(all('section.field > dl dd').map((el) => el.textContent!.trim())).toEqual([
+    `${info.name} Change`,
+    `${ai.name} Change`,
     'Group computer',
     person.name,
   ]);
@@ -347,4 +355,128 @@ it('never offers an external AI as secretary, and no choice when there is no oth
   group.apply([{ ...ai, seq: 10000, cli: 'external' }]);
   flushSync();
   expect(document.querySelector('dialog select')).toBeNull();
+});
+
+const edit = (label: string) => one<HTMLButtonElement>(`button[aria-label="${label}"]`);
+const press = (el: Element, key: string, init: KeyboardEventInit = {}) =>
+  el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
+
+it('renames the group in place: Enter sends it, Escape leaves it, focus goes back', async () => {
+  const { group, info, request } = setup();
+  show(GroupDetails, { group });
+  const opener = edit('Change group name');
+  expect(opener.getAttribute('aria-expanded')).toBe('false');
+  opener.click();
+  flushSync();
+  const field = one<HTMLInputElement>('input[aria-label="Group name"]');
+  expect([document.activeElement, field.value, field.maxLength]).toEqual([field, info.name, 80]);
+  fill(field, 'Other');
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  field.dispatchEvent(escape);
+  expect(escape.defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(document.activeElement).toBe(edit('Change group name')));
+  expect(document.querySelector('input[aria-label="Group name"]')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+
+  edit('Change group name').click();
+  flushSync();
+  fill(one<HTMLInputElement>('input[aria-label="Group name"]'), '  ');
+  flushSync();
+  expect(one<HTMLButtonElement>('.edit-field .btn-primary').disabled).toBe(true);
+  fill(one<HTMLInputElement>('input[aria-label="Group name"]'), ' Docs ');
+  one<HTMLFormElement>('.edit-field').requestSubmit();
+  await vi.waitFor(() => expect(document.activeElement).toBe(edit('Change group name')));
+  expect(sent(request)).toEqual({ t: 'group', g: group.g, op: 'set', name: 'Docs' });
+});
+
+it('keeps an unchanged value unsent, and a refused one open with its reason', async () => {
+  const { group, request } = setup();
+  show(GroupDetails, { group });
+  edit('Change group name').click();
+  flushSync();
+  one<HTMLFormElement>('.edit-field').requestSubmit();
+  await vi.waitFor(() => expect(document.querySelector('.edit-field')).toBeNull());
+  expect(request).not.toHaveBeenCalled();
+  request.mockResolvedValueOnce({ re: 1, err: { code: 'forbidden', msg: 'refused' } });
+  edit('Change group name').click();
+  flushSync();
+  fill(one<HTMLInputElement>('input[aria-label="Group name"]'), 'Docs');
+  one<HTMLFormElement>('.edit-field').requestSubmit();
+  await vi.waitFor(() =>
+    expect(one('.edit-field [role=alert]').textContent!.trim()).toBe(
+      'Not sent: this device may not do that.',
+    ),
+  );
+  one<HTMLButtonElement>('.edit-field .btn-ghost').click();
+  await vi.waitFor(() => expect(document.querySelector('.edit-field')).toBeNull());
+});
+
+it('changes the secretary in place and says why an AI on a task cannot be one', async () => {
+  const { group, info, ai, request } = setup();
+  show(GroupDetails, { group });
+  expect(one('section.field > dl dd:nth-of-type(2)').textContent!.trim()).toBe('None Change');
+  edit('Change secretary').click();
+  flushSync();
+  const select = one<HTMLSelectElement>('select[aria-label="Secretary"]');
+  expect(all('select option').map((el) => el.textContent)).toEqual(['Choose an AI', ai.name]);
+  expect(one<HTMLButtonElement>('.edit-field .btn-primary').disabled).toBe(true);
+  request.mockResolvedValueOnce({ re: 1, err: { code: 'conflict', msg: 'busy' } });
+  choose(select, ai.name);
+  flushSync();
+  press(select, 'Enter', { metaKey: true });
+  await vi.waitFor(() =>
+    expect(one('.edit-field [role=alert]').textContent).toBe(
+      'Not saved: that AI is on an unfinished task, so it cannot be the secretary now.',
+    ),
+  );
+  expect(sent(request)).toEqual({ t: 'group', g: group.g, op: 'set', secretary: ai.id });
+  press(select, 'a');
+  expect(document.querySelector('.edit-field')).not.toBeNull();
+  press(select, 'Escape');
+  await vi.waitFor(() => expect(document.activeElement).toBe(edit('Change secretary')));
+  group.apply([{ ...info, seq: 100, secretary: ai.id }]);
+  flushSync();
+  expect(one('section.field > dl dd:nth-of-type(2)').textContent!.trim()).toBe(`${ai.name} Change`);
+});
+
+it('shows the name but no way to change it to a member, and none offline', () => {
+  const { group, home, person, ai } = setup();
+  group.apply([{ ...person, seq: 101, role: 'member' }]);
+  show(GroupDetails, { group });
+  expect(document.querySelectorAll('button.edit').length).toBe(0);
+  group.rows.delete(`member ${ai.id}`);
+  group.apply([{ ...person, seq: 102, role: 'owner' }]);
+  home.ctl = undefined;
+  flushSync();
+  expect(all('section.field > dl dt').map((el) => el.textContent)).toEqual([
+    'Group name',
+    'Home computer',
+    'Computer owner',
+  ]);
+  expect(edit('Change group name').disabled).toBe(true);
+});
+
+it('ignores Escape while a save is in flight, so its answer settles this edit', async () => {
+  const { group, request } = setup();
+  let answer!: (value: object) => void;
+  request.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+  show(GroupDetails, { group });
+  edit('Change group name').click();
+  flushSync();
+  const field = one<HTMLInputElement>('input[aria-label="Group name"]');
+  fill(field, 'Docs');
+  one<HTMLFormElement>('.edit-field').requestSubmit();
+  await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  flushSync();
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  field.dispatchEvent(escape);
+  flushSync();
+  expect([escape.defaultPrevented, field.isConnected, field.readOnly]).toEqual([false, true, true]);
+  answer({ re: 1, err: { code: 'forbidden', msg: 'refused' } });
+  await vi.waitFor(() =>
+    expect(one('.edit-field [role=alert]').textContent!.trim()).toBe(
+      'Not sent: this device may not do that.',
+    ),
+  );
+  expect(field.value).toBe('Docs');
 });

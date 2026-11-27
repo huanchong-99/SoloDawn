@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  addNote,
   authorOf,
+  editNote,
+  Editing,
   forgetDisabledReason,
   forgetMemory,
   groupNotes,
@@ -312,5 +315,92 @@ describe('MemoryView paging', () => {
     await p2;
     expect(v2.note.more).toBe(true);
     expect(groupNotes(g2)).toEqual([]);
+  });
+});
+
+describe('editNote, addNote and Editing', () => {
+  function sending() {
+    const sent: Record<string, unknown>[] = [];
+    const { home, group } = makeGroup({
+      handler: async (req) => {
+        sent.push(JSON.parse((req.env as p.Envelope).p));
+        return { re: 1, ok: true };
+      },
+    });
+    const payload = () => {
+      const { n: _n, ts: _ts, ...rest } = sent.at(-1)!;
+      return rest;
+    };
+    return { home, group, sent, payload };
+  }
+
+  it('sends note_edit with the note id, its own name unless another is given, and the text', async () => {
+    const { home, group, payload } = sending();
+    const doc = row<p.NoteRow>('row-note-kb', { id: 'doc-1' });
+    expect(await editNote(group, doc, 'New text.')).toBe('');
+    expect(payload()).toEqual({
+      t: 'note_edit',
+      g: gid,
+      id: 'doc-1',
+      name: doc.name,
+      text: 'New text.',
+    });
+    await editNote(group, doc, 'Other.', 'Renamed');
+    expect(payload()).toEqual({
+      t: 'note_edit',
+      g: gid,
+      id: 'doc-1',
+      name: 'Renamed',
+      text: 'Other.',
+    });
+    await editNote(group, row<p.NoteRow>('row-note', { id: 'n-1' }), 'Lesson.');
+    expect(payload()).toEqual({ t: 'note_edit', g: gid, id: 'n-1', text: 'Lesson.' });
+    home.ctl = makeCtl(async () => ({ re: 2, err: { code: 'not_found', msg: 'gone' } }));
+    expect(await editNote(group, doc, 'x')).toBe('not_found');
+  });
+
+  it('sends note with a new id and no task: a context note, or a typed one with its name', async () => {
+    const { home, group, sent, payload } = sending();
+    const id = expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/);
+    expect(await addNote(group, 'Lesson.')).toBe('');
+    expect(payload()).toEqual({ t: 'note', g: gid, id, task: null, text: 'Lesson.' });
+    await addNote(group, 'Why.', { type: 'kb', name: 'Decision' });
+    expect(payload()).toEqual({
+      t: 'note',
+      g: gid,
+      id,
+      task: null,
+      type: 'kb',
+      name: 'Decision',
+      text: 'Why.',
+    });
+    await addNote(group, 'Calm.', { type: 'preset', name: 'Calm' });
+    expect(payload()).toEqual({
+      t: 'note',
+      g: gid,
+      id,
+      task: null,
+      type: 'preset',
+      name: 'Calm',
+      text: 'Calm.',
+    });
+    expect(new Set(sent.map((cmd) => cmd.id)).size).toBe(3);
+    home.ctl = makeCtl(async () => ({ re: 2, err: { code: 'conflict', msg: 'taken' } }));
+    expect(await addNote(group, 'x', { type: 'kb', name: 'Decision' })).toBe('conflict');
+  });
+
+  it('closes an edit and gives focus back to its button, or to nothing when the button is gone', async () => {
+    const editing = new Editing();
+    const button = document.createElement('button');
+    button.id = 'edit-1';
+    document.body.append(button);
+    editing.id = 'edit-1';
+    await editing.close();
+    expect([editing.id, document.activeElement]).toEqual([undefined, button]);
+    button.blur();
+    button.remove();
+    editing.id = 'edit-1';
+    await editing.close();
+    expect([editing.id, document.activeElement]).toEqual([undefined, document.body]);
   });
 });

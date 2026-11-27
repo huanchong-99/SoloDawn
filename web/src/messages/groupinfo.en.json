@@ -59,5 +59,15 @@
   "groupinfo.limit.ask_wait_s": "Wait for another AI",
   "groupinfo.limit.ask_wait_s.hint": "Then the AI goes on. The answer reaches it as a message.",
   "groupinfo.limit.ask_depth": "Chain of questions",
-  "groupinfo.limit.ask_depth.hint": "How long a chain of questions may get. At 1, an AI that is asked asks nobody; at 0, AIs do not ask each other."
+  "groupinfo.limit.ask_depth.hint": "How long a chain of questions may get. At 1, an AI that is asked asks nobody; at 0, AIs do not ask each other.",
+  "groupinfo.name": "Group name",
+  "groupinfo.name.edit": "Change group name",
+  "groupinfo.secretary.none": "None",
+  "groupinfo.secretary.edit": "Change secretary",
+  "groupinfo.change": "Change",
+  "groupinfo.edit.keys": "Ctrl or ⌘ + Enter saves, Esc cancels",
+  "groupinfo.edit.gone": "Not saved: it was deleted in the meantime.",
+  "groupinfo.note.add": "Add a note",
+  "groupinfo.note.edit": "Change note: {text}",
+  "groupinfo.note.text": "Note"
 }

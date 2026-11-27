@@ -62,6 +62,8 @@ type homePostWorld struct {
 	oldText   string
 	oldReview string
 	oldNote   string
+	notePos   int64
+	noteText  string
 	lastMsg   string
 	lastErr   string
 	nonce     int
@@ -84,6 +86,9 @@ func homePostSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the second browser receives a gone marker for that "(note|msg)"$`, w.secondGetsGone)
 	sc.Step(`^(a non-admin member tries to forget the old note|the first browser tries to forget the old text message|"ai-two" tries to post a completion report in the thread of task 1|"ai-one" tries to post progress in the main line)$`, w.attemptRefusal)
 	sc.Step(`^the post home answers "([^"]*)"$`, w.checkRefusal)
+	sc.Step(`^the non-admin member edits the old note to "([^"]*)"$`, w.editOld)
+	sc.Step(`^the second browser receives the old note with that text, in its place, by the non-admin member$`, w.secondGetsEdit)
+	sc.Step(`^("ai-one"|the non-admin member) tries to edit the old note$`, w.attemptEdit)
 }
 
 func (w *homePostWorld) now() time.Time { return time.UnixMilli(w.clock.Load()) }
@@ -388,10 +393,22 @@ func (w *homePostWorld) seedMemory() error {
 	if err := w.sendOK("b1", noteCmd); err != nil {
 		return err
 	}
-	if _, err := w.readRows("b2", 1); err != nil {
+	if err := w.readNotePos(); err != nil {
 		return err
 	}
 	return w.putOldReview()
+}
+
+// readNotePos reads the new note on the second browser, and keeps its place.
+func (w *homePostWorld) readNotePos() error {
+	rows, err := w.readRows("b2", 1)
+	if err != nil {
+		return err
+	}
+	var note proto.NoteRow
+	err = json.Unmarshal(rows[0], &note)
+	w.notePos = note.Pos
+	return err
 }
 
 func (w *homePostWorld) putOldReview() error {
@@ -498,4 +515,47 @@ func (w *homePostWorld) checkRefusal(code string) error {
 		return fmt.Errorf("got %s (%v); want error %s", w.lastErr, err, code)
 	}
 	return nil
+}
+
+func (w *homePostWorld) noteEdit(as, text string) proto.NoteEdit {
+	return proto.NoteEdit{
+		HomeCommand: proto.HomeCommand{Type: "note_edit", Nonce: w.nextID(), Timestamp: w.clock.Load(), Group: proto.ID(w.group), As: proto.ID(as)},
+		ID:          proto.ID(w.oldNote), Text: text,
+	}
+}
+
+func (w *homePostWorld) editOld(text string) error {
+	w.noteText = text
+	return w.sendOK("guest", w.noteEdit("", text))
+}
+
+// secondGetsEdit reads the edited note on both browsers: the first one's push
+// is read too, so that its next answer is the next frame it gets.
+func (w *homePostWorld) secondGetsEdit() error {
+	if _, err := w.readRows("b1", 1); err != nil {
+		return err
+	}
+	rows, err := w.readRows("b2", 1)
+	if err != nil {
+		return err
+	}
+	var note proto.NoteRow
+	if err := json.Unmarshal(rows[0], &note); err != nil {
+		return err
+	}
+	got := []any{note.ID, note.Text, note.Pos, note.By}
+	if want := []any{w.oldNote, w.noteText, w.notePos, w.members["guest"]}; !reflect.DeepEqual(got, want) {
+		return fmt.Errorf("got note %v; want %v", got, want)
+	}
+	return nil
+}
+
+func (w *homePostWorld) attemptEdit(who string) error {
+	sender, as := "guest", ""
+	if who == `"ai-one"` {
+		sender, as = "host", w.members["ai-one"]
+	}
+	raw, err := w.sendRaw(sender, w.noteEdit(as, "Changed."))
+	w.lastErr = raw
+	return err
 }

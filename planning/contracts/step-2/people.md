@@ -15,7 +15,7 @@ A person's `member` row has `role` (`contracts/rows.md` section 2).
 
 | Role | Who | May, beyond what the role above it in this table may |
 | --- | --- | --- |
-| `member` | every person who joined | read the group; `post`, `note`, `jump`; `act` on a card that names them; add and remove their own AIs (`host.join`, `host.leave`); remove themself |
+| `member` | every person who joined | read the group; `post`, `note`, `note_edit`, `jump`; `act` on a card that names them; add and remove their own AIs (`host.join`, `host.leave`); remove themself |
 | `admin` | named by the owner | everything `contracts/commands.md` gives "an admin"; `invite`; `member add_person`; remove a person whose role is `member` |
 | `owner` | the owner of the home node; the person of `group create` | set roles; remove an admin |
 

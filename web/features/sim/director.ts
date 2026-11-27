@@ -7,8 +7,9 @@ import { Host } from './host';
 import { ids } from './ids';
 import type { SimNode } from './node';
 import { Ops } from './ops';
+import { noteEdit, notePut } from './memory';
 import { People } from './people';
-import { group, person, row, type Fields } from './rows';
+import { group, person, type Fields } from './rows';
 import { Scene, type AI, type Msg } from './scene';
 import { Talk } from './talk';
 import { Tasks } from './tasks';
@@ -56,29 +57,14 @@ export class Director extends Scene implements Hands {
       member: () => (payload.op === 'add_person' ? undefined : this.people.member(payload)),
       invite: () => this.people.invite(payload),
       join: () => this.people.join(payload),
-      note: () => this.#note(payload),
+      note: () => notePut(this.world, payload),
+      note_edit: () => noteEdit(this.world, payload),
       forget: () => this.#forget(payload),
       push: () => ({ ok: true }),
       group: () => (payload.op === 'set' ? this.people.group(payload) : undefined),
       post: () => (payload.kind === 'confirm' ? this.people.askToWatch(g, payload) : undefined),
     };
     return commands[payload.t as string]?.();
-  }
-
-  #note(payload: Fields) {
-    const g = payload.g as string;
-    const fields = {
-      id: payload.id,
-      g,
-      task: payload.task ?? null,
-      type: payload.type,
-      name: payload.name,
-    };
-    this.world.write(
-      g,
-      row('row-note', { ...fields, text: payload.text, by: ids.me, ts: Date.now() }),
-    );
-    return { ok: true };
   }
 
   #forget(payload: Fields) {

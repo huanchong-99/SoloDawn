@@ -1,6 +1,6 @@
 Feature: Messages, notes and deletion markers in the home
-  People and AIs post messages in the main line and in task threads, write context notes, and
-  delete notes or review messages with gone markers. Connected browsers receive live pushes of
+  People and AIs post messages in the main line and in task threads, write context notes, people
+  edit them in place, and admins delete notes or review messages with gone markers. Connected browsers receive live pushes of
   messages, thread summaries and deletion markers, and the host receives the inbox items that wake
   each AI.
 
@@ -27,6 +27,18 @@ Feature: Messages, notes and deletion markers in the home
     Then the second browser receives a gone marker for that "note"
     When the first browser forgets the old review message
     Then the second browser receives a gone marker for that "msg"
+
+  Scenario: A member edits a note in place, and no AI and no edit of a forgotten note can
+    Given a group home with two connected browsers of its owner, a secretary and two working AIs on its host
+    And the group holds an old text message, an old review message and an old note
+    When the non-admin member edits the old note to "Path events carry the connection id and the path."
+    Then the second browser receives the old note with that text, in its place, by the non-admin member
+    When "ai-one" tries to edit the old note
+    Then the post home answers "forbidden"
+    When the first browser forgets the old note
+    Then the second browser receives a gone marker for that "note"
+    When the non-admin member tries to edit the old note
+    Then the post home answers "not_found"
 
   Scenario Outline: Refusals on posts and forget leave the group unchanged
     Given a group home with two connected browsers of its owner, a secretary and two working AIs on its host

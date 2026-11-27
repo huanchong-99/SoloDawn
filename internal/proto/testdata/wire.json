@@ -81,6 +81,7 @@
   "note": {"optional":[],"nullable":["task"],"fraction":[],"id":["g","id","n"],"opaque":[]},
   "note-kb": {"optional":["as","name","type"],"nullable":["task"],"fraction":[],"id":["as","g","id","n"],"opaque":[]},
   "note-preset": {"optional":["name","type"],"nullable":["task"],"fraction":[],"id":["g","id","n"],"opaque":[]},
+  "note_edit": {"optional":["name"],"nullable":[],"fraction":[],"id":["g","id","n"],"opaque":[]},
   "offer": {"optional":["to"],"nullable":[],"fraction":[],"id":["n"],"opaque":[]},
   "pair": {"optional":["exp"],"nullable":[],"fraction":[],"id":[],"opaque":[]},
   "pair-browser": {"optional":[],"nullable":[],"fraction":[],"id":["n"],"opaque":[]},

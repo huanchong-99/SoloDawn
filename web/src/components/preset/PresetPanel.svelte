@@ -1,55 +1,45 @@
 <script lang="ts">
-  import { authorOf } from '../../lib/groupinfo.svelte';
+  import { addNote, authorOf, editNote, Editing } from '../../lib/groupinfo.svelte';
   import type { Group } from '../../lib/groups.svelte';
   import { isAdmin } from '../../lib/members';
   import { prefs, t } from '../../lib/prefs.svelte';
-  import type { NoteRow } from '../../lib/proto';
   import { now, shortWhen } from '../../lib/when';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
+  import EditButton from '../groupinfo/EditButton.svelte';
+  import EditField, { type Field } from '../groupinfo/EditField.svelte';
   import ForgetDialog, { type ForgetTarget } from '../groupinfo/ForgetDialog.svelte';
-  import { canWrite, presets, PresetView, savePreset, validName } from './presets.svelte';
+  import { presets, PresetView } from './presets.svelte';
 
+  /** The style presets: a person writes and changes them in place, name and text (commands.md
+   *  1.6; step-3/knowledge.md section 2); an admin deletes them. */
   let { group }: { group: Group } = $props();
   const uid = $props.id();
+  const addId = `${uid}-add`;
+  const editing = new Editing();
+  const close = () => void editing.close();
+  const reasons = $derived({ conflict: t('preset.taken'), not_found: t('groupinfo.edit.gone') });
+  const fields = (name: string, text: string): Field[] => [
+    { label: t('preset.name'), value: name, maxlength: 80 },
+    { label: t('preset.text'), value: text, multiline: true },
+  ];
   let open = $state(false);
   let heading = $state<HTMLElement>();
   let pending = $state.raw<ForgetTarget>();
-  let name = $state('');
-  let text = $state('');
-  let editing = $state(false);
-  let busy = $state(false);
-  let failed = $state('');
   const view = $derived(new PresetView(group));
   const notes = $derived(presets(group));
-  const writable = $derived(canWrite(group));
-  const deletable = $derived(Boolean(group.home.ctl) && isAdmin(group));
+  const offline = $derived(!group.home.ctl);
+  const deletable = $derived(!offline && isAdmin(group));
 
   $effect(() => {
     if (open) view.sync();
   });
 
-  function edit(note: NoteRow) {
-    name = note.name!;
-    text = note.text;
-    editing = true;
-    failed = '';
-  }
-
-  function clear() {
-    name = '';
-    text = '';
-    editing = false;
-    failed = '';
-  }
-
-  async function submit(event: SubmitEvent) {
-    event.preventDefault();
-    busy = true;
-    failed = await savePreset(group, name, text);
-    busy = false;
-    if (!failed) clear();
-  }
+  /** A new preset never replaces one of the same name: that one is changed in place. */
+  const add = ([name, text]: string[]) =>
+    notes.some((note) => note.name === name.trim())
+      ? Promise.resolve('conflict')
+      : addNote(group, text, { type: 'preset', name: name.trim() });
 </script>
 
 <section class="preset" aria-labelledby={`${uid}-head`}>
@@ -61,72 +51,66 @@
     </summary>
     {#if open}
       <div class="fold-body mem-body">
-        {#if !group.home.ctl}<p class="hint">{t('preset.offline')}</p>{/if}
+        {#if offline}<p class="hint">{t('preset.offline')}</p>{/if}
         {#if view.failed}<Failure code={view.failed} />{/if}
         {#if view.busy}<p class="hint" role="status">{t('preset.loading')}</p>{/if}
         <ul class="mem-list" aria-labelledby={`${uid}-head`}>
           {#each notes as note (note.id)}
+            {@const editId = `${uid}-edit-${note.id}`}
             <li class="mem-item">
-              <b>{note.name}</b>
+              {#if editing.id !== editId}<b>{note.name}</b>{/if}
               <div class="mem-meta">
                 <b>{authorOf(group, note.by)}</b>
                 <time datetime={new Date(note.ts).toISOString()}>
                   {shortWhen(note.ts, now(), prefs.lang)}
                 </time>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-ghost"
-                  disabled={!writable || busy}
-                  onclick={() => edit(note)}
-                >
-                  {t('preset.edit')}
-                </button>
+                {#if group.me}
+                  <EditButton
+                    id={editId}
+                    label={t('preset.edit').replace('{name}', note.name!)}
+                    {editing}
+                    disabled={offline}
+                  />
+                {/if}
                 <button
                   type="button"
                   class="btn btn-sm btn-ghost del"
-                  disabled={!deletable || busy}
+                  disabled={!deletable}
                   aria-label={t('groupinfo.forget.note').replace('{text}', note.name!)}
                   onclick={() => (pending = { r: 'note', id: note.id, label: note.name!, heading })}
                 >
                   {t('groupinfo.forget')}
                 </button>
               </div>
-              <p class="mem-text">{note.text}</p>
+              {#if editing.id === editId}
+                <EditField
+                  fields={fields(note.name!, note.text)}
+                  {reasons}
+                  save={([name, text]) => editNote(group, note, text, name.trim())}
+                  onclose={close}
+                />
+              {:else}
+                <p class="mem-text">{note.text}</p>
+              {/if}
             </li>
           {/each}
         </ul>
         {#if view.loaded && notes.length === 0}<p class="hint">{t('preset.empty')}</p>{/if}
-        <form class="mem-body" onsubmit={submit}>
-          <label class="field">
-            <span>{t('preset.name')}</span><input
-              class="input"
-              bind:value={name}
-              required
-              disabled={!writable || busy || editing}
-            />
-          </label>
-          <label class="field">
-            <span>{t('preset.text')}</span><textarea
-              class="input"
-              rows="4"
-              bind:value={text}
-              disabled={!writable || busy}></textarea>
-          </label>
-          {#if failed}<Failure code={failed} />{/if}
-          <div class="row">
-            <button class="btn btn-primary btn-sm" disabled={!writable || busy || !validName(name)}>
-              {t('preset.save')}
-            </button>
-            {#if editing}<button
-                type="button"
-                class="btn btn-ghost btn-sm"
-                disabled={busy}
-                onclick={clear}
-              >
-                {t('preset.cancel')}
-              </button>{/if}
+        {#if editing.id === addId}
+          <div class="mem-item">
+            <EditField fields={fields('', '')} {reasons} save={add} onclose={close} />
           </div>
-        </form>
+        {:else if group.me}
+          <button
+            type="button"
+            id={addId}
+            class="btn btn-sm btn-ghost add"
+            disabled={offline}
+            onclick={() => (editing.id = addId)}
+          >
+            <Icon name="plus" sm />{t('preset.add')}
+          </button>
+        {/if}
       </div>
     {/if}
   </details>
@@ -181,12 +165,24 @@
     color: var(--text);
     font-size: var(--fs-sm);
   }
-  .del {
+  .del,
+  .mem-meta :global(.edit) {
     margin-left: auto;
+  }
+  .mem-meta :global(.edit + .del) {
+    margin-left: 0;
   }
   .del:not([disabled]) {
     color: var(--danger);
     --hover: var(--danger-soft);
+  }
+  .add {
+    align-self: flex-start;
+    gap: 4px;
+    color: var(--sky);
+  }
+  .add[disabled] {
+    color: var(--text-3);
   }
   .mem-text {
     white-space: pre-wrap;

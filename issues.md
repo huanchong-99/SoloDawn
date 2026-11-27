@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · bug · The demo world wrote a second document when a preset or knowledge-base document was saved again
+
+- Symptom: in `?demo`, saving a style preset or a knowledge-base document under a name that already existed added a second entry of that name instead of replacing the first, which `planning/contracts/step-3/knowledge.md` section 2 requires.
+- Cause: the demo's `note` handler (`web/features/sim/director.ts`, `#note`, before M2) wrote every `note` under the command's new `id` and never looked up the note of that type and name.
+- Status: resolved by unit M2: `notePut` in `web/features/sim/memory.ts` replaces the note of that type and name, keeping its id and place (`features/sim/sim.test.ts`, "writes, edits, searches and pages the project memory and the knowledge base").
+
 ### 2026-11-27 · limitation · With the nightfall theme colour, links read as secondary text
 
 - Symptom: under 夜幕 Nightfall, links and the "更改" actions of the side panel are a neutral grey close to `--text-2` (`web/src/styles/accents.css`, `nightfall` block).

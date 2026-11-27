@@ -2,12 +2,14 @@ package home
 
 import "github.com/huanchong-99/SoloDawn/internal/proto"
 
-// Project memory: note writes a context note, and forget replaces a note or a
-// review message with a gone marker (planning/contracts/commands.md 1.6;
-// planning/contracts/rows.md sections 5 and 6).
+// Project memory: note writes a context note, note_edit changes a note in
+// place, and forget replaces a note or a review message with a gone marker
+// (planning/contracts/commands.md 1.6; planning/contracts/rows.md sections 5
+// and 6).
 
 func init() {
 	Commands.Add("note", notePut)
+	Commands.Add("note_edit", noteEdit)
 	Commands.Add("forget", noteForget)
 }
 
@@ -35,6 +37,43 @@ func notePut(s *State, c Command) (Result, *Refusal) {
 		Task: (*string)(p.Task), Text: p.Text, By: c.Who.Member(), Timestamp: c.Timestamp,
 	}
 	return Result{Rows: []Row{RowOf(row)}}, nil
+}
+
+func noteEdit(_ *State, c Command) (Result, *Refusal) {
+	if c.Who.AI != "" {
+		return Result{}, &Refusal{"forbidden", "only a person edits a note"}
+	}
+	var p proto.NoteEdit
+	if refusal := c.Decode(&p); refusal != nil {
+		return Result{}, refusal
+	}
+	note, ok := c.Disk.Note(string(p.ID))
+	if !ok {
+		return Result{}, &Refusal{"not_found", "the note does not exist"}
+	}
+	if refusal := noteRename(c.Disk, note, p.Name); refusal != nil {
+		return Result{}, refusal
+	}
+	note.Name, note.Text, note.By, note.Timestamp = p.Name, p.Text, c.Who.Member(), c.Timestamp
+	return Result{Rows: []Row{RowOf(note)}}, nil
+}
+
+// noteRename checks the name of an edit: none on a context note, and on a
+// typed note one that no other note of its type has.
+func noteRename(d Disk, note proto.NoteRow, name string) *Refusal {
+	if note.NoteType == "" {
+		if name != "" {
+			return &Refusal{"bad_request", "a context note has no name"}
+		}
+		return nil
+	}
+	if !presetNameOK(name) {
+		return &Refusal{"bad_request", "a typed note requires a name of 1 to 80 printable characters"}
+	}
+	if other, taken := presetFind(d.TypedNotes(note.NoteType), name); taken && other.ID != note.ID {
+		return &Refusal{"conflict", "another note of that type has that name"}
+	}
+	return nil
 }
 
 func noteForget(s *State, c Command) (Result, *Refusal) {

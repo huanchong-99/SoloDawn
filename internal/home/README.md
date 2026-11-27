@@ -95,7 +95,7 @@ last local membership deletes the node-wide device log and push subscriptions.
 ## Contract
 
 **Keys.** The table holds one function per key: the payload's `t`, followed by `/` and its `op` for
-`group`, `member` and `task`, its `kind` for `post`, its `action` for `act`. `note`, `forget`,
+`group`, `member` and `task`, its `kind` for `post`, its `action` for `act`. `note`, `note_edit`, `forget`,
 `jump` and `push` are keys by themselves. The `/` of a key is made by the seam and by nothing in
 a payload: a `t`, or an `op`, `kind` or `action`, that holds a `/` names no command, and neither
 does one of those five types without its field. `Add` panics when a key is given twice.
@@ -679,7 +679,7 @@ this:
 ([commands](../../planning/contracts/commands.md) 1.3;
 [messages](../../planning/contracts/messages.md) 1 and 2.10;
 [rows](../../planning/contracts/rows.md) sections 4 and 5), under `post/<kind>`. `cmd_note.go`
-holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
+holds `note`, `note_edit` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
 [rows](../../planning/contracts/rows.md) sections 5 and 6). Where the contracts are silent, they do
 this:
 
@@ -708,6 +708,11 @@ this:
   by an admin only (`forbidden`); `r` must be `note` or `msg` (`bad_request`); a missing or already
   forgotten row is `not_found`; a `msg` whose `kind` is not `review` is `conflict`; otherwise a
   `GoneRow` (`gone: true`) replaces it.
+- **`note_edit`.** By a person only: one signed for an AI is `forbidden` before the payload is
+  read. It reads the live note through `Disk.Note`, so a forgotten one is `not_found`, and
+  `noteRename` checks the name: none on a context note, on a typed note one of
+  `presetNameOK` that `Disk.TypedNotes` gives to no other note of that type (`conflict`). The
+  `NoteRow` keeps its `pos`, `task` and `type`, and takes `name`, `text`, `by` and `ts`.
 
 ## Cards
 

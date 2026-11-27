@@ -592,7 +592,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `chat.side` (`order: 20`) below the member panel. Its folded "Project memory" section fetches
     `note` and `review` ledger pages on demand (`fetch` with `kind`), omits `gone` markers, and
     lets an admin delete a note or review entry with a signed `forget` command after a `<dialog>`
-    confirmation.
+    confirmation. Any person of the group adds a note (`note`) and changes one in place
+    (`note_edit`); the group details (order 19) let an admin change the group's name and
+    secretary in place (`group set`). An edit in place is `EditButton` and `EditField`: Enter in a
+    line, Ctrl or ⌘ with Enter in a text, or Save sends it; Escape or Cancel leaves the value; a
+    refusal stays beside the field; focus returns to the button that opened it. Review ledger
+    entries are signed by the reviewing AI and are not edited.
 - **Terminal takeover.** `#/terminal/<g>/<member>[/<task>]` (`routes/Terminal.svelte`,
   `lib/terminal.svelte.ts`, `components/terminal/`) loads `@xterm/xterm` and `@xterm/addon-fit`
   with a dynamic `import()`. `Takeover` in `lib/terminal.svelte.ts` is the takeover of one
@@ -742,7 +747,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`                      |
 | `src/lib/stop.ts`             | emergency stop: pause a group, which computers have their AIs offline             |
 | `src/lib/queue.ts`            | which of the person's messages wait for a busy AI; `jump`                         |
-| `src/lib/groupinfo.svelte.ts` | project-memory `note` and `review` paging, `forget`                               |
+| `src/lib/groupinfo.svelte.ts` | memory paging; `note`, `note_edit`, `forget`, `group set`                         |
 | `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                     |
 | `src/lib/system.ts`           | the words of a notice of the home, by its code                                    |
 | `src/lib/notify.svelte.ts`    | live in-page notification store, classification, dismissal and jump               |
@@ -898,12 +903,16 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   update `host.info`, and `pair.browser` returns no link.
 - From 768 px the top bar of an open chat says "Chats", and the chat's own
   head with the group's name is below it, where the design has one bar with the group's name.
-- The preset editor and brief preset reader load only the first 50 presets; there is
-  no pagination or read by name. Typed notes stay out of Project memory.
+- The preset list and brief preset reader load only the first 50 presets; there is
+  no pagination or read by name. Typed notes stay out of Project memory. A person adds a preset
+  and changes its name and text in place (`note_edit`); a new preset whose name is held is
+  refused before it is sent.
 - Knowledge-base lists load in pages of 50; searches return up to 20 documents in the home's
   ranking order. If more
-  match, narrow the query rather than paging results. There is no knowledge-base editor; AIs
-  write documents with `kb_put`.
+  match, narrow the query rather than paging results. A person adds a document and changes its
+  name and text in place (`note_edit`); a new document whose name this browser already holds is
+  refused before it is sent, and one held only by the home replaces that document, as `kb_put`
+  does.
 - The texts of the `states` area are in the build, although only a development server shows
   their page.
 - Cards and the rows a home writes are one line each in the main line, and Safari moves the main

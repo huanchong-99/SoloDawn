@@ -69,7 +69,8 @@ Result, only when `type` is sent: `id`, `replaced`.
   the member id of the person or AI that sent it as `by`, and a new `seq`.
   Its `id` and `pos` stay; the command's own `id` is not used. The result
   has the row's `id` and `replaced: true`. No history: the old text is gone.
-- A document is renamed by writing the new name and forgetting the old one.
+- A document or a preset is changed in place, its name included, with
+  `note_edit` (`contracts/commands.md` 1.6), which keeps its `id` and `pos`.
 
 Refused:
 
@@ -213,8 +214,8 @@ CREATE UNIQUE INDEX row_named ON row (g, data->>'type', data->>'name')
   WHERE r = 'note' AND gone = 0 AND data->>'type' IS NOT NULL;
 ```
 
-- `row` stays the record; `kb` is derived from it. The `note` and `forget`
-  commands change both in one transaction: a replaced or forgotten
+- `row` stays the record; `kb` is derived from it. The `note`, `note_edit`
+  and `forget` commands change both in one transaction: a replaced or forgotten
   document leaves the index, a written one enters it. The migration that
   creates `kb` fills it from `row`. Retention never touches it.
 - `row_named` is the rule "one note per name" and the lookup of section 2

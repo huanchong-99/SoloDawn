@@ -30,11 +30,12 @@ async function request(req: Record<string, unknown>) {
 }
 
 function applyNote(cmd: Record<string, unknown>) {
-  const previous = held.find((row) => row.name === cmd.name);
+  const previous = held.find((row) => row.id === cmd.id);
   const note = example('row-note', {
+    ...previous,
     ...cmd,
+    t: undefined,
     r: 'note',
-    id: previous?.id ?? cmd.id,
     by: owner,
     ts: 1,
     seq: ++seq,
@@ -92,13 +93,11 @@ function fill(selector: string, value: string) {
   flushSync();
 }
 
-async function save() {
-  one('.preset form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+async function save(count: number) {
+  one<HTMLFormElement>('.preset .edit-field').requestSubmit();
+  await vi.waitFor(() => expect(commands).toHaveLength(count));
   await tick();
-  await vi.waitFor(() => {
-    flushSync();
-    expect(one<HTMLButtonElement>('.preset form button').disabled).toBe(true);
-  });
+  flushSync();
 }
 
 describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
@@ -126,58 +125,67 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       expect(texts('.groupinfo:not(.preset) .mem-text')).toEqual(['Context only.']);
     });
   });
-  Scenario('A person lists creates and changes presets', ({ Given, When, Then }) => {
-    Given('an online human member opens Style presets', async () => {
-      setup();
-      await openFold('.preset details');
-    });
-    Then('the editor fetches presets and lists their name and text', () => {
-      expect(fetches).toEqual([{ t: 'fetch', g: gid, kind: 'preset', before: 0, limit: 50 }]);
-      expect(texts('.preset .mem-item > b')).toEqual(['Calm dashboard']);
-      expect(texts('.preset .mem-text')).toEqual([style]);
-      const list = one('.preset .mem-list');
-      expect(document.getElementById(list.getAttribute('aria-labelledby')!)?.textContent).toBe(
-        'Style presets',
-      );
-    });
-    When('the member creates Quiet forms', async () => {
-      fill('.preset input', 'Quiet forms');
-      fill('.preset textarea', 'No motion.');
-      await save();
-    });
-    Then('a preset note command creates Quiet forms', () => {
-      expect(commands[0]).toEqual({
-        t: 'note',
-        n: expect.any(String),
-        ts: expect.any(Number),
-        g: gid,
-        id: expect.any(String),
-        task: null,
-        type: 'preset',
-        name: 'Quiet forms',
-        text: 'No motion.',
+  Scenario(
+    'A person lists, creates, and changes presets in place, name included',
+    ({ Given, When, Then }) => {
+      Given('an online human member opens Style presets', async () => {
+        setup();
+        await openFold('.preset details');
       });
-      expect(texts('.preset .mem-text')).toEqual([style, 'No motion.']);
-    });
-    When('the member edits Quiet forms', async () => {
-      all<HTMLButtonElement>('.preset .mem-item button')[2].click();
-      flushSync();
-      expect(one<HTMLInputElement>('.preset input').disabled).toBe(true);
-      fill('.preset textarea', 'Short motion.');
-      await save();
-    });
-    Then('a preset note command replaces its text', () => {
-      expect(commands[1]).toMatchObject({
-        t: 'note',
-        name: 'Quiet forms',
-        text: 'Short motion.',
-        type: 'preset',
-        task: null,
+      Then('the editor fetches presets and lists their name and text', () => {
+        expect(fetches).toEqual([{ t: 'fetch', g: gid, kind: 'preset', before: 0, limit: 50 }]);
+        expect(texts('.preset .mem-item > b')).toEqual(['Calm dashboard']);
+        expect(texts('.preset .mem-text')).toEqual([style]);
+        const list = one('.preset .mem-list');
+        expect(document.getElementById(list.getAttribute('aria-labelledby')!)?.textContent).toBe(
+          'Style presets',
+        );
       });
-      expect(commands[1].id).not.toBe(commands[0].id);
-      expect(texts('.preset .mem-text')).toEqual([style, 'Short motion.']);
-    });
-  });
+      When('the member creates Quiet forms', async () => {
+        one<HTMLButtonElement>('.preset .add').click();
+        flushSync();
+        fill('.preset input', 'Quiet forms');
+        fill('.preset textarea', 'No motion.');
+        await save(1);
+      });
+      Then('a preset note command creates Quiet forms', () => {
+        expect(commands[0]).toEqual({
+          t: 'note',
+          n: expect.any(String),
+          ts: expect.any(Number),
+          g: gid,
+          id: expect.any(String),
+          task: null,
+          type: 'preset',
+          name: 'Quiet forms',
+          text: 'No motion.',
+        });
+        expect(texts('.preset .mem-text')).toEqual([style, 'No motion.']);
+      });
+      When('the member renames Quiet forms to Still forms with new text, in place', async () => {
+        one<HTMLButtonElement>('.preset button[aria-label="Change preset: Quiet forms"]').click();
+        flushSync();
+        expect(one<HTMLInputElement>('.preset input').value).toBe('Quiet forms');
+        fill('.preset input', ' Still forms ');
+        fill('.preset textarea', 'Short motion.');
+        await save(2);
+      });
+      Then('a note_edit command keeps its id and the list shows Still forms with its text', () => {
+        expect(commands[1]).toEqual({
+          t: 'note_edit',
+          n: expect.any(String),
+          ts: expect.any(Number),
+          g: gid,
+          id: commands[0].id,
+          name: 'Still forms',
+          text: 'Short motion.',
+        });
+        expect(texts('.preset .mem-item > b')).toEqual(['Calm dashboard', 'Still forms']);
+        expect(texts('.preset .mem-text')).toEqual([style, 'Short motion.']);
+        expect(all('.preset .edit-field')).toEqual([]);
+      });
+    },
+  );
   Scenario('Missing presets and read-only states', ({ Given, When, Then }) => {
     Given('a group with a brief naming Calm dashboard', setup);
     When('the named preset is deleted and the reader opens it', async () => {
@@ -196,10 +204,10 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       group.home.ctl = undefined;
       await openFold('.preset details');
     });
-    Then('presets remain readable but writing is disabled', () => {
+    Then('presets remain readable but changing and adding are disabled', () => {
       expect(texts('.preset .mem-text')).toEqual([style]);
-      expect(one<HTMLInputElement>('.preset input').disabled).toBe(true);
-      expect(one<HTMLTextAreaElement>('.preset textarea').disabled).toBe(true);
+      const buttons = all<HTMLButtonElement>('.preset .edit, .preset .add');
+      expect(buttons.map((button) => button.disabled)).toEqual([true, true]);
       expect(texts('.preset .hint')).toEqual([
         'Cannot reach the group home. Presets are read-only.',
       ]);
