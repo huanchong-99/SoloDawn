@@ -258,6 +258,7 @@ describe('classify, whoOf, titleOf and targetIdOf', () => {
     expect(titleOf(group, approvalFromSecretary)).toBe('pnpm install');
     expect(titleOf(group, summaryWithTask)).toBe('T-12 Show connection path');
     expect(titleOf(group, summaryFallback)).toBe('Merged cleanly');
+    expect(titleOf(group, row<p.MsgRow>('row-msg-task'))).toBe('T-12 Show connection path');
 
     const leadText = row<p.MsgRow>('row-msg-text', { id: 'lead-txt', seq: 8, pos: 8 });
     const otherTaskMsg = row<p.MsgRow>('row-msg-task', {

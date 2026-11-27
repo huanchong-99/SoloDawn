@@ -213,7 +213,7 @@ describe('why a task stands still', () => {
     const group = makeGroup(
       'owner',
       row('row-member-ai', { id: codex, name: 'Codex', ...folder }),
-      row('row-member-ai', { id: claude, name: 'Claude Code', ...folder }),
+      row('row-member-ai', { id: claude, name: 'Claude Code', state: 'paused', ...folder }),
       row('row-member-ai', { id: qwen, name: 'Qwen', user: 'mina-user', host: 'pc', seq: 900 }),
       row('row-task', { id: 'a', num: 7, state: 'paused', assignee: claude }),
       row('row-task', { id: 'b', num: 8, state: 'done', assignee: codex }),

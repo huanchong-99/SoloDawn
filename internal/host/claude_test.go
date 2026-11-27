@@ -747,3 +747,14 @@ func drainUntilTurnEnded(t *testing.T, ch <-chan Event) []Event {
 	t.Fatalf("Events closed before TurnEnded: %+v", got)
 	return nil
 }
+
+// The stderr tail stays the last 64 KiB however the writes are cut.
+func TestOutputTailKeepsTheLast64KiB(t *testing.T) {
+	var tail outputTail
+	tail.Write([]byte(strings.Repeat("a", outputTailSize-1) + "b"))
+	tail.Write([]byte("cd"))
+	want := strings.Repeat("a", outputTailSize-3) + "bcd"
+	if string(tail) != want {
+		t.Fatalf("tail of %d bytes ending %q, want %d ending %q", len(tail), tail[max(0, len(tail)-4):], len(want), want[len(want)-4:])
+	}
+}

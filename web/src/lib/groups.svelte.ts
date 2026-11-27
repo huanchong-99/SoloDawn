@@ -140,8 +140,7 @@ export class Group {
   /** What to call a member: its name; of one that left, the name it had when this browser last
    *  held its row; else "former member". What a removed person wrote stays theirs (people.md 2.4). */
   nameOf(id: string | undefined) {
-    if (id === undefined) return t('chat.gone');
-    return (this.member(id) ?? this.#former.get(id))?.name ?? t('chat.gone');
+    return (this.member(id) ?? this.#former.get(id!))?.name ?? t('chat.gone');
   }
 
   /** A person's display name in this group by user id, also of one that left while this browser

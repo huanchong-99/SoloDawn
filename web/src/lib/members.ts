@@ -251,7 +251,6 @@ export function candidatesOf(
   owned: readonly Home[],
   infos: ReadonlyMap<Home, HostInfoPush>,
 ): Candidate[] {
-  const existing = group ? aiMembers(group) : [];
   return owned.flatMap((home) => {
     const info = infos.get(home);
     if (!info) return [];
@@ -265,7 +264,8 @@ export function candidatesOf(
       loginOk: entry.login_ok,
       inGroup:
         entry.groups.some((g) => g.g === group?.g) ||
-        existing.some((m) => m.host === info.device && m.cli === entry.agent),
+        (group !== undefined &&
+          aiMembers(group).some((m) => m.host === info.device && m.cli === entry.agent)),
     }));
   });
 }
@@ -378,8 +378,8 @@ export function knownPeople(home: Home, group?: Group): Known[] {
       .reverse()
       .map(({ user, name }) => [user, name]),
   );
-  for (const user of [home.me.user, ...(group ? humanMembers(group) : []).map((p) => p.user)])
-    known.delete(user);
+  known.delete(home.me.user);
+  if (group) for (const { user } of humanMembers(group)) known.delete(user);
   return [...known]
     .map(([user, name]) => ({ user, name }))
     .sort((a, b) => a.name.localeCompare(b.name));

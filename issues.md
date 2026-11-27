@@ -6,6 +6,29 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-27 · limitation · `takeover.go:210` (`== ""` to `!= ""`) decided a value nobody reads
+
+- Symptom: CONDITIONALS_NEGATION at `internal/host/takeover.go:210:58` lived in mutation run 45905182817 (shard host-s-takeover).
+- Cause: `target.kind` is read only by `createSession` (`internal/host/deliver.go:1312,1315`), which runs only when `Sessions.Get(target.key)` misses (`prepareTargetSession`, `deliver.go:1276-1278`). With no task the key is the group session's, and its absence returns `not_found` at `deliver.go:1306-1309` before `kind` is read; with a task, `lastTask` has just read that task session from `Sessions.All()`, so it exists. Only a session ended between those two calls on another goroutine could tell the mutant apart.
+- Status: resolved by the commit "Host: a takeover without a task leaves the session kind alone; node mutation shards stay inside the runner's memory": `takeoverTarget` sets only the task from `lastTask`. The one difference left is under a race, a group session that appears between `followMember` and `createSession`: `createSession` then also runs `cleanupTaskSessions`, which ends only sessions of done, cancelled or reassigned tasks, before `Create` refuses the existing key.
+
+### 2026-11-27 · bug · The node-admit-local mutation shard ran the runner out of memory
+
+- Symptom: `go node-admit-local` of mutation run 45905182817 failed after 9 minutes with the annotation "Out of memory."; its log was never uploaded. A rerun of the same commit passed (126 killed, 13 timed out, the rest on the filter list).
+- Cause: gremlins ran four mutants at once (`--workers 8`), each test binary capped at 4 GiB by `ulimit -v`. The shard's timed-out mutants come one after another (seven `local.go` mutants in a row), so four runaways at 4 GiB fill the runner's 16 GiB.
+- Status: resolved by the same commit: the shard is split into node-admit-dir and node-export-local, and those and the other node shards whose timed-out mutants come in runs (node-node, node-pair, node-socket-update) take `--workers 4`, two mutants at once and at most 8 GiB (`.github/workflows/mutation.yml`, matrix key `workers`).
+
+### 2026-11-27 · limitation · Equivalent web mutants of the model batch, and a gremlins blind spot
+
+- Symptom: Stryker survivors that no test can kill: `groups.svelte.ts:143` (`id === undefined` guard; `member(undefined)` and `#former.get(undefined)` find nothing), `members.ts:254,381` (the `[]` of a missing group is only read through `m.host` and `p.user`), `nodes.svelte.ts:110` (`group.home !== node`: `infos` holds owner homes only, `#read` via `activeCtl`, and `unheard` keeps groups of non-owner homes), `taskops.ts:66` (`other !== task`: a `busy` wait is only on a queued task, which `hasSession` excludes, `planning/contracts/rows.md` section 4) and `taskops.ts:88` (`task.wait?.by`: the manual hold exists only when `task.wait.kind` is `manual`). gremlins reported `internal/home/cmd_task.go:418:99` NOT COVERED: Go's cover tool ends a block at a function literal, so the condition after it in an `if` init had no block.
+- Status: resolved by the commit "Web and home: drop the guards whose mutants are equivalent": the guards are gone with no change of behaviour, and the `IndexFunc` call is its own statement (as `internal/node/schedule.go` in b4e9fda48).
+
+### 2026-11-27 · bug · Four files of the model batch belonged to no mutation shard
+
+- Symptom: mutation run 45905182817 failed "Files in exactly one shard": `internal/home/cmd_summary.go`, `internal/host/tools_workspaces.go`, `internal/host/tree_unix.go` and `tree_windows.go` were never mutated.
+- Cause: the `own` regexes of `.github/workflows/mutation.yml` did not match their names.
+- Status: resolved by the commit "ci: mutation shards own the files the model batch added" (home-cmd-task-ev `^(cmd_[st]|e)`, host-mcp-merge `^(mc|me|tr|tools_w)`). Their mutants are first seen in the next run.
+
 ### 2026-11-27 · deviation · The onboarding prompt still tells the AI to check the Git identity
 
 - Symptom: the prompt that **Add a computer** gives for an AI CLI has a step "Check `git config --global user.email`; if it is empty, ask me for a name and an email and set them". `install.md` no longer has that step, and SoloDawn commits nothing and needs no Git.
