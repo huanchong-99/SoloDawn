@@ -111,8 +111,8 @@ func (p *Pairer) serveJoining(ctx context.Context, via joinVia, device string, r
 		return via.snapshot(c, p.cfg.Logs.dvlWith(c.joining.presented()))
 	})
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	delete(*via.conns, raw)
-	p.mu.Unlock()
 }
 
 func (j *joinConn) accepts(payload string) bool {
@@ -122,15 +122,18 @@ func (j *joinConn) accepts(payload string) bool {
 
 func (p *Pairer) inviteVia(a *pairAttempt) joinVia {
 	return joinVia{a.invitation.group, &a.joining, func(c *sesConn, log *identity.Log) *home.Joining {
-		now := p.cfg.Now().UnixMilli()
-		p.mu.Lock()
-		open := pairLive(a, now)
-		p.mu.Unlock()
 		return &home.Joining{
-			Group: a.invitation.group, By: a.invitation.by, Open: open, Log: log,
+			Group: a.invitation.group, By: a.invitation.by, Open: p.attemptOpen(a), Log: log,
 			Admit: func(used bool) { p.admit(a, c, log, used) },
 		}
 	}}
+}
+
+func (p *Pairer) attemptOpen(a *pairAttempt) bool {
+	now := p.cfg.Now().UnixMilli()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return pairLive(a, now)
 }
 
 func (p *Pairer) admit(a *pairAttempt, c *sesConn, log *identity.Log, used bool) {
@@ -151,17 +154,20 @@ func (p *Pairer) admitted(c *sesConn, log *identity.Log, forget func()) {
 	if err := p.cfg.Logs.dvlKeep(log, c); err != nil {
 		p.cfg.Sessions.cfg.Report(err)
 	}
-	p.mu.Lock()
-	forget()
-	rec := p.codePeers[c.device]
-	p.mu.Unlock()
-	if rec != nil {
+	if rec := p.forgetAdmitted(c.device, forget); rec != nil {
 		p.dropPeer(c.device, rec)
 	}
 	c.home.SetJoining(nil)
 	c.joining.mu.Lock()
+	defer c.joining.mu.Unlock()
 	c.joining.admitted = true
-	c.joining.mu.Unlock()
+}
+
+func (p *Pairer) forgetAdmitted(device string, forget func()) *codePeer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	forget()
+	return p.codePeers[device]
 }
 
 // A code is an open invitation code of a group homed here, from the moment
@@ -268,12 +274,15 @@ func tellRoom(paths []*peer.Path, frame any) {
 func (p *Pairer) HostCodes(path *peer.Path) {
 	p.codeMu.Lock()
 	defer p.codeMu.Unlock()
-	p.mu.Lock()
-	codes := slices.Collect(maps.Values(p.codes))
-	p.mu.Unlock()
-	for _, c := range codes {
+	for _, c := range p.openCodes() {
 		tellRoom([]*peer.Path{path}, c.hosting())
 	}
+}
+
+func (p *Pairer) openCodes() []*code {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Collect(maps.Values(p.codes))
 }
 
 // watchCode ends a code when the home's clock has reached expires: the entry
@@ -301,14 +310,19 @@ func (p *Pairer) onCodeMsg(path *peer.Path, room string, data []byte) {
 	if c == nil || !ok || !c.secret.Verify(m, "b") {
 		return
 	}
-	rec := &codePeer{code: c, route: path.Route(), joining: &map[Ctl]bool{}}
+	rec := p.keepCodePeer(c, m.Key, path.Route())
+	go p.watchPeer(m.Key, rec)
+}
+
+func (p *Pairer) keepCodePeer(c *code, device string, route peer.Route) *codePeer {
+	rec := &codePeer{code: c, route: route, joining: &map[Ctl]bool{}}
 	p.mu.Lock()
-	if old := p.codePeers[m.Key]; old != nil && old.code == c {
+	defer p.mu.Unlock()
+	if old := p.codePeers[device]; old != nil && old.code == c {
 		rec.joining = old.joining
 	}
-	p.codePeers[m.Key] = rec
-	p.mu.Unlock()
-	go p.watchPeer(m.Key, rec)
+	p.codePeers[device] = rec
+	return rec
 }
 
 func (p *Pairer) codeOfRoom(room string) *code {
@@ -337,19 +351,22 @@ func (p *Pairer) watchPeer(device string, rec *codePeer) {
 // peer any more: when the device's peer now has the set of connections of
 // rec, nothing is done; otherwise the set was left with rec, which closes it.
 func (p *Pairer) dropPeer(device string, rec *codePeer) {
+	for _, ctl := range p.takeDropped(device, rec) {
+		ctl.Close()
+	}
+}
+
+func (p *Pairer) takeDropped(device string, rec *codePeer) []Ctl {
 	p.mu.Lock()
-	var unadmitted []Ctl
+	defer p.mu.Unlock()
 	cur := p.codePeers[device]
 	if cur == rec {
 		delete(p.codePeers, device)
 	}
 	if cur == rec || cur == nil || cur.joining != rec.joining {
-		unadmitted = slices.Collect(maps.Keys(*rec.joining))
+		return slices.Collect(maps.Keys(*rec.joining))
 	}
-	p.mu.Unlock()
-	for _, ctl := range unadmitted {
-		ctl.Close()
-	}
+	return nil
 }
 
 func (p *Pairer) codeVia(rec *codePeer) joinVia {

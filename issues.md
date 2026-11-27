@@ -748,6 +748,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-27 · bug · Panics inside `Pairer.mu` in `internal/node/admit.go` left the mutex locked and blocked test clean-up for 10 minutes
+
+- Symptom: mutants `internal/node/admit.go:306:36` (`onCodeMsg`) and `internal/node/admit.go:346:23` (`dropPeer`) panicked with a nil pointer dereference inside `Pairer.mu`, leaving the mutex locked during `t.Cleanup`. Clean-up goroutines (`serveJoining` at `internal/node/admit.go:113`, waited on at `internal/node/admit_test.go:756`, and `Pairer.Close` at `internal/node/pair.go:128`) deadlocked on `Pairer.mu.Lock()`, hanging until the 10-minute test timeout (reproduced under `-timeout 5s` on `internal/node` for `dropPeer` and on `TestCodeEnds` for `onCodeMsg`).
+- Cause: `onCodeMsg`, `dropPeer`, `serveJoining`, `inviteVia`, `admitted` (which runs a `forget` closure under `Pairer.mu`), and `HostCodes` in `internal/node/admit.go` called `p.mu.Unlock()` manually instead of `defer p.mu.Unlock()`. Adding `TryLock` or timeout workarounds across 5+ test clean-up paths in `internal/node/admit_test.go` and `internal/node/pair_test.go` would hide the leaked lock and leave production and other callers exposed; `defer p.mu.Unlock()` in `internal/node/admit.go` is the least code that fixes the root cause.
+- Status: resolved in PR #431. Extracted `keepCodePeer`, `takeDropped` (mirroring `finish`/`claimFinish` in `internal/node/pair.go`), `attemptOpen`, `forgetAdmitted`, and `openCodes`, and added `defer p.mu.Unlock()` in `serveJoining` (plus `defer c.joining.mu.Unlock()` in `admitted`), so every lock acquisition in `internal/node/admit.go` unlocks on panic. Added `TestPairerUnlocksMuOnPanic` (`internal/node/admit_test.go`), which fails immediately under `-timeout 5s` on reverted `internal/node/admit.go`. Without `-timeout`, `go test -count=1 ./internal/node` now fails within seconds for both the `keepCodePeer` and `takeDropped` mutants.
+
 ### 2026-11-27 · bug · In the demo, a person removed right after joining still said hello
 
 - Symptom: in `?demo`, removing Nora within 2.5 s of her joining by code left 「我进来了，有需要我的地方 @ 我。」 by her under 「Alex 把 Nora 移出了群。」, a post by someone no longer in the group (`shots/m3/demo-d4-panel-expire.png` of the first M3-8 run).

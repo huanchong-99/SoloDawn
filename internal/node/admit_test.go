@@ -1406,3 +1406,74 @@ func TestCodeTypedAgainAfterAnotherCode(t *testing.T) {
 	waitClosed(t, byFirst, "the joining connection of a pair message whose 10 minutes ended")
 	mustEqual(t, []bool{isOpen(byThird), r.pairer.Known(device.ID())}, []bool{true, true})
 }
+
+func assertMuUnlocksOnPanic(t *testing.T, p *Pairer, name string, fn func()) {
+	t.Helper()
+	panicked := false
+	func() {
+		defer func() {
+			if recover() != nil {
+				panicked = true
+			}
+		}()
+		fn()
+	}()
+	if !panicked {
+		t.Fatalf("%s did not panic", name)
+	}
+	if !p.mu.TryLock() {
+		t.Fatalf("Pairer.mu stayed locked after panic in %s", name)
+	}
+	p.mu.Unlock()
+}
+
+func TestPairerUnlocksMuOnPanic(t *testing.T) {
+	db := sesOpenStore(t)
+	nodeKey, owner := sesKey("panic-node"), sesKey("panic-owner")
+	logs := seedOwnedLogs(t, db, nodeKey, owner)
+	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, time.Now(), nil)
+	sessions := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h})
+	p := newPairer(PairConfig{
+		Key: nodeKey, Store: db, Logs: logs, Sessions: sessions,
+		After: func(time.Duration) <-chan time.Time { return make(chan time.Time) },
+	})
+
+	assertMuUnlocksOnPanic(t, p, "dropPeer", func() {
+		p.dropPeer("dev", &codePeer{})
+	})
+
+	ctl := newFakeCtl()
+	ctl.Close()
+	assertMuUnlocksOnPanic(t, p, "serveJoining", func() {
+		p.serveJoining(t.Context(), joinVia{group: "g"}, "dev", ctl)
+	})
+
+	assertMuUnlocksOnPanic(t, p, "admit", func() {
+		p.admit(nil, &sesConn{device: "dev", raw: ctl, joining: &joinConn{}}, &identity.Log{User: owner.ID()}, false)
+	})
+
+	secret := identity.NewSecret()
+	c := &code{group: "g", room: secret.Room(), secret: secret, ended: make(chan struct{})}
+	dev := sesKey("nil-peer")
+	frame := codePairFrame(secret, c.room, dev, "b")
+	p.mu.Lock()
+	p.codes["g"] = c
+	p.codePeers[dev.ID()] = nil
+	p.mu.Unlock()
+	p.onCodeMsg(&peer.Path{}, c.room, frame)
+	if !p.Known(dev.ID()) {
+		t.Fatal("onCodeMsg with nil prior entry did not register peer")
+	}
+	close(c.ended)
+	poll(t, time.Second, "watchPeer cleanup", func() string {
+		if p.Known(dev.ID()) {
+			return "still known"
+		}
+		return ""
+	})
+
+	nilMapPairer := &Pairer{codes: map[string]*code{"g": c}}
+	assertMuUnlocksOnPanic(t, nilMapPairer, "onCodeMsg", func() {
+		nilMapPairer.onCodeMsg(&peer.Path{}, c.room, frame)
+	})
+}
