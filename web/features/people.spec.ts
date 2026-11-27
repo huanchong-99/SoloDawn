@@ -2,14 +2,15 @@ import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { flushSync } from 'svelte';
 import { expect, vi, type MockInstance } from 'vitest';
 import { homes, type Home } from '../src/lib/groups.svelte';
-import { JoinError, readInvitation } from '../src/lib/join';
+import { JoinError, readCode, readInvitation } from '../src/lib/join';
 import { goldens } from '../src/lib/mock';
 import type { Net, Source } from '../src/lib/net.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
 import { href } from '../src/lib/route.svelte';
+import { codeUntil, invitationText } from '../src/lib/members';
 import { clock } from '../src/lib/when';
 import { browser, example, owner, TestHome } from './home';
-import { all, closePage, fill, go, one, openPage, read, text } from './page';
+import { all, closePage, fill, go, one, openPage, read, text, texts } from './page';
 
 const feature = await loadFeature('../features/web_people.feature');
 const join = vi.fn<NonNullable<Net['join']>>();
@@ -43,6 +44,7 @@ function submit() {
 
 describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
   let home: TestHome;
+  let client: ReturnType<typeof browser>;
   let command: MockInstance<Home['command']>;
 
   /** Opens the chat of "Website" as a person of `role`; `also` adds to the home first. */
@@ -54,7 +56,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
     if (role !== 'owner') addPerson('Owner', 'owner');
     addPerson('Member', 'member');
     addPerson('Admin', 'admin');
-    const client = browser(home);
+    client = browser(home);
     homes.push(client.store);
     await client.connect();
     command = vi.spyOn(client.store, 'command');
@@ -80,6 +82,9 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
     When('I create an invitation', async () => {
       vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
       vi.setSystemTime(invitation.expires - 60_000);
+      // Each opening reads the group's code first: none is open.
+      command.mockResolvedValueOnce(success);
+      command.mockResolvedValueOnce(success);
       command.mockResolvedValueOnce(refusal('forbidden'));
       command.mockResolvedValueOnce({ ...success, ...invitation });
       button('Invite').click();
@@ -94,7 +99,8 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       );
       button('Create link', activeDialog()).click();
       await vi.waitFor(() => expect(text('dialog pre')).toBe(invitation.link));
-      expect(command.mock.calls).toEqual([[{ t: 'invite', g }], [{ t: 'invite', g }]]);
+      const show = [{ t: 'code', g, op: 'show' }];
+      expect(command.mock.calls).toEqual([show, show, [{ t: 'invite', g }], [{ t: 'invite', g }]]);
     });
     Then('I can copy its link before it expires', async () => {
       expect(text('dialog .hint')).toBe(
@@ -114,7 +120,10 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       await vi.advanceTimersByTimeAsync(60_000);
       flushSync();
       expect(text('dialog .expired')).toBe('This link has expired.');
-      expect(buttons(activeDialog()).map((item) => item.textContent!.trim())).toEqual(['Done']);
+      expect(buttons(activeDialog()).map((item) => item.textContent!.trim())).toEqual([
+        'Create code',
+        'Done',
+      ]);
       button('Done').click();
       await vi.waitFor(() => expect(activeDialog()).toBeNull());
     });
@@ -150,7 +159,11 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       Then(
         'the dialog lists "Mina" and "Sam" under "In your other groups here", each with "Add", and offers "Cancel"',
         () => {
-          expect(text('dialog[open] h3')).toBe('In your other groups here · 2');
+          expect(texts('dialog[open] h3')).toEqual([
+            'Invitation code',
+            'In your other groups here · 2',
+            'One-time link',
+          ]);
           expect(all('dialog[open] .pick-row b').map((each) => each.textContent)).toEqual([
             'Mina',
             'Sam',
@@ -158,7 +171,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
           expect(buttons(row('Mina')).map((each) => each.textContent!.trim())).toEqual(['Add']);
           expect(
             buttons(activeDialog().querySelector('footer')!).map((b) => b.textContent!.trim()),
-          ).toEqual(['Cancel', 'Create link']);
+          ).toEqual(['Cancel']);
         },
       );
       When('I add Mina, and then Sam, whom the home no longer knows', async () => {
@@ -173,7 +186,8 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
         () => {
           const sent = home.asked
             .filter((req) => req.t === 'cmd')
-            .map((req) => JSON.parse((req.env as { p: string }).p) as object);
+            .map((req) => JSON.parse((req.env as { p: string }).p) as { t: string })
+            .filter((fields) => fields.t === 'member');
           expect(sent).toMatchObject([
             { t: 'member', g, op: 'add_person', user: 'Mina', name: 'Mina' },
             { t: 'member', g, op: 'add_person', user: 'Sam', name: 'Sam' },
@@ -182,7 +196,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
           expect(row('Mina').querySelector('.badge')!.getAttribute('data-tone')).toBe('ok');
           expect(buttons(row('Mina'))).toEqual([]);
           expect(read(row('Sam').querySelector('small')!)).toBe(
-            'Not in any of your groups here any more: send them the link below.',
+            'Not in any of your groups here any more: send them the code or the link below.',
           );
         },
       );
@@ -192,9 +206,187 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
           await vi.waitFor(() => expect(person('Mina')).toBeDefined());
           expect(
             buttons(activeDialog().querySelector('footer')!).map((b) => b.textContent!.trim()),
-          ).toEqual(['Done', 'Create link']);
+          ).toEqual(['Done']);
         },
       );
+    },
+  );
+
+  const opened = JSON.parse(goldens['cmd-code']) as { code: string; expires: number };
+  const open = { code: opened.code, expires: opened.expires };
+  const renewed = { code: 'ABCD-EFGH-JKMN-PQRS', expires: opened.expires + 3_600_000 };
+  const codeShown = () => document.querySelector('dialog .code-card output')?.textContent;
+  const hourChoices = () =>
+    all<HTMLInputElement>('dialog .seg input').map((input) => [
+      input.closest('label')!.textContent!.trim(),
+      input.checked,
+    ]);
+
+  Scenario(
+    "An owner makes, replaces and turns off the group's invitation code",
+    ({ Given, When, Then, And }) => {
+      Given('I am the group owner', () => openAs('owner'));
+      When('I open "Invite" while the group has no invitation code open', async () => {
+        command.mockResolvedValueOnce(success);
+        button('Invite').click();
+        flushSync();
+        await vi.waitFor(() => expect(command).toHaveBeenCalledOnce());
+        expect(command.mock.calls).toEqual([[{ t: 'code', g, op: 'show' }]]);
+      });
+      Then(
+        'the dialog has asked the home for the code, and offers to make one for 1 hour, 24 hours or 7 days, with 24 hours chosen',
+        () => {
+          expect(text('dialog section p.lead')).toBe(
+            'Anyone who has the code can join while it is valid. Give it only to the people you invite, and turn it off when they are in.',
+          );
+          expect(hourChoices()).toEqual([
+            ['1 hour', false],
+            ['24 hours', true],
+            ['7 days', false],
+          ]);
+          expect(codeShown()).toBeUndefined();
+          expect(button('Create code', activeDialog()).disabled).toBe(false);
+        },
+      );
+      When('I make a code for 7 days, which the home first refuses', async () => {
+        all<HTMLInputElement>('dialog .seg input')[2].click();
+        flushSync();
+        command.mockResolvedValueOnce(refusal('forbidden'));
+        command.mockResolvedValueOnce({ ...success, ...open });
+        button('Create code', activeDialog()).click();
+        await vi.waitFor(() =>
+          expect(text('dialog [role=alert]')).toBe('Not sent: this device may not do that.'),
+        );
+        button('Create code', activeDialog()).click();
+        await vi.waitFor(() => expect(codeShown()).toBe(open.code));
+        const made = [{ t: 'code', g, op: 'new', hours: 168 }];
+        expect(command.mock.calls).toEqual([made, made]);
+      });
+      Then('the dialog shows the code and until when it is valid', () => {
+        expect(text('dialog .code-card .until')).toBe(codeUntil(open, 'en'));
+        expect(document.querySelector('dialog [role=alert]')).toBeNull();
+        expect(all('dialog .seg')).toEqual([]);
+      });
+      And('I can copy the code, and the invitation, whose last line is the code', async () => {
+        const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+        button('Copy code').click();
+        await vi.waitFor(() => expect(text('.app [role=status]')).toBe('Copied'));
+        button('Copy invitation').click();
+        await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+        const copied = invitationText('Website', open, 'en');
+        expect(writeText.mock.calls).toEqual([[open.code], [copied]]);
+        expect(copied.split('\n')).toEqual([expect.stringContaining('"Website"'), open.code]);
+        writeText.mockRejectedValueOnce(new Error('denied'));
+        button('Copy code').click();
+        await vi.waitFor(() => expect(text('.app [role=status]')).toBe('Could not copy.'));
+      });
+      When(
+        'I choose "New code", am told that the current code stops working at once, and confirm',
+        async () => {
+          button('New code', activeDialog()).click();
+          flushSync();
+          expect(text('dialog .note[role=status]')).toBe('The current code stops working at once.');
+          expect(codeShown()).toBeUndefined();
+          button('Cancel', activeDialog()).click();
+          flushSync();
+          expect(codeShown()).toBe(open.code);
+          button('New code', activeDialog()).click();
+          flushSync();
+          expect(hourChoices().find(([, on]) => on)).toEqual(['7 days', true]);
+          command.mockResolvedValueOnce({ ...success, ...renewed });
+          button('New code', activeDialog()).click();
+          await vi.waitFor(() => expect(command).toHaveBeenCalledOnce());
+          expect(command.mock.calls).toEqual([[{ t: 'code', g, op: 'new', hours: 168 }]]);
+        },
+      );
+      Then('the dialog shows the new code', async () => {
+        await vi.waitFor(() => expect(codeShown()).toBe(renewed.code));
+        expect(document.querySelector('dialog .note')).toBeNull();
+      });
+      When('I turn the code off', async () => {
+        command.mockResolvedValueOnce(success);
+        button('Turn off', activeDialog()).click();
+        await vi.waitFor(() => expect(codeShown()).toBeUndefined());
+        expect(command.mock.calls).toEqual([[{ t: 'code', g, op: 'off' }]]);
+      });
+      Then('the dialog shows no code and offers to make one', () => {
+        expect(button('Create code', activeDialog())).toBeDefined();
+        expect(hourChoices().map(([label]) => label)).toEqual(['1 hour', '24 hours', '7 days']);
+      });
+    },
+  );
+
+  Scenario(
+    'The dialog shows the open code, and reads it again when the home is reached again',
+    ({ Given, When, Then }) => {
+      Given('I am the group owner', () => openAs('owner'));
+      When('I open "Invite" while the group\'s code is open', () => {
+        command.mockResolvedValueOnce({ ...success, ...open });
+        button('Invite').click();
+        flushSync();
+      });
+      Then('the dialog shows the code, and offers "Done"', async () => {
+        await vi.waitFor(() => expect(codeShown()).toBe(open.code));
+        expect(
+          buttons(activeDialog().querySelector('footer')!).map((b) => b.textContent!.trim()),
+        ).toEqual(['Done']);
+      });
+      const icons = () => all('dialog .code-card button svg').map((svg) => svg.innerHTML);
+      When('I copy the code, it is replaced elsewhere, and the home is reached again', async () => {
+        vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+        button('Copy code').click();
+        await vi.waitFor(() => expect(icons()[0]).not.toBe(icons()[1]));
+        command.mockResolvedValueOnce({ ...success, ...renewed });
+        client.drop();
+        await client.connect();
+        await vi.waitFor(() => expect(codeShown()).toBe(renewed.code));
+      });
+      Then('the dialog shows the new code, with neither copy ticked', () => {
+        flushSync();
+        expect(icons()[0]).toBe(icons()[1]);
+      });
+      When('the code is turned off elsewhere and the home is reached again', async () => {
+        command.mockResolvedValueOnce(success);
+        client.drop();
+        await client.connect();
+        await vi.waitFor(() => expect(command).toHaveBeenCalledOnce());
+        expect(command.mock.calls).toEqual([[{ t: 'code', g, op: 'show' }]]);
+      });
+      Then('the dialog shows no code', () => vi.waitFor(() => expect(codeShown()).toBeUndefined()));
+    },
+  );
+
+  Scenario(
+    'Removing a person says that an open code ends with it, and leaving does not',
+    ({ Given, When, Then }) => {
+      const notice = () => document.querySelector('.person [role=status]')?.textContent;
+      Given('I am a group admin', () => openAs('admin'));
+      When('I press "Remove" for a member', () => {
+        expect(notice()).toBeUndefined();
+        button('Remove', person('Member')).click();
+        flushSync();
+      });
+      Then(
+        'the confirmation says that an open invitation code of the group is ended as well',
+        () => {
+          expect(actions('Member')).toEqual(['Confirm removal']);
+          expect(notice()).toBe('If the group has an invitation code open, it is ended as well.');
+        },
+      );
+      When('I press "Leave" for myself', () => {
+        button('Confirm removal', person('Member')).dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+        );
+        flushSync();
+        expect(notice()).toBeUndefined();
+        button('Leave', person('Reader')).click();
+        flushSync();
+      });
+      Then('the confirmation says nothing of a code', () => {
+        expect(actions('Reader')).toEqual(['Confirm leaving']);
+        expect(notice()).toBeUndefined();
+        expect(command).not.toHaveBeenCalledWith(expect.objectContaining({ op: 'remove' }));
+      });
     },
   );
 
@@ -317,7 +509,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
     });
     Then('the invitation attempt is cancelled', async () => {
       expect(signal.aborted).toBe(true);
-      response.resolve({ notifications: [] });
+      response.resolve({ g, notifications: [] });
       await response.promise;
       expect(location.hash).toBe(href('groups'));
     });
@@ -345,7 +537,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
   Scenario('Admission opens the joined group', ({ Given, When, Then }) => {
     Given('I open a valid invitation link', () => openPage(hash));
     When('I submit my name and the home admits me', () => {
-      join.mockResolvedValueOnce({ notifications: [] });
+      join.mockResolvedValueOnce({ g, notifications: [] });
       submit();
       expect(join.mock.calls).toEqual([[readInvitation(hash), 'Reader', expect.any(AbortSignal)]]);
     });
@@ -355,11 +547,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
   });
 
   Scenario('An invalid invitation never starts a join', ({ Given, Then }) => {
-    Given('I open a malformed invitation', () => {
-      openPage('#/join');
-      expect(text('main [role=alert]')).toBe('This invitation link is invalid.');
-      go('#join=invalid');
-    });
+    Given('I open a malformed invitation', () => openPage('#join=invalid'));
     Then('the page rejects the link without showing the form', () => {
       expect(text('main [role=alert]')).toBe('This invitation link is invalid.');
       expect(document.querySelector('main form')).toBeNull();
@@ -380,6 +568,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
             expect(text('main [role=alert]')).toBe('Could not join (join: expired).'),
           );
           join.mockResolvedValueOnce({
+            g,
             notifications: [{ node: 'own', error: new JoinError('home.add', 'lost') }],
           });
           submit();
@@ -427,6 +616,110 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       expect(text('main .top .swap[lang=en]')).toBe('EN');
       expect(one('main .top .swap svg')).not.toBe(lightIcon);
       expect(one('main .top .swap svg').querySelector('circle')).not.toBeNull();
+    });
+  });
+
+  /** Types a code and a name on the join page, and presses "Join group". */
+  function joinWith(code: string) {
+    fill(codeField(), code);
+    fill(one('main input:not(.code)'), 'Reader');
+    flushSync();
+    button('Join group').click();
+    flushSync();
+  }
+  const codeField = () => one<HTMLInputElement>('main input.code');
+  const openJoin = () => {
+    openPage(href('join'));
+    expect(text('main .hero p')).toBe(
+      'Enter the code, then choose the name people in the group will see.',
+    );
+    expect(texts('main label span')).toEqual(['Invitation code', 'Your name in this group']);
+    expect(codeField().placeholder).toBe('XXXX-XXXX-XXXX-XXXX');
+    expect(button('Join group').disabled).toBe(true);
+  };
+  const typed = '7k2m 9qxd 4f8t wb3n';
+
+  Scenario(
+    'A person joins by an invitation code pasted in lower case with spaces',
+    ({ Given, When, Then }) => {
+      Given('I open "Join a group" with no link', openJoin);
+      When(
+        'I paste the code in lower case with spaces and no hyphens, give my name, and the home admits me',
+        () => {
+          join.mockResolvedValueOnce({ g, notifications: [] });
+          joinWith(` ${typed} `);
+          // Each step is a test of its own, which starts with no calls.
+          expect(join.mock.calls).toEqual([
+            [{ secret: '7K2M9QXD4F8TWB3N' }, 'Reader', expect.any(AbortSignal)],
+          ]);
+          expect(join.mock.calls[0][0]).toEqual(readCode(typed));
+        },
+      );
+      Then(
+        'the client is asked to join with that code alone, and opens the group the home named',
+        () => vi.waitFor(() => expect(location.hash).toBe(href('chat', { g }))),
+      );
+    },
+  );
+
+  Scenario('A text that is no code is refused on the page', ({ Given, When, Then }) => {
+    Given('I open "Join a group" with no link', openJoin);
+    When('I type a code with the letter O and my name, and join', () => {
+      joinWith('7K2M-9QXD-4F8T-WB3O');
+      expect(join).not.toHaveBeenCalled();
+    });
+    Then(
+      'the page says that a code has 16 characters and never the letters I, L, O or U, and nothing is sent',
+      () => {
+        expect(text('main [role=alert]')).toBe(
+          'This is not an invitation code: a code has 16 characters and never the letters I, L, O or U.',
+        );
+        expect(codeField().getAttribute('aria-invalid')).toBe('true');
+        fill(codeField(), '7K2M-9QXD-4F8T-WB3N');
+        flushSync();
+        expect(document.querySelector('main [role=alert]')).toBeNull();
+      },
+    );
+  });
+
+  Scenario('While nothing answers a code, the page says so', ({ Given, When, Then }) => {
+    const attempt = Promise.withResolvers<Awaited<ReturnType<NonNullable<Net['join']>>>>();
+    Given('I open "Join a group" with no link', openJoin);
+    When('I type a code and my name, and join', () => {
+      join.mockReturnValueOnce(attempt.promise);
+      joinWith(typed);
+    });
+    Then(
+      "the page says that it looks for the group's home, and what to check while nothing answers",
+      () => {
+        expect(text('main .seek[role=status]')).toBe(
+          "Looking for the group's home… If nothing answers: check the code; if it is right, the group's home may be off, or the code may have ended. This waits up to 10 minutes.",
+        );
+        expect(codeField().disabled).toBe(true);
+        expect(button('Joining…').disabled).toBe(true);
+      },
+    );
+    When('nothing has answered after 10 minutes', async () => {
+      attempt.reject(new JoinError('room', 'timeout'));
+      await vi.waitFor(() => expect(document.querySelector('main .seek')).toBeNull());
+    });
+    Then("the page says that the group's home never answered", () => {
+      expect(text('main [role=alert]')).toBe(
+        "The group's home never answered. Check the code, or ask an admin whether the group's home is on and the code is still valid.",
+      );
+      expect(codeField().disabled).toBe(false);
+    });
+    When('I join again and the home refuses the code', async () => {
+      join.mockRejectedValueOnce(new JoinError('join', 'forbidden'));
+      button('Join group').click();
+      await vi.waitFor(() => expect(join).toHaveBeenCalledOnce());
+    });
+    Then('the page says that the code has ended', async () => {
+      await vi.waitFor(() =>
+        expect(text('main [role=alert]')).toBe(
+          'This code has ended: it expired, was turned off or was replaced. Ask an admin for a new one.',
+        ),
+      );
     });
   });
 

@@ -7,7 +7,7 @@ import Indicator from '../components/nodes/Indicator.svelte';
 import { DeviceLog } from './devlog';
 import { Home, homes } from './groups.svelte';
 import { Device, ed25519, encode, loadDevice } from './identity';
-import { readInvitation } from './join';
+import { readCode, readInvitation } from './join';
 import { goldens } from './mock';
 import { mockHome, sourceOf, start } from './net.svelte';
 import * as owner from './owner';
@@ -671,6 +671,61 @@ it('reuses and keeps the group home when a watch ends on an already joined node'
   expect(net.homes).toContain(host);
 });
 
+it('joins by code on every path, at the home that answers on one of them, and remembers that path', async () => {
+  const browser = await loadDevice({ crypto, idb: () => idb });
+  const own = await newDevice();
+  const home = await newDevice();
+  const log = new DeviceLog(crypto, browser.id);
+  await log.apply(
+    await signDeviceEntry(browser, browser.id, 1, 'add', browser.id, 'browser', 'Web'),
+  );
+  await log.apply(await signDeviceEntry(browser, browser.id, 2, 'add', own.id, 'node', 'Own node'));
+  const page = 'ws://localhost:3000/rv';
+  const lan = 'ws://192.0.2.10:47800/rv';
+  await saveOwner(() => idb, log, { [own.id]: [lan, page] });
+  const client = startTracked('live');
+  await vi.waitFor(() => expect(clients.map((way) => way.url)).toEqual([page, lan]));
+  const [rv, nodeWay] = clients;
+  rv.ready();
+  nodeWay.ready();
+  const code = readCode('7k2m 9qxd 4f8t wb3n')!;
+  const joined = client.net.join!(code, 'Joiner', new AbortController().signal);
+  const id = await room(crypto, code.secret);
+  const enter = { t: 'join', room: id };
+  await vi.waitFor(() => expect(nodeWay.sent).toContainEqual(enter));
+  expect(rv.sent.filter((frame) => frame.t === 'join')).toEqual([enter]);
+  expect(nodeWay.sent.filter((frame) => frame.t === 'join')).toEqual([enter]);
+  expect(rv.known(home.id)).toBe(false);
+  nodeWay.receive(nodeWay.url, { t: 'joined', room: id });
+  const remote = { role: 'a', k: home.id, kind: 'node', name: 'Foreign home' };
+  nodeWay.receive(nodeWay.url, {
+    t: 'room',
+    room: id,
+    data: { t: 'pair', ...remote, mac: await mac(crypto, code.secret, remote) },
+  });
+  const pc = await answerNode(nodeWay, home, browser.id, undefined);
+  expect(rv.known(home.id)).toBe(true);
+  pc.ctl.deliver({
+    ...welcomeFrame(1, home.id, 'Foreign home'),
+    owner: false,
+    v: 3,
+    join: websiteId,
+  });
+  await vi.waitFor(() => expect(pc.ctl.frames().at(-1)?.t).toBe('cmd'));
+  const command = pc.ctl.frames().at(-1)!;
+  expect(JSON.parse(command.env.p)).toMatchObject({ t: 'join', g: websiteId, name: 'Joiner' });
+  pc.ctl.deliver({ t: 'groups', groups: [{ g: websiteId, name: 'Shared', seq: 3 }] });
+  pc.ctl.deliver({ t: 'cmd', re: command.id, ok: true });
+  await expect(joined).resolves.toEqual({ g: websiteId, notifications: [] });
+  expect(await loadJoined(() => idb)).toEqual({
+    [home.id]: { name: 'Foreign home', url: nodeWay.url },
+  });
+  expect(homes.find((each) => each.device === home.id)?.groups.map(({ g }) => g)).toEqual([
+    websiteId,
+  ]);
+  expect(rv.known(home.id)).toBe(true);
+});
+
 it('joins an invitation without adopting the home and reconnects to it after reload', async () => {
   const browser = await loadDevice({ crypto, idb: () => idb });
   const own = await newDevice();
@@ -759,7 +814,7 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   });
   expect(notice.env.k).toBe(browser.id);
   ownPC.ctl.deliver({ t: 'cmd', re: notice.id, ok: true });
-  await expect(joined).resolves.toEqual({ notifications: [] });
+  await expect(joined).resolves.toEqual({ g: websiteId, notifications: [] });
   const sharedHome = homes[2];
   expect(sharedHome.owner).toBe(false);
   expect(sharedHome.groups.map((group) => group.g)).toEqual([websiteId]);

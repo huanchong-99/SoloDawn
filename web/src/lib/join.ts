@@ -14,10 +14,13 @@ import {
   type Welcome,
 } from './proto';
 
+/** What a person was given to join a group. A link names the group and its home
+ *  (contracts/step-2/people.md section 4); a code is the secret alone, and the home's `pair`
+ *  message and the `welcome` name them (4.1). */
 export interface Invitation {
   secret: string;
-  g: string;
-  home: string;
+  g?: string;
+  home?: string;
 }
 
 export class JoinError extends Error {
@@ -38,7 +41,8 @@ export class JoinError extends Error {
   }
 }
 
-export function readInvitation(hash: string): Invitation | undefined {
+/** A `#join=` link: its secret, group and home, read without contacting the home. */
+export function readInvitation(hash: string): Required<Invitation> | undefined {
   if (!hash.startsWith('#join=')) return undefined;
   const fields = new URLSearchParams(hash.slice(1));
   const g = fields.get('g');
@@ -51,16 +55,28 @@ export function readInvitation(hash: string): Invitation | undefined {
   }
 }
 
+/** A code as a person typed it: white space is removed and the rest read as a typed pairing
+ *  secret (contracts/step-2/people.md 2.6); undefined for a text that is no code. */
+export function readCode(text: string): Invitation | undefined {
+  try {
+    return { secret: parseSecret(text.replace(/\s/g, '')) };
+  } catch {}
+}
+
 interface JoinOptions {
   device: Device;
   log: DeviceLog;
   browserName: string;
+  /** The signalling path of a link: this page's rendezvous. */
   url: string;
+  /** Every signalling path this browser has, on each of which a code's room is joined. */
+  urls: string[];
   session: Pick<Session, 'watchRoom' | 'send'>;
-  dial(listen: () => Listener, onpath: (path: Path | undefined) => void): JoinPeer;
+  dial(home: string, listen: () => Listener, onpath: (path: Path | undefined) => void): JoinPeer;
   signal: AbortSignal;
-  remember(name: string): Promise<void>;
-  link(): Link;
+  /** Keeps the home that admitted this browser, with its name and the path it answered on. */
+  remember(home: string, url: string, name: string): Promise<void>;
+  link(home: string): Link;
   ownNodes(): Home[];
   onpath(path: Path | undefined): void;
 }
@@ -79,7 +95,10 @@ export function presentLog(ctl: { send?(frame: Devlog): void }, log: DeviceLog) 
   ctl.send!(frame);
 }
 
-type GroupHome = Pick<Invitation, 'g' | 'home'>;
+type GroupHome = Required<Pick<Invitation, 'g' | 'home'>>;
+/** An invitation with what the attempt learns: for a code, the home and the path it answered on
+ *  from its `pair` message, the group from `welcome.join`. */
+type Found = Invitation & { url: string };
 
 function homeNotice(node: Home, { g, home }: GroupHome, name: string, url: string) {
   return node.me.sign(
@@ -127,29 +146,28 @@ function checkCancel(signal: AbortSignal, step: JoinError['step']) {
   if (signal.aborted) throw new JoinError(step, 'cancelled');
 }
 
-function joinRoom(
-  invitation: Invitation,
-  options: JoinOptions,
-  id: string,
-  self: Pair,
-  dial: () => void,
-) {
-  const { session, url } = options;
+/** Joins the room on the link's one path, or a code's on every path, until the home's `pair`
+ *  message comes on one of them. */
+function joinRoom(found: Found, options: JoinOptions, id: string, self: Pair, dial: () => void) {
+  const { session } = options;
   let offered = false;
-  const receivePair = async (data: Pair) => {
-    if (!(await invitationPair(invitation, data)) || offered) return;
+  const receivePair = async (url: string, data: Pair) => {
+    if (!(await invitationPair(found, data)) || offered) return;
     offered = true;
+    Object.assign(found, { home: data.k, url });
     dial();
   };
-  const stop = session.watchRoom(url, id, (path, frame) => {
-    if (offered || path !== url) return;
-    if (!inRoom(frame, id)) return;
-    if (frame.t === 'room') void receivePair(frame.data);
-    else session.send(url, { t: 'room', room: id, data: self });
-  });
+  const watch = (url: string) =>
+    session.watchRoom(url, id, (path, frame) => {
+      if (offered || path !== url) return;
+      if (!inRoom(frame, id)) return;
+      if (frame.t === 'room') void receivePair(url, frame.data);
+      else session.send(url, { t: 'room', room: id, data: self });
+    });
+  const stops = (found.home ? [options.url] : options.urls).map(watch);
   return () => {
     offered = true;
-    stop();
+    for (const stop of stops) stop();
   };
 }
 
@@ -157,15 +175,14 @@ function inRoom(frame: Heard, id: string): frame is Extract<Heard, { t: 'joined'
   return 'room' in frame && frame.room === id;
 }
 
-function invitationPair(invitation: Invitation, data: Pair) {
+/** A link names its home; a code takes the device that proves it holds the code. */
+function invitationPair({ home, secret }: Invitation, data: Pair) {
   return (
-    data.k === invitation.home &&
-    data.kind === 'node' &&
-    verifyPair(crypto, invitation.secret, data, 'a')
+    (home ?? data.k) === data.k && data.kind === 'node' && verifyPair(crypto, secret, data, 'a')
   );
 }
 
-function open(invitation: Invitation, options: JoinOptions, id: string, pair: Pair) {
+function open(found: Found, options: JoinOptions, id: string, pair: Pair) {
   const ready = Promise.withResolvers<{ ctl: Ctl; welcome: Welcome }>();
   const listed = Promise.withResolvers<Groups>();
   void listed.promise.catch(() => {});
@@ -177,30 +194,34 @@ function open(invitation: Invitation, options: JoinOptions, id: string, pair: Pa
     ready.reject(error);
     listed.reject(error);
   };
-  const stop = joinRoom(invitation, options, id, pair, () => {
+  const stop = joinRoom(found, options, id, pair, () => {
     step = 'hello';
-    peer = options.dial(() => {
-      const link = start && options.link();
-      return {
-        online: (ctl, welcome) => {
-          if (!link) return ready.resolve({ ctl, welcome });
-          presentLog(ctl, options.log);
-          link.online(ctl, welcome);
-        },
-        offline: () => {
-          const served = link ?? start;
-          if (served) served.offline();
-          else failed('lost');
-        },
-        refused: failed,
-        push: (frame) => {
-          if (start) return (link ?? start).push(frame);
-          if (frame.t === 'groups' && frame.groups.some((group) => group.g === invitation.g)) {
-            listed.resolve(frame);
-          }
-        },
-      };
-    }, options.onpath);
+    peer = options.dial(
+      found.home!,
+      () => {
+        const link = start && options.link(found.home!);
+        return {
+          online: (ctl, welcome) => {
+            if (!link) return ready.resolve({ ctl, welcome });
+            presentLog(ctl, options.log);
+            link.online(ctl, welcome);
+          },
+          offline: () => {
+            const served = link ?? start;
+            if (served) served.offline();
+            else failed('lost');
+          },
+          refused: failed,
+          push: (frame) => {
+            if (start) return (link ?? start).push(frame);
+            if (frame.t === 'groups' && frame.groups.some((group) => group.g === found.g)) {
+              listed.resolve(frame);
+            }
+          },
+        };
+      },
+      options.onpath,
+    );
   });
   return {
     stop,
@@ -217,13 +238,15 @@ function open(invitation: Invitation, options: JoinOptions, id: string, pair: Pa
     next: (value: JoinError['step']) => (step = value),
     error: (error: unknown) => (error instanceof JoinError ? error : new JoinError(step, 'lost')),
     serve(ctl: Ctl, welcome: Welcome, groups: Groups) {
-      start = options.link();
+      start = options.link(found.home!);
       start.online(ctl, welcome);
       start.push(groups);
     },
   };
 }
 
+/** Joins the group of a link or a code; answers with the group and the outcome of telling the
+ *  person's nodes its home. */
 export async function joinGroup(invitation: Invitation, name: string, options: JoinOptions) {
   const { device, log, signal, browserName } = options;
   if (!log.valid(device.id)) throw new JoinError('onboarding', 'unpaired');
@@ -231,7 +254,8 @@ export async function joinGroup(invitation: Invitation, name: string, options: J
   const id = await room(crypto, invitation.secret);
   const pair: Pair = { t: 'pair', ...fields, mac: await mac(crypto, invitation.secret, fields) };
   checkCancel(signal, 'room');
-  const connection = open(invitation, options, id, pair);
+  const found: Found = { ...invitation, url: options.url };
+  const connection = open(found, options, id, pair);
   const stop = abortPending(signal, (code) => {
     connection.failed(code);
     connection.stop();
@@ -239,24 +263,25 @@ export async function joinGroup(invitation: Invitation, name: string, options: J
   });
   try {
     const { ctl, welcome } = await connection.ready;
-    await admit(ctl, welcome, invitation, name, options, connection.next);
+    found.g ??= welcome.join;
+    await admit(ctl, welcome, found, name, options, connection.next);
     connection.next('remember');
-    await options.remember(welcome.name);
+    await options.remember(found.home!, found.url, welcome.name);
     checkCancel(signal, 'remember');
     connection.next('groups');
-    const groups = await (welcome.groups.some((group) => group.g === invitation.g)
+    const groups = await (welcome.groups.some((group) => group.g === found.g)
       ? { t: 'groups' as const, groups: welcome.groups }
       : connection.listed);
-    const group = groups.groups.find((group) => group.g === invitation.g)!.name;
+    const group = groups.groups.find((group) => group.g === found.g)!.name;
     const nodes = options.ownNodes();
     connection.next('home.add');
     const envelopes = await Promise.all(
-      nodes.map((node) => homeNotice(node, invitation, group, options.url)),
+      nodes.map((node) => homeNotice(node, found as GroupHome, group, found.url)),
     );
     checkCancel(signal, 'home.add');
     const notices = notify(nodes, envelopes);
     connection.serve(ctl, welcome, groups);
-    return { peer: connection.peer, notices };
+    return { g: found.g!, peer: connection.peer, notices };
   } catch (error) {
     connection.close();
     throw connection.error(error);

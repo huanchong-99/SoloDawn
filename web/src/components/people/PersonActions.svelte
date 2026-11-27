@@ -67,6 +67,8 @@
     >
       {t(asked ? (`${removal}.confirm` as const) : removal)}
     </button>
+    <!-- Removing another ends the group's open code, which the person may hold (people.md 2.4). -->
+    {#if asked && !self}<p class="hint" role="status">{t('people.remove.code')}</p>{/if}
     {#if failure === 'conflict'}
       <p class="hint" role="alert">{t('people.conflict')}</p>
     {:else if failure}

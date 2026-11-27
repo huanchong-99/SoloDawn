@@ -91,7 +91,7 @@ Feature: Member panel and adding an AI to a group
   Scenario: A group whose second person is refused says where it stopped, and opens all the same
     Given "Mina" and "Sam" are in the group "Website" on "workstation", and the home no longer has a log of "Sam"
     When the owner opens "New group", ticks "Mina", "Sam" and "Claude Code · workstation", names the group "Studio" and themself "Alex", and creates it
-    Then the dialog stays open and says "Mina" was "Added", "Sam" was refused with "Not in any of your groups on this computer any more: invite them by link." and "Claude Code" is "Not sent: an earlier step was refused"
+    Then the dialog stays open and says "Mina" was "Added", "Sam" was refused with "Not in any of your groups on this computer any more: invite them by code or link." and "Claude Code" is "Not sent: an earlier step was refused"
     And the dialog says "The group exists, but not everyone could be added. Add them again from its member panel." and its button reads "Open the group" with no "Cancel"
     And the home made "Studio" and added Mina and tried Sam, and "workstation" received no "host.join"
     When the owner presses "Open the group"

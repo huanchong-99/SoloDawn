@@ -7,10 +7,12 @@
     freeName,
     joinError,
     knownPeople,
+    lifetimes,
     nameClash,
     unavailable,
     type Candidate,
     type Draft,
+    type OpenCode,
     type Refusal,
     type Stop,
   } from '../../lib/members';
@@ -20,6 +22,7 @@
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
   import FolderPicker from '../member/FolderPicker.svelte';
+  import CodeCard from '../people/CodeCard.svelte';
   import ModelFields from '../model/ModelFields.svelte';
   import { listedModels } from '../model/model';
   import ProfileFields from '../profile/ProfileFields.svelte';
@@ -46,10 +49,23 @@
   let secretary = $state('');
   let busy = $state(false);
   let failed = $state('');
-  /** After the group exists and one of its people or AIs was refused: what became of each, by
-   *  user and by key. */
-  let outcome = $state.raw<{ g: string; words: Record<string, { text: string; bad: boolean }> }>();
+  /** Whether an invitation code is made with the group, and for how many hours. */
+  let coded = $state(false);
+  let hours = $state<number>(24);
+  /** After the group exists, when one of its people, its AIs or its code was refused, or a code
+   *  was made: what became of each person and AI, by user and by key, and of the code. */
+  let outcome = $state.raw<{
+    g: string;
+    words: Record<string, { text: string; bad: boolean }>;
+    code?: OpenCode;
+    /** The refusal of `code new`. */
+    codeFailed?: string;
+  }>();
   let clashing = $state(false);
+  /** Where the code that was made, or why not, is shown. The footer sticks to the dialog's lower
+   *  edge, so in a long dialog that place is scrolled into sight as soon as it is there. */
+  let made = $state<HTMLElement>();
+  $effect(() => made?.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
 
   const known = $derived(chosen ? knownPeople(chosen) : []);
   // Agents the node does not start are added from a group's member panel, with their tool.
@@ -124,11 +140,21 @@
         workspace: ais[key].workspace,
         draft: ais[key].draft,
       })),
+      hours: coded ? hours : undefined,
     });
     busy = false;
-    if (!made.stopped) return close(made.g);
-    if (made.stopped.step === 'group') failed = made.stopped.err.code;
-    else outcome = { g: made.g, words: told([...users.map((each) => each.user), ...keys], made) };
+    // A code that was made is shown before the dialog closes, so that it can be copied.
+    if (!made.stopped && !made.code) return close(made.g);
+    if (made.stopped?.step === 'group') failed = made.stopped.err.code;
+    else outcome = after(made, [...users.map((each) => each.user), ...keys]);
+  }
+
+  /** What became of the people, the AIs and the code of a group that exists. */
+  function after(made: { g: string; stopped?: Stop; code?: OpenCode }, ids: string[]) {
+    const { g, stopped, code } = made;
+    if (!stopped) return { g, words: {}, code };
+    if (stopped.step === 'code') return { g, words: {}, codeFailed: stopped.err.code };
+    return { g, words: told(ids, made) };
   }
 
   /** What became of each person and AI, by user and by key, when one of them was refused: those
@@ -148,6 +174,7 @@
     name = member = secretary = '';
     people = {};
     ais = {};
+    coded = false;
     outcome = undefined;
     dialog.close();
     location.hash = `#/groups/${g}`;
@@ -230,6 +257,27 @@
         <p class="hint">{t('groups.create.people.none')}</p>
       {/each}
       <p class="hint">{t('groups.create.people.hint')}</p>
+      <div class="code-pick">
+        <label class="check">
+          <input type="checkbox" bind:checked={coded} disabled={Boolean(outcome)} />
+          <span>{t('groups.create.code')}</span>
+        </label>
+        {#if coded && !outcome?.code}
+          <fieldset
+            class="seg"
+            style:--at={(lifetimes as readonly number[]).indexOf(hours)}
+            disabled={Boolean(outcome)}
+          >
+            <legend class="sr">{t('people.code.hours')}</legend>
+            {#each lifetimes as each (each)}
+              <label>
+                <input type="radio" name={`${uid}-hours`} value={each} bind:group={hours} />
+                <span>{t(`people.code.hours.${each}`)}</span>
+              </label>
+            {/each}
+          </fieldset>
+        {/if}
+      </div>
     </fieldset>
 
     <fieldset class="part">
@@ -314,7 +362,20 @@
 
     {#if failed}<Failure code={failed} />{/if}
     {#if clashing}<p class="hint bad" role="alert">{t('groups.create.names')}</p>{/if}
-    {#if outcome}<p class="hint warn" role="status">{t('groups.create.partly')}</p>{/if}
+    <!-- Not when everyone was added and only the code was refused: that is said on its own. -->
+    {#if outcome && !outcome.code && !outcome.codeFailed}
+      <p class="hint warn" role="status">{t('groups.create.partly')}</p>
+    {/if}
+    <!-- The code that was made, or why not, beside the button the person just pressed. -->
+    {#if outcome?.code || outcome?.codeFailed}
+      <div class="made" bind:this={made}>
+        {#if outcome.code}
+          <CodeCard code={outcome.code} group={name.trim()} />
+        {:else}
+          <Failure code={outcome.codeFailed!} />
+        {/if}
+      </div>
+    {/if}
     <footer class="row">
       <span class="grow"></span>
       {#if !outcome}
@@ -393,6 +454,24 @@
   }
   .warn {
     color: var(--dawn-text);
+  }
+  .code-pick {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-4);
+    min-height: 44px;
+    margin-top: var(--sp-2);
+  }
+  /* Clear of the sticky footer: 69 px, 77 px on touch. */
+  .made {
+    margin-top: var(--sp-2);
+    scroll-margin-bottom: 96px;
+  }
+  .code-pick .seg {
+    animation:
+      rise var(--dur-2) var(--ease-out),
+      appear var(--dur-2) var(--ease-out);
   }
   .check {
     display: inline-flex;

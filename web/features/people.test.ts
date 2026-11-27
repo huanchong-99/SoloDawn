@@ -29,8 +29,8 @@ const submit = () => one<HTMLButtonElement>('main button[type="submit"], main fo
 
 it('rejects malformed invitations and accepts a valid hash in the same page', () => {
   openPage('#/join');
-  expect(text('main [role=alert]')).toBe('This invitation link is invalid.');
-  expect(document.querySelector('main .hero p')).toBeNull();
+  expect(document.querySelector('main [role=alert]')).toBeNull();
+  expect(one('main input.code')).not.toBeNull();
   go('#join=invalid');
   expect(text('main [role=alert]')).toBe('This invitation link is invalid.');
   expect(document.querySelector('main .hero p')).toBeNull();
@@ -63,7 +63,7 @@ it('labels the join form, rejects blank names, and aborts a pending submission o
   const signal = join.mock.lastCall![2];
   go(href('groups'));
   expect(signal.aborted).toBe(true);
-  response.resolve({ notifications: [] });
+  response.resolve({ g, notifications: [] });
   await response.promise;
   expect(location.hash).toBe(href('groups'));
 });
@@ -83,6 +83,7 @@ it('recommends pairing when unpaired and shows the link after partial notificati
   );
   expect(one('main .card a[href="#/onboarding"]').textContent).toBe('Connect a computer');
   join.mockResolvedValueOnce({
+    g,
     notifications: [{ node: 'own', error: new JoinError('home.add', 'lost') }],
   });
   submit().click();

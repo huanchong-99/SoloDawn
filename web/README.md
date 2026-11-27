@@ -130,7 +130,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 
   An address fits a path when it has as many segments, every word is equal and every parameter
   is given, except an optional last one (such as `:task?`); no address fits two paths. A `#join=`
-  fragment is passed intact to the join form. Parameters are
+  fragment is passed intact to the join form; `#/join` alone, which "Join a group" of the group
+  list opens, asks for an invitation code. Parameters are
   read with `decodeURIComponent`; `href(page, params)` writes an address with
   `encodeURIComponent`, and `parse` reads it back. An address that fits no path, one with a
   malformed escape, and `#/states` in the build open `groups`. `route` is `{ page, params, dir }`;
@@ -162,12 +163,18 @@ file in `src/routes/`. It edits neither the shell nor another area:
   is how this browser reaches a home now (`direct` or `relay`, the round trip, since when), and
   undefined while it does not; the mock's path is direct. `net.source` says which it is.
 - **Joining a group.** `readInvitation` in `src/lib/join.ts` reads a `#join=` fragment without
-  contacting its home. The join page (U2-1) passes the invitation, chosen display name and a
-  cancellation signal to `net.join`. The active browser enters the invitation room on its
-  existing rendezvous connection without adopting either device, presents its own log, and asks
-  the home to admit it. On success, it
-  remembers the home in IndexedDB (store `device`, key `joined`), notifies its connected own
-  nodes with `home.add`, and starts reading the new group on the same connection.
+  contacting its home; `readCode` reads a typed invitation code: it removes white space and reads
+  the rest as a typed pairing secret, and the page refuses any other text before anything is sent
+  (`contracts/step-2/people.md` 2.6). The join page (U2-1) passes the invitation or the code,
+  chosen display name and a cancellation signal to `net.join`. The active browser enters the
+  room without adopting either device: a link's on this page's rendezvous alone, taking only the
+  `pair` message of the home it names; a code's on every signalling path it has, this page's
+  rendezvous and the addresses its nodes gave in `welcome`, taking the first node that proves the
+  code as the home and the path it answered on (section 4.1). While nothing answers, the page says
+  so, for up to 10 minutes. The browser presents its own log and asks the home to admit it to the
+  link's group, or for a code to the group `welcome.join` names. On success, it remembers the home
+  and that path in IndexedDB (store `device`, key `joined`), notifies its connected own nodes with
+  `home.add`, and starts reading the new group on the same connection.
 - **Homes heard of.** Each `host.info` of an own node names the groups whose home it knows
   (`contracts/step-2/people.md` section 7, point 2): `net.svelte.ts` dials and remembers those
   homes (`Home.onhomes`), so another browser of the person shows the groups they joined. Until its
@@ -518,8 +525,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     sends nothing when that computer is no longer among those that can be reached. A computer
     that appears while there was none to choose from is chosen. The dialog also lists the people who are
     already in one of the person's groups on that computer and the person's connected AIs, each with a
-    tick, and the folder each ticked AI works in (`FolderPicker.svelte`). It creates the group first,
-    then adds each person and each AI, and says beside any of them that was refused.
+    tick, and the folder each ticked AI works in (`FolderPicker.svelte`), and "Also make an
+    invitation code" with its lifetime, off by default. It creates the group first, then adds
+    each person and each AI, then sends `code new` when the box is ticked (`found` in
+    `src/lib/members.ts`), and says beside any of them that was refused. A code that was made is
+    shown with its copies before the dialog closes; a refused code is said under the box.
   - The shell keeps the person's computers told the homes they need (`tell` in
     `src/lib/nodes.svelte.ts`): those of groups on another person's computer.
     What a computer's `host.info.homes` lacks is sent with `home.add`, once per connection,
@@ -549,8 +559,17 @@ file in `src/routes/`. It edits neither the shell nor another area:
     "Open terminal" link enabled only when the browser's own path to that computer is `direct`, or,
     while the AI is in `takeover`, a "Hand back" button that sends `takeover.end` and says that
     messages to it wait until then; then the human members with their roles and online status;
-    actions and errors go below the person's name. Owners and admins can generate a one-time invite
-    with a countdown. The owner's row has no role or removal action. Owners can promote, demote, and
+    actions and errors go below the person's name. Owners and admins open "Invite"
+    (`InvitationDialog.svelte`): first the group's invitation code (`contracts/step-2/people.md`
+    2.6), read with `code show` when the dialog opens and again each time the home is reached; with
+    none open, a lifetime of 1 hour, 24 hours (chosen) or 7 days and "Create code"; with one open,
+    the code (`CodeCard.svelte`), until when it is valid, "Copy code", "Copy invitation" (one line
+    of instructions with the date, the code on a line of its own), "New code", which says first
+    that the current code stops working, and "Turn off". `sendCode` in `src/lib/members.ts` follows
+    a `new` answered without the code, a repeat answered from its receipt, with `show`. Below the
+    code come the people of the person's other groups, then a one-time link with a countdown. The
+    confirmation of removing another person says that an open code is ended with it; leaving says
+    nothing of it. The owner's row has no role or removal action. Owners can promote, demote, and
     remove other people; admins can remove ordinary members; non-owners can leave. Signed commands
     go to the group home, and its row pushes update the panel. The access editor
     (`src/components/allow/`) places each AI's allow list and approval delegates alongside its
@@ -744,7 +763,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/peer.ts`             | signalling paths, connections to nodes, `ctl`, path, reconnect                    |
 | `features/peer-fakes.ts`      | a peer connection and its channels for the tests of `peer.ts`                     |
 | `src/lib/groups.svelte.ts`    | `Home`, `Group`: row caches, cursor, paging, lists, commands                      |
-| `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`                      |
+| `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`, invitation code     |
 | `src/lib/stop.ts`             | emergency stop: pause a group, which computers have their AIs offline             |
 | `src/lib/queue.ts`            | which of the person's messages wait for a busy AI; `jump`                         |
 | `src/lib/groupinfo.svelte.ts` | memory paging; `note`, `note_edit`, `forget`, `group set`                         |
@@ -775,7 +794,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/profile/`     | work share and usage block, owner editor, model-tier suggestion, profile fields   |
 | `src/components/model/`       | model/level fields, owner editor and catalog refresh                              |
-| `src/components/people/`      | invitation dialog, role/removal actions and join form                             |
+| `src/components/people/`      | invitation dialog and code card, role/removal actions and join form               |
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
 | `src/components/groupinfo/`   | home, settings (order 19) and project memory (order 20) at `chat.side`            |
 | `src/components/preset/`      | style preset editor (`chat.side`, `order: 21`) and brief preset reader            |

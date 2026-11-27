@@ -68,16 +68,18 @@ describe('step 2 in the browser', () => {
     await p.getByRole('button', { name: 'Done' }).click();
     const row = p.locator('.people li', { hasText: /^Q/ });
     await row.getByRole('button', { name: 'Make admin' }).click();
-    await expect.poll(() => sent(p), { timeout: 5000 }).toHaveLength(2);
+    // The dialog read the group's invitation code when it opened (people.md 2.6).
+    await expect.poll(() => sent(p), { timeout: 5000 }).toHaveLength(3);
     await update(p, 'member', 'q', { role: 'admin' });
     await row.getByRole('button', { name: 'Make member' }).waitFor();
     await row.getByRole('button', { name: 'Remove' }).click();
     await row.getByRole('button', { name: 'Confirm removal' }).click();
-    await expect.poll(() => sent(p), { timeout: 5000 }).toHaveLength(3);
+    await expect.poll(() => sent(p), { timeout: 5000 }).toHaveLength(4);
     await p.evaluate(() => window.s2.remove('member', 'q'));
     await texts(p, '.people li').toEqual(['A\nAlex · You · Owner']);
     const { g, q: id } = await ids(p);
     expect(await sent(p)).toEqual([
+      { t: 'code', g, op: 'show' },
       { t: 'invite', g },
       { t: 'member', g, op: 'set', id, role: 'admin' },
       { t: 'member', g, op: 'remove', id },

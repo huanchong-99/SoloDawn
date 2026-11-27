@@ -15,6 +15,7 @@
   import '../styles/onboarding.css';
 
   let { params, net }: PageProps<'join'> = $props();
+  // A `#join=` link joins its group; `#/join` alone asks for an invitation code.
   const invitation = $derived(read(params.link));
 
   function read(link: string | undefined) {
@@ -44,12 +45,22 @@
   <section class="hero">
     <span class="badge">{t('people.join.badge')}</span>
     <h1>{t('page.join')}</h1>
-    {#if invitation}<p>{t('people.join.body')}</p>{/if}
+    {#if invitation}
+      <p>{t('people.join.body')}</p>
+    {:else if !params.link}
+      <p>{t('people.join.code.body')}</p>
+    {/if}
   </section>
 
   <div class="wrap single">
-    {#key params.link}
-      <JoinForm {invitation} {net} />
-    {/key}
+    {#if params.link && !invitation}
+      <section class="card">
+        <p role="alert">{t('people.join.invalid')}</p>
+      </section>
+    {:else}
+      {#key params.link}
+        <JoinForm {invitation} {net} />
+      {/key}
+    {/if}
   </div>
 </div>

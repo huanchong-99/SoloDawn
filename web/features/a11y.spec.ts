@@ -432,8 +432,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             'Group name',
             'Your name in the group',
             'Mina',
+            'Also make an invitation code',
           ]);
-          expect(controls.map((el) => described(el))).toEqual(['', '', '']);
+          expect(controls.map((el) => described(el))).toEqual(['', '', '', '']);
         },
       );
       When('the person opens the chat of "Website" on a 1280 px desktop', () => {

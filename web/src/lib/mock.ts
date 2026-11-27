@@ -232,20 +232,25 @@ const cmdAnswers: Record<string, string> = {
   invite: 'cmd-invite-link',
 };
 
+/** `code new` and `code show` answer the example's code, `code off` plain ok; nothing is kept. */
+const codeAnswer = ({ op }: CmdFields) => (op === 'off' ? 'cmd-ok' : 'cmd-code');
+
 /** Whether a command adds a readable group, after which a node pushes `groups`. */
 function pushesGroups({ t, op }: CmdFields): boolean {
   return t === 'join' || (t === 'group' && op === 'create');
 }
 
 /** Which golden command answer a node sends for a signed command payload. */
-function cmdAnswer({ t, type }: CmdFields): string {
+function cmdAnswer(fields: CmdFields): string {
+  const { t, type } = fields;
   if (t === 'note' && type !== undefined) return 'cmd-noted';
+  if (t === 'code') return codeAnswer(fields);
   return cmdAnswers[t] ?? 'cmd-ok';
 }
 
 /** A connection to a node that knows the examples' one group and is the owner's: it answers
  *  `host.info` and `host.workspaces`. `sync` pushes `reset` and `rows`, then answers `synced`; commands
- *  answer with their typed example (`cmd-invite-link`, `cmd-noted`, or `cmd-ok`),
+ *  answer with their typed example (`cmd-invite-link`, `cmd-noted`, `cmd-code` or `cmd-ok`),
  *  and `group create` or `join` pushes `groups` before its answer. Frames are read as real ones
  *  are: answers with `decodeAnswer`, pushes with `Frame`. */
 export function mockCtl(onpush: (push: p.Push) => void): p.Ctl {
