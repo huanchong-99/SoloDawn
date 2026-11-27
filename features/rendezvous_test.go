@@ -57,13 +57,13 @@ var (
 		"index.html": {Data: []byte("web client")},
 		"install.md": {Data: []byte("install steps")},
 	}
-	rvDevice = regexp.MustCompile("browser|node|tablet")
+	rvDevice = regexp.MustCompile("browser|node|tablet|phone")
 	rvSecret = identity.Secret("7K2M9QXD4F8TWB3N")
 )
 
-const rvICE = `{"t":"ice","ice":[],"ttl":3600}`
+const rvICE = `{"t":"ice","ice":[],"ttl":3600,"hosts":true}`
 
-// rvWorld is one scenario: a rendezvous and the connections of up to three devices.
+// rvWorld is one scenario: a rendezvous and the connections of up to four devices.
 type rvWorld struct {
 	t          *testing.T
 	bin        string
@@ -77,6 +77,11 @@ type rvWorld struct {
 	got        []string // what it did answer
 	ended      error    // how reading those answers ended early
 	offer      proto.Envelope
+	room       string            // the room that steps name "the room"
+	host, card string            // the device that hosts it, and its card
+	guests     []string          // "each of them"
+	greeted    map[string][]byte // the frames each guest got on joining
+	pairs      [][]byte          // the room frames the guests sent
 	cleanup    []func()
 	httpClient *http.Client
 }
@@ -91,8 +96,8 @@ func init() {
 type rvKey struct{}
 
 func rendezvousSteps(sc *godog.ScenarioContext, f fixtures) {
-	w := &rvWorld{t: f.t, bin: f.bin, conns: map[string]*websocket.Conn{}, nonces: map[string]string{}}
-	const device = `(browser|node|tablet)`
+	w := &rvWorld{t: f.t, bin: f.bin, conns: map[string]*websocket.Conn{}, nonces: map[string]string{}, room: rvSecret.Room()}
+	const device = `(browser|node|tablet|phone)`
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, rvKey{}, w), nil
 	})
@@ -131,16 +136,17 @@ func rendezvousSteps(sc *godog.ScenarioContext, f fixtures) {
 	})
 
 	sc.Step(`^the `+device+` joins the room(?: of a pairing secret)?$`, func(name string) error {
-		return w.send(name, proto.RoomID{Type: "join", Room: rvSecret.Room()})
+		return w.send(name, proto.RoomID{Type: "join", Room: w.room})
 	})
 	sc.Step(`^the `+device+` is told that the room is joined$`, func(name string) error {
-		return w.receiveFrame(name, proto.RoomID{Type: "joined", Room: rvSecret.Room()})
+		return w.receiveFrame(name, proto.RoomID{Type: "joined", Room: w.room})
 	})
-	sc.Step(`^the `+device+` is told that the room is full$`, func(name string) error {
-		return w.receiveFrame(name, proto.RoomID{Type: "full", Room: rvSecret.Room()})
+	sc.Step(`^the `+device+` is told that (?:the|that) room is full$`, func(name string) error {
+		return w.receiveFrame(name, proto.RoomID{Type: "full", Room: w.room})
 	})
 	sc.Step(`^the `+device+` sends its pair message through the room$`, w.sendPair)
 	sc.Step(`^the `+device+` receives that room message$`, func(name string) error { return w.receive(name, string(w.sent)) })
+	hostedRoomSteps(sc, w, device)
 
 	sc.Step(`^the `+device+` sends a frame of (\d+) bytes$`, func(name string, size int) error {
 		w.answers = []string{rvICE}
@@ -322,7 +328,7 @@ func (w *rvWorld) signIn(name string) error {
 	if err := w.answerChallenge(name, "its signature of that challenge"); err != nil {
 		return err
 	}
-	return w.receive(name, `{"t":"ready","ice":[],"ttl":3600}`)
+	return w.receive(name, `{"t":"ready","ice":[],"ttl":3600,"hosts":true}`)
 }
 
 func (w *rvWorld) signInAll(names string) error {
@@ -341,14 +347,16 @@ func (w *rvWorld) route(from, to, payload string) (err error) {
 	return w.send(from, proto.Route{Type: "to", Key: exampleKey(to).ID(), Env: w.sent})
 }
 
-func (w *rvWorld) sendPair(name string) error {
+// rvPair is the pair message of a device. The rendezvous never reads it.
+func rvPair(name string) json.RawMessage {
 	pair := proto.Pair{Type: "pair", Key: exampleKey(name).ID(), Kind: "node", Name: name, Role: "a"}
 	pair.MAC = rvSecret.MAC(pair)
-	data, err := json.Marshal(pair)
-	if err != nil {
-		return err
-	}
-	if w.sent, err = json.Marshal(proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: rvSecret.Room()}, Data: data}); err != nil {
+	data, _ := json.Marshal(pair) // A struct of strings always encodes.
+	return data
+}
+
+func (w *rvWorld) sendPair(name string) (err error) {
+	if w.sent, err = json.Marshal(proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: w.room}, Data: rvPair(name)}); err != nil {
 		return err
 	}
 	return w.write(name, string(w.sent))
@@ -446,6 +454,125 @@ func (w *rvWorld) checkOffer(name, want string) error {
 	}
 	if result != want {
 		return fmt.Errorf("offer check = %s, want %s", result, want)
+	}
+	return nil
+}
+
+// hostedRoomSteps are the steps of a room that one device hosts
+// (contracts/rendezvous.md 2.2).
+func hostedRoomSteps(sc *godog.ScenarioContext, w *rvWorld, device string) {
+	sc.Step(`^the `+device+` hosts the room(?: of (another) pairing secret)? with its pair message$`, func(name, another string) error {
+		if another != "" {
+			w.room = identity.NewSecret().Room()
+		}
+		w.host, w.card = name, string(rvPair(name))
+		return w.hostRoom(name, w.room, rvPair(name))
+	})
+	sc.Step(`^the `+device+` hosts (\d+) rooms$`, func(name string, n int) error {
+		for i := range n {
+			if err := w.hostRoom(name, fmt.Sprintf("%032x", i), rvPair(name)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	sc.Step(`^the `+device+` hosts one more room$`, func(name string) error {
+		w.room = identity.NewSecret().Room()
+		return w.hostRoom(name, w.room, rvPair(name))
+	})
+	sc.Step(`^the `+device+` leaves the room$`, func(name string) error {
+		return w.send(name, proto.RoomID{Type: "leave", Room: w.room})
+	})
+	sc.Step(`^the `+device+` receives the host's pair message$`, func(name string) error {
+		return w.receive(name, w.cardFrame())
+	})
+	sc.Step(`^(the .+) join the room (one after another|at once)$`, w.joinHosted)
+	sc.Step(`^each of them is told that the room is joined and receives the host's pair message$`, w.guestsGreeted)
+	sc.Step(`^each of them sends its pair message through the room$`, w.guestsSendPairs)
+	sc.Step(`^the `+device+` receives each of those room messages$`, w.receivePairs)
+}
+
+func (w *rvWorld) hostRoom(name, room string, data json.RawMessage) error {
+	return w.send(name, proto.RoomData{RoomID: proto.RoomID{Type: "join", Room: room}, Data: data})
+}
+
+// cardFrame is the room frame that carries the host's card.
+func (w *rvWorld) cardFrame() string {
+	b, _ := json.Marshal(proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: w.room}, Data: json.RawMessage(w.card)})
+	return string(b)
+}
+
+// joinHosted joins each device in turn. One after another, a device joins
+// once the one before has been answered; at once, all join before any answer
+// is read.
+func (w *rvWorld) joinHosted(names, how string) error {
+	w.guests, w.greeted = rvDevice.FindAllString(names, -1), map[string][]byte{}
+	for _, name := range w.guests {
+		if err := w.send(name, proto.RoomID{Type: "join", Room: w.room}); err != nil {
+			return err
+		}
+		if how == "one after another" {
+			if err := w.readGreeting(name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// readGreeting reads the two frames that a guest gets on joining.
+func (w *rvWorld) readGreeting(name string) error {
+	for range 2 {
+		_, b, err := rvRead(w.conns[name])
+		if err != nil {
+			return err
+		}
+		w.greeted[name] = append(append(w.greeted[name], b...), '\n')
+	}
+	return nil
+}
+
+func (w *rvWorld) guestsGreeted() error {
+	joined, _ := json.Marshal(proto.RoomID{Type: "joined", Room: w.room})
+	want := string(joined) + "\n" + w.cardFrame() + "\n"
+	for _, name := range w.guests {
+		if w.greeted[name] == nil {
+			if err := w.readGreeting(name); err != nil {
+				return err
+			}
+		}
+		if got := string(w.greeted[name]); got != want {
+			return fmt.Errorf("the %s got %s, want %s", name, got, want)
+		}
+	}
+	return nil
+}
+
+func (w *rvWorld) guestsSendPairs() error {
+	w.pairs = nil
+	for _, name := range w.guests {
+		if err := w.sendPair(name); err != nil {
+			return err
+		}
+		w.pairs = append(w.pairs, w.sent)
+	}
+	return nil
+}
+
+// receivePairs reads one frame for each pair message sent, in any order.
+func (w *rvWorld) receivePairs(name string) error {
+	var got, want []string
+	for _, pair := range w.pairs {
+		_, b, err := rvRead(w.conns[name])
+		if err != nil {
+			return err
+		}
+		got, want = append(got, string(b)), append(want, string(pair))
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		return fmt.Errorf("the %s received %q, want %q", name, got, want)
 	}
 	return nil
 }

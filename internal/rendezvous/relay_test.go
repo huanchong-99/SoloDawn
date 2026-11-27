@@ -27,7 +27,7 @@ func TestRESTLifetime(t *testing.T) {
 		r := relay{secret: "secret", stun: "stun:rv:3478", urls: []string{"turn:rv:3478?transport=udp", "turns:trv:443?transport=tcp"}}
 		check := func(kind, user, pass string) {
 			t.Helper()
-			want := proto.ICEConfig{Type: kind, TTL: 3600, ICE: []proto.ICEServer{{URLs: []string{"stun:rv:3478"}}, {URLs: r.urls, Username: user, Credential: pass}}}
+			want := proto.ICEConfig{Type: kind, TTL: 3600, Hosts: true, ICE: []proto.ICEServer{{URLs: []string{"stun:rv:3478"}}, {URLs: r.urls, Username: user, Credential: pass}}}
 			if got := r.ice(kind, "device"); !reflect.DeepEqual(got, want) {
 				t.Fatalf("ice = %+v; want %+v", got, want)
 			}
@@ -294,9 +294,9 @@ func TestSTUNOnly(t *testing.T) {
 	ws, nonce := dial(t, sig.URL)
 	k := key(4)
 	send(t, ws, proto.Auth{Type: "auth", Key: k.ID(), Signature: k.SignChallenge(nonce)})
-	expect(t, ws, proto.ICEConfig{Type: "ready", TTL: 3600, ICE: want})
+	expect(t, ws, proto.ICEConfig{Type: "ready", TTL: 3600, ICE: want, Hosts: true})
 	send(t, ws, proto.RVFrame{Type: "ice"})
-	expect(t, ws, proto.ICEConfig{Type: "ice", TTL: 3600, ICE: want})
+	expect(t, ws, proto.ICEConfig{Type: "ice", TTL: 3600, ICE: want, Hosts: true})
 	send(t, ws, proto.RVFrame{Type: "quota"})
 	expect(t, ws, proto.Quota{Type: "quota", Used: 0, Limit: 0})
 }

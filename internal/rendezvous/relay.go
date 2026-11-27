@@ -38,8 +38,10 @@ type relay struct {
 	ledger
 }
 
+// ice is the ready frame or the answer to an ice request. Every server of
+// this version hosts rooms, so both say so.
 func (r *relay) ice(kind, id string) proto.ICEConfig {
-	frame := proto.ICEConfig{Type: kind, ICE: []proto.ICEServer{}, TTL: int(ttl / time.Second)}
+	frame := proto.ICEConfig{Type: kind, ICE: []proto.ICEServer{}, TTL: int(ttl / time.Second), Hosts: true}
 	if r.stun == "" {
 		return frame
 	}

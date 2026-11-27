@@ -1,5 +1,5 @@
 ---
-description: 'The rendezvous server: signalling over WebSocket, pairing rooms, the STUN and TURN relay with its quota and limits, the standalone service with its certificates, and the handler that nodes serve for the local web client.'
+description: 'The rendezvous server: signalling over WebSocket, pairing and hosted rooms, the STUN and TURN relay with its quota and limits, the standalone service with its certificates, and the handler that nodes serve for the local web client.'
 kind: reference
 ---
 
@@ -19,8 +19,8 @@ and certificates. The protocol is in [rendezvous](../../planning/contracts/rende
 | File | Holds |
 | --- | --- |
 | `server.go` | `Handler`, the `/rv` WebSocket: handshake, routing of `to`, `watch`, `ice` and `quota` frames, per-receiver queues |
-| `room.go` | pairing rooms: `join` and `room` frames |
-| `relay.go` | the TURN server, credentials, `ice` answers, the relay's own addresses and relay port holding |
+| `room.go` | pairing and hosted rooms: `join`, `leave` and `room` frames |
+| `relay.go` | the TURN server, credentials, `ready` and `ice` answers (with `hosts`), the relay's own addresses and relay port holding |
 | `limits.go` | allocations per device and per source, and permissions per client |
 | `quota.go` | the daily relay ledger of each device |
 | `standalone.go` | `Options`, `PortRange`, `Serve` |
@@ -39,6 +39,13 @@ and certificates. The protocol is in [rendezvous](../../planning/contracts/rende
   dropped and both connections stay open.
 - **Rooms.** A room id is 32 hex digits, a room holds two devices and lives 15 minutes, and one
   connection is in at most 16 rooms. A third device is told the room is full.
+- **Hosted rooms.** A `join` with `data` makes the connection the room's host and `data` its card;
+  every server of this version says `hosts` in `ready` and in each `ice` answer. Each device that
+  waited in the room, and each that joins later, gets `joined` and the card and is not kept; its
+  `room` frames go to the host. A hosted room has no 15 minutes: it ends at the host's `leave` or
+  with its connection. A connection hosts at most 16 beside the 16 it is in; a room that has a host,
+  and a 17th hosting, are answered `full` and the connection stays. The 16-room check of a `join`
+  comes first, so a device already in 16 rooms that joins a hosted room is disconnected.
 - **Relay.** A TURN username carries an alias of the device (an HMAC under the process's secret), not
   its id. A credential is checked when an allocation opens; the daily quota bounds what a relayed
   connection moves. Limits: 32 allocations per device, 128 per source (an IPv4 address or an IPv6
