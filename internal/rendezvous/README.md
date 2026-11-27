@@ -41,8 +41,8 @@ and certificates. The protocol is in [rendezvous](../../planning/contracts/rende
   connection is in at most 16 rooms. A third device is told the room is full.
 - **Hosted rooms.** A `join` with `data` makes the connection the room's host and `data` its card;
   every server of this version says `hosts` in `ready` and in each `ice` answer. Each device that
-  waited in the room, and each that joins later, gets `joined` and the card and is not kept; its
-  `room` frames go to the host. A hosted room has no 15 minutes: it ends at the host's `leave` or
+  waited in the room, and each that joins later, gets `joined` and the card and is not kept; any
+  device's `room` frames for that room go to the host. A hosted room has no 15 minutes: it ends at the host's `leave` or
   with its connection. A connection hosts at most 16 beside the 16 it is in; a room that has a host,
   and a 17th hosting, are answered `full` and the connection stays. The 16-room check of a `join`
   comes first, so a device already in 16 rooms that joins a hosted room is disconnected.

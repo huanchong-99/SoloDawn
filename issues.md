@@ -6,36 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-27 · bug · In the demo, a person removed right after joining still said hello
-
-- Symptom: in `?demo`, removing Nora within 2.5 s of her joining by code left 「我进来了，有需要我的地方 @ 我。」 by her under 「Alex 把 Nora 移出了群。」, a post by someone no longer in the group (`shots/m3/demo-d4-panel-expire.png` of the first M3-8 run).
-- Cause: the scripted hellos are posted by a timer that never looked whether the person was still a member (`web/features/sim/people.ts`, `#noraJoins`, `added`, `#leoJoins` and `#direct`'s thanks, each `this.world.after(…, () => this.post(…))`). The client shows rows in the order the home wrote them, which was right.
-- Status: resolved on `m3/web`: `#sayLater` (`web/features/sim/people.ts:80-84`) posts only for a member; test "says nothing for a person removed before their hello" in `web/features/sim/sim.test.ts`, which fails on the old code.
-
-### 2026-11-27 · bug · After joining in the demo, the top bar said 「重连中」 until a reload
-
-- Symptom: in `?demo`, after joining a group by code the connection indicator stayed 「重连中」.
-- Cause: the demo's `FakePeer` told its path once, as it came online (`web/features/sim/session.ts`, `#open`). A join starts following the path only when it is admitted, after that one report, and closing the replaced peer had cleared the path. `peer.ts` reads the browser's statistics again, so a real connection recovers.
-- Status: resolved on `m3/web`: the demo peer tells its path again a second later (`web/features/sim/session.ts:94`); the indicator reads 「直连」 again in the click-through.
-
-### 2026-11-27 · bug · In the demo, joining a group of one's own computer said that not every computer was told
-
-- Symptom: in `?demo`, typing the open invitation code of 官网改版 on 加入群 ended in 「你已加入群聊，但并非所有已连接的电脑都收到了通知。」 instead of opening the group.
-- Cause: the join dials the group's home again, which replaces the browser's connection to that computer (`hub.peer`). In peer.ts a closed peer reports its connection lost (`Peer.close` → `#end` → `#offline`, `web/src/lib/peer.ts:604-614`), so the client stops asking that home anything on it; the demo's `FakePeer.close` (`web/features/sim/session.ts`, before M3-8) only closed its line. The home kept its `ctl`, `ownNodes` listed it, and the `home.add` sent on the closed line failed as `lost`.
-- Status: resolved in unit M3-8: `FakePeer.close` reports the loss as peer.ts does (`web/features/sim/session.ts:137-143`); the click-through opens the group.
-
-### 2026-11-27 · deviation · The demo answered `join` of a member with `conflict`
-
-- Symptom: in `?demo`, a person who opened a link of a group they are in was told they are already in it; `contracts/step-2/people.md` 2.2 point 3 answers such a `join` `ok` and writes nothing (the restore case), which a typed code of one's own group also needs (A9.52).
-- Cause: `People.join` in `web/features/sim/people.ts` returned `conflict` for a member.
-- Status: resolved in unit M3-8: a member is answered `ok`.
-
-### 2026-11-27 · bug · The demo world wrote a second document when a preset or knowledge-base document was saved again
-
-- Symptom: in `?demo`, saving a style preset or a knowledge-base document under a name that already existed added a second entry of that name instead of replacing the first, which `planning/contracts/step-3/knowledge.md` section 2 requires.
-- Cause: the demo's `note` handler (`web/features/sim/director.ts`, `#note`, before M2) wrote every `note` under the command's new `id` and never looked up the note of that type and name.
-- Status: resolved by unit M2: `notePut` in `web/features/sim/memory.ts` replaces the note of that type and name, keeping its id and place (`features/sim/sim.test.ts`, "writes, edits, searches and pages the project memory and the knowledge base").
-
 ### 2026-11-27 · limitation · With the nightfall theme colour, links read as secondary text
 
 - Symptom: under 夜幕 Nightfall, links and the "更改" actions of the side panel are a neutral grey close to `--text-2` (`web/src/styles/accents.css`, `nightfall` block).
@@ -778,6 +748,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-27 · bug · In the demo, a person removed right after joining still said hello
+
+- Symptom: in `?demo`, removing Nora within 2.5 s of her joining by code left 「我进来了，有需要我的地方 @ 我。」 by her under 「Alex 把 Nora 移出了群。」, a post by someone no longer in the group (`shots/m3/demo-d4-panel-expire.png` of the first M3-8 run).
+- Cause: the scripted hellos are posted by a timer that never looked whether the person was still a member (`web/features/sim/people.ts`, `#noraJoins`, `added`, `#leoJoins` and `#direct`'s thanks, each `this.world.after(…, () => this.post(…))`). The client shows rows in the order the home wrote them, which was right.
+- Status: resolved in PR #427: `#sayLater` (`web/features/sim/people.ts:80-84`) posts only for a member; test "says nothing for a person removed before their hello" in `web/features/sim/sim.test.ts`, which fails on the old code.
+
+### 2026-11-27 · bug · After joining in the demo, the top bar said 「重连中」 until a reload
+
+- Symptom: in `?demo`, after joining a group by code the connection indicator stayed 「重连中」.
+- Cause: the demo's `FakePeer` told its path once, as it came online (`web/features/sim/session.ts`, `#open`). A join starts following the path only when it is admitted, after that one report, and closing the replaced peer had cleared the path. `peer.ts` reads the browser's statistics again, so a real connection recovers.
+- Status: resolved in PR #427: the demo peer tells its path again a second later (`web/features/sim/session.ts:94`); the indicator reads 「直连」 again in the click-through.
+
+### 2026-11-27 · bug · In the demo, joining a group of one's own computer said that not every computer was told
+
+- Symptom: in `?demo`, typing the open invitation code of 官网改版 on 加入群 ended in 「你已加入群聊，但并非所有已连接的电脑都收到了通知。」 instead of opening the group.
+- Cause: the join dials the group's home again, which replaces the browser's connection to that computer (`hub.peer`). In peer.ts a closed peer reports its connection lost (`Peer.close` → `#end` → `#offline`, `web/src/lib/peer.ts:604-614`), so the client stops asking that home anything on it; the demo's `FakePeer.close` (`web/features/sim/session.ts`, before M3-8) only closed its line. The home kept its `ctl`, `ownNodes` listed it, and the `home.add` sent on the closed line failed as `lost`.
+- Status: resolved in unit M3-8: `FakePeer.close` reports the loss as peer.ts does (`web/features/sim/session.ts:137-143`); the click-through opens the group.
+
+### 2026-11-27 · deviation · The demo answered `join` of a member with `conflict`
+
+- Symptom: in `?demo`, a person who opened a link of a group they are in was told they are already in it; `contracts/step-2/people.md` 2.2 point 3 answers such a `join` `ok` and writes nothing (the restore case), which a typed code of one's own group also needs (A9.52).
+- Cause: `People.join` in `web/features/sim/people.ts` returned `conflict` for a member.
+- Status: resolved in unit M3-8: a member is answered `ok`.
+
 ### 2026-11-27 · bug · A data race on the log rotation size in the node tests
 
 - Symptom: once in `go test -race -count=20 ./internal/node/` (at 45803ffbd): `checkLogRotation` wrote `maxLogBytes` (`node_test.go:82`) while a Pion callback goroutine that `TestNetStatusLiveNodeRuntime` left behind read it in `logFile.Write` (`node.go:102`). The three tests involved, run 6 times under `-race`, show it once.
@@ -801,6 +795,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `go test -tags acceptance -race` on "People who type one invitation code meet the home in its room and join, at once (A9.47)" failed one run in three with `WARNING: DATA RACE` (`testing.go: race detected during execution of test`); the two writes were the two browsers' clean-ups.
 - Cause: the function `afterScenario` returns appended to a plain slice (`features/acceptance_test.go:136`, before the fix), and `twoJoin` (`features/node_pair_code_test.go:458`, `twoJoin`) opens one browser (`newPeerBrowser`, which registers its clean-up) in each of two goroutines.
 - Status: resolved in unit M3-7: the list is guarded by a mutex in `afterScenario`; `-race -count=3` of the invitation-code scenarios passes.
+
 ### 2026-11-27 · bug · The demo world wrote a second document when a preset or knowledge-base document was saved again
 
 - Symptom: in `?demo`, saving a style preset or a knowledge-base document under a name that already existed added a second entry of that name instead of replacing the first, which `planning/contracts/step-3/knowledge.md` section 2 requires.

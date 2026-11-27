@@ -147,7 +147,7 @@ CREATE TABLE setting (
   at start and kept in memory. A `device` row in `row` is the same entry,
   written once per group so that it gets a group sequence number.
 - `receipt` is written in the transaction of the command it belongs to, for
-  home commands and host commands alike. For `pair.browser` and
+  home commands and host commands alike. For `pair.browser`, `invite` and
   `takeover.start` it records only that the command succeeded; for `code`
   likewise, never the code (`contracts/commands.md`, "Once only").
 - `processed_offer` remembers each applied offer by (`signer`, `conn`) across
@@ -159,7 +159,9 @@ CREATE TABLE setting (
   `offline` (false), `homes` (the list `host.info` shows,
   `contracts/datachannel.md` section 7), `invites` (an object from group id
   to that group's open invitation code: `code`, `by`, `expires`;
-  `contracts/step-2/people.md` 2.6).
+  `contracts/step-2/people.md` 2.6), `moved` (an object from the id of a
+  group moved away to the device id of its new home;
+  `contracts/step-2/export.md` section 3).
 
 ## 3. Host tables
 
@@ -339,7 +341,7 @@ version on an older data directory it:
 
 So a node that starts on the data directory of `v3.0.0-rc.1` keeps its
 pairing, its devices, its account types and its peers, and lists no group.
-People who were in its groups are invited again by link: the node has
+People who were in its groups are invited again by code or by link: the node has
 forgotten their devices. An export file carries the schema version of the
 node that wrote it, and a file of another version is refused
 (`contracts/step-2/export.md` section 5).

@@ -62,7 +62,9 @@ AI, always present. A person's row has none of them.
   all keep the default tier has no stronger AI, so section 4 never asks
   for anything.
 - The web client shows the four on the AI member panel and card, and lets
-  the AI's owner edit them there (section 2a).
+  the AI's owner edit them there (section 2a), except the model and level
+  of an external AI, which are text set when it joins
+  (`contracts/step-3/external.md` section 11).
 
 ## 2. Setting it (adds to `contracts/commands.md` 1.2 and section 2)
 
@@ -95,10 +97,11 @@ owner's `member set`.
   levels, and "the CLI's default" for both; what is chosen goes in that
   AI's `host.join`. Choosing a
   model fills the tier with that model's suggestion; the owner may change
-  it, and write skills, before sending.
+  it before sending, and, in the add-AI dialog only, write skills.
 - **Editing.** The AI member panel shows model, level, tier and skills,
   the tier in one block with the usage line of section 3 (`window_pct`
-  and when it resets). The owner changes any of the four in one editor
+  and when it resets, or the turns of today for a CLI that reports no
+  window). The owner changes any of the four in one editor
   with `member set`; its level is a choice of its own, offered from the
   chosen model's `efforts` and "the CLI's default". Beside the tier it
   shows the suggestion for the chosen model when the two differ; taking
@@ -106,7 +109,8 @@ owner's `member set`.
 - **The secretary.** No view shows or offers the secretary's tier (its
   card, its editor, the add-AI and create-group dialogs once it is chosen
   as secretary), because it takes no tasks; its stored tier stays as set,
-  and only orders it among the candidates of section 4.
+  and only orders it among the candidates of section 4. Its card shows the
+  usage line alone, headed "Quota".
 - **Refresh.** A button on the panel sends `host.info` with `refresh`.
   A discovery changes `host.info` only. It never changes a member row,
   so what the owner set stays, whatever is found later.

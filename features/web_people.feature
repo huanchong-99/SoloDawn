@@ -13,7 +13,7 @@ Feature: People in a group
     When I open "Invite"
     Then the dialog lists "Mina" and "Sam" under "In your other groups here", each with "Add", and offers "Cancel"
     When I add Mina, and then Sam, whom the home no longer knows
-    Then the home has added Mina with "add_person", her row says "Added", and Sam's row says to send the link
+    Then the home has added Mina with "add_person", her row says "Added", and Sam's row says to send the code or the link
     And Mina is listed among the people of the group, and the dialog offers "Done" in place of "Cancel"
 
   Scenario: An owner makes, replaces and turns off the group's invitation code
