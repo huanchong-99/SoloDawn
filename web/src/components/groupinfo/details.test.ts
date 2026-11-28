@@ -1,7 +1,8 @@
-import { flushSync } from 'svelte';
+import { flushSync, tick } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { all, choose, closePage, fill, one, show } from '../../../features/page';
+import { all, choose, closePage, fill, one, show, texts } from '../../../features/page';
+import { previewText } from '../../lib/groupinfo.svelte';
 import { Group, Home, homes } from '../../lib/groups.svelte';
 import { nodes } from '../../lib/nodes.svelte';
 import { goldens } from '../../lib/mock';
@@ -9,6 +10,7 @@ import { prefs } from '../../lib/prefs.svelte';
 import * as p from '../../lib/proto';
 import EditGroup from './EditGroup.svelte';
 import GroupDetails from './GroupDetails.svelte';
+import GroupInfoPanel from './GroupInfoPanel.svelte';
 import SecretaryWarning from './SecretaryWarning.svelte';
 import AddAI from '../member/AddAI.svelte';
 import InvitationDialog from '../people/InvitationDialog.svelte';
@@ -534,4 +536,71 @@ it('ignores Escape while a save is in flight, so its answer settles this edit', 
     ),
   );
   expect(field.value).toBe('Docs');
+});
+
+it('groups note actions, preserves note and review delete dialogs, and adds no placeholder to other editors', async () => {
+  const { group, request } = setup();
+  request.mockResolvedValue({ re: 1, ok: true, rows: [], more: false });
+  const note = p.decode(p.NoteRow, goldens['row-note']);
+  const review = p.decode(p.MsgRow, goldens['row-msg-review']) as Extract<
+    p.MsgRow,
+    { kind: 'review' }
+  >;
+  group.apply([note, review]);
+
+  show(GroupDetails, { group });
+  edit('Change group name').click();
+  flushSync();
+  expect(
+    one<HTMLInputElement>('input[aria-label="Group name"]').getAttribute('placeholder'),
+  ).toBeNull();
+  one<HTMLButtonElement>('.group-details .edit-field .btn-ghost').click();
+  await tick();
+  flushSync();
+
+  show(GroupInfoPanel, { group });
+  one<HTMLDetailsElement>('.groupinfo details').open = true;
+  one('.groupinfo details').dispatchEvent(new Event('toggle'));
+  await tick();
+  flushSync();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(all('.groupinfo [role=status]')).toEqual([]);
+  });
+
+  const noteLabel = previewText(note.text);
+  const reviewLabel = previewText(`T-${review.body.num} ${review.body.title}`);
+  const editBtn = one<HTMLButtonElement>('.groupinfo .mem-meta .edit');
+  const [noteDelBtn, reviewDelBtn] = all<HTMLButtonElement>('.groupinfo .mem-meta .del');
+  expect(editBtn.parentElement).toBe(noteDelBtn.parentElement);
+  expect(editBtn.parentElement?.classList.contains('mem-acts')).toBe(true);
+  expect(reviewDelBtn.parentElement?.classList.contains('mem-meta')).toBe(true);
+  expect(noteDelBtn.getAttribute('aria-label')).toBe(`Delete note: ${noteLabel}`);
+  expect(reviewDelBtn.getAttribute('aria-label')).toBe(`Delete review: ${reviewLabel}`);
+
+  one<HTMLButtonElement>('.groupinfo .add').click();
+  flushSync();
+  expect(
+    one<HTMLTextAreaElement>('.groupinfo .edit-field textarea').getAttribute('placeholder'),
+  ).toBeNull();
+  one<HTMLButtonElement>('.groupinfo .edit-field .btn-ghost').click();
+  await tick();
+  flushSync();
+
+  noteDelBtn.click();
+  flushSync();
+  expect(texts('dialog h2')).toEqual(['Delete this note?']);
+  expect(texts('dialog .lead')).toEqual([
+    'This removes it permanently from the project memory on every connected device.',
+  ]);
+  one<HTMLButtonElement>('dialog .btn-ghost').click();
+  await tick();
+  flushSync();
+
+  reviewDelBtn.click();
+  flushSync();
+  expect(texts('dialog h2')).toEqual(['Delete this review from the ledger?']);
+  expect(texts('dialog .lead')).toEqual([
+    'This removes it permanently from the project memory on every connected device.',
+  ]);
 });

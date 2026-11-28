@@ -45,7 +45,13 @@
   });
 
   function askForget(r: ForgetRowType, id: string, label: string) {
-    pending = { r, id, label, heading: r === 'note' ? notesHead : ledgerHead };
+    pending = {
+      r,
+      kind: r === 'note' ? 'note' : undefined,
+      id,
+      label,
+      heading: r === 'note' ? notesHead : ledgerHead,
+    };
   }
 </script>
 
@@ -98,24 +104,26 @@
                     <time datetime={new Date(note.ts).toISOString()}>
                       {shortWhen(note.ts, now(), prefs.lang)}
                     </time>
-                    {#if group.me}
-                      <EditButton
-                        id={editId}
-                        label={t('groupinfo.note.edit').replace('{text}', label)}
-                        {editing}
-                        disabled={!group.home.ctl}
-                      />
-                    {/if}
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-ghost del"
-                      disabled={!group.info || Boolean(forgetReason)}
-                      aria-label={t('groupinfo.forget.note').replace('{text}', label)}
-                      aria-describedby={forgetReason ? `${uid}-why` : undefined}
-                      onclick={() => askForget('note', note.id, label)}
-                    >
-                      {t('groupinfo.forget')}
-                    </button>
+                    <span class="mem-acts">
+                      {#if group.me}
+                        <EditButton
+                          id={editId}
+                          label={t('groupinfo.note.edit').replace('{text}', label)}
+                          {editing}
+                          disabled={!group.home.ctl}
+                        />
+                      {/if}
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-ghost del"
+                        disabled={!group.info || Boolean(forgetReason)}
+                        aria-label={t('groupinfo.forget.note').replace('{text}', label)}
+                        aria-describedby={forgetReason ? `${uid}-why` : undefined}
+                        onclick={() => askForget('note', note.id, label)}
+                      >
+                        {t('groupinfo.forget')}
+                      </button>
+                    </span>
                   </div>
                   {#if editing.id === editId}
                     <EditField
@@ -324,12 +332,16 @@
     color: var(--text);
     font-size: var(--fs-sm);
   }
-  .del,
-  .mem-meta :global(.edit) {
+  .mem-acts {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    white-space: nowrap;
     margin-left: auto;
   }
-  .mem-meta :global(.edit + .del) {
-    margin-left: 0;
+  .mem-meta > .del {
+    margin-left: auto;
   }
   .add {
     align-self: flex-start;

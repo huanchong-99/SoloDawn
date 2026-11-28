@@ -10,5 +10,8 @@
   "preset.offline": "无法连接群组主机。预设为只读。",
   "preset.loading": "正在加载预设…",
   "preset.add": "新建预设",
-  "preset.taken": "没有保存：已有同名的预设。"
+  "preset.taken": "没有保存：已有同名的预设。",
+  "preset.forget": "删除预设：{text}",
+  "preset.confirm": "删除这个预设？",
+  "preset.confirm.body": "这会把它从群的风格预设里永久删除。"
 }

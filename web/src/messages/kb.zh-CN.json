@@ -14,5 +14,8 @@
   "kb.edit": "更改文档：{name}",
   "kb.name": "文档名",
   "kb.text": "文档内容",
-  "kb.taken": "没有保存：已有同名的文档。"
+  "kb.taken": "没有保存：已有同名的文档。",
+  "kb.forget": "删除文档：{text}",
+  "kb.confirm": "删除这个文档？",
+  "kb.confirm.body": "这会把它从群的知识库里永久删除。"
 }

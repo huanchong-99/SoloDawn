@@ -7,12 +7,20 @@
   /** Row and focus handles passed to the forget confirmation dialog. */
   export interface ForgetTarget {
     r: ForgetRowType;
+    kind?: 'note' | 'preset' | 'doc';
     id: string;
     label: string;
     heading: HTMLElement | undefined;
   }
 
-  /** Confirmation dialog that sends `forget` for one note or review ledger entry. */
+  const confirmText = {
+    note: { title: 'groupinfo.confirm.note', body: 'groupinfo.confirm.body' },
+    preset: { title: 'preset.confirm', body: 'preset.confirm.body' },
+    doc: { title: 'kb.confirm', body: 'kb.confirm.body' },
+    review: { title: 'groupinfo.confirm.review', body: 'groupinfo.confirm.body' },
+  } as const;
+
+  /** Confirmation dialog that sends `forget` for one note, preset, document, or review ledger entry. */
   let {
     group,
     target,
@@ -23,6 +31,7 @@
     onclose: () => void;
   } = $props();
   const uid = $props.id();
+  const copy = $derived(confirmText[target.r === 'note' ? (target.kind ?? 'note') : 'review']);
 
   let dialog: HTMLDialogElement;
   let busy = $state(false);
@@ -64,10 +73,8 @@
 <dialog bind:this={dialog} class="dlg" aria-labelledby={`${uid}-title`} onclose={handleClose}>
   <form onsubmit={submit}>
     <header>
-      <h2 id={`${uid}-title`}>
-        {t(target.r === 'note' ? 'groupinfo.confirm.note' : 'groupinfo.confirm.review')}
-      </h2>
-      <p class="lead">{t('groupinfo.confirm.body')}</p>
+      <h2 id={`${uid}-title`}>{t(copy.title)}</h2>
+      <p class="lead">{t(copy.body)}</p>
     </header>
 
     <p class="preview">{target.label}</p>
