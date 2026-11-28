@@ -31,6 +31,15 @@ Feature: Shell of the web client
     When the address becomes "#/groups"
     Then no chat is open
 
+  Scenario: On wide screens the Chats tab reopens the last opened group while it exists
+    Given the home of the group "Website" is reached
+    When the person opens the client at "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ" on a wide screen and goes to "#/settings"
+    Then the Chats tab links to "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ" and the logo links to "#/groups"
+    When the screen is 600 px wide at "#/settings"
+    Then on a narrow screen the Chats tab links to "#/groups"
+    When the screen is 1440 px wide at "#/settings" and the group is removed
+    Then once the group is gone the Chats tab links to "#/groups"
+
   Scenario: The address of a group that has not been read keeps the chat's place, with a way back
     When the person opens the client at "#/groups/not-read-yet"
     Then the page says "This group has not been read yet. It is read once the computer that is its home can be reached."
