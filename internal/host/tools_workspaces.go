@@ -51,7 +51,7 @@ func listWorkspaces(found iter.Seq[workspaces.Folder], data string) []proto.Work
 	room := ctlLimit - len(marshalWire(proto.HostWorkspaces{Success: proto.Success{Re: math.MaxInt64}, Workspaces: list}))
 	seen := map[string]bool{}
 	for f := range found {
-		path, err := resolveWorkspace(f.Path)
+		path, err := ResolveWorkspace(f.Path)
 		if err != nil || seen[path] || within(data, path) {
 			continue
 		}

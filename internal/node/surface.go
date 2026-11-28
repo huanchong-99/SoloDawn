@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"runtime"
 	"sync"
 
@@ -25,6 +26,8 @@ type (
 		Agents               func(context.Context, bool) ([]proto.HostAgent, error)
 		Update               func() *proto.Update
 		Relay                func() *proto.RelayUse
+		Permissions          func() *proto.Permissions
+		Permit               func(context.Context, proto.HostPermit) error
 	}
 	// Surface serves host.info on a Sessions hub.
 	Surface struct {
@@ -40,15 +43,69 @@ type (
 )
 
 // NewSurface constructs a Surface and registers host.info, watch.start,
-// host.workspaces, pty.resize and takeover.start replay on cfg.Sessions.
+// host.workspaces, host.permit, pty.resize and takeover.start replay on cfg.Sessions.
 func NewSurface(cfg SurfaceConfig) *Surface {
 	sf := &Surface{cfg: srfDefaults(cfg)}
 	cfg.Sessions.Requests["host.info"] = RequestHandler{Type: "host.info", Run: sf.reqHostInfo}
 	cfg.Sessions.Requests["watch.start"] = RequestHandler{Run: sf.reqWatchStart}
 	cfg.Sessions.Requests["host.workspaces"] = RequestHandler{Run: sf.reqHostWorkspaces}
+	cfg.Sessions.Requests["host.permit"] = RequestHandler{Async: true, Run: sf.reqHostPermit}
 	cfg.Sessions.Pushes["pty.resize"] = sf.pushPTYResize
 	cfg.Sessions.Replays["takeover.start"] = sf.replayTakeoverStart
 	return sf
+}
+
+func (sf *Surface) reqHostPermit(ctx context.Context, _ *home.Conn, from Ctl, _ string, id int64, data json.RawMessage) (any, error) {
+	if sf.cfg.Permit == nil {
+		return nil, &host.Error{Code: "bad_request", Message: "permissions are only reported by the macOS app"}
+	}
+	var req proto.HostPermit
+	if err := proto.Decode(data, &req); err != nil {
+		return nil, &host.Error{Code: "bad_request", Message: err.Error()}
+	}
+	if err := validatePermitRequest(req); err != nil {
+		return nil, err
+	}
+	if req.Path != "" {
+		return sf.startFolderPermit(ctx, from, id, req)
+	}
+	if err := sf.cfg.Permit(ctx, req); err != nil {
+		return nil, err
+	}
+	from.Send(proto.Success{Re: id, OK: true})
+	return nil, nil
+}
+
+func (sf *Surface) startFolderPermit(ctx context.Context, from Ctl, id int64, req proto.HostPermit) (any, error) {
+	resolved, err := host.ResolveWorkspace(req.Path)
+	if err != nil {
+		return nil, err
+	}
+	req.Path = resolved
+	sf.cfg.Sessions.cfg.Spawn(func() {
+		probeCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		go func() {
+			select {
+			case <-from.Done():
+				cancel()
+			case <-probeCtx.Done():
+			}
+		}()
+		from.Send(permitReply(id, sf.cfg.Permit(probeCtx, req)))
+	})
+	return nil, nil
+}
+
+func permitReply(id int64, err error) any {
+	if err == nil {
+		return proto.Success{Re: id, OK: true}
+	}
+	var wireErr *host.Error
+	if errors.As(err, &wireErr) {
+		return proto.ErrorResponse{Re: id, Err: proto.WireError{Code: wireErr.Code, Message: wireErr.Message}}
+	}
+	return proto.ErrorResponse{Re: id, Err: proto.WireError{Code: "internal", Message: "request failed"}}
 }
 
 func (sf *Surface) reqWatchStart(_ context.Context, _ *home.Conn, from Ctl, by string, _ int64, data json.RawMessage) (any, error) {
@@ -75,6 +132,9 @@ func srfDefaults(cfg SurfaceConfig) SurfaceConfig {
 	}
 	if cfg.Relay == nil {
 		cfg.Relay = func() *proto.RelayUse { return nil }
+	}
+	if cfg.Permissions == nil {
+		cfg.Permissions = func() *proto.Permissions { return nil }
 	}
 	return cfg
 }
@@ -127,8 +187,9 @@ func (sf *Surface) hostState(ctx context.Context, refresh bool) (proto.HostState
 		Device: sf.cfg.ID, Name: name, OS: sf.cfg.OS, Version: sf.cfg.Version, Exe: sf.cfg.Exe,
 		Open: srfCountOpen(sessions), MaxOpen: db.maxOpen, Offline: db.offline,
 		Update: sf.cfg.Update(), Homes: db.homes, Relay: sf.cfg.Relay(),
-		Agents:   agents,
-		Settings: proto.HostSettings{RetentionDays: 90, IdleMinutes: 15, DefaultLevel: 3, Approvers: []string{}},
+		Permissions: sf.cfg.Permissions(),
+		Agents:      agents,
+		Settings:    proto.HostSettings{RetentionDays: 90, IdleMinutes: 15, DefaultLevel: 3, Approvers: []string{}},
 	}, nil
 }
 

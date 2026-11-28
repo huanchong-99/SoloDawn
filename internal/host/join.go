@@ -204,8 +204,13 @@ func handleHostJoin(ctx context.Context, h *Host, _ Owner, by string, data json.
 	if err != nil {
 		return nil, err
 	}
-	if p.Workspace, err = resolveWorkspace(p.Workspace); err != nil {
+	if p.Workspace, err = ResolveWorkspace(p.Workspace); err != nil {
 		return nil, err
+	}
+	if h.Access != nil {
+		if err := h.Access(p.Workspace); err != nil {
+			return nil, err
+		}
 	}
 	cfg, err := joinLoadConfig(h, p)
 	if err != nil {
@@ -214,11 +219,11 @@ func handleHostJoin(ctx context.Context, h *Host, _ Owner, by string, data json.
 	return nil, joinExecuteJoin(ctx, h, joinStateOf(h), p, cfg, by)
 }
 
-// resolveWorkspace returns the folder at path with its symbolic links
-// resolved: the form in which a workspace is kept and compared
+// ResolveWorkspace returns path with symbolic links resolved when it names an
+// existing folder: the form in which a workspace is kept and compared
 // (contracts/local.md section 7). It answers bad_request for a path that is
 // not absolute and not_found where no folder is now.
-func resolveWorkspace(path string) (string, error) {
+func ResolveWorkspace(path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", &Error{Code: "bad_request", Message: "the workspace is not an absolute path: " + path}
 	}

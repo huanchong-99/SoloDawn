@@ -632,6 +632,57 @@ func TestPairingSurfaceClientAndForegroundStop(t *testing.T) {
 	checkForegroundContextStop(t)
 }
 
+func TestNodeBundlePermissionsWiring(t *testing.T) {
+	savedOps := openPermitOps
+	t.Cleanup(func() { openPermitOps = savedOps })
+
+	var probes atomic.Int64
+	allowNet := false
+	ticker := newFakeTicker()
+	openPermitOps = func(string) *permitOps {
+		return &permitOps{
+			probeAll: func() proto.Permissions {
+				probes.Add(1)
+				return proto.Permissions{LocalNetwork: allowNet, Incoming: true, FullDisk: false}
+			},
+			openSettings: func(string) error { return nil },
+			startHelper:  func(context.Context, string) (permitHelper, error) { return newFakeHelper("en"), nil },
+			probeFolder:  func(context.Context, string) error { return nil },
+			now:          time.Now,
+			newTicker:    func(time.Duration) permitTicker { return ticker },
+		}
+	}
+
+	dir := socketRoot(t)
+	n, err := openNode(t.Context(), dir)
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+
+	if probes.Load() != 1 || n.host.Access == nil {
+		t.Fatalf("initial probes=%d access=%v", probes.Load(), n.host.Access != nil)
+	}
+	mustNoErr(t, n.host.Access(t.TempDir()))
+
+	ownerKey := adoptTestBrowser(t, n)
+	fc := serveConn(t, n.sessions, ownerKey.ID(), false)
+	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 3, Kind: "browser", Name: "b", Addrs: []string{}})
+	fc.next(t) // welcome
+	fc.next(t) // devlog
+
+	allowNet = true
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 2}})
+	var push proto.HostInfoPush
+	mustNoErr(t, proto.Decode(fc.next(t), &push))
+	if push.Type != "host.info" || push.Permissions == nil || !push.Permissions.LocalNetwork {
+		t.Fatalf("node permit push = %+v", push)
+	}
+	var ok proto.Success
+	mustNoErr(t, proto.Decode(fc.next(t), &ok))
+	if ok.Re != 2 || !ok.OK {
+		t.Fatalf("node permit ok = %+v", ok)
+	}
+}
+
 func TestOnAdoptReportsAFailedServiceInstall(t *testing.T) {
 	saved := installService
 	t.Cleanup(func() { installService = saved })

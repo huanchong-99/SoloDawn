@@ -2314,6 +2314,47 @@ func TestMissingFolderFailsTheStart(t *testing.T) {
 	}
 }
 
+func TestAccessRefusalFailsTheStart(t *testing.T) {
+	h, rh, drv, _ := setupRunEnv(t)
+	folder := t.TempDir()
+	taskKey := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
+	h.Sessions.Create(makeRunSession(taskKey, TaskSession, folder))
+
+	h.Access = func(f string) error {
+		return &Error{Code: "permission", Message: "macOS does not allow SoloDawn to use " + f}
+	}
+	wantDetail := "macOS does not allow SoloDawn to use " + folder
+	if err := Runner.Turn(t.Context(), h, taskKey, "go", Turn{Kind: ItemsTurn, Thread: runTask1}); err == nil || !strings.Contains(err.Error(), wantDetail) {
+		t.Fatalf("refused start err = %v; want %q", err, wantDetail)
+	}
+	var st proto.MemberStatus[proto.TurnInterruptedEvent]
+	tskNoErr(t, proto.Decode([]byte(rh.waitCmd(t).raw), &st))
+	if st.Event == nil || st.Event.Reason != "crash" || st.Event.Detail != wantDetail {
+		t.Fatalf("status = %+v; want crash with detail %q", st, wantDetail)
+	}
+	var fail proto.TaskFail
+	tskNoErr(t, proto.Decode([]byte(rh.waitCmd(t).raw), &fail))
+	if fail.Op != "fail" || fail.Reason != "crash" || fail.Detail != wantDetail {
+		t.Fatalf("task fail = %+v; want detail %q", fail, wantDetail)
+	}
+	if drv.count() != 0 {
+		t.Fatalf("starts = %d, want 0", drv.count())
+	}
+
+	h.Access = func(string) error { return errors.New("plain access failure") }
+	if err := Runner.Turn(t.Context(), h, taskKey, "go", Turn{Kind: ItemsTurn, Thread: runTask1}); err == nil || !strings.Contains(err.Error(), "plain access failure") {
+		t.Fatalf("plain err = %v", err)
+	}
+	rh.waitCmd(t)
+	rh.waitCmd(t)
+
+	h.Access = func(string) error { return nil }
+	tskNoErr(t, Runner.Turn(t.Context(), h, taskKey, "go", Turn{Kind: ItemsTurn, Thread: runTask1}))
+	if drv.count() != 1 || drv.lastLaunch().Folder != folder {
+		t.Fatalf("starts = %d, want 1 in %q", drv.count(), folder)
+	}
+}
+
 func TestFailedTurnReportsCrashAndDetail(t *testing.T) {
 	checkFailedGroupTurnCrash(t)
 	checkFailedTaskTurnCrash(t)
