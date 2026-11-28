@@ -53,6 +53,8 @@ func TestPTYHelperProcess(t *testing.T) {
 		runPTYHangTreeHelper(args[1])
 	case "pty-hangleaf":
 		runPTYHangLeafHelper(args[1])
+	case "pty-env":
+		runPTYEnvHelper()
 	default:
 		return
 	}
@@ -80,6 +82,19 @@ func runPTYEchoHelper() {
 			return
 		}
 	}
+}
+
+func runPTYEnvHelper() {
+	term, hasTerm := os.LookupEnv("TERM")
+	keep, hasKeep := os.LookupEnv("SOLODAWN_PTY_TEST_KEEP")
+	termCount := 0
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "TERM=") {
+			termCount++
+		}
+	}
+	fmt.Printf("TERM=[%t:%s]\nCOUNT=[%d]\nKEEP=[%t:%s]\n", hasTerm, term, termCount, hasKeep, keep)
+	bufio.NewReader(os.Stdin).ReadString('\n')
 }
 
 func runPTYFloodHelper() {
@@ -889,5 +904,63 @@ func TestPTYCloseTimeoutAndReentrancy(t *testing.T) {
 		if got := killed.Load(); got != wantKills {
 			t.Fatalf("slow=%v: kill count = %d, want %d", slow, got, wantKills)
 		}
+	}
+}
+
+func runPTYEnvCase(t *testing.T, termVal string, unset bool) string {
+	t.Helper()
+	t.Setenv("SOLODAWN_PTY_TEST_KEEP", "kept-value")
+	t.Setenv("TERM", termVal)
+	if unset {
+		if err := os.Unsetenv("TERM"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newPTYTestHost(t)
+	registerPTYTestDriver(t, "ptyenv", func(Launch) ([]string, string, error) {
+		return ptyHelperArgv(t, "pty-env"), "sess-env", nil
+	})
+	p, _, err := h.StartPTY("g-env", "m-env", "ptyenv", Launch{Folder: t.TempDir(), Level: 1}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	term := newPTYTestTerminal("pty:g-env:m-env")
+	serveDone := make(chan struct{})
+	go func() {
+		defer close(serveDone)
+		h.ServeTerminal(term)
+	}()
+	defer func() {
+		term.Close()
+		<-serveDone
+		p.Close()
+	}()
+	term.waitContains(t, "KEEP=[true:kept-value]")
+	return term.output()
+}
+
+func TestPTYEnvTermAndInheritance(t *testing.T) {
+	cases := []struct {
+		name     string
+		unset    bool
+		term     string
+		wantTerm string
+	}{
+		{name: "unset", unset: true, wantTerm: "xterm-256color"},
+		{name: "empty", term: "", wantTerm: "xterm-256color"},
+		{name: "dumb", term: "dumb", wantTerm: "xterm-256color"},
+		{name: "custom", term: "screen-256color", wantTerm: "screen-256color"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := runPTYEnvCase(t, tc.term, tc.unset)
+			wantTerm := "TERM=[true:" + tc.wantTerm + "]"
+			if !strings.Contains(out, wantTerm) {
+				t.Fatalf("output %q does not contain %q", out, wantTerm)
+			}
+			if !strings.Contains(out, "COUNT=[1]") {
+				t.Fatalf("output %q does not contain COUNT=[1]", out)
+			}
+		})
 	}
 }

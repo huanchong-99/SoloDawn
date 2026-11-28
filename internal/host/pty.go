@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -168,6 +169,8 @@ func ptyOpenHandle(name string) (string, gopty.Pty, error) {
 	return exePath, ptmx, nil
 }
 
+const ptyDefaultTerm = "xterm-256color"
+
 func ptySpawn(part *ptyPart, slot aiSlot, argv []string, folder string, onDone func()) (*PTY, error) {
 	exePath, ptmx, err := ptyOpenHandle(argv[0])
 	if err != nil {
@@ -175,6 +178,7 @@ func ptySpawn(part *ptyPart, slot aiSlot, argv []string, folder string, onDone f
 	}
 	cmd := ptmx.Command(exePath, argv[1:]...)
 	cmd.Dir = folder
+	cmd.Env = ptyEnv()
 	if err := cmd.Start(); err != nil {
 		ptmx.Close()
 		return nil, ptyWrapCLIError(err)
@@ -187,6 +191,17 @@ func ptySpawn(part *ptyPart, slot aiSlot, argv []string, folder string, onDone f
 		return nil, ptyWrapCLIError(err)
 	}
 	return ptyActivate(part, slot, handle, cmd, onDone), nil
+}
+
+// ptyEnv inherits the node's environment and sets TERM to xterm-256color when
+// TERM is unset, empty, or "dumb" (such as under launchd or non-interactive
+// shells) so interactive CLIs do not fall back to dumb-terminal prompts.
+func ptyEnv() []string {
+	env := os.Environ()
+	if term := os.Getenv("TERM"); term == "" || term == "dumb" {
+		return append(env, "TERM="+ptyDefaultTerm)
+	}
+	return env
 }
 
 func ptyActivate(part *ptyPart, slot aiSlot, handle ptyHandle, cmd *gopty.Cmd, onDone func()) *PTY {

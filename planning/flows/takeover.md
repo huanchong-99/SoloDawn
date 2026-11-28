@@ -41,9 +41,11 @@ not start it, and a `takeover.start` that names one is answered `conflict`.
 6. N starts the vendor's interactive CLI in a pseudo-terminal, in S's
    folder, with S's session id and with the same level, the same setting
    sources and the same MCP configuration as the structured session
-   (`contracts/drivers.md` 1.3). What the CLI would have asked through a
-   card it now asks O in the terminal. State `takeover`; N reports
-   `member status`; the task card shows "owner is operating directly".
+   (`contracts/drivers.md` 1.3), inheriting N's environment with
+   `TERM=xterm-256color` when `TERM` is unset or `dumb`. What the CLI
+   would have asked through a card it now asks O in the terminal. State
+   `takeover`; N reports `member status`; the task card shows "owner is
+   operating directly".
 7. N answers `ok`. B opens the data channel `pty:<g>:<member>` and sends
    `pty.resize`. From here bytes flow both ways untouched. If B has not
    opened the channel 60 s after `ok`, N hands back as in step 12.
