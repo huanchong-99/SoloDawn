@@ -140,6 +140,14 @@ function addStarterGroup(rig: OwnedNode, g = websiteId, groupName = 'Website') {
   rig.home.add(g, groupName);
   rig.home.write(g, example('row-member-human', { id: owner, g, user, name: 'Me' }));
   rig.home.write(g, example('row-member-ai', { id: secAiId, g, user, name: 'Claude Code' }));
+  rig.home.write(
+    g,
+    example('row-member-ai', { id: 'worker-ai-1', g, user, name: 'Codex', cli: 'codex' }),
+  );
+  rig.home.write(
+    g,
+    example('row-member-ai', { id: 'worker-ai-2', g, user, name: 'Worker 2', cli: 'claude' }),
+  );
   rig.home.write(g, example('row-group', { g, name: groupName, secretary: secAiId }));
 }
 
@@ -241,16 +249,11 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
         go(location.hash);
       });
 
-      Then(
-        'the address is "#/onboarding" and the dock is a pill saying "0/5 · Connect your computer"',
-        () => {
-          expect(location.hash).toBe('#/onboarding');
-          const pill = one('.guide-pill');
-          expect(pill.getAttribute('aria-label')).toContain('0/5 · Connect your computer');
-          expect(one('.guide-pill .ring-num').textContent).toBe('0');
-          expect(one('.guide-pill .t').textContent).toBe('Connect your computer');
-        },
-      );
+      Then('the address is "#/onboarding" and neither the guide dock nor its pill is shown', () => {
+        expect(location.hash).toBe('#/onboarding');
+        expect(all('.guide-dock')).toHaveLength(0);
+        expect(all('.guide-pill')).toHaveLength(0);
+      });
     },
   );
 
@@ -340,12 +343,64 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       expect(one('.guide-dock .step.cur b').textContent).toContain('Create your first group');
     });
 
-    When('the group "Website" has a secretary and the person\'s Claude Code', async () => {
-      addStarterGroup(workstation!, websiteId, 'Website');
+    When('the group "Website" has a secretary and 1 working AI', async () => {
+      workstation!.home.add(websiteId, 'Website');
+      workstation!.home.write(
+        websiteId,
+        example('row-member-human', { id: owner, g: websiteId, user, name: 'Me' }),
+      );
+      workstation!.home.write(
+        websiteId,
+        example('row-member-ai', { id: secAiId, g: websiteId, user, name: 'Claude Code' }),
+      );
+      workstation!.home.write(
+        websiteId,
+        example('row-member-ai', {
+          id: 'worker-ai-1',
+          g: websiteId,
+          user,
+          name: 'Codex',
+          cli: 'codex',
+        }),
+      );
+      workstation!.home.write(
+        websiteId,
+        example('row-group', { g: websiteId, name: 'Website', secretary: secAiId }),
+      );
       workstation!.drop();
       await workstation!.connect();
       await waitDone(() => expect(find(websiteId)?.info?.secretary).toBe(secAiId));
       setHostAgents([makeAgent({ account: 'personal', defaults: { ...readyDefaults } })]);
+    });
+
+    Then('step 4 stays current and its action is "Add AI"', async () => {
+      expect(one('.guide-dock .step.cur b').textContent).toContain('Create your first group');
+      expect(one('.guide-dock .step.cur .body p').textContent?.trim()).toBe(
+        'This group needs 1 more working AI. Click Add AI; you can add the same CLI again with another name.',
+      );
+      expect(all('.guide-dock .step.cur .tip')).toHaveLength(0);
+      expect(one('.guide-dock .step.cur button').textContent?.trim()).toBe('Add AI');
+
+      clickButton('.guide-dock .step.cur button', 'Add AI');
+      go(location.hash);
+      expect(location.hash).toBe(`#/groups/${websiteId}`);
+      await waitDone(() => expect(one('[data-guide="add-ai"]')).toBeTruthy());
+      one<HTMLButtonElement>('.guide-pill').click();
+      flushSync();
+    });
+
+    When('the group "Website" has a secretary and 2 working AIs besides it', () => {
+      workstation!.home.write(
+        websiteId,
+        example('row-member-ai', {
+          id: 'worker-ai-2',
+          g: websiteId,
+          user,
+          name: 'Worker 2',
+          cli: 'claude',
+        }),
+      );
+      flushSync();
     });
 
     Then('step 4 is done with "Created "Website"" and step 5 is current', () => {
@@ -918,7 +973,7 @@ describe('guide layout, focus, and reduced motion in Chromium', () => {
 
   async function seedBrowserGuide(
     page: Page,
-    opts: { defaultsSet: boolean; hasGroup: boolean; collapsed: boolean },
+    opts: { defaultsSet: boolean; hasGroup: boolean; collapsed: boolean; workingAis?: number },
   ) {
     await page.evaluate(
       `(async () => {
@@ -969,9 +1024,22 @@ describe('guide layout, focus, and reduced motion in Chromium', () => {
         const g = 'rZNvy-1jH6Z-BcPqA5U5BQ';
         const secId = '1PC8WineBrUQ-apCjx7tug';
         if (opts.hasGroup) {
+          const workers = opts.workingAis ?? 2;
           rig.home.add(g, 'Website');
           rig.home.write(g, example('row-member-human', { id: owner, g, user, name: 'Alex' }));
           rig.home.write(g, example('row-member-ai', { id: secId, g, user, name: 'Claude Code' }));
+          if (workers >= 1) {
+            rig.home.write(
+              g,
+              example('row-member-ai', { id: 'worker-ai-1', g, user, name: 'Codex', cli: 'codex' }),
+            );
+          }
+          if (workers >= 2) {
+            rig.home.write(
+              g,
+              example('row-member-ai', { id: 'worker-ai-2', g, user, name: 'Worker 2', cli: 'claude' }),
+            );
+          }
           rig.home.write(g, example('row-group', { g, name: 'Website', secretary: secId }));
         }
         homes.push(rig.store);
@@ -1155,21 +1223,21 @@ describe('guide layout, focus, and reduced motion in Chromium', () => {
     { width: 1440, height: 900 },
     { width: 1280, height: 800 },
   ])(
-    'auto-collapses to pill on #/onboarding at $width x $height and never covers pairing or Account type',
+    'hides both guide dock and pill on #/onboarding at $width x $height before and after pairing cards appear',
     async ({ width, height }) => {
       const ctx = await browser.newContext({ viewport: { width, height }, locale: 'en-US' });
       const page = await ctx.newPage();
       await page.goto(`${server.resolvedUrls!.local[0]}?nomock#/onboarding`);
       await seedOnboardingGuide(page, false);
-      await page.locator('.guide-pill').waitFor();
+      await page.locator('#prompt').waitFor();
       expect(await page.locator('.guide-dock').count()).toBe(0);
+      expect(await page.locator('.guide-pill').count()).toBe(0);
 
-      // Re-open manually via pill, then simulate Account type / Next button arriving -> collapses again.
-      await page.locator('.guide-pill').click();
-      await page.locator('.guide-dock').waitFor();
+      // Account type cards and Next button arriving keep both dock and pill hidden on #/onboarding.
       await seedOnboardingGuide(page, true);
-      await page.locator('.guide-pill').waitFor();
+      await page.locator('.onboarding .done-btn').waitFor();
       expect(await page.locator('.guide-dock').count()).toBe(0);
+      expect(await page.locator('.guide-pill').count()).toBe(0);
       await ctx.close();
     },
   );
@@ -1259,6 +1327,49 @@ describe('guide layout, focus, and reduced motion in Chromium', () => {
     expect(disjoint).toBe(true);
     await ctx.close();
   });
+
+  it.each([
+    { width: 768, targetSelector: '.side-open', hiddenSelector: '[data-guide="add-ai"]' },
+    { width: 1440, targetSelector: '[data-guide="add-ai"]', hiddenSelector: '.side-open' },
+  ])(
+    'step 4 Add AI rings visible $targetSelector at $width px while $hiddenSelector is hidden',
+    async ({ width, targetSelector, hiddenSelector }) => {
+      const ctx = await browser.newContext({ viewport: { width, height: 900 }, locale: 'en-US' });
+      const page = await ctx.newPage();
+      await page.goto(`${server.resolvedUrls!.local[0]}?nomock#/groups`);
+      await seedBrowserGuide(page, {
+        defaultsSet: true,
+        hasGroup: true,
+        workingAis: 1,
+        collapsed: false,
+      });
+      await page.locator('.guide-dock .step.cur button', { hasText: 'Add AI' }).click();
+      await page.locator('.guide-beacon').waitFor();
+
+      const info = await page.evaluate(
+        ({ visSel, hidSel }) => {
+          const vis = document.querySelector<HTMLElement>(visSel)!;
+          const hid = document.querySelector<HTMLElement>(hidSel)!;
+          const b = document.querySelector<HTMLElement>('.guide-beacon')!.getBoundingClientRect();
+          const t = vis.getBoundingClientRect();
+          return {
+            visOk: vis.checkVisibility({ visibilityProperty: true }),
+            hidOk: hid.checkVisibility({ visibilityProperty: true }),
+            beacon: { left: b.left, top: b.top, right: b.right, bottom: b.bottom },
+            target: { left: t.left, top: t.top, right: t.right, bottom: t.bottom },
+          };
+        },
+        { visSel: targetSelector, hidSel: hiddenSelector },
+      );
+
+      expect(info.visOk).toBe(true);
+      expect(info.hidOk).toBe(false);
+      expect(info.beacon.left).toBeCloseTo(info.target.left - 4, 1);
+      expect(info.beacon.top).toBeCloseTo(info.target.top - 4, 1);
+      expect(info.beacon.right).toBeLessThanOrEqual(width);
+      await ctx.close();
+    },
+  );
 });
 
 describe('guide overlap auto-collapse in happy-dom', () => {

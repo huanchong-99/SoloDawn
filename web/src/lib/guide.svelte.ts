@@ -1,6 +1,7 @@
 // Five-step first-run guide state, pure step derivation, navigation intents, and brand-new
 // browser check (DESIGN-1127 Part B).
 import type { Group } from './groups.svelte';
+import { workingAis } from './members';
 import type { Computer } from './nodes.svelte';
 import { cliName } from './onboard.svelte';
 import { loadJoined, loadOwner } from './owner';
@@ -131,6 +132,7 @@ export interface GroupStep {
   done: boolean;
   name: string | undefined;
   g: string | undefined;
+  need: number;
 }
 
 /** Result of step 5: send the first request. */
@@ -145,7 +147,7 @@ export type GuideStep = [ConnectStep, AisStep, DefaultsStep, GroupStep, AskStep]
 export type StepIntent =
   { kind: 'refresh' } | { kind: 'go'; hash: string; selector?: string; create?: boolean };
 
-function fixedIntent(id: 'connect' | 'defaults' | 'group'): StepIntent {
+function fixedIntent(id: 'connect' | 'defaults'): StepIntent {
   return (
     {
       connect: { kind: 'go', hash: href('onboarding') },
@@ -154,8 +156,7 @@ function fixedIntent(id: 'connect' | 'defaults' | 'group'): StepIntent {
         hash: href('nodes'),
         selector: '[data-guide="defaults"][data-unset]',
       },
-      group: { kind: 'go', hash: href('groups'), create: true },
-    } satisfies Record<'connect' | 'defaults' | 'group', StepIntent>
+    } satisfies Record<'connect' | 'defaults', StepIntent>
   )[id];
 }
 
@@ -164,12 +165,22 @@ function aisIntent(step: AisStep): StepIntent {
   return { kind: 'go', hash: href('nodes'), selector: '.ai-row fieldset.acct' };
 }
 
+const chatGroupTarget = '[data-guide="add-ai"], .side-open';
+
+function groupIntent(step: GroupStep): StepIntent {
+  if (step.g) {
+    return { kind: 'go', hash: href('chat', { g: step.g }), selector: chatGroupTarget };
+  }
+  return { kind: 'go', hash: href('groups'), create: true };
+}
+
 /** Maps a guide step (and current starter group id) to its navigation/refresh intent. */
 export function stepIntent(
   step: GuideStep[number],
   groupId: string | undefined,
 ): StepIntent | undefined {
   if (step.id === 'ais') return aisIntent(step);
+  if (step.id === 'group') return groupIntent(step);
   if (step.id === 'ask') {
     return groupId
       ? { kind: 'go', hash: href('chat', { g: groupId }), selector: '.composer:not(.in-thread)' }
@@ -200,8 +211,6 @@ export interface Box {
   height: number;
 }
 
-const onboardingTargets = '.onboarding .card, .onboarding fieldset.acct, .onboarding .done-btn';
-
 const pageTargets: Partial<Record<Page, Partial<Record<GuideStep[number]['id'], string>>>> = {
   nodes: {
     ais: '.ai-row fieldset.acct',
@@ -211,6 +220,7 @@ const pageTargets: Partial<Record<Page, Partial<Record<GuideStep[number]['id'], 
     group: '.list .head button, .list .empty button',
   },
   chat: {
+    group: chatGroupTarget,
     ask: '.composer:not(.in-thread)',
   },
 };
@@ -220,9 +230,7 @@ export function stepTargetSelector(
   stepId: GuideStep[number]['id'] | undefined,
   page: Page,
 ): string | undefined {
-  if (!stepId) return undefined;
-  if (page === 'onboarding') return onboardingTargets;
-  return pageTargets[page]?.[stepId];
+  return pageTargets[page]?.[stepId as GuideStep[number]['id']];
 }
 
 function hasArea(box: Box): boolean {
@@ -412,10 +420,27 @@ export function stepDoneText(step: GuideStep[number]): string {
   return t(`guide.step.${step.id}.done`);
 }
 
+function groupAddBody(need: number): string {
+  return need === 1
+    ? t('guide.step.group.add.body.one')
+    : t('guide.step.group.add.body').replace('{n}', String(need));
+}
+
+/** Localized body text shown for a current guide step. */
+export function stepBodyText(step: GuideStep[number]): string {
+  if (step.id === 'group') {
+    return step.need > 0 ? groupAddBody(step.need) : t('guide.step.group.body');
+  }
+  return t(`guide.step.${step.id}.body`);
+}
+
 /** Localized action button label for the current guide step. */
 export function stepActionLabel(step: GuideStep[number]): string {
   if (step.id === 'ais') {
     return step.none ? t('guide.step.ais.again') : t('guide.step.ais.go');
+  }
+  if (step.id === 'group') {
+    return step.g ? t('guide.step.group.add') : t('guide.step.group.go');
   }
   return t(`guide.step.${step.id}.go`);
 }
@@ -483,13 +508,19 @@ export function createAnnouncer(
 
 type Agent = HostInfoPush['agents'][number];
 
-function starterGroup(group: Group): boolean {
+function hasOwnSecretaryGroup(group: Group): boolean {
   const me = group.me;
   return Boolean(
     group.info?.secretary &&
     me &&
     group.members.some((member) => member.kind === 'ai' && member.user === me.user),
   );
+}
+
+const requiredWorkingAis = 2;
+
+function hasTwoWorkingAis(group: Group): boolean {
+  return workingAis(group).length >= requiredWorkingAis;
 }
 
 function connectStep(computers: readonly Computer[]): ConnectStep {
@@ -526,14 +557,13 @@ function defaultsStep(aisDone: boolean, agents: readonly Agent[]): DefaultsStep 
   };
 }
 
-function groupStep(readyGroups: readonly Group[]): GroupStep {
-  const latest = readyGroups[0];
-  return {
-    id: 'group',
-    done: readyGroups.length > 0,
-    name: latest?.name,
-    g: latest?.g,
-  };
+function groupStep(readyGroups: readonly Group[], partial?: Group): GroupStep {
+  if (readyGroups.length > 0) {
+    const latest = readyGroups[0]!;
+    return { id: 'group', done: true, name: latest.name, g: latest.g, need: 0 };
+  }
+  const need = partial ? requiredWorkingAis - workingAis(partial).length : 0;
+  return { id: 'group', done: false, name: undefined, g: partial?.g, need };
 }
 
 function askStep(readyGroups: readonly Group[]): AskStep {
@@ -554,8 +584,9 @@ export function guideSteps(computers: readonly Computer[], groups: readonly Grou
   const step1 = connectStep(computers);
   const step2 = aisStep(agents, infos.length, computers.length, step1.name);
   const step3 = defaultsStep(step2.done, agents);
-  const readyGroups = groups.filter(starterGroup);
-  return [step1, step2, step3, groupStep(readyGroups), askStep(readyGroups)];
+  const ownGroups = groups.filter(hasOwnSecretaryGroup);
+  const readyGroups = ownGroups.filter(hasTwoWorkingAis);
+  return [step1, step2, step3, groupStep(readyGroups, ownGroups[0]), askStep(readyGroups)];
 }
 
 /** Whether this browser has neither an owner record nor any joined home in IndexedDB. */

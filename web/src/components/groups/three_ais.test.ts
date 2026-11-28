@@ -85,6 +85,9 @@ it('shows the 3-AI hint in CreateGroup while workingCount < 2 without blocking c
     ...document.querySelectorAll<HTMLInputElement>('dialog .ai input[type=checkbox]'),
   ];
   ticks()[0].click();
+  // Ticking an AI leaves its folder empty and disables Create group until a folder is chosen.
+  flushSync();
+  expect(submit().disabled).toBe(true);
   ticks()[1].click();
   flushSync();
   // 1 secretary + 1 working AI => workingCount = 1 < 2, hint remains visible.
@@ -123,11 +126,11 @@ it('shows the 3-AI inline prompt in Chat only when a group with AIs has < 2 work
     { ...ai, id: ai.id, name: 'Secretary', secretary: true, seq: 11 },
   ]);
   flushSync();
-  expect(prompt()?.textContent).toContain('at least 2 working AIs besides the secretary');
+  expect(prompt()?.textContent).toContain('add 2 working AIs besides the secretary');
 
   prefs.lang = 'zh-CN';
   flushSync();
-  expect(prompt()?.textContent).toContain('至少加上 2 个干活 AI');
+  expect(prompt()?.textContent).toContain('除了秘书还要 2 个工作 AI');
   prefs.lang = 'en';
   flushSync();
 
@@ -142,14 +145,26 @@ it('shows the 3-AI inline prompt in Chat only when a group with AIs has < 2 work
   expect(prompt()).toBeNull();
 });
 
-it('explains the 3-AI rule in guide step 4 for both English and Chinese', () => {
+it('explains the 3-AI rule and shared-folder choice in guide step 4, CreateGroup, and Chat', () => {
   prefs.lang = 'en';
   expect(t('guide.step.group.body')).toContain('3 AIs');
   expect(t('guide.step.group.body')).toContain('1 secretary + at least 2 working AIs');
   expect(t('guide.step.group.body')).toContain('same CLI twice');
+  expect(t('guide.step.group.body')).toContain('share one folder');
+  expect(t('guide.step.group.body')).toContain('take turns');
+  expect(t('guide.step.group.body')).toContain('same time');
+  expect(t('groups.create.ais.need')).toContain('share one folder');
+  expect(t('groups.create.ais.need')).toContain('same time');
+  expect(t('chat.need_working_ais')).toContain('assignee and the reviewer must differ');
+  expect(t('chat.need_working_ais')).toContain('same CLI twice');
 
   prefs.lang = 'zh-CN';
   expect(t('guide.step.group.body')).toContain('3 个 AI');
-  expect(t('guide.step.group.body')).toContain('1 个秘书 + 至少 2 个干活 AI');
-  expect(t('guide.step.group.body')).toContain('加两次');
+  expect(t('guide.step.group.body')).toContain('1 个秘书 + 至少 2 个工作 AI');
+  expect(t('guide.step.group.body')).toContain('再加一次');
+  expect(t('guide.step.group.body')).toContain('共用一个，任务会排队');
+  expect(t('guide.step.group.body')).toContain('同时干活');
+  expect(t('groups.create.ais.need')).toContain('共用同一个文件夹');
+  expect(t('chat.need_working_ais')).toContain('执行和复核不能是同一个');
+  expect(t('chat.need_working_ais')).toContain('同一个 CLI 可以再加一次');
 });

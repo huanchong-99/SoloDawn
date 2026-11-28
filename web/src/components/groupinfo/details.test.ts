@@ -53,7 +53,7 @@ it('warns in the invitation dialog before the first other person joins, not afte
   expect(document.querySelector('dialog header .note')).toBeNull();
 });
 
-it('warns about a personal secretary in Add AI, and sends the folder it took', async () => {
+it('warns about a personal secretary in Add AI, keeps folder empty until chosen, and sends the confirmed folder', async () => {
   const { group, home, person, request } = setup();
   home.owner = true;
   homes.push(home);
@@ -72,8 +72,28 @@ it('warns about a personal secretary in Add AI, and sends the folder it took', a
     expect(one<HTMLInputElement>('dialog input[type=radio]').checked).toBe(true),
   );
   await vi.waitFor(() =>
-    expect(one('dialog .path-row code').textContent?.trim()).toBe('/home/dev/website'),
+    expect(one('dialog .path-row code').textContent?.trim()).toBe('No folder chosen'),
   );
+  const pathCode = one('dialog .path-row code');
+  expect(pathCode.classList.contains('unset')).toBe(true);
+  const folderBtn = one<HTMLButtonElement>('dialog .path-row .change');
+  expect(folderBtn.textContent?.trim()).toBe('Choose');
+  expect(folderBtn.getAttribute('aria-label')).toBe('Choose the folder of other-cli');
+  expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(true);
+
+  folderBtn.click();
+  flushSync();
+  await vi.waitFor(() => {
+    expect(one<HTMLDialogElement>('dialog dialog').open).toBe(true);
+    expect(all('dialog dialog .pick-row')).toHaveLength(2);
+  });
+  expect(one<HTMLInputElement>('dialog dialog .pick-row input').checked).toBe(true);
+  one<HTMLButtonElement>('dialog dialog footer .btn-primary').click();
+  flushSync();
+  expect(pathCode.textContent?.trim()).toBe('/home/dev/website');
+  expect(pathCode.classList.contains('unset')).toBe(false);
+  expect(folderBtn.textContent?.trim()).toBe('Change');
+  expect(folderBtn.getAttribute('aria-label')).toBe('Change the folder of other-cli');
   expect(document.querySelector('dialog .sec-opt .note')).toBeNull();
   one<HTMLInputElement>('dialog input[type=checkbox]').click();
   flushSync();
@@ -115,6 +135,38 @@ it('closes Add AI when the parent withdraws the dialog', () => {
   state.set('open', false);
   flushSync();
   expect(one<HTMLDialogElement>('dialog').open).toBe(false);
+});
+
+it('pre-highlights the newest folder if Choose is opened while host.workspaces is still loading', async () => {
+  const { group, home, person, request } = setup();
+  home.owner = true;
+  homes.push(home);
+  const hostInfo = p.decode(p.HostInfoPush, goldens['host-info-push']);
+  hostInfo.agents = [
+    { ...hostInfo.agents[0], agent: 'other-cli', account: 'personal', groups: [] },
+  ];
+  nodes.infos.set(home, hostInfo);
+  const folders = p.decode(p.HostWorkspaces, goldens['host-workspaces-answer']);
+  let resolveFolders!: (value: unknown) => void;
+  request.mockImplementation((req: { t: string }) =>
+    req.t === 'host.workspaces'
+      ? new Promise((resolve) => {
+          resolveFolders = resolve;
+        })
+      : Promise.resolve({ ...hostInfo, re: 1, ok: true }),
+  );
+  group.apply([{ ...person, id: 'reader', user: 'reader', name: 'Reader', seq: 102 }]);
+  show(AddAI, { group, open: true });
+  await vi.waitFor(() =>
+    expect(one<HTMLInputElement>('dialog input[type=radio]').checked).toBe(true),
+  );
+  one<HTMLButtonElement>('dialog .path-row .change').click();
+  flushSync();
+  expect(all('dialog dialog .pick-row')).toHaveLength(0);
+
+  resolveFolders(folders);
+  await vi.waitFor(() => expect(all('dialog dialog .pick-row')).toHaveLength(2));
+  expect(one<HTMLInputElement>('dialog dialog .pick-row input').checked).toBe(true);
 });
 
 function setup() {

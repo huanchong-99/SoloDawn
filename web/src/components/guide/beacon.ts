@@ -22,8 +22,14 @@ function reducedMotion() {
   return matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+function firstVisible(selector: string): HTMLElement | undefined {
+  return [...document.querySelectorAll<HTMLElement>(selector)].find((el) =>
+    el.checkVisibility({ visibilityProperty: true }),
+  );
+}
+
 function findTarget(selector: string, signal: AbortSignal): Promise<HTMLElement | undefined> {
-  const immediate = document.querySelector<HTMLElement>(selector);
+  const immediate = firstVisible(selector);
   if (immediate) return Promise.resolve(immediate);
   const started = Date.now();
   return new Promise((resolve) => {
@@ -32,7 +38,7 @@ function findTarget(selector: string, signal: AbortSignal): Promise<HTMLElement 
     signal.addEventListener('abort', () => (stop(), resolve(undefined)));
     const poll = () => {
       if (signal.aborted) return;
-      const found = document.querySelector<HTMLElement>(selector);
+      const found = firstVisible(selector);
       if (found) return resolve(found);
       if (Date.now() - started >= findTimeoutMs) return resolve(undefined);
       rafId = requestAnimationFrame(poll);

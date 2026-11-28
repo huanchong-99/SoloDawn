@@ -31,7 +31,7 @@
   "groups.create.people.hint": "其他人可以等群建好后，用邀请码或邀请链接加进来。",
   "groups.create.code": "同时生成邀请码",
   "groups.create.ais": "AI",
-  "groups.create.ais.need": "一个能开工的群需要 3 个 AI：1 个秘书 + 至少 2 个干活 AI（因为任务的执行者和复核者必须是不同的 AI）。你可以混用两个 CLI，也可以建群后点「添加 AI」把同一个 CLI 配成不同的 AI 名字和文件夹各加一次。",
+  "groups.create.ais.need": "一个能开工的群需要 3 个 AI：1 个秘书 + 至少 2 个干活 AI（因为任务的执行者和复核者必须是不同的 AI）。你可以混用两个 CLI，也可以建群后点「添加 AI」用不同名字把同一个 CLI 加两次。AI 可以共用同一个文件夹（里面的任务会排队轮流做），也可以各自用不同的文件夹同时干活。",
   "groups.create.ais.none": "还没有已接入的 AI。先在「电脑和 AI」页接入电脑，并为它的 AI 选好账号类型。",
   "groups.create.ai.name": "{ai} 在群里的名字",
   "groups.create.ai.secretary": "设为秘书：{ai}",

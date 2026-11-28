@@ -54,6 +54,7 @@
       <h2 class="sec-title grow">{t('member.ai')} · {ais.length}</h2>
       <button
         class="btn btn-sm"
+        data-guide="add-ai"
         onclick={() => (adding = true)}
         disabled={!group.info || Boolean(addReason)}
         aria-describedby={addReason ? `${uid}-add-why` : undefined}

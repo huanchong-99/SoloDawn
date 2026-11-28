@@ -14,7 +14,7 @@
   "chat.empty.body": "Write what you need. The secretary turns it into a brief and waits for your go-ahead.",
   "chat.empty.people": "Say something to the people here. To give AIs work, add a connected AI under Members.",
   "chat.nosecretary": "This group has no secretary yet: a message that mentions nobody reaches no AI.",
-  "chat.need_working_ais": "Add at least 2 working AIs besides the secretary via Add AI before starting tasks (the assignee and reviewer must be different AIs; you can mix two CLIs or add the same CLI twice with different names and folders).",
+  "chat.need_working_ais": "Before tasks can start, add 2 working AIs besides the secretary (the assignee and the reviewer must differ). Click Add AI; you can add the same CLI twice.",
   "chat.latest": "Back to the latest",
   "chat.latest.new": "New messages",
   "chat.compose": "Message",

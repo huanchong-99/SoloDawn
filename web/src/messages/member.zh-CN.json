@@ -31,6 +31,7 @@
   "member.folder.change": "更改",
   "member.folder.change.of": "更改 {ai} 的文件夹",
   "member.folder.choose": "选择",
+  "member.folder.choose.of": "选择 {ai} 的文件夹",
   "member.folder.title": "选择文件夹",
   "member.folder.lead": "{ai} 在 {computer} 上用过的文件夹，最近用的在前。它会直接在你选的文件夹里干活。",
   "member.folder.loading": "正在读取文件夹…",

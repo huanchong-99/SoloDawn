@@ -109,8 +109,19 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     });
   };
   const submitAdd = async () => {
-    // The newest folder of the AI's computer is taken before anything is sent.
-    await vi.waitFor(() => expect(one('dialog .path-row code').textContent).toContain('/'));
+    await vi.waitFor(() =>
+      expect(one('dialog .path-row code').textContent?.trim()).toBe('No folder chosen'),
+    );
+    expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(true);
+    one<HTMLButtonElement>('dialog .path-row .change').click();
+    flushSync();
+    await vi.waitFor(() => {
+      expect(one<HTMLDialogElement>('dialog dialog').open).toBe(true);
+      expect(one<HTMLButtonElement>('dialog dialog footer .btn-primary').disabled).toBe(false);
+    });
+    one<HTMLButtonElement>('dialog dialog footer .btn-primary').click();
+    flushSync();
+    expect(one('dialog .path-row code').textContent).toContain('/');
     submit(one<HTMLFormElement>('dialog form'));
     await vi.waitFor(() => expect(sent).toHaveLength(1));
   };

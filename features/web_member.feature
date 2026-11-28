@@ -47,19 +47,25 @@ Feature: Member panel and adding an AI to a group
 
   Scenario: The folder list says which AI of the group has a folder, and a folder of another group cannot be chosen
     Given on "workstation" Claude Code of this group works in "/home/dev/website" and an AI of the group "Docs" in "/home/dev/notes"
-    When the owner opens "Add AI" with "Claude Code · workstation" chosen and opens its folder list
-    Then "/home/dev/website" is chosen and says "Claude Code works here too", and "/home/dev/notes" cannot be chosen and says "Taken by the group Docs"
-    When the owner types "/home/dev/notes" as another folder and takes it
-    Then the list says "This folder belongs to the group Docs. Choose another one." and the folder stays "/home/dev/website"
-    When the owner closes the list
-    Then the dialog says the folder is shared with Claude Code and takes one task at a time
+    When the owner opens "Add AI" with "Claude Code · workstation" chosen
+    Then the folder shows "No folder chosen" with "Choose" and "Add AI" is disabled
+    When the owner opens its folder list
+    Then "/home/dev/website" is pre-highlighted and says "Claude Code works here too", and "/home/dev/notes" cannot be chosen and says "Taken by the group Docs"
+    When the owner closes the list without confirming
+    Then the folder still shows "No folder chosen" with "Choose"
+    When the owner reopens its folder list, types "/home/dev/notes" as another folder and takes it
+    Then the list says "This folder belongs to the group Docs. Choose another one." and the folder stays "No folder chosen"
+    When the owner clears the typed folder and presses "Use this folder"
+    Then the folder shows "/home/dev/website" with "Change", "Add AI" is enabled, and the dialog says the folder is shared with Claude Code and takes one task at a time
 
   Scenario: A group is created with a person and two AIs, each in its folder, the first AI the secretary
     Given "Mina" is in the group "Website" on "workstation", and a second computer "laptop" is connected
     When the owner opens "New group" from the group list
     Then the dialog offers "Mina" and the four AIs, with "Codex · workstation" and "Claude Code · laptop" disabled and their computers before their reasons
     When the owner ticks "Mina", "Claude Code · workstation" and "Codex · laptop"
-    Then "Claude Code" is the secretary, "Codex" is not, each secretary choice is named for its AI, and each AI has the newest folder that no other group has
+    Then each AI shows "No folder chosen" with "Choose", "Create group" is disabled, "Claude Code" is the secretary, "Codex" is not, and each secretary choice is named for its AI
+    When the owner confirms the pre-highlighted folder for each AI
+    Then each AI has the newest folder that no other group has, with "Change", and "Create group" is enabled
     And only "Codex", not the secretary, offers a work share, at "Normal"
     When the owner chooses "GPT-5.4" with the level "high" for "Codex"
     Then the work share of "Codex" becomes the model's suggestion "More"

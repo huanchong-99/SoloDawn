@@ -32,6 +32,7 @@ import {
   terminalDisabledReason,
   usageMeter,
   waitingOnMe,
+  workingAis,
   unavailable,
   waitingOnOther,
   watchDisabledReason,
@@ -166,6 +167,37 @@ describe('member lists, roles and addDisabledReason', () => {
     });
     g2.apply([earlySec, lateWork]);
     expect(aiMembers(g2).map((m) => m.name)).toEqual(['AAA Sec', 'ZZZ Worker']);
+    expect(workingAis(g2).map((m) => m.name)).toEqual(['ZZZ Worker']);
+
+    // workingAis excludes secretaries matched by group.info.secretary even if member.secretary is false.
+    const { group: g3 } = makeGroup({ withInfo: true, secretary: 'ai-sec-by-info' });
+    g3.apply([
+      row<p.AIMemberRow>('row-member-ai', {
+        id: 'ai-sec-by-info',
+        g: gid,
+        name: 'Info Secretary',
+        secretary: false,
+      }),
+      row<p.AIMemberRow>('row-member-ai', {
+        id: 'ai-w1',
+        g: gid,
+        name: 'Worker One',
+        secretary: false,
+      }),
+    ]);
+    expect(workingAis(g3).map((m) => m.name)).toEqual(['Worker One']);
+
+    // workingAis still works before a row-group info row arrives (group.info === undefined).
+    const { group: g4 } = makeGroup({ withInfo: false });
+    g4.apply([
+      row<p.AIMemberRow>('row-member-ai', {
+        id: 'ai-no-info',
+        g: gid,
+        name: 'Early Worker',
+        secretary: false,
+      }),
+    ]);
+    expect(workingAis(g4).map((m) => m.name)).toEqual(['Early Worker']);
   });
 
   it('says whether a group has an AI member and whether a device/CLI pair is already in it', () => {
