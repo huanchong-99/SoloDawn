@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
@@ -174,7 +175,7 @@ func TestOpenNodeStartupErrors(t *testing.T) {
 func checkIdentityAndLogStartupErrors(t *testing.T) {
 	dir := socketRoot(t)
 	mustNoErr(t, os.WriteFile(filepath.Join(dir, "logs"), []byte("x"), 0o600))
-	if err := runNode(t.Context(), dir, nil); err == nil {
+	if err := runNodeOut(t.Context(), dir, nil, io.Discard); err == nil {
 		t.Fatal("expected stepLog error")
 	}
 
@@ -935,7 +936,7 @@ func checkForegroundContextStop(t *testing.T) {
 	sigDir := socketRoot(t)
 	sigL := openSocket(t, sigDir)
 	sigErr := make(chan error, 1) // single reader: checkForegroundContextStop
-	go func() { sigErr <- runForegroundNode(sigDir, sigL) }()
+	go func() { sigErr <- runForegroundNode(sigDir, sigL, io.Discard) }()
 	waitCond(t, func() bool {
 		return (Command{Cmd: "status"}).send(sigDir, io.Discard) == nil
 	})
@@ -1528,4 +1529,103 @@ func TestNodeHostsItsCodes(t *testing.T) {
 	mustEqual(t, bool(inviteJoinResult(t, owner).OK), true)
 	waitHosted(t, local(n), secret, "")
 	waitHosted(t, rv, secret, "")
+}
+
+type syncOutBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncOutBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncOutBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+type failingOut struct{ err error }
+
+func (f failingOut) Write([]byte) (int, error) { return 0, f.err }
+
+func stubPortFreeForeground(t *testing.T) context.CancelFunc {
+	t.Helper()
+	savedPeer, savedTCP, savedFg := peerListen, tcpListen, foregroundContext
+	t.Cleanup(func() {
+		peerListen, tcpListen, foregroundContext = savedPeer, savedTCP, savedFg
+	})
+	peerListen = func(_, _ int, id string) (*peer.Sockets, error) {
+		return peer.Listen(0, 0, id)
+	}
+	tcpListen = func(network, addr string) (net.Listener, error) {
+		return savedTCP(network, strings.Replace(addr, strconv.Itoa(defaultWebPort), "0", 1))
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	foregroundContext = func() (context.Context, context.CancelFunc) { return ctx, func() {} }
+	return cancel
+}
+
+func assertRunningURLLine(t *testing.T, got string) int {
+	t.Helper()
+	const prefix = "SoloDawn node is running: http://localhost:"
+	body, hasEnd := strings.CutSuffix(got, "\n")
+	portStr, hasPre := strings.CutPrefix(body, prefix)
+	port, err := strconv.Atoi(portStr)
+	if !hasEnd || !hasPre || err != nil || port <= 0 {
+		t.Fatalf("foreground stdout = %q, want %q<port>\\n", got, prefix)
+	}
+	return port
+}
+
+func TestForegroundPrintsRunningURL(t *testing.T) {
+	dir := nodeTestDir(t)
+	cancel := stubPortFreeForeground(t)
+	var out syncOutBuf
+	errCh := make(chan error, 1) // single reader: TestForegroundPrintsRunningURL
+	go func() { errCh <- Foreground(&out) }()
+	waitCond(t, func() bool {
+		return (Command{Cmd: "status"}).send(dir, io.Discard) == nil && out.String() != ""
+	})
+	port := assertRunningURLLine(t, out.String())
+	checkLocalWebServer(t, port)
+	cancel()
+	mustNoErr(t, <-errCh)
+	logBytes, err := os.ReadFile(filepath.Join(dir, "logs", "node.log"))
+	mustNoErr(t, err)
+	if strings.Contains(string(logBytes), "SoloDawn node is running") {
+		t.Fatalf("node.log unexpectedly recorded foreground stdout line: %s", logBytes)
+	}
+}
+
+func TestForegroundWritesErrorWhenStdoutFails(t *testing.T) {
+	_ = stubPortFreeForeground(t)
+	_, err := openNodeOut(t.Context(), socketRoot(t), failingOut{err: io.ErrClosedPipe})
+	if !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("openNodeOut stdout failure = %v, want %v", err, io.ErrClosedPipe)
+	}
+}
+
+func TestForegroundAndRunNodePortFree(t *testing.T) {
+	badDir := socketRoot(t)
+	mustNoErr(t, os.WriteFile(filepath.Join(badDir, "logs"), []byte("x"), 0o600))
+	if err := runNodeOut(t.Context(), badDir, nil, io.Discard); err == nil {
+		t.Fatal("expected runNodeOut stepLog error")
+	}
+	if _, err := openNode(t.Context(), badDir); err == nil {
+		t.Fatal("expected openNode stepLog error")
+	}
+	cancel := stubPortFreeForeground(t)
+	sigDir := socketRoot(t)
+	sigL := openSocket(t, sigDir)
+	sigErr := make(chan error, 1) // single reader: TestForegroundAndRunNodePortFree
+	go func() { sigErr <- runForegroundNode(sigDir, sigL, io.Discard) }()
+	waitCond(t, func() bool {
+		return (Command{Cmd: "status"}).send(sigDir, io.Discard) == nil
+	})
+	cancel()
+	mustNoErr(t, <-sigErr)
 }

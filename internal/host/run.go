@@ -968,6 +968,7 @@ func finishLoginInvalid(h *Host, rt *runtimePart, s Session, slot aiSlot, text s
 		ev = proto.LoginInvalidEvent{SystemCode: proto.SystemCode{Code: "login_invalid"}, Detail: eventDetail(text)}
 	}
 	sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, ev)
+	notifyLoginChanged(h)
 }
 
 // eventDetail redacts secrets and keeps the first non-empty line for brief

@@ -228,7 +228,7 @@ func agtListen(h *Host, key SessionKey, e Event) {
 	if !ok {
 		return
 	}
-	if loginOK, changed := agtLoginChange(e); changed && Part[agtPart](h).setLoginOK(s.Agent, loginOK) {
+	if loginOK, changed := agtLoginChange(e); changed && Part[agtPart](h).setLoginOK(s.Agent, loginOK) && loginOK {
 		notifyLoginChanged(h)
 	}
 }

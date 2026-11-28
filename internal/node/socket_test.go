@@ -232,13 +232,14 @@ func TestForegroundRuntime(t *testing.T) {
 	dir := nodeTestDir(t)
 	saved := startNode
 	t.Cleanup(func() { startNode = saved })
-	startNode = func(path string, l *Local) error {
-		if path != dir || l.Addr().String() != filepath.Join(dir, "sock") {
-			t.Errorf("runtime got %q and %q, want %q", path, l.Addr(), dir)
+	var out strings.Builder
+	startNode = func(path string, l *Local, stdout io.Writer) error {
+		if path != dir || l.Addr().String() != filepath.Join(dir, "sock") || stdout != &out {
+			t.Errorf("runtime got %q, %q, %v, want %q", path, l.Addr(), stdout, dir)
 		}
 		return io.ErrClosedPipe
 	}
-	if err := Foreground(); err != io.ErrClosedPipe {
+	if err := Foreground(&out); err != io.ErrClosedPipe {
 		t.Fatalf("foreground returned %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "sock")); !errors.Is(err, os.ErrNotExist) {
@@ -249,14 +250,14 @@ func TestForegroundRuntime(t *testing.T) {
 func TestForegroundErrors(t *testing.T) {
 	dir := nodeTestDir(t)
 	openSocket(t, dir)
-	if err := Foreground(); err != errRunning {
+	if err := Foreground(io.Discard); err != errRunning {
 		t.Fatalf("foreground on an active socket returned %v", err)
 	}
 	for _, name := range []string{"HOME", "XDG_DATA_HOME", "LocalAppData", "USERPROFILE"} {
 		t.Setenv(name, "")
 	}
 	_, want := DataDir()
-	if err := Foreground(); errText(err) != errText(want) || want == nil {
+	if err := Foreground(io.Discard); errText(err) != errText(want) || want == nil {
 		t.Fatalf("foreground returned %v, want %v", err, want)
 	}
 }

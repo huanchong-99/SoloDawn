@@ -9,7 +9,7 @@ kind: reference
 
 `internal/node` assembles the components of a SoloDawn node ([architecture](../../planning/architecture.md), section 8):
 
-- `node.go` and `proc_*.go`: `Foreground()` runtime assembly (`openNode`, `runNode`), `logs/node.log` rotation at 10 MiB (keeping `.1`), `device.key` and `node.db` initialization, `home.StartLoop` (`OwnerFn: logs.Owner`), `host.Host` + `ServeMCP` on the local socket, `AttachLocal`, `Logs` + `Sessions` + `Surface` + `Pairer`, start-at-login registration on adoption (`InstallService`), `peer.Peer` + `Host.Connect`, embedded local web UI (`localhost:47800`, or a port that is free on 127.0.0.1 as well) + `/rv` local signalling path, and persistent remote rendezvous connections ([local](../../planning/contracts/local.md), sections 1-3 and 10).
+- `node.go` and `proc_*.go`: `Foreground(stdout)` runtime assembly (`openNodeOut`, `runNodeOut`, `openNode`), `logs/node.log` rotation at 10 MiB (keeping `.1`), `device.key` and `node.db` initialization, `home.StartLoop` (`OwnerFn: logs.Owner`), `host.Host` + `ServeMCP` on the local socket, `AttachLocal`, `Logs` + `Sessions` + `Surface` + `Pairer`, start-at-login registration on adoption (`InstallService`), `peer.Peer` + `Host.Connect`, embedded local web UI (`localhost:47800`, or a port that is free on 127.0.0.1 as well) + `/rv` local signalling path (writing `SoloDawn node is running: http://localhost:<port>` to `stdout` once the HTTP server binds, while `openNode` passes `io.Discard` and the detached daemon writes nothing new), and persistent remote rendezvous connections ([local](../../planning/contracts/local.md), sections 1-3 and 10).
 - `diag.go`: the node's diagnostic events, the level file and the form of the log ([diagnostics](../../planning/contracts/diagnostics.md)).
 - The local socket and the loopback web server accept through `peer.Steady`: an accept error is logged and does not end them.
 - `dir.go` and `socket*.go`: per-user data directory, exclusive lock on `lock`, and owner-only local Unix socket (`sock`) carrying local CLI commands and MCP sessions ([local](../../planning/contracts/local.md), sections 2 and 3).
@@ -41,7 +41,7 @@ Startup probes the host's CLI versions and model listings. `host.info` reuses th
 | hold the single-node lock and bind `sock` | `ListenLocal(dir)`, `(*Local).Close()` ([local.md](../../planning/contracts/local.md) section 3) |
 | read the first line of a local socket client | `AcceptOpening(conn)`, `ReadOpening(r)`, `ReadPair(line, owner, configured)` |
 | register or send a local CLI subcommand | `Subcommands`, `Command.Run(stdout)`, `MCP(args, stdin, stdout, stderr)` |
-| run the assembled foreground node | `Foreground()` ([local.md](../../planning/contracts/local.md) sections 1-3, 10) |
+| run the assembled foreground node | `Foreground(stdout)` ([local.md](../../planning/contracts/local.md) sections 1-3, 10) |
 | install or remove start-at-login | `InstallService`, `RemoveService` (`service*.go`, [local.md](../../planning/contracts/local.md) section 1) |
 | check and apply signed-sum release updates | `(*Updater).Check(ctx, now)`, `(*Updater).Apply()` ([local.md](../../planning/contracts/local.md) section 9) |
 | run the standalone rendezvous and static web service | `Rendezvous(opts)` |

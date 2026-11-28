@@ -138,7 +138,7 @@ func (w *profileTurnWorld) checkAssignmentRules() error {
 		"The tier is the share of tasks its owner wants it given: `strong` more, `standard` a normal share, `light` fewer.",
 		"Skills say which tasks: the hard and the special ones go to the AIs whose skills name them; when skills say nothing, to the higher tier.",
 		"Spread independent tasks over different AIs, so several subscriptions work at once.",
-		"Each AI works in its own folder on its own computer; the member list in your turn names both.",
+		"Each AI works in a folder on its computer; AIs on one computer may share a folder, whose tasks take turns, and separate folders let them work at the same time.",
 		"choose a reviewer on the assignee's computer when the project has no shared remote")
 }
 

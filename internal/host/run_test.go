@@ -2593,3 +2593,96 @@ func assertTaskFailCmd(t *testing.T, cmd recordedCmd, task, reason, detail strin
 		t.Fatalf("unexpected task fail %+v, want %s/%s/%s", fail, task, reason, detail)
 	}
 }
+
+type loginSnap struct {
+	open     int
+	st1, t1  string
+	st2, t2  string
+	claudeOK bool
+}
+
+func captureLoginSnap(t *testing.T, h *Host, snaps chan<- loginSnap) {
+	t.Helper()
+	open := 0
+	for _, s := range h.Sessions.All() {
+		if s.State != Dormant {
+			open++
+		}
+	}
+	st1, t1 := h.MemberState(runGroup1, runAI1)
+	st2, t2 := h.MemberState(runGroup1, runAI2)
+	agents, err := h.Agents(context.Background(), false)
+	if err != nil {
+		t.Errorf("Agents inside LoginChanged: %v", err)
+		return
+	}
+	snaps <- loginSnap{open: open, st1: st1, t1: t1, st2: st2, t2: t2, claudeOK: agents[0].LoginOK}
+}
+
+func waitLoginSnap(t *testing.T, snaps <-chan loginSnap) loginSnap {
+	t.Helper()
+	select {
+	case snap := <-snaps:
+		return snap
+	case <-time.After(5 * time.Second):
+		t.Fatal(timedOut(5*time.Second, "LoginChanged callback", nil))
+		return loginSnap{}
+	}
+}
+
+func TestLoginChangedWaitsForDormantLimitedAndZeroOpen(t *testing.T) {
+	newAgtStandIns(t, map[string]agtStandInSpec{
+		"claude": {Stdout: "2.1.311 (Claude Code)\n"},
+	})
+	h, rh, drv, _ := setupRunEnv(t)
+	Listeners["agents"] = agtListen
+	snaps := make(chan loginSnap, 8)
+	h.LoginChanged = func() { captureLoginSnap(t, h, snaps) }
+
+	k1 := SessionKey{Group: runGroup1, Member: runAI1}
+	k2 := SessionKey{Group: runGroup1, Member: runAI2}
+	tskNoErr(t, h.Sessions.Create(makeRunSession(k1, GroupSession, runFolder("repo-1"))))
+	tskNoErr(t, h.Sessions.Create(makeRunSession(k2, GroupSession, runFolder("repo-2"))))
+
+	// Live turn hitting LoginInvalid must notify after Dormant, limited, and 0 open.
+	tskNoErr(t, Runner.Turn(t.Context(), h, k1, "auth-1", Turn{Kind: ItemsTurn}))
+	rh.waitCmd(t) // working
+	drv.lastProc().emit(Event{Kind: LoginInvalid, Text: "expired"})
+	snap1 := waitLoginSnap(t, snaps)
+	if snap1 != (loginSnap{open: 0, st1: "limited", st2: "dormant", claudeOK: false}) {
+		t.Fatalf("live turn LoginChanged snapshot = %+v, want {open:0 st1:limited st2:dormant claudeOK:false}", snap1)
+	}
+	waitForState(t, h, k1, Dormant)
+	rh.waitCmd(t) // limited
+
+	// Second member on the same CLI (claude already login_ok=false) still notifies after exit.
+	tskNoErr(t, Runner.Turn(t.Context(), h, k2, "auth-2", Turn{Kind: ItemsTurn}))
+	rh.waitCmd(t) // working
+	drv.lastProc().emit(Event{Kind: LoginInvalid, Text: "still expired"})
+	snap2 := waitLoginSnap(t, snaps)
+	if snap2 != (loginSnap{open: 0, st1: "limited", st2: "limited", claudeOK: false}) {
+		t.Fatalf("second member LoginChanged snapshot = %+v, want {open:0 st1:limited st2:limited claudeOK:false}", snap2)
+	}
+	waitForState(t, h, k2, Dormant)
+	rh.waitCmd(t) // limited
+
+	// Waiting session hitting LoginInvalid outside a turn also waits for Dormant and limited.
+	tskNoErr(t, Runner.Turn(t.Context(), h, k1, "recover", Turn{Kind: ItemsTurn}))
+	rh.waitCmd(t) // working
+	drv.lastProc().emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitForState(t, h, k1, Waiting)
+	rh.waitCmd(t) // waiting
+	if !waitLoginSnap(t, snaps).claudeOK {
+		t.Fatal("expected LoginChanged with claudeOK=true on completed turn")
+	}
+	drv.lastProc().emit(Event{Kind: LoginInvalid, Text: "idle expired"})
+	snap3 := waitLoginSnap(t, snaps)
+	if snap3 != (loginSnap{open: 0, st1: "limited", st2: "limited", claudeOK: false}) {
+		t.Fatalf("waiting LoginChanged snapshot = %+v, want {open:0 st1:limited st2:limited claudeOK:false}", snap3)
+	}
+	waitForState(t, h, k1, Dormant)
+	rh.waitCmd(t) // limited
+	if len(snaps) != 0 {
+		t.Fatalf("unexpected extra LoginChanged calls: %d", len(snaps))
+	}
+}

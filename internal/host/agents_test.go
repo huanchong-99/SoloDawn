@@ -403,15 +403,15 @@ func TestAgentsLoginStatusTransitions(t *testing.T) {
 	assertLogin(true, true)
 	agtEqual(t, loginChanges, 0)
 
-	// LoginInvalid marks only that session's agent invalid; a second agent is tracked independently.
+	// LoginInvalid clears only that session's login_ok; LoginChanged is deferred to finishLoginInvalid.
 	h.Report(claudeKey, Event{Kind: LoginInvalid, Text: "not signed in"})
 	assertLogin(false, true)
-	agtEqual(t, loginChanges, 1)
+	agtEqual(t, loginChanges, 0)
 	h.Report(claudeKey, Event{Kind: LoginInvalid, Text: "still not signed in"})
-	agtEqual(t, loginChanges, 1)
+	agtEqual(t, loginChanges, 0)
 	h.Report(codexKey, Event{Kind: LoginInvalid, Text: "expired token"})
 	assertLogin(false, false)
-	agtEqual(t, loginChanges, 2)
+	agtEqual(t, loginChanges, 0)
 
 	// Neutral events (Ready included) and a failed TurnEnded keep login_ok false.
 	h.Report(claudeKey, Event{Kind: Ready, Session: "sess-1"})
@@ -419,20 +419,20 @@ func TestAgentsLoginStatusTransitions(t *testing.T) {
 	h.Report(claudeKey, Event{Kind: RateLimited, Resets: seamStart})
 	h.Report(claudeKey, Event{Kind: TurnEnded, Status: "failed"})
 	assertLogin(false, false)
-	agtEqual(t, loginChanges, 2)
+	agtEqual(t, loginChanges, 0)
 
 	// TurnEnded with status completed or interrupted restores login_ok for that agent only.
 	h.Report(claudeKey, Event{Kind: TurnEnded, Status: "completed"})
 	assertLogin(true, false)
-	agtEqual(t, loginChanges, 3)
+	agtEqual(t, loginChanges, 1)
 
 	h.Report(codexKey, Event{Kind: TurnEnded, Status: "interrupted"})
 	assertLogin(true, true)
-	agtEqual(t, loginChanges, 4)
+	agtEqual(t, loginChanges, 2)
 
 	// Completing again when already valid does not re-notify LoginChanged.
 	h.Report(codexKey, Event{Kind: TurnEnded, Status: "completed"})
-	agtEqual(t, loginChanges, 4)
+	agtEqual(t, loginChanges, 2)
 }
 
 func TestAgentSetAccountsAndAudit(t *testing.T) {
@@ -458,13 +458,13 @@ func TestAgentSetAccountsAndAudit(t *testing.T) {
 	agtEqual(t, standIns.calls("claude"), 1)
 	agtEqual(t, standIns.calls("codex"), 1)
 	h.Report(claudeKey, Event{Kind: LoginInvalid})
-	agtEqual(t, loginChanges, 1)
+	agtEqual(t, loginChanges, 0)
 
 	// All three valid account types (including setting the same value twice) update the row without probing PATH, preserve caps, and restore login_ok.
 	for _, account := range []string{"personal", "personal", "team", "api_key"} {
 		agtCallSet(t, h, "owner-dev", agtSetPayload("claude", account))
 	}
-	agtEqual(t, loginChanges, 2)
+	agtEqual(t, loginChanges, 1)
 	agtEqual(t, standIns.calls("claude"), 1)
 	agtEqual(t, standIns.calls("codex"), 1)
 

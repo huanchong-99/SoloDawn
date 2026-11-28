@@ -113,8 +113,9 @@ with that secret and a label for this computer.
 solodawn pair <secret> --name "<label>"
 ```
 
-Check the pairing result against the device label and fingerprint shown
-in the browser.
+Once `solodawn pair` connects, check the label and fingerprint it prints
+against the node's label shown under "Node is running" and its fingerprint
+shown under "Identity verified" in the browser.
 
 When pairing succeeds, the node registers itself to start at login:
 `~/Library/LaunchAgents/org.solodawn.node.plist` on macOS, the systemd user
