@@ -34,6 +34,7 @@ func TestHostSurfaceGoldens(t *testing.T) {
 
 	golden(t, "host-info-request", HostInfoRequest{Request{"host.info", 9}, true})
 	answer := hostState()
+	answer.Permissions = &Permissions{LocalNetwork: true, Incoming: true, FullDisk: false}
 	answer.Agents[0].Defaults = &Profile{"opus", "high", "strong", "Go backend"}
 	golden(t, "host-info-answer", HostInfo{"host.info", Success{9, true}, answer})
 	// The owner took all AIs offline after an update was installed, and the
@@ -51,6 +52,10 @@ func TestHostSurfaceGoldens(t *testing.T) {
 	golden(t, "host-workspaces-request", HostWorkspacesRequest{Request{"host.workspaces", 11}, "claude"})
 	// Newest use first (contracts/datachannel.md section 7).
 	golden(t, "host-workspaces-answer", HostWorkspaces{Success{11, true}, []Workspace{{workspace, ts - 60000}, {"/home/dev/notes", ts - 86400000}}})
+
+	golden(t, "host-permit", HostPermit{Request: Request{"host.permit", 7}})
+	golden(t, "host-permit-open", HostPermit{Request: Request{"host.permit", 7}, Open: "full_disk", Lang: "zh-CN"})
+	golden(t, "host-permit-path", HostPermit{Request: Request{"host.permit", 7}, Path: "/Users/me/Documents/site"})
 
 	golden(t, "pty-resize", PTYResize{"pty.resize", ID(group), ID(agent), 120, 32})
 	golden(t, "beacon", Beacon{"beacon", ID(id("beacon")), ts, 47800})

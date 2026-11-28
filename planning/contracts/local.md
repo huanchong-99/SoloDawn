@@ -15,7 +15,7 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 | --- | --- |
 | `solodawn node` | runs the node in the foreground, serving the web client and built-in `/rv` signalling on `http://localhost:47800` (falling back to a free port when `47800` is in use) and printing `SoloDawn node is running: http://localhost:<port>` to stdout once the local HTTP server binds (the detached daemon prints nothing new); `node --help` and `node -h` print node startup help to stdout and exit 0 |
 | `solodawn rendezvous …` | runs the rendezvous service (`contracts/rendezvous.md`) |
-| `solodawn pair <secret> [--name <label>] [--rendezvous <url>]` | starts the node if needed, pairs it, prints the result (`flows/pairing.md` A). Without `--name` the label is the computer's host name; without `--rendezvous` the node uses its configured rendezvous, or the official one. A node that already has an owner refuses, and its one line points to `solodawn pair-browser` |
+| `solodawn pair <secret> [--name <label>] [--rendezvous <url>]` | starts the node if needed (on a Mac, from the app, as the login agent: section 11), pairs it, prints the result (`flows/pairing.md` A). Without `--name` the label is the computer's host name; without `--rendezvous` the node uses its configured rendezvous, or the official one. A node that already has an owner refuses, and its one line points to `solodawn pair-browser` |
 | `solodawn pair-browser` | prints a pairing link for a new browser |
 | `solodawn open` | pairs and opens the local browser on the node's own web client |
 | `solodawn group export <group id> <file> [--to <device id>]`, `solodawn group import <file>` | step 2: write a group to a file, as a move (`--to`) or a copy, or install one (`contracts/step-2/export.md` section 1) |
@@ -23,6 +23,7 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 | `solodawn service install`, `service remove` | registers or removes start-at-login for the current user (launchd agent, systemd user unit, Windows scheduled task) |
 | `solodawn mcp --token <t>` | the MCP shim; started by a CLI, not by people |
 | `solodawn mcp --member <id>`, `solodawn wait --member <id> [--timeout <s>]`, `solodawn done --member <id> --run <n> [--failed <text>]` | step 3, for an external AI and its runner: the shim under a member id, taking an item, ending a run (`contracts/step-3/external.md` sections 3 and 5) |
+| `solodawn probe <folder>` | started by the node on a Mac, not by people: lists the folder once and exits 0, 3 when macOS's privacy rules refuse it, 1 for any other failure |
 | `solodawn version` | prints the version |
 | `solodawn --help`, `solodawn -h`, `solodawn help` | prints the command summary, including how to start `solodawn node` and `http://localhost:47800`, to stdout and exits 0 |
 
@@ -35,6 +36,8 @@ the running node through the local socket and exits non-zero with one line of
 text on failure. Unknown commands, unknown flags, or extra unexpected
 arguments print `usage: solodawn <command> [arguments]` to stderr and exit 2
 (`rendezvous` prints its flag usage to stderr and exits 2).
+
+On a Mac, `solodawn` without arguments inside the app (the app opened from the Finder) starts the node as the login agent unless one answers, opens `http://localhost:47800` in the browser and exits 0.
 
 ## 2. Data directory
 
@@ -138,7 +141,10 @@ added (R-11).
   from one when a session ends, a task is done or cancelled, or an AI
   leaves.
 - **Before a CLI starts** for a session, in structured mode or in a
-  terminal, the host checks that the folder exists. A folder that is gone
+  terminal, the host checks that the folder exists and, on a Mac, that
+  macOS lets the node list it (section 11); a folder it refuses, or has not
+  answered for within 2 seconds, fails the start in the same way, with the
+  reason in `detail`. A folder that is gone
   (deleted, renamed, on a drive that is not mounted) fails the start: the
   host reports `turn_interrupted` with `crash` and the path in `detail`,
   and in a task session also `task fail`; a takeover is refused with `cli`
@@ -258,7 +264,9 @@ program, and `host.info.update` stays `null`. A user updates by hand
 
 - **Source**: the releases of this repository. Each release holds one file
   per target named `solodawn_<version>_<os>_<arch>` (with `.exe` on
-  Windows) and one `SHA256SUMS`.
+  Windows) and one `SHA256SUMS`. The file for macOS is
+  `solodawn_<version>_darwin_<arch>.zip`, which holds `SoloDawn.app`
+  (section 11).
 - **Versions**: a release tag is `vMAJOR.MINOR.PATCH`, three decimal
   numbers. `<version>` in a file name is the exact tag, `v` included:
   `solodawn_v1.4.0_linux_amd64`. A release is newer when its three numbers,
@@ -284,6 +292,40 @@ address. `/rv` on the same
 port is served on the node's network addresses too and is authenticated by
 its challenge (`contracts/rendezvous.md` section 1). The page gets no
 special trust: it pairs like any browser (`solodawn open`).
+
+## 11. macOS: the app and its permissions
+
+On a Mac the node is the main executable of an app, `SoloDawn.app`
+(`Contents/MacOS/solodawn`, identifier `org.solodawn.node`), installed in `~/Applications`, so
+that macOS shows SoloDawn's name, icon and reasons wherever it asks. `~/.local/bin/solodawn` is a
+symbolic link to that executable. A node that does not run from an app (a development build)
+behaves as on any other system and reports no permissions.
+
+- **Started by launchd.** From the app, `solodawn pair` starts the node by writing the login agent
+  and loading it (`launchctl bootstrap gui/<uid>`), never as its own child: macOS attributes what
+  a process does to the app that started it, and a node started from a terminal would be allowed
+  and asked in the terminal's name. The agent's plist names the app in
+  `AssociatedBundleIdentifiers`.
+- **What is reported** in `host.info` as `permissions` (`contracts/datachannel.md` section 7):
+  - `local_network`: the node writes one byte from a UDP socket connected to an unused link-local
+    IPv6 address, port 9, on each network interface that is up and broadcast-capable. `false`
+    when a write failed with `EHOSTUNREACH` and none succeeded. The attempt is also what makes
+    macOS ask.
+  - `incoming`: `false` when the Application Firewall is on and answers that the app is blocked
+    (`socketfilterfw --getglobalstate`, `--getappblocked`).
+  - `full_disk`: `true` when a child process, `solodawn probe`, can list `~/Library/Safari`.
+- **A folder** is checked by a child process, `solodawn probe <folder>`: at `host.permit` with
+  `path`, at `host.join` and before a CLI starts. A child is judged anew by macOS, as the CLIs
+  will be. `host.permit` waits for the person; the other two wait 2 seconds and then refuse.
+- **The drag panel** is a second executable of the app, `Contents/MacOS/SoloDawnPermissions`,
+  built from `macos/` with the library PermissionFlow. The node starts it as a child and writes
+  one line to its standard input when `full_disk` turns `true`.
+- The node asks for nothing else: not Accessibility, Screen Recording, Input Monitoring or
+  Automation.
+- **Signing.** The app is signed ad hoc. macOS ties each permission to the exact build, so after
+  an update it asks for the local network, incoming connections and each folder again, and Full
+  Disk Access must be given again. The reported values are attempts of the running build, so they
+  are right after an update too.
 
 [ak]: https://platform.claude.com/docs/en/get-api-key
 [oa]: https://github.com/openai/openai-openapi/blob/manual_spec/openapi.yaml

@@ -76,6 +76,9 @@ export const schemaOf: Record<string, GenericSchema> = {
   'host-leave': p.HostLeave,
   'host-offline': p.HostCommandOnly,
   'host-online': p.HostCommandOnly,
+  'host-permit': p.HostPermitRequest,
+  'host-permit-open': p.HostPermitRequest,
+  'host-permit-path': p.HostPermitRequest,
   'host-workspaces-answer': p.HostWorkspaces,
   'host-workspaces-request': p.HostWorkspacesRequest,
   ice: p.ICECandidate,
@@ -229,6 +232,7 @@ const answers = {
   cmd: 'cmd-ok',
   'host.info': 'host-info-answer',
   'host.workspaces': 'host-workspaces-answer',
+  'host.permit': 'cmd-ok',
   'watch.start': 'cmd-ok',
 } as const satisfies Record<p.RequestType, string>;
 

@@ -23,9 +23,11 @@ rendezvous.
    its SHA-256, run `solodawn pair <secret> --name <label>`, with
    `--rendezvous <url>` when the prompt gives one.
 6. `solodawn pair` starts the node process if it is not running and hands it
-   the secret over the local socket. The node generates its device key on
-   first start. A node that already belongs to a person refuses: the command
-   says so and points to `solodawn pair-browser` (section C).
+   the secret over the local socket. On a Mac, from the app, it starts the
+   node as the login agent (`contracts/local.md` section 11). The node
+   generates its device key on first start. A node that already belongs to a
+   person refuses: the command says so and points to `solodawn pair-browser`
+   (section C).
 7. The node authenticates to the rendezvous service, the one the prompt
    names if it names one, and joins the room. The service sends `joined` to
    both sides.
@@ -43,9 +45,9 @@ rendezvous.
     the other end of this pairing connection (`contracts/envelope.md`
     section 6). The browser sends `hello` again and the new `welcome` says
     `owner: true`.
-11. The node registers itself to start at login, then reports the AI CLIs
-    it found on the machine in `host.info` (`contracts/datachannel.md`
-    section 7).
+11. The node registers itself to start at login (on a Mac it already is,
+    from step 6), then reports the AI CLIs it found on the machine in
+    `host.info` (`contracts/datachannel.md` section 7).
 12. For each CLI the owner picks an account type (R-50); the browser sends
     `agent.set`. The page moves on to "create your first group".
 13. `solodawn pair` prints the result (label, fingerprint, path in use) and

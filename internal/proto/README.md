@@ -2,7 +2,7 @@
 
 These structs describe the JSON exchanged during signalling, pairing, device-log
 transfer, session setup, group reads, commands, the inbox of a host and the host
-surface of a node ([`host.go`](host.go): `host.info`, `pty.resize`, the
+surface of a node ([`host.go`](host.go): `host.info`, `host.permit`, `pty.resize`, the
 `groups` push and the host commands of `settings.set`, `agent.set`, `perm.set` and
 the takeover). They do
 not authenticate peers, apply rows or execute commands. The source of truth is
@@ -182,6 +182,11 @@ the type does not name, not with `Decode`.
   section 1a) add `follow` (`True`) to `AIMemberRow`, `MemberAddAI`, `MemberSet` and `HostJoin`,
   `defaults` (`*Profile`) on each agent of `host.info`, `AgentDefaults` (`agent.defaults`), and
   `ValidProfile` in [`profile.go`](profile.go).
+- `HostPermit` (`host.permit`, answered with `CmdResult` / `Success`) and
+  `Permissions` (`permissions` on `HostState`, present only for a node running
+  from its macOS app) carry macOS permission state and requests
+  ([datachannel.md, section 7](../../planning/contracts/datachannel.md);
+  [local.md, section 11](../../planning/contracts/local.md)).
 - `True` is a boolean that decodes only `true`: `ok` of a success (`Success`), `off` of a push
   and `jump` of an item.
 - In `SettingsSet`, `caps` is `AgentCaps`: a member per agent being changed, its

@@ -1022,6 +1022,14 @@ const HostState = {
   homes: v.array(v.object({ g: Id, home: str, name: str })),
   /** The quota answer of the rendezvous; `null` while the node has none. */
   relay: v.nullable(v.object({ used: int, limit: int })),
+  /** Only from a node running from its macOS app (`contracts/local.md` section 11). */
+  permissions: v.optional(
+    v.object({
+      local_network: bool,
+      incoming: bool,
+      full_disk: bool,
+    }),
+  ),
   agents: v.array(
     v.object({
       agent: str,
@@ -1088,6 +1096,17 @@ export const HostWorkspaces = v.object({
   workspaces: v.array(v.object({ path: str, used: int })),
 });
 export type HostWorkspaces = v.InferOutput<typeof HostWorkspaces>;
+
+/** Checks macOS permissions, opens a System Settings page or drag panel, or probes a folder
+ *  (datachannel.md section 7). */
+export const HostPermitRequest = v.object({
+  t: v.literal('host.permit'),
+  id: int,
+  open: v.optional(v.picklist(['local_network', 'incoming', 'folders', 'full_disk'])),
+  lang: optionalText,
+  path: optionalText,
+});
+export type HostPermitRequest = v.InferOutput<typeof HostPermitRequest>;
 
 /** The size of a takeover's terminal, pushed by the browser; `ai` is the member taken over. */
 export const PTYResize = v.object({
@@ -1257,6 +1276,7 @@ export const AnswerOf = {
   cmd: CmdResult,
   'host.info': HostInfo,
   'host.workspaces': HostWorkspaces,
+  'host.permit': CmdResult,
   'watch.start': CmdResult,
 } as const;
 export type RequestType = keyof typeof AnswerOf;
@@ -1308,6 +1328,7 @@ export interface Ctl {
   request(req: Ask<Cmd>): Promise<AnswerTo<'cmd'> | ErrorResponse>;
   request(req: Ask<HostInfoRequest>): Promise<AnswerTo<'host.info'> | ErrorResponse>;
   request(req: Ask<HostWorkspacesRequest>): Promise<AnswerTo<'host.workspaces'> | ErrorResponse>;
+  request(req: Ask<HostPermitRequest>): Promise<AnswerTo<'host.permit'> | ErrorResponse>;
   request(req: Ask<WatchStart>): Promise<AnswerTo<'watch.start'> | ErrorResponse>;
   send?(frame: Devlog | PTYResize): void;
   channel?(label: string): PtyChannel | undefined;
