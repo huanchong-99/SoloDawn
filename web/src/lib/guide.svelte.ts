@@ -6,7 +6,7 @@ import { cliName } from './onboard.svelte';
 import { loadJoined, loadOwner } from './owner';
 import { preference, t } from './prefs.svelte';
 import type { HostInfoPush } from './proto';
-import { href } from './route.svelte';
+import { href, type Page } from './route.svelte';
 
 /** Persisted states of the first-run guide in `localStorage` (`sd-guide-state`). */
 export const guideStates = ['new', 'open', 'closed', 'done'] as const;
@@ -19,15 +19,27 @@ export const guideState = preference('guide-state', guideStates, 'new');
 export const guideUi = $state({ expanded: true, closedNote: false, focusHeading: false });
 
 let closedTimer: ReturnType<typeof setTimeout> | undefined;
+let userOpened = false;
 
 function clearClosedTimer() {
   clearTimeout(closedTimer);
   closedTimer = undefined;
 }
 
+/** Whether the expanded dock was explicitly opened by the person since the last layout reset. */
+export function isUserOpened(): boolean {
+  return userOpened;
+}
+
+/** Clears the explicit user-open flag so automatic overlap collapse may re-evaluate. */
+export function clearUserOpened() {
+  userOpened = false;
+}
+
 /** Starts or reopens the guide in its expanded dock form. */
 export function openGuide() {
   clearClosedTimer();
+  userOpened = true;
   guideUi.closedNote = false;
   guideUi.expanded = true;
   guideUi.focusHeading = true;
@@ -37,6 +49,7 @@ export function openGuide() {
 /** Closes the guide and shows the 4 s reopen note (`guide.closed`). */
 export function closeGuide() {
   clearClosedTimer();
+  userOpened = false;
   guideState.value = 'closed';
   guideUi.expanded = false;
   guideUi.focusHeading = false;
@@ -49,12 +62,14 @@ export function closeGuide() {
 
 /** Collapses the open dock to its pill (or closes the phone bottom sheet). */
 export function collapseGuide() {
+  userOpened = false;
   guideUi.expanded = false;
   guideUi.focusHeading = false;
 }
 
 /** Expands the pill back into the dock (or opens the phone bottom sheet). */
-export function expandGuide(focus = false) {
+export function expandGuide(focus = false, manual = focus) {
+  userOpened = manual;
   guideUi.expanded = true;
   guideUi.focusHeading = focus;
 }
@@ -62,6 +77,7 @@ export function expandGuide(focus = false) {
 /** Marks the guide as finished from the finish view. */
 export function finishGuide() {
   clearClosedTimer();
+  userOpened = false;
   guideUi.closedNote = false;
   guideUi.focusHeading = false;
   guideState.value = 'done';
@@ -70,6 +86,7 @@ export function finishGuide() {
 /** Clears transient UI timers when resetting between tests. */
 export function resetGuideUi() {
   clearClosedTimer();
+  userOpened = false;
   guideUi.expanded = true;
   guideUi.closedNote = false;
   guideUi.focusHeading = false;
@@ -171,6 +188,214 @@ export function canCollapseOnEscape(
   return (
     open && event.key === 'Escape' && !event.defaultPrevented && Boolean(dock?.contains(active))
   );
+}
+
+/** Viewport-relative bounding box matching `DOMRect` geometry fields. */
+export interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+const onboardingTargets = '.onboarding .card, .onboarding fieldset.acct, .onboarding .done-btn';
+
+const pageTargets: Partial<Record<Page, Partial<Record<GuideStep[number]['id'], string>>>> = {
+  nodes: {
+    ais: '.ai-row fieldset.acct',
+    defaults: '[data-guide="defaults"][data-unset], .defaults .editor',
+  },
+  groups: {
+    group: '.list .head button, .list .empty button',
+  },
+  chat: {
+    ask: '.composer:not(.in-thread)',
+  },
+};
+
+/** CSS selector for interactive targets the current step points to on `page`, if any. */
+export function stepTargetSelector(
+  stepId: GuideStep[number]['id'] | undefined,
+  page: Page,
+): string | undefined {
+  if (!stepId) return undefined;
+  if (page === 'onboarding') return onboardingTargets;
+  return pageTargets[page]?.[stepId];
+}
+
+function hasArea(box: Box): boolean {
+  return box.width > 0 && box.height > 0;
+}
+
+function spansOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return aStart < bEnd && aEnd > bStart;
+}
+
+/** Whether two laid-out rectangles share positive overlapping area. */
+export function boxesOverlap(a: Box, b: Box): boolean {
+  if (!hasArea(a) || !hasArea(b)) return false;
+  return (
+    spansOverlap(a.left, a.right, b.left, b.right) && spansOverlap(a.top, a.bottom, b.top, b.bottom)
+  );
+}
+
+/** Whether the expanded dock box overlaps any visible target element of the current step. */
+export function dockOverlapsTargets(
+  dock: Pick<Element, 'getBoundingClientRect'>,
+  stepId: GuideStep[number]['id'] | undefined,
+  page: Page,
+  root: Pick<ParentNode, 'querySelectorAll'> = document,
+): boolean {
+  const selector = stepTargetSelector(stepId, page);
+  if (!selector) return false;
+  const dockBox = dock.getBoundingClientRect();
+  for (const el of root.querySelectorAll(selector)) {
+    if (boxesOverlap(dockBox, el.getBoundingClientRect())) return true;
+  }
+  return false;
+}
+
+/** Callbacks invoked when page layout changes vs when entrance animations settle. */
+export interface DockLayoutHandlers {
+  onLayoutChange: () => void;
+  onSettled: () => void;
+}
+
+function sizeChanged(prev: [number, number] | undefined, rect: DOMRectReadOnly): boolean {
+  return Boolean(prev) && (rect.width !== prev![0] || rect.height !== prev![1]);
+}
+
+function resizeHandler(onLayoutChange: () => void) {
+  let prev: [number, number] | undefined;
+  return (entries: ResizeObserverEntry[]) => {
+    const rect = entries.at(-1)!.contentRect;
+    if (sizeChanged(prev, rect)) onLayoutChange();
+    prev = [rect.width, rect.height];
+  };
+}
+
+function scrollHandler(dock: Element, onLayoutChange: () => void) {
+  return (event: Event) => {
+    if (event.target instanceof Node && dock.contains(event.target)) return;
+    onLayoutChange();
+  };
+}
+
+function watchMain(main: Element, onLayoutChange: () => void): () => void {
+  const mo = new MutationObserver(onLayoutChange);
+  const ro = new ResizeObserver(resizeHandler(onLayoutChange));
+  mo.observe(main, { childList: true, subtree: true });
+  ro.observe(main);
+  main.addEventListener('pointerdown', onLayoutChange, { passive: true });
+  main.addEventListener('focusin', onLayoutChange, { passive: true });
+  return () => {
+    mo.disconnect();
+    ro.disconnect();
+    main.removeEventListener('pointerdown', onLayoutChange);
+    main.removeEventListener('focusin', onLayoutChange);
+  };
+}
+
+/** Observes page DOM, viewport size, scroll, main interaction, and settled animations. */
+export function observeDockLayout(
+  main: Element,
+  dock: Element,
+  handlers: DockLayoutHandlers,
+): () => void {
+  const { onLayoutChange, onSettled } = handlers;
+  const onScroll = scrollHandler(dock, onLayoutChange);
+  const unwatchMain = watchMain(main, onLayoutChange);
+  window.addEventListener('resize', onLayoutChange, { passive: true });
+  window.addEventListener('scroll', onScroll, { capture: true, passive: true });
+  window.addEventListener('animationend', onSettled, { capture: true, passive: true });
+  return () => {
+    unwatchMain();
+    window.removeEventListener('resize', onLayoutChange);
+    window.removeEventListener('scroll', onScroll, true);
+    window.removeEventListener('animationend', onSettled, true);
+  };
+}
+
+/** Reactive inputs controlling whether the expanded guide dock may overlap page targets. */
+export interface OverlapSyncInput {
+  visible: boolean;
+  narrow: boolean;
+  dock: HTMLElement | undefined;
+  stepId: GuideStep[number]['id'] | undefined;
+  page: Page;
+  group: string | undefined;
+  doneCount: number;
+}
+
+/** Route and step progress fields whose change resets explicit user-open override. */
+export type OverlapTargetContext = Pick<
+  OverlapSyncInput,
+  'page' | 'group' | 'stepId' | 'doneCount'
+>;
+
+/** Whether two overlap contexts share identical route and step progress fields. */
+export function sameTargetContext(a: OverlapTargetContext, b: OverlapTargetContext): boolean {
+  return (
+    a.page === b.page && a.group === b.group && a.stepId === b.stepId && a.doneCount === b.doneCount
+  );
+}
+
+/** Whether the expanded desktop dock is currently mounted and eligible for overlap tracking. */
+export function canWatchDock(
+  input: Pick<OverlapSyncInput, 'visible' | 'narrow' | 'dock'>,
+): input is Pick<OverlapSyncInput, 'visible' | 'narrow'> & { dock: HTMLElement } {
+  return input.visible && !input.narrow && guideUi.expanded && Boolean(input.dock);
+}
+
+/** Collapses the dock over a target unless user-opened, notifying only if dock held focus. */
+export function autoCollapseIfOverlapping(
+  input: Pick<OverlapSyncInput, 'visible' | 'narrow' | 'dock' | 'stepId' | 'page'>,
+  onFocusInsideDock: () => void,
+  doc: Pick<Document, 'activeElement' | 'querySelectorAll'> = document,
+): boolean {
+  if (!canWatchDock(input) || userOpened) return false;
+  if (!dockOverlapsTargets(input.dock, input.stepId, input.page, doc)) return false;
+  if (input.dock.contains(doc.activeElement)) onFocusInsideDock();
+  collapseGuide();
+  return true;
+}
+
+function copyContext(ctx: OverlapTargetContext): OverlapTargetContext {
+  return {
+    page: ctx.page,
+    group: ctx.group,
+    stepId: ctx.stepId,
+    doneCount: ctx.doneCount,
+  };
+}
+
+/** Tracks route/step context transitions and attaches layout observers while dock stays open. */
+export function createOverlapTracker(
+  initial: OverlapTargetContext,
+  onFocusInsideDock: () => void,
+  doc: Pick<Document, 'activeElement' | 'querySelector' | 'querySelectorAll'> = document,
+) {
+  let prev = copyContext(initial);
+
+  return {
+    sync(input: OverlapSyncInput): (() => void) | undefined {
+      if (!sameTargetContext(prev, input)) {
+        prev = copyContext(input);
+        clearUserOpened();
+      }
+      if (!canWatchDock(input)) return undefined;
+      if (autoCollapseIfOverlapping(input, onFocusInsideDock, doc)) return undefined;
+      return observeDockLayout(doc.querySelector('main')!, input.dock, {
+        onLayoutChange: () => {
+          clearUserOpened();
+          autoCollapseIfOverlapping(input, onFocusInsideDock, doc);
+        },
+        onSettled: () => autoCollapseIfOverlapping(input, onFocusInsideDock, doc),
+      });
+    },
+  };
 }
 
 function aisDoneText(count: number): string {

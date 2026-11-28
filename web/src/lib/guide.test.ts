@@ -4,23 +4,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeviceLog } from './devlog';
 import type { Group } from './groups.svelte';
 import {
+  autoCollapseIfOverlapping,
+  boxesOverlap,
   canCollapseOnEscape,
+  canWatchDock,
+  clearUserOpened,
   closeGuide,
   collapseGuide,
   createAnnouncer,
+  createOverlapTracker,
+  dockOverlapsTargets,
   expandGuide,
   finishGuide,
   guideState,
   guideStates,
   guideSteps,
   guideUi,
+  type GuideStep,
   isBrandNew,
+  isUserOpened,
   modal,
+  observeDockLayout,
   openGuide,
+  type OverlapTargetContext,
   resetGuideUi,
+  sameTargetContext,
   stepActionLabel,
   stepDoneText,
   stepIntent,
+  stepTargetSelector,
 } from './guide.svelte';
 import { Device, ed25519 } from './identity';
 import type { Computer } from './nodes.svelte';
@@ -136,6 +148,7 @@ describe('guide state & timers', () => {
     vi.resetModules();
     const fresh = await import('./guide.svelte');
     expect(fresh.guideUi).toEqual({ expanded: true, closedNote: false, focusHeading: false });
+    expect(fresh.isUserOpened()).toBe(false);
     expect(fresh.guideState.value).toBe('new');
 
     fresh.guideState.value = 'open';
@@ -679,5 +692,570 @@ describe('isBrandNew', () => {
         },
       }) as unknown as IDBFactory;
     expect(await isBrandNew(crypto, brokenIdb)).toBe(false);
+  });
+});
+
+describe('user-opened tracking, step targets, box overlap, and layout observer', () => {
+  afterEach(() => {
+    resetGuideUi();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    document.body.innerHTML = '';
+  });
+
+  it('tracks isUserOpened across open, expand, collapse, close, finish, and reset', () => {
+    resetGuideUi();
+    expect(isUserOpened()).toBe(false);
+
+    openGuide();
+    expect(isUserOpened()).toBe(true);
+    clearUserOpened();
+    expect(isUserOpened()).toBe(false);
+
+    expandGuide(true);
+    expect(isUserOpened()).toBe(true);
+    collapseGuide();
+    expect(isUserOpened()).toBe(false);
+
+    expandGuide();
+    expect(isUserOpened()).toBe(false);
+    expect(guideUi.focusHeading).toBe(false);
+
+    expandGuide(false, true);
+    expect(isUserOpened()).toBe(true);
+    expect(guideUi.focusHeading).toBe(false);
+
+    expandGuide(true, false);
+    expect(isUserOpened()).toBe(false);
+    expect(guideUi.focusHeading).toBe(true);
+
+    openGuide();
+    closeGuide();
+    expect(isUserOpened()).toBe(false);
+
+    openGuide();
+    finishGuide();
+    expect(isUserOpened()).toBe(false);
+
+    openGuide();
+    resetGuideUi();
+    expect(isUserOpened()).toBe(false);
+  });
+
+  it('maps each page and step to its interactive target selector', () => {
+    expect(stepTargetSelector(undefined, 'onboarding')).toBeUndefined();
+    expect(stepTargetSelector('connect', 'onboarding')).toBe(
+      '.onboarding .card, .onboarding fieldset.acct, .onboarding .done-btn',
+    );
+    expect(stepTargetSelector('ais', 'onboarding')).toBe(
+      '.onboarding .card, .onboarding fieldset.acct, .onboarding .done-btn',
+    );
+    expect(stepTargetSelector('defaults', 'onboarding')).toBe(
+      '.onboarding .card, .onboarding fieldset.acct, .onboarding .done-btn',
+    );
+
+    expect(stepTargetSelector('ais', 'nodes')).toBe('.ai-row fieldset.acct');
+    expect(stepTargetSelector('defaults', 'nodes')).toBe(
+      '[data-guide="defaults"][data-unset], .defaults .editor',
+    );
+    expect(stepTargetSelector('connect', 'nodes')).toBeUndefined();
+    expect(stepTargetSelector('group', 'nodes')).toBeUndefined();
+
+    expect(stepTargetSelector('group', 'groups')).toBe('.list .head button, .list .empty button');
+    expect(stepTargetSelector('connect', 'groups')).toBeUndefined();
+
+    expect(stepTargetSelector('ask', 'chat')).toBe('.composer:not(.in-thread)');
+    expect(stepTargetSelector('group', 'chat')).toBeUndefined();
+
+    expect(stepTargetSelector('connect', 'settings')).toBeUndefined();
+  });
+
+  it('detects strict positive overlap between laid-out boxes', () => {
+    const box = (left: number, top: number, right: number, bottom: number) => ({
+      left,
+      top,
+      right,
+      bottom,
+      width: right - left,
+      height: bottom - top,
+    });
+    const dock = box(100, 100, 200, 200);
+
+    expect(boxesOverlap(box(150, 120, 150, 180), dock)).toBe(false);
+    expect(boxesOverlap(box(120, 150, 180, 150), dock)).toBe(false);
+    expect(boxesOverlap(dock, box(150, 120, 150, 180))).toBe(false);
+    expect(boxesOverlap(dock, box(120, 150, 180, 150))).toBe(false);
+
+    // Touching edges do not overlap.
+    expect(boxesOverlap(dock, box(0, 100, 100, 200))).toBe(false);
+    expect(boxesOverlap(dock, box(200, 100, 300, 200))).toBe(false);
+    expect(boxesOverlap(dock, box(100, 0, 200, 100))).toBe(false);
+    expect(boxesOverlap(dock, box(100, 200, 200, 300))).toBe(false);
+
+    // 1 px intersection overlaps.
+    expect(boxesOverlap(dock, box(199, 199, 250, 250))).toBe(true);
+    expect(boxesOverlap(dock, box(50, 50, 101, 101))).toBe(true);
+    expect(boxesOverlap(dock, box(120, 120, 140, 140))).toBe(true);
+  });
+
+  it('checks whether dock rect intersects any matching step target in root', () => {
+    const dock = document.createElement('aside');
+    vi.spyOn(dock, 'getBoundingClientRect').mockReturnValue({
+      left: 500,
+      top: 400,
+      right: 844,
+      bottom: 800,
+      width: 344,
+      height: 400,
+    } as DOMRect);
+
+    const querySpy = vi.spyOn(document, 'querySelectorAll');
+    expect(dockOverlapsTargets(dock, undefined, 'nodes', document)).toBe(false);
+    expect(dockOverlapsTargets(dock, 'defaults', 'settings', document)).toBe(false);
+    expect(querySpy).not.toHaveBeenCalled();
+    expect(dockOverlapsTargets(dock, 'defaults', 'nodes', document)).toBe(false);
+    expect(querySpy).toHaveBeenCalledTimes(1);
+    querySpy.mockRestore();
+
+    const first = document.createElement('button');
+    first.dataset.guide = 'defaults';
+    first.dataset.unset = '';
+    vi.spyOn(first, 'getBoundingClientRect').mockReturnValue({
+      left: 500,
+      top: 300,
+      right: 600,
+      bottom: 332,
+      width: 100,
+      height: 32,
+    } as DOMRect);
+    const second = document.createElement('button');
+    second.dataset.guide = 'defaults';
+    second.dataset.unset = '';
+    vi.spyOn(second, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      width: 0,
+      height: 0,
+    } as DOMRect);
+    document.body.append(first, second);
+
+    expect(dockOverlapsTargets(dock, 'defaults', 'nodes', document)).toBe(false);
+
+    vi.spyOn(second, 'getBoundingClientRect').mockReturnValue({
+      left: 510,
+      top: 520,
+      right: 610,
+      bottom: 552,
+      width: 100,
+      height: 32,
+    } as DOMRect);
+    expect(dockOverlapsTargets(dock, 'defaults', 'nodes')).toBe(true);
+    document.body.innerHTML = '';
+  });
+
+  it('observes main DOM/resize/interaction and window resize/scroll/animationend and cleans up', async () => {
+    const roObserve = vi.fn();
+    const roDisconnect = vi.fn();
+    let roCallback!: (entries: ResizeObserverEntry[]) => void;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: (entries: ResizeObserverEntry[]) => void) {
+          roCallback = cb;
+        }
+        observe = roObserve;
+        disconnect = roDisconnect;
+      },
+    );
+
+    const main = document.createElement('main');
+    const mainChild = document.createElement('div');
+    main.appendChild(mainChild);
+    const dock = document.createElement('aside');
+    const dockChild = document.createElement('div');
+    dock.appendChild(dockChild);
+    document.body.append(main, dock);
+
+    const addWinSpy = vi.spyOn(window, 'addEventListener');
+    const removeWinSpy = vi.spyOn(window, 'removeEventListener');
+    const addMainSpy = vi.spyOn(main, 'addEventListener');
+    const removeMainSpy = vi.spyOn(main, 'removeEventListener');
+
+    const onLayoutChange = vi.fn();
+    const onSettled = vi.fn();
+    const stop = observeDockLayout(main, dock, { onLayoutChange, onSettled });
+
+    expect(roObserve).toHaveBeenCalledWith(main);
+    expect(addMainSpy).toHaveBeenCalledWith('pointerdown', onLayoutChange, { passive: true });
+    expect(addMainSpy).toHaveBeenCalledWith('focusin', onLayoutChange, { passive: true });
+    expect(addWinSpy).toHaveBeenCalledWith('resize', onLayoutChange, { passive: true });
+    expect(addWinSpy).toHaveBeenCalledWith('scroll', expect.any(Function), {
+      capture: true,
+      passive: true,
+    });
+    expect(addWinSpy).toHaveBeenCalledWith('animationend', onSettled, {
+      capture: true,
+      passive: true,
+    });
+
+    // ResizeObserver initial measurement does not trigger layout change.
+    roCallback([
+      { contentRect: { width: 800, height: 600 } as DOMRectReadOnly },
+    ] as ResizeObserverEntry[]);
+    roCallback([
+      { contentRect: { width: 800, height: 600 } as DOMRectReadOnly },
+    ] as ResizeObserverEntry[]);
+    expect(onLayoutChange).not.toHaveBeenCalled();
+
+    // Width or height delta triggers onLayoutChange.
+    roCallback([
+      { contentRect: { width: 700, height: 600 } as DOMRectReadOnly },
+    ] as ResizeObserverEntry[]);
+    expect(onLayoutChange).toHaveBeenCalledTimes(1);
+    roCallback([
+      { contentRect: { width: 700, height: 500 } as DOMRectReadOnly },
+    ] as ResizeObserverEntry[]);
+    expect(onLayoutChange).toHaveBeenCalledTimes(2);
+
+    // Child/subtree DOM mutations inside main trigger onLayoutChange.
+    const added = document.createElement('span');
+    mainChild.appendChild(added);
+    await vi.waitFor(() => expect(onLayoutChange).toHaveBeenCalledTimes(3));
+
+    // Scroll inside dock is ignored; scroll outside dock and non-Node window scroll trigger.
+    dockChild.dispatchEvent(new Event('scroll', { bubbles: false }));
+    expect(onLayoutChange).toHaveBeenCalledTimes(3);
+    mainChild.dispatchEvent(new Event('scroll', { bubbles: false }));
+    expect(onLayoutChange).toHaveBeenCalledTimes(4);
+    window.dispatchEvent(new Event('scroll'));
+    expect(onLayoutChange).toHaveBeenCalledTimes(5);
+
+    // Pointer/focus inside main and window resize trigger onLayoutChange.
+    main.dispatchEvent(new Event('pointerdown'));
+    main.dispatchEvent(new Event('focusin'));
+    window.dispatchEvent(new Event('resize'));
+    expect(onLayoutChange).toHaveBeenCalledTimes(8);
+
+    // animationend invokes onSettled without invoking onLayoutChange.
+    window.dispatchEvent(new Event('animationend'));
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    expect(onLayoutChange).toHaveBeenCalledTimes(8);
+
+    // Cleanup removes all listeners and disconnects observers.
+    stop();
+    expect(roDisconnect).toHaveBeenCalledTimes(1);
+    expect(removeMainSpy).toHaveBeenCalledWith('pointerdown', onLayoutChange);
+    expect(removeMainSpy).toHaveBeenCalledWith('focusin', onLayoutChange);
+    expect(removeWinSpy).toHaveBeenCalledWith('resize', onLayoutChange);
+    expect(removeWinSpy).toHaveBeenCalledWith('scroll', expect.any(Function), true);
+    expect(removeWinSpy).toHaveBeenCalledWith('animationend', onSettled, true);
+
+    main.dispatchEvent(new Event('pointerdown'));
+    window.dispatchEvent(new Event('resize'));
+    window.dispatchEvent(new Event('scroll'));
+    window.dispatchEvent(new Event('animationend'));
+    mainChild.appendChild(document.createElement('span'));
+    await Promise.resolve();
+    expect(onLayoutChange).toHaveBeenCalledTimes(8);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('compares overlap target context across page, group, stepId, and doneCount', () => {
+    const base: OverlapTargetContext = {
+      page: 'groups',
+      group: 'g1',
+      stepId: 'group',
+      doneCount: 2,
+    };
+    expect(sameTargetContext(base, { ...base })).toBe(true);
+    expect(sameTargetContext(base, { ...base, page: 'nodes' })).toBe(false);
+    expect(sameTargetContext(base, { ...base, group: 'g2' })).toBe(false);
+    expect(sameTargetContext(base, { ...base, stepId: 'ask' })).toBe(false);
+    expect(sameTargetContext(base, { ...base, doneCount: 3 })).toBe(false);
+  });
+
+  it('checks all four dock-watching eligibility conditions in canWatchDock', () => {
+    resetGuideUi();
+    const dock = document.createElement('aside');
+    expect(canWatchDock({ visible: true, narrow: false, dock })).toBe(true);
+    expect(canWatchDock({ visible: false, narrow: false, dock })).toBe(false);
+    expect(canWatchDock({ visible: true, narrow: true, dock })).toBe(false);
+    expect(canWatchDock({ visible: true, narrow: false, dock: undefined })).toBe(false);
+    collapseGuide();
+    expect(canWatchDock({ visible: true, narrow: false, dock })).toBe(false);
+  });
+
+  it('auto-collapses on overlap only when watchable and notifies focus only if dock holds focus', () => {
+    resetGuideUi();
+    document.body.innerHTML = '';
+    const main = document.createElement('main');
+    const mainBtn = document.createElement('button');
+    mainBtn.dataset.guide = 'defaults';
+    mainBtn.dataset.unset = '';
+    main.appendChild(mainBtn);
+
+    const dock = document.createElement('aside');
+    const dockBtn = document.createElement('button');
+    dock.appendChild(dockBtn);
+    document.body.append(main, dock);
+
+    vi.spyOn(dock, 'getBoundingClientRect').mockReturnValue({
+      left: 500,
+      top: 400,
+      right: 844,
+      bottom: 800,
+      width: 344,
+      height: 400,
+    } as DOMRect);
+    let targetTop = 500;
+    vi.spyOn(mainBtn, 'getBoundingClientRect').mockImplementation(
+      () =>
+        ({
+          left: 510,
+          top: targetTop,
+          right: 610,
+          bottom: targetTop + 32,
+          width: 100,
+          height: 32,
+        }) as DOMRect,
+    );
+
+    const onFocusInsideDock = vi.fn();
+    dockBtn.focus();
+    expect(document.activeElement).toBe(dockBtn);
+
+    // Not watchable -> false without collapsing or reporting dock focus.
+    expect(
+      autoCollapseIfOverlapping(
+        { visible: false, narrow: false, dock, stepId: 'defaults', page: 'nodes' },
+        onFocusInsideDock,
+      ),
+    ).toBe(false);
+    expect(guideUi.expanded).toBe(true);
+    expect(onFocusInsideDock).not.toHaveBeenCalled();
+
+    // User-opened override suppresses auto-collapse even on overlap.
+    expandGuide(true);
+    expect(
+      autoCollapseIfOverlapping(
+        { visible: true, narrow: false, dock, stepId: 'defaults', page: 'nodes' },
+        onFocusInsideDock,
+      ),
+    ).toBe(false);
+    expect(guideUi.expanded).toBe(true);
+    expect(onFocusInsideDock).not.toHaveBeenCalled();
+
+    // Clear override and test non-overlapping layout -> false.
+    clearUserOpened();
+    targetTop = 100;
+    expect(
+      autoCollapseIfOverlapping(
+        { visible: true, narrow: false, dock, stepId: 'defaults', page: 'nodes' },
+        onFocusInsideDock,
+      ),
+    ).toBe(false);
+    expect(guideUi.expanded).toBe(true);
+    expect(onFocusInsideDock).not.toHaveBeenCalled();
+
+    // Overlap while focus is on a main control -> collapses WITHOUT calling onFocusInsideDock.
+    targetTop = 500;
+    mainBtn.focus();
+    expect(document.activeElement).toBe(mainBtn);
+    expect(
+      autoCollapseIfOverlapping(
+        { visible: true, narrow: false, dock, stepId: 'defaults', page: 'nodes' },
+        onFocusInsideDock,
+      ),
+    ).toBe(true);
+    expect(guideUi.expanded).toBe(false);
+    expect(onFocusInsideDock).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(mainBtn);
+
+    // Overlap while focus is inside the dock -> collapses AND calls onFocusInsideDock.
+    expandGuide(false);
+    dockBtn.focus();
+    expect(document.activeElement).toBe(dockBtn);
+    expect(
+      autoCollapseIfOverlapping(
+        { visible: true, narrow: false, dock, stepId: 'defaults', page: 'nodes' },
+        onFocusInsideDock,
+      ),
+    ).toBe(true);
+    expect(guideUi.expanded).toBe(false);
+    expect(onFocusInsideDock).toHaveBeenCalledTimes(1);
+
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('tracks context changes, preserves manual open on animationend, and resets it on layout change', () => {
+    resetGuideUi();
+    document.body.innerHTML = '';
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+
+    const main = document.createElement('main');
+    const target = document.createElement('button');
+    target.dataset.guide = 'defaults';
+    target.dataset.unset = '';
+    main.appendChild(target);
+    const dock = document.createElement('aside');
+    const dockBtn = document.createElement('button');
+    dock.appendChild(dockBtn);
+    document.body.append(main, dock);
+
+    vi.spyOn(dock, 'getBoundingClientRect').mockReturnValue({
+      left: 500,
+      top: 400,
+      right: 844,
+      bottom: 800,
+      width: 344,
+      height: 400,
+    } as DOMRect);
+    let targetTop = 100;
+    vi.spyOn(target, 'getBoundingClientRect').mockImplementation(
+      () =>
+        ({
+          left: 510,
+          top: targetTop,
+          right: 610,
+          bottom: targetTop + 32,
+          width: 100,
+          height: 32,
+        }) as DOMRect,
+    );
+
+    const onFocusInsideDock = vi.fn();
+    const initial: OverlapTargetContext = {
+      page: 'nodes',
+      group: 'g1',
+      stepId: 'ais',
+      doneCount: 1,
+    };
+    const tracker = createOverlapTracker(initial, onFocusInsideDock);
+    // Mutating initial after creation must not alter the tracker's stored context.
+    initial.page = 'chat';
+
+    // Same context preserves userOpened and attaches layout observers.
+    expandGuide(true);
+    const stopA = tracker.sync({
+      visible: true,
+      narrow: false,
+      dock,
+      page: 'nodes',
+      group: 'g1',
+      stepId: 'ais',
+      doneCount: 1,
+    });
+    expect(typeof stopA).toBe('function');
+    expect(isUserOpened()).toBe(true);
+    stopA?.();
+
+    // Context change clears userOpened even when dock cannot currently be watched.
+    const stopHidden = tracker.sync({
+      visible: false,
+      narrow: false,
+      dock,
+      page: 'nodes',
+      group: 'g2',
+      stepId: 'ais',
+      doneCount: 1,
+    });
+    expect(stopHidden).toBeUndefined();
+    expect(isUserOpened()).toBe(false);
+
+    // Repeating the updated context leaves userOpened intact.
+    expandGuide(true);
+    expect(
+      tracker.sync({
+        visible: false,
+        narrow: false,
+        dock,
+        page: 'nodes',
+        group: 'g2',
+        stepId: 'ais',
+        doneCount: 1,
+      }),
+    ).toBeUndefined();
+    expect(isUserOpened()).toBe(true);
+
+    // Transitioning to an overlapping step clears userOpened and collapses at once.
+    targetTop = 500;
+    dockBtn.focus();
+    expect(
+      tracker.sync({
+        visible: true,
+        narrow: false,
+        dock,
+        page: 'nodes',
+        group: 'g2',
+        stepId: 'defaults',
+        doneCount: 2,
+      }),
+    ).toBeUndefined();
+    expect(isUserOpened()).toBe(false);
+    expect(guideUi.expanded).toBe(false);
+    expect(onFocusInsideDock).toHaveBeenCalledTimes(1);
+
+    // While user-opened, animationend keeps dock open; layout change clears override and collapses.
+    expandGuide(true);
+    targetTop = 100;
+    const stopOpen = tracker.sync({
+      visible: true,
+      narrow: false,
+      dock,
+      page: 'nodes',
+      group: 'g2',
+      stepId: 'defaults',
+      doneCount: 2,
+    });
+    expect(typeof stopOpen).toBe('function');
+
+    targetTop = 500;
+    window.dispatchEvent(new Event('animationend'));
+    expect(guideUi.expanded).toBe(true);
+    expect(isUserOpened()).toBe(true);
+
+    target.focus();
+    main.dispatchEvent(new Event('pointerdown'));
+    expect(guideUi.expanded).toBe(false);
+    expect(isUserOpened()).toBe(false);
+    expect(onFocusInsideDock).toHaveBeenCalledTimes(1);
+    stopOpen?.();
+
+    // When not user-opened, animationend re-evaluates and collapses upon overlap.
+    resetGuideUi();
+    targetTop = 100;
+    const stopSettled = tracker.sync({
+      visible: true,
+      narrow: false,
+      dock,
+      page: 'nodes',
+      group: 'g2',
+      stepId: 'defaults',
+      doneCount: 2,
+    });
+    expect(typeof stopSettled).toBe('function');
+    targetTop = 500;
+    dockBtn.focus();
+    window.dispatchEvent(new Event('animationend'));
+    expect(guideUi.expanded).toBe(false);
+    expect(onFocusInsideDock).toHaveBeenCalledTimes(2);
+    stopSettled?.();
+
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 });
