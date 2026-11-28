@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,27 @@ func TestMain(m *testing.M) {
 		return
 	}
 	m.Run()
+}
+
+func TestBundledNoArgsLaunch(t *testing.T) {
+	savedBundled, savedLaunch := isBundled, launchApp
+	t.Cleanup(func() {
+		isBundled = savedBundled
+		launchApp = savedLaunch
+	})
+	isBundled = func() bool { return true }
+	launchApp = func() error { return nil }
+	var stdout, stderr bytes.Buffer
+	if code := run(nil, &stdout, &stderr); code != 0 || stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("bundled ok: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+
+	launchApp = func() error { return errors.New("launch\nfailed") }
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(nil, &stdout, &stderr); code != 1 || stdout.Len() != 0 || stderr.String() != "launch failed\n" {
+		t.Fatalf("bundled fail: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
 }
 
 func TestMainUsesCommandExitCode(t *testing.T) {

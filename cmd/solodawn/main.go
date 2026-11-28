@@ -13,6 +13,8 @@ import (
 var (
 	exit          = os.Exit
 	runForeground = node.Foreground
+	isBundled     = node.IsBundled
+	launchApp     = node.Launch
 )
 
 func main() {
@@ -89,6 +91,9 @@ Options:
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
+		if isBundled() {
+			return result(launchApp(), stderr)
+		}
 		return usage(stderr)
 	}
 	if len(args) == 1 && isHelpFlag(args[0]) {
