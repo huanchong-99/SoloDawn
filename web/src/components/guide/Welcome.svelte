@@ -3,7 +3,7 @@
   import { recent } from '../../lib/groups.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { nodes } from '../../lib/nodes.svelte';
-  import { t } from '../../lib/prefs.svelte';
+  import { otherLang, prefs, t, textIn, toggleLang } from '../../lib/prefs.svelte';
   import { route } from '../../lib/route.svelte';
 
   const stepIds = ['connect', 'ais', 'defaults', 'group', 'ask'] as const;
@@ -65,6 +65,13 @@
         </button>
         <button type="button" class="btn btn-ghost" onclick={closeGuide}>
           {t('guide.welcome.later')}
+        </button>
+        <button type="button" class="btn btn-ghost" onclick={toggleLang}>
+          {#key prefs.lang}<span class="swap" lang={otherLang()}>{t('bar.lang.other')}</span>{/key}
+          <span class="sr">
+            <span lang="en">{textIn('en', 'bar.lang')}</span> /
+            <span lang="zh-CN">{textIn('zh-CN', 'bar.lang')}</span>
+          </span>
         </button>
       </footer>
     </div>

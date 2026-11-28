@@ -619,6 +619,26 @@
       height: 44px;
     }
   }
+  @media (min-width: 1024px) {
+    :global(body:has(.guide-pill.over-chat) .side) {
+      padding-bottom: 76px;
+    }
+  }
+  @media (min-width: 1024px) and (pointer: coarse) {
+    :global(body:has(.guide-pill.over-chat) .side) {
+      padding-bottom: 80px;
+    }
+  }
+  @media (min-width: 1024px) and (max-width: 1279px) {
+    :global(body:has(.guide-pill.over-chat) .side) {
+      padding-bottom: 176px;
+    }
+  }
+  @media (min-width: 1024px) and (max-width: 1279px) and (pointer: coarse) {
+    :global(body:has(.guide-pill.over-chat) .side) {
+      padding-bottom: 180px;
+    }
+  }
   .ring {
     position: relative;
     width: 26px;
