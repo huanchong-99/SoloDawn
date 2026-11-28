@@ -142,7 +142,8 @@ an `event` in `member status`, which H turns into a `system` row
 
 | Event | What N does |
 | --- | --- |
-| the CLI exits or closes its output during a turn, or cannot start because the session's folder is gone | reports `turn_interrupted` (`crash`), for a missing folder with its path in `detail`; in a task session also sends `task fail`; state `dormant`; the next item starts the CLI again with the same session id |
+| the CLI exits or closes its output during a turn, or cannot start (including when the session's folder is gone) | reports `turn_interrupted` (`crash`) with a redacted first-line error `detail` (for a missing folder, its path); in a task session also sends `task fail`; state `dormant`; the next item starts the CLI again with the same session id |
+| a turn ends with status `failed` while the CLI stays open (except when `rate_limited` or `login_invalid` is reported) | state `waiting`; reports `turn_interrupted` (`crash`) with a redacted first-line error `detail`; does not close the CLI or send `task fail` |
 | a turn lasts longer than `limits.turn_minutes`, or a Codex turn is silent (`contracts/drivers.md` 1.2 step 6) | interrupts it; reports `turn_interrupted` (`timeout`); in a task session also sends `task fail` |
 | the CLI cannot resume the session id | starts a fresh session in the same folder; its first turn carries what the first turn of that session kind carries, plus the last 20 messages of the thread (R-123); reports `session_replaced` |
 | the CLI reports a vendor rate limit | state `limited`; reports `rate_limited` with the reset time; items are held until then |

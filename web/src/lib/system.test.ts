@@ -49,6 +49,20 @@ describe('systemText', () => {
       { code: 'turn_interrupted', ai: codex, reason: 'crash', task, detail: 'signal 9' },
       "Codex $& $''s turn crashed. · T-12 · signal 9",
     ],
+    [
+      {
+        code: 'turn_interrupted',
+        ai: codex,
+        reason: 'crash',
+        task,
+        detail: '\n  API error 400  \nstack trace line 2',
+      },
+      "Codex $& $''s turn crashed. · T-12 · API error 400",
+    ],
+    [
+      { code: 'turn_interrupted', ai: codex, reason: 'crash', detail: '  \n   \n  ' },
+      "Codex $& $''s turn crashed.",
+    ],
     [{ code: 'turn_interrupted', ai: codex, reason: 'timeout' }, "Codex $& $''s turn timed out."],
     [
       { code: 'turn_interrupted', ai: codex, reason: 'stop', task },
@@ -57,6 +71,10 @@ describe('systemText', () => {
     [
       { code: 'login_invalid', ai: codex, detail: 'expired token' },
       "Codex $& $''s sign-in is no longer valid. · expired token",
+    ],
+    [
+      { code: 'login_invalid', ai: codex, detail: '\n  oauth expired \nplease run /login' },
+      "Codex $& $''s sign-in is no longer valid. · oauth expired",
     ],
     [{ code: 'login_invalid', ai: 'gone' }, "Former member's sign-in is no longer valid."],
     [

@@ -2313,3 +2313,283 @@ func TestMissingFolderFailsTheStart(t *testing.T) {
 		t.Fatalf("starts %d, want 1 in the folder that is back", drv.count())
 	}
 }
+
+func TestFailedTurnReportsCrashAndDetail(t *testing.T) {
+	checkFailedGroupTurnCrash(t)
+	checkFailedTaskTurnCrash(t)
+	checkFailedTurnOfflineRetry(t)
+	checkRateLimitedFailedTurn(t)
+	checkFailedTurnInterruptAndStray(t)
+	checkFailedStartAndWriteCrash(t)
+	assertEqual(t, eventDetail("  \n \t "), "")
+}
+
+func checkFailedGroupTurnCrash(t *testing.T) {
+	t.Helper()
+	h, rh, drv, _ := setupRunEnv(t)
+	kGrp := SessionKey{Group: runGroup1, Member: runAI1}
+	h.Sessions.Create(makeRunSession(kGrp, GroupSession, runFolder("repo")))
+
+	tskNoErr(t, Runner.Turn(t.Context(), h, kGrp, "go", Turn{Kind: ItemsTurn}))
+	rh.waitCmd(t) // working
+	drv.proc(0).emit(Event{Kind: Ready, Session: "keep-grp"})
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "failed", Text: "\n  line one " + runSecret + "\nline two"})
+	if s := waitForState(t, h, kGrp, Waiting); s.CLISession != "keep-grp" {
+		t.Fatalf("group CLISession lost: %q", s.CLISession)
+	}
+	assertTurnCrashStatus(t, rh.waitCmd(t), "waiting", "", "crash", "line one [redacted]")
+
+	tskNoErr(t, Runner.Turn(t.Context(), h, kGrp, "follow-up", Turn{Kind: ItemsTurn}))
+	rh.waitCmd(t) // working
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitForState(t, h, kGrp, Waiting)
+	rh.waitCmd(t) // waiting
+	assertEqual(t, drv.count(), 1)
+}
+
+func checkFailedTaskTurnCrash(t *testing.T) {
+	t.Helper()
+	h, rh, drv, _ := setupRunEnv(t)
+	kTask := SessionKey{Group: runGroup1, Member: runAI2, Task: runTask1}
+	h.Sessions.Create(makeRunSession(kTask, TaskSession, runFolder("wt/1")))
+
+	tskNoErr(t, Runner.Turn(t.Context(), h, kTask, "go", Turn{Kind: ItemsTurn, Thread: runTask1}))
+	rh.waitCmd(t) // working
+	drv.proc(0).emit(Event{Kind: Ready, Session: "keep-task"})
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "failed", Text: "  api overloaded\ntry again"})
+	if s := waitForState(t, h, kTask, Waiting); s.CLISession != "keep-task" {
+		t.Fatalf("task CLISession lost: %q", s.CLISession)
+	}
+	assertTurnCrashStatus(t, rh.waitCmd(t), "waiting", runTask1, "crash", "api overloaded")
+	assertNoTaskFail(t, rh.snapshotCmds())
+
+	tskNoErr(t, Runner.Turn(t.Context(), h, kTask, "follow-up", Turn{Kind: ItemsTurn, Thread: runTask1}))
+	rh.waitCmd(t) // working
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitForState(t, h, kTask, Waiting)
+	rh.waitCmd(t) // waiting
+	assertEqual(t, drv.count(), 1)
+	assertNoTaskFail(t, rh.snapshotCmds())
+}
+
+func checkFailedTurnOfflineRetry(t *testing.T) {
+	t.Helper()
+	stopAllTestHosts()
+	saveRuntimeGlobals(t)
+	base := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		h, rh, drv, shutdown := setupBubbleEnv(t, base)
+		defer shutdown()
+		kTask := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
+		h.Sessions.Create(makeRunSession(kTask, TaskSession, runFolder("wt/1")))
+
+		tskNoErr(t, Runner.Turn(t.Context(), h, kTask, "go", Turn{Kind: ItemsTurn, Thread: runTask1}))
+		synctest.Wait()
+		rh.waitCmd(t) // working
+
+		closedHome := newRunHome("direct")
+		close(closedHome.done)
+		h.Attach("home-dev", closedHome)
+		synctest.Wait()
+
+		drv.proc(0).emit(Event{Kind: TurnEnded, Status: "failed", Text: "offline fail\nline two"})
+		synctest.Wait()
+		waitForState(t, h, kTask, Waiting)
+
+		liveHome := newRunHome("direct")
+		h.Attach("home-dev", liveHome)
+		synctest.Wait()
+		cmds := liveHome.snapshotCmds()
+		assertTurnCrashStatus(t, cmds[0], "waiting", runTask1, "crash", "offline fail")
+		assertNoTaskFail(t, cmds)
+	})
+}
+
+func checkRateLimitedFailedTurn(t *testing.T) {
+	t.Helper()
+	cases := []struct {
+		agent string
+		kind  Kind
+		task  string
+	}{
+		{"codex", GroupSession, ""},
+		{"codex", TaskSession, runTask1},
+		{"claude", GroupSession, ""},
+		{"claude", TaskSession, runTask1},
+	}
+	for _, tc := range cases {
+		runRateLimitedFailedCase(t, tc.agent, tc.kind, tc.task)
+	}
+}
+
+func runRateLimitedFailedCase(t *testing.T, agent string, kind Kind, task string) {
+	t.Helper()
+	stopAllTestHosts()
+	saveRuntimeGlobals(t)
+	base := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		h, rh, drv, shutdown := setupBubbleEnv(t, base)
+		defer shutdown()
+		Listeners["limits"] = listenLimits
+		Holds["limits"] = holdLimits
+
+		key := SessionKey{Group: runGroup1, Member: runAI1, Task: task}
+		h.Sessions.Create(Session{
+			SessionKey: key, Kind: kind, Folder: runFolder("repo"),
+			Agent: agent, Home: "home-dev", Name: agent,
+		})
+		tskNoErr(t, Runner.Turn(t.Context(), h, key, "go", Turn{Kind: ItemsTurn, Thread: task}))
+		synctest.Wait()
+
+		resets := h.Now().Add(time.Minute).UnixMilli()
+		drv.proc(0).emit(Event{Kind: RateLimited, Resets: resets})
+		synctest.Wait()
+		drv.proc(0).emit(Event{Kind: TurnEnded, Status: "failed", Text: "You've hit your usage limit\nretry"})
+		synctest.Wait()
+
+		waitForState(t, h, key, Waiting)
+		assertEqual(t, drv.count(), 1)
+		cmds := rh.snapshotCmds()
+		assertRateLimitedCmd(t, cmds[len(cmds)-1], resets)
+		assertNoTaskFail(t, cmds)
+		assertNoEventCode(t, cmds, "turn_interrupted")
+
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		cmds = rh.snapshotCmds()
+		assertEqual(t, cmds[len(cmds)-1].payload["state"], any("waiting"))
+	})
+}
+
+func checkFailedTurnInterruptAndStray(t *testing.T) {
+	t.Helper()
+	h, rh, drv, _ := setupRunEnv(t)
+	reported := make(chan EventKind, 32)
+	Listeners["seen"] = func(_ *Host, _ SessionKey, e Event) { reported <- e.Kind }
+	kGrp := SessionKey{Group: runGroup1, Member: runAI1}
+	h.Sessions.Create(makeRunSession(kGrp, GroupSession, runFolder("repo")))
+
+	// Host stop interrupt leaves session open in Waiting even if CLI marks turn failed.
+	tskNoErr(t, Runner.Turn(t.Context(), h, kGrp, "stop-me", Turn{Kind: ItemsTurn}))
+	rh.waitCmd(t) // working
+	tskNoErr(t, errFalse(interruptSessionTurn(h, kGrp, "stop", ""), "interruptSessionTurn stop returned false"))
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "failed", Text: "aborted"})
+	waitForState(t, h, kGrp, Waiting)
+	assertTurnCrashStatus(t, rh.waitCmd(t), "waiting", "", "stop", "")
+
+	// Stray failed TurnEnded while Waiting is ignored without closing or crashing.
+	nBefore := len(rh.snapshotCmds())
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "failed", Text: "late failure"})
+	drv.proc(0).emit(Event{Kind: Active})
+	for <-reported != Active {
+	}
+	st, _ := h.Sessions.Get(kGrp)
+	assertEqual(t, [2]any{st.State, len(rh.snapshotCmds())}, [2]any{Waiting, nBefore})
+
+	// Jump interrupt followed by a failed turn reports crash while staying open in Waiting.
+	tskNoErr(t, Runner.Turn(t.Context(), h, kGrp, "next", Turn{Kind: ItemsTurn}))
+	rh.waitCmd(t) // working
+	tskNoErr(t, errFalse(interruptSessionTurn(h, kGrp, "jump", ""), "interruptSessionTurn jump returned false"))
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "failed", Text: "upstream failure"})
+	waitForState(t, h, kGrp, Waiting)
+	assertTurnCrashStatus(t, rh.waitCmd(t), "waiting", "", "crash", "upstream failure")
+}
+
+func checkFailedStartAndWriteCrash(t *testing.T) {
+	t.Helper()
+	h, rh, drv, _ := setupRunEnv(t)
+	kTask := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
+	kGrp := SessionKey{Group: runGroup1, Member: runAI2}
+	h.Sessions.Create(makeRunSession(kTask, TaskSession, runFolder("wt/1")))
+	h.Sessions.Create(makeRunSession(kGrp, GroupSession, runFolder("repo")))
+
+	drv.startErr = errors.New("cli missing " + runSecret + "\nextra")
+	if err := Runner.Turn(t.Context(), h, kTask, "go", Turn{Kind: ItemsTurn, Thread: runTask1}); err == nil {
+		t.Fatal("expected start error")
+	}
+	assertTurnCrashStatus(t, rh.waitCmd(t), "dormant", runTask1, "crash", "cli missing [redacted]")
+	assertTaskFailCmd(t, rh.waitCmd(t), runTask1, "crash", "cli missing [redacted]")
+	drv.startErr = nil
+
+	// Write failure on Waiting records the redacted error detail and moves to Dormant.
+	tskNoErr(t, Runner.Turn(t.Context(), h, kGrp, "ok", Turn{Kind: ItemsTurn}))
+	rh.waitCmd(t) // working
+	drv.lastProc().emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitForState(t, h, kGrp, Waiting)
+	rh.waitCmd(t) // waiting
+	drv.lastProc().mu.Lock()
+	drv.lastProc().turnErr = errors.New("broken pipe " + runSecret)
+	drv.lastProc().mu.Unlock()
+	if err := Runner.Turn(t.Context(), h, kGrp, "fail-wait", Turn{Kind: ItemsTurn}); err == nil {
+		t.Fatal("expected waiting write error")
+	}
+	rh.waitCmd(t) // working
+	assertTurnCrashStatus(t, rh.waitCmd(t), "dormant", "", "crash", "broken pipe [redacted]")
+
+	h.Settle()
+	sTask, _ := h.Sessions.Get(kTask)
+	reportLaunchFailure(h, stateOf(h), sTask, errSettling)
+	var msSettle proto.MemberStatus[proto.TurnInterruptedEvent]
+	tskNoErr(t, proto.Decode([]byte(rh.waitCmd(t).raw), &msSettle))
+	if msSettle.Event != nil {
+		t.Fatalf("settling launch failure emitted unexpected event: %+v", msSettle.Event)
+	}
+}
+
+func errFalse(ok bool, msg string) error {
+	if !ok {
+		return errors.New(msg)
+	}
+	return nil
+}
+
+func assertTurnCrashStatus(t *testing.T, cmd recordedCmd, wantState, task, reason, detail string) {
+	t.Helper()
+	var ms proto.MemberStatus[proto.TurnInterruptedEvent]
+	tskNoErr(t, proto.Decode([]byte(cmd.raw), &ms))
+	want := [5]any{wantState, "turn_interrupted", reason, task, detail}
+	var got [5]any
+	if ms.Event != nil {
+		got = [5]any{ms.State, ms.Event.Code, ms.Event.Reason, string(ms.Event.Task), ms.Event.Detail}
+	}
+	if got != want {
+		t.Fatalf("unexpected status %+v (event=%+v), want %v", ms, ms.Event, want)
+	}
+}
+
+func assertRateLimitedCmd(t *testing.T, cmd recordedCmd, resets int64) {
+	t.Helper()
+	var ms proto.MemberStatus[proto.RateLimitedEvent]
+	tskNoErr(t, proto.Decode([]byte(cmd.raw), &ms))
+	if ms.State != "limited" || ms.Event == nil || ms.Event.Code != "rate_limited" || ms.Event.Resets != resets {
+		t.Fatalf("unexpected rate limit status %+v (event=%+v), want resets=%d", ms, ms.Event, resets)
+	}
+}
+
+func assertNoTaskFail(t *testing.T, cmds []recordedCmd) {
+	t.Helper()
+	for _, cmd := range cmds {
+		if cmd.payload["t"] == "task" && cmd.payload["op"] == "fail" {
+			t.Fatalf("unexpected task fail command: %s", cmd.raw)
+		}
+	}
+}
+
+func assertNoEventCode(t *testing.T, cmds []recordedCmd, badCode string) {
+	t.Helper()
+	for _, cmd := range cmds {
+		ev, _ := cmd.payload["event"].(map[string]any)
+		if ev["code"] == badCode {
+			t.Fatalf("unexpected event %q in command: %s", badCode, cmd.raw)
+		}
+	}
+}
+
+func assertTaskFailCmd(t *testing.T, cmd recordedCmd, task, reason, detail string) {
+	t.Helper()
+	var fail proto.TaskFail
+	tskNoErr(t, proto.Decode([]byte(cmd.raw), &fail))
+	if [4]string{fail.Op, string(fail.ID), fail.Reason, fail.Detail} != [4]string{"fail", task, reason, detail} {
+		t.Fatalf("unexpected task fail %+v, want %s/%s/%s", fail, task, reason, detail)
+	}
+}

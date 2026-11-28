@@ -13,10 +13,10 @@
   import type { Points } from '../../lib/mounts.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { nodes } from '../../lib/nodes.svelte';
-  import { accountLabel } from '../../lib/onboard.svelte';
+  import { accountLabel, cliName } from '../../lib/onboard.svelte';
   import { t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
-  import { statusIn } from '../../lib/stop';
+  import { isLoginInvalid, isOffline, statusIn } from '../../lib/stop';
   import { endTakeover, hostHomeOf, terminalTask } from '../../lib/terminal.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
@@ -92,6 +92,19 @@
           <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
         </div>
       </header>
+      {#if mine && ai.state === 'limited' && !isOffline(host) && isLoginInvalid(host, ai.cli)}
+        <div class="note" data-tone="danger" role="status">
+          <Icon name="alert" sm />
+          <div class="grow">
+            <b>{t('member.reauth.title').replace('{cli}', cliName(ai.cli))}</b>
+            {' '}{t('member.reauth.body').replace('{computer}', ai.host_name)}<a
+              href={href('nodes')}
+            >
+              {t('member.reauth.link')}
+            </a>
+          </div>
+        </div>
+      {/if}
       <Profile {group} {ai} suggested={suggestedTier(host, ai)}>
         {#snippet children(share, skillsRow, editProfile)}
           <div

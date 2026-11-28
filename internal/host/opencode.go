@@ -148,6 +148,7 @@ type openCodeProcess struct {
 	base     string
 	session  string
 	status   string // how the running turn ends, from session.error
+	errText  string // error text carried by a failed turn
 	startErr error
 }
 
@@ -307,7 +308,11 @@ func (p *openCodeProcess) failed(session, name, text string) {
 	if cmp.Or(session, p.session) != p.session {
 		return
 	}
-	p.status = map[bool]string{true: "interrupted", false: "failed"}[name == "MessageAbortedError"]
+	aborted := name == "MessageAbortedError"
+	p.status = map[bool]string{true: "interrupted", false: "failed"}[aborted]
+	if !aborted {
+		p.errText = cmp.Or(strings.TrimSpace(text), name)
+	}
 	if name == "ProviderAuthError" {
 		p.events <- Event{Kind: LoginInvalid, Text: text}
 	}
@@ -315,7 +320,8 @@ func (p *openCodeProcess) failed(session, name, text string) {
 
 func (p *openCodeProcess) idle(session string) {
 	if session == p.session {
-		p.events <- Event{Kind: TurnEnded, Status: cmp.Or(p.status, "completed")}
+		p.events <- Event{Kind: TurnEnded, Status: cmp.Or(p.status, "completed"), Text: p.errText}
 		p.status = ""
+		p.errText = ""
 	}
 }

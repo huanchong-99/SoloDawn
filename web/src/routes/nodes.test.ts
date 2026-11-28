@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { flushSync } from 'svelte';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { all, closePage, show } from '../../features/page';
 import { Group, Home, homes } from '../lib/groups.svelte';
 import { goldens } from '../lib/mock';
@@ -42,4 +43,72 @@ it('lists a group that moved on the computer it moved to, and not on the one it 
   show(Nodes, { net });
   const hosted = all('section.node').map((card) => card.querySelector('.kv dd')?.textContent);
   expect(hosted).toEqual([undefined, 'Website']);
+});
+
+it('distinguishes expired login from unconfigured account across pushed host.info without re-fetching on open', async () => {
+  const box = computer('node-1', 'Workstation');
+  const answer = p.decode(p.HostInfo, goldens['host-info-answer']);
+  let calls = 0;
+  box.ctl = {
+    request: vi.fn(async () => {
+      calls += 1;
+      return answer;
+    }) as unknown as p.Ctl['request'],
+  };
+  homes.push(box);
+
+  nodes.sync([box]);
+  await vi.waitFor(() => expect(nodes.infos.get(box)).toBeDefined());
+  expect(calls).toBe(1);
+
+  const net: Net = { source: 'mock', homes, path: () => undefined };
+  show(Nodes, { net });
+  flushSync();
+  expect(calls).toBe(1);
+  expect(
+    all('.card.node .ai-row')
+      .find((el) => el.textContent?.includes('Claude Code'))
+      ?.querySelector('.st')
+      ?.textContent?.trim(),
+  ).toBe('Signed in');
+
+  const push = p.decode(p.HostInfoPush, goldens['host-info-push']);
+  nodes.receive(box, {
+    ...push,
+    device: answer.device,
+    name: answer.name,
+    offline: false,
+    agents: answer.agents.map((a) =>
+      a.agent === 'claude' ? { ...a, account: 'personal', login_ok: false } : a,
+    ),
+  });
+  flushSync();
+
+  const cards = all('.card.node .ai-row');
+  const claudeRow = cards.find((el) => el.textContent?.includes('Claude Code'))!;
+  const codexRow = cards.find((el) => el.textContent?.includes('Codex'))!;
+  expect(claudeRow.querySelector('.st')!.textContent!.trim()).toBe('Sign-in expired');
+  expect(claudeRow.querySelector('.note[data-tone="danger"]')?.textContent).toContain(
+    'Claude Code needs to sign in again.',
+  );
+  expect(claudeRow.querySelector('.note[data-tone="danger"]')?.textContent).toContain(
+    'Run it directly on workstation',
+  );
+  // Codex has account: null and login_ok: false -> stays Not signed in without reauth alert.
+  expect(codexRow.querySelector('.st')!.textContent!.trim()).toBe('Not signed in');
+  expect(codexRow.querySelector('.note[data-tone="danger"]')).toBeNull();
+
+  // Pushing updated host.info with login_ok = true clears the alert immediately.
+  nodes.receive(box, {
+    ...push,
+    device: answer.device,
+    name: answer.name,
+    offline: false,
+  });
+  flushSync();
+  const updatedClaude = all('.card.node .ai-row').find((el) =>
+    el.textContent?.includes('Claude Code'),
+  )!;
+  expect(updatedClaude.querySelector('.st')!.textContent!.trim()).toBe('Signed in');
+  expect(updatedClaude.querySelector('.note[data-tone="danger"]')).toBeNull();
 });

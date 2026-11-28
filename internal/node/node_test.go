@@ -1239,8 +1239,13 @@ func TestNodePushesWatchers(t *testing.T) {
 	checkWatchersPush(t, conn, []string{"watcher"})
 	endWatchGrant(t, n.host, group, member, "watcher")
 	checkWatchersPush(t, conn, []string{})
+	n.host.LoginChanged()
+	var loginPush proto.HostInfoPush
+	mustNoErr(t, proto.Decode(conn.next(t), &loginPush))
+	mustEqual(t, loginPush.Type, "host.info")
 	n.Close()
 	n.host.WatchersChanged()
+	n.host.LoginChanged()
 }
 
 func checkWatchersPush(t *testing.T, conn *fakeCtl, want []string) {

@@ -382,6 +382,8 @@ func TestAgentsLoginStatusTransitions(t *testing.T) {
 		"codex":  {Stdout: "codex-cli 0.164.0\n"},
 	})
 	h, _ := seamHost(t, seamStore(t))
+	var loginChanges int
+	h.LoginChanged = func() { loginChanges++ }
 	claudeKey := SessionKey{Group: "g1", Member: "m1", Task: "t1"}
 	codexKey := SessionKey{Group: "g1", Member: "m2", Task: "t2"}
 	agtCheck(t, h.Sessions.Create(Session{SessionKey: claudeKey, Kind: TaskSession, Folder: "wt/1-a", Agent: "claude", Home: "home-1", Name: "Claude"}))
@@ -399,12 +401,17 @@ func TestAgentsLoginStatusTransitions(t *testing.T) {
 	h.Report(SessionKey{Group: "missing"}, Event{Kind: LoginInvalid})
 	h.Report(claudeKey, Event{Kind: TurnBegan})
 	assertLogin(true, true)
+	agtEqual(t, loginChanges, 0)
 
 	// LoginInvalid marks only that session's agent invalid; a second agent is tracked independently.
 	h.Report(claudeKey, Event{Kind: LoginInvalid, Text: "not signed in"})
 	assertLogin(false, true)
+	agtEqual(t, loginChanges, 1)
+	h.Report(claudeKey, Event{Kind: LoginInvalid, Text: "still not signed in"})
+	agtEqual(t, loginChanges, 1)
 	h.Report(codexKey, Event{Kind: LoginInvalid, Text: "expired token"})
 	assertLogin(false, false)
+	agtEqual(t, loginChanges, 2)
 
 	// Neutral events (Ready included) and a failed TurnEnded keep login_ok false.
 	h.Report(claudeKey, Event{Kind: Ready, Session: "sess-1"})
@@ -412,13 +419,20 @@ func TestAgentsLoginStatusTransitions(t *testing.T) {
 	h.Report(claudeKey, Event{Kind: RateLimited, Resets: seamStart})
 	h.Report(claudeKey, Event{Kind: TurnEnded, Status: "failed"})
 	assertLogin(false, false)
+	agtEqual(t, loginChanges, 2)
 
 	// TurnEnded with status completed or interrupted restores login_ok for that agent only.
 	h.Report(claudeKey, Event{Kind: TurnEnded, Status: "completed"})
 	assertLogin(true, false)
+	agtEqual(t, loginChanges, 3)
 
 	h.Report(codexKey, Event{Kind: TurnEnded, Status: "interrupted"})
 	assertLogin(true, true)
+	agtEqual(t, loginChanges, 4)
+
+	// Completing again when already valid does not re-notify LoginChanged.
+	h.Report(codexKey, Event{Kind: TurnEnded, Status: "completed"})
+	agtEqual(t, loginChanges, 4)
 }
 
 func TestAgentSetAccountsAndAudit(t *testing.T) {
@@ -433,6 +447,8 @@ func TestAgentSetAccountsAndAudit(t *testing.T) {
 	db := seamStore(t)
 	seamSQL(t, db, `INSERT INTO agent(agent, cli_version, caps) VALUES('claude', '2.1.311', '{"day":{"unit":"turns","max":50}}')`)
 	h, _ := seamHost(t, db)
+	var loginChanges int
+	h.LoginChanged = func() { loginChanges++ }
 	now := time.UnixMilli(seamStart)
 	h.Now = func() time.Time { return now }
 
@@ -442,11 +458,13 @@ func TestAgentSetAccountsAndAudit(t *testing.T) {
 	agtEqual(t, standIns.calls("claude"), 1)
 	agtEqual(t, standIns.calls("codex"), 1)
 	h.Report(claudeKey, Event{Kind: LoginInvalid})
+	agtEqual(t, loginChanges, 1)
 
 	// All three valid account types (including setting the same value twice) update the row without probing PATH, preserve caps, and restore login_ok.
 	for _, account := range []string{"personal", "personal", "team", "api_key"} {
 		agtCallSet(t, h, "owner-dev", agtSetPayload("claude", account))
 	}
+	agtEqual(t, loginChanges, 2)
 	agtEqual(t, standIns.calls("claude"), 1)
 	agtEqual(t, standIns.calls("codex"), 1)
 

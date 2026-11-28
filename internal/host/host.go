@@ -89,6 +89,9 @@ type Host struct {
 	// WatchersChanged notifies node when a watch grant is added or ends. It
 	// must not wait.
 	WatchersChanged func()
+	// LoginChanged notifies node when a local CLI's login_ok flag flips. It
+	// must not wait.
+	LoginChanged func()
 	// Shim is the command line that starts this node's MCP shim, without the
 	// token (contracts/local.md section 1). node sets it, so that the CLIs of
 	// two nodes in one process reach each their own node.

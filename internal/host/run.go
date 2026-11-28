@@ -48,6 +48,7 @@ type pendingCrash struct {
 	session    Session
 	reason     string
 	detail     string
+	keepTask   bool
 	statusSent bool
 }
 
@@ -138,10 +139,23 @@ type liveProc struct {
 	interruptDetail string
 	exitWhy         EventKind
 	eventText       string
+	turnErr         atomic.Pointer[string]
 	replacedOK      bool
 	replaceErr      error
 	// Single reader: stopProcess or writeTurnToWaiting.
 	loopDone chan struct{}
+}
+
+func (lp *liveProc) setTurnErr(err error) {
+	s := err.Error()
+	lp.turnErr.Store(&s)
+}
+
+func (lp *liveProc) turnErrText() string {
+	if p := lp.turnErr.Load(); p != nil {
+		return *p
+	}
+	return ""
 }
 
 func (lp *liveProc) triggerClose() {
@@ -393,6 +407,7 @@ func writeTurnToWaiting(h *Host, rt *runtimePart, s Session, lp *liveProc, text 
 	h.Sessions.SetTurn(s.SessionKey, turn)
 	h.Report(s.SessionKey, Event{Kind: TurnBegan})
 	if err := lp.proc.Turn(text); err != nil {
+		lp.setTurnErr(err)
 		lp.cancel()
 		<-lp.loopDone
 		return err
@@ -425,11 +440,19 @@ func startFromDormant(h *Host, rt *runtimePart, s Session, cfg launchConfig, tex
 	if err != nil {
 		h.Sessions.Move(fresh.SessionKey, Working, Dormant)
 		rt.notify()
-		sendMemberStatus(context.Background(), h, rt, fresh.Home, fresh.Group, fresh.Member, nil)
+		reportLaunchFailure(h, rt, fresh, err)
 		return err
 	}
 	sendMemberStatus(context.Background(), h, rt, fresh.Home, fresh.Group, fresh.Member, nil)
 	return deliverInitialTurn(h, lp, text, turn)
+}
+
+func reportLaunchFailure(h *Host, rt *runtimePart, s Session, err error) {
+	if errors.Is(err, errSettling) {
+		sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, nil)
+		return
+	}
+	reportOrQueueCrash(context.Background(), h, rt, pendingCrash{session: s, detail: eventDetail(err.Error())})
 }
 
 // missingFolder is empty while the session's folder exists, and otherwise
@@ -446,7 +469,7 @@ func missingFolder(s Session) string {
 // session fails its task (flows/agent-turn.md E). A dormant session stays so.
 func failStart(h *Host, rt *runtimePart, s Session, gone string) error {
 	h.Sessions.Move(s.SessionKey, s.State, Dormant)
-	reportOrQueueCrash(context.Background(), h, rt, pendingCrash{session: s, detail: RedactSecrets(gone)})
+	reportOrQueueCrash(context.Background(), h, rt, pendingCrash{session: s, detail: eventDetail(gone)})
 	return &Error{"cli", gone}
 }
 
@@ -464,6 +487,7 @@ func deliverInitialTurn(h *Host, lp *liveProc, text string, turn Turn) error {
 	if err == nil {
 		return nil
 	}
+	lp.setTurnErr(err)
 	stopProcess(lp)
 	if lp.replacedOK {
 		return nil
@@ -556,9 +580,9 @@ func handleProcessEvent(h *Host, rt *runtimePart, lp *liveProc, e Event) {
 	case Ready:
 		onProcessReady(h, lp.key, e)
 	case NoSession:
-		onProcessNoSession(h, lp, e)
+		onProcessNoSession(h, rt, lp, e)
 	case LoginInvalid:
-		onProcessLoginInvalid(h, lp, e)
+		onProcessLoginInvalid(h, rt, lp, e)
 	case TurnEnded:
 		onProcessTurnEnded(h, rt, lp, slot, e)
 	default:
@@ -573,6 +597,20 @@ func noteEventText(lp *liveProc, text string) {
 	}
 }
 
+func (rt *runtimePart) markProcessExit(lp *liveProc, why EventKind, text string) {
+	rt.mu.Lock()
+	lp.exitWhy = why
+	rt.mu.Unlock()
+	noteEventText(lp, text)
+	lp.triggerClose()
+}
+
+func (rt *runtimePart) hasExitWhy(lp *liveProc) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return lp.exitWhy != ""
+}
+
 func onProcessReady(h *Host, key SessionKey, e Event) {
 	if e.Session != "" {
 		setID := func(s *Session) { s.CLISession = e.Session }
@@ -581,38 +619,39 @@ func onProcessReady(h *Host, key SessionKey, e Event) {
 	h.Report(key, e)
 }
 
-func onProcessNoSession(h *Host, lp *liveProc, e Event) {
+func onProcessNoSession(h *Host, rt *runtimePart, lp *liveProc, e Event) {
 	h.Report(lp.key, e)
 	if lp.resumed {
-		lp.exitWhy = NoSession
-		lp.triggerClose()
+		rt.markProcessExit(lp, NoSession, "")
 	}
 }
 
-func onProcessLoginInvalid(h *Host, lp *liveProc, e Event) {
-	lp.exitWhy = LoginInvalid
-	noteEventText(lp, e.Text)
-	lp.triggerClose()
+func onProcessLoginInvalid(h *Host, rt *runtimePart, lp *liveProc, e Event) {
+	rt.markProcessExit(lp, LoginInvalid, e.Text)
 	h.Report(lp.key, e)
 }
 
 func onProcessTurnEnded(h *Host, rt *runtimePart, lp *liveProc, slot aiSlot, e Event) {
 	h.Report(lp.key, e)
-	why, detail, ok := finishActiveTurn(rt, lp, slot)
-	if lp.exitWhy != "" || !ok {
+	if rt.hasExitWhy(lp) {
 		return
 	}
+	why, detail, ok := finishActiveTurn(rt, lp, slot, e.Status != "failed")
+	if !ok {
+		return
+	}
+	failedText := cmp.Or(e.Text, lp.eventText)
 	lp.resumed = false
 	lp.eventText = ""
 	idle := readIdleDuration(h)
 	h.Sessions.Move(lp.key, Working, Waiting)
 	armTurnIdle(h, rt, lp, idle)
-	reportFinishedTurn(h, rt, lp.session, reportedWhy(why), detail)
+	reportTurnResult(h, rt, lp.session, reportedWhy(why), detail, e.Status == "failed", failedText)
 	rt.notify()
 	rt.startBackground(h, "deliver", func() { Deliver(h, slot.group, slot.member) }, "g", slot.group)
 }
 
-func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot) (string, string, bool) {
+func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot, clearLimit bool) (string, string, bool) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	if !lp.turnActive {
@@ -622,7 +661,9 @@ func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot) (string, strin
 	lp.stopInterruptTimer()
 	why, detail := lp.interruptWhy, lp.interruptDetail
 	lp.interruptWhy, lp.interruptDetail = "", ""
-	delete(rt.limited, slot)
+	if clearLimit {
+		delete(rt.limited, slot)
+	}
 	return why, detail, true
 }
 
@@ -630,7 +671,19 @@ func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot) (string, strin
 // rate_limited event that came during it, or as an interrupt (why: stop or
 // timeout, which also fails a task).
 func reportFinishedTurn(h *Host, rt *runtimePart, s Session, why, detail string) {
+	reportTurnResult(h, rt, s, why, detail, false, "")
+}
+
+// reportTurnResult handles member status at turn end, adding a visible
+// turn_interrupted notice without closing the CLI or failing the task when a
+// CLI stays open after returning status "failed" (without rate_limited).
+func reportTurnResult(h *Host, rt *runtimePart, s Session, why, detail string, failed bool, failedText string) {
 	ev := takePendingLimitEvent(h, s.SessionKey)
+	if why == "" && ev == nil && failed {
+		c := pendingCrash{session: s, reason: "crash", detail: eventDetail(failedText), keepTask: true}
+		reportOrQueueCrash(context.Background(), h, rt, c)
+		return
+	}
 	if why == "" {
 		sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, ev)
 		return
@@ -667,7 +720,7 @@ func claimTurnInterrupt(rt *runtimePart, key SessionKey, reason, detail string) 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	lp := rt.procs[key]
-	if lp == nil || !lp.turnActive || rt.closing[key] || lp.interruptWhy != "" {
+	if lp == nil || !lp.turnActive || rt.closing[key] || lp.interruptWhy != "" || lp.exitWhy != "" {
 		return nil
 	}
 	lp.interruptWhy, lp.interruptDetail = reason, detail
@@ -882,7 +935,7 @@ func finishTurnProcessExit(h *Host, rt *runtimePart, lp *liveProc) {
 	if lp.exitWhy == LoginInvalid {
 		finishLoginInvalid(h, rt, lp.session, slot, lp.eventText)
 	} else {
-		detail := cmp.Or(RedactSecrets(lp.eventText), intrDetail)
+		detail := eventDetail(cmp.Or(lp.eventText, intrDetail, lp.turnErrText()))
 		c := pendingCrash{session: lp.session, reason: reportedWhy(why), detail: detail}
 		sendCrashStep(context.Background(), h, rt, &c)
 	}
@@ -912,9 +965,20 @@ func endTurnExitClose(rt *runtimePart, key SessionKey) {
 func finishLoginInvalid(h *Host, rt *runtimePart, s Session, slot aiSlot, text string) {
 	var ev any
 	if rt.enterLimited(slot) {
-		ev = proto.LoginInvalidEvent{SystemCode: proto.SystemCode{Code: "login_invalid"}, Detail: RedactSecrets(text)}
+		ev = proto.LoginInvalidEvent{SystemCode: proto.SystemCode{Code: "login_invalid"}, Detail: eventDetail(text)}
 	}
 	sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, ev)
+}
+
+// eventDetail redacts secrets and keeps the first non-empty line for brief
+// failure notices.
+func eventDetail(text string) string {
+	for _, line := range strings.Split(RedactSecrets(text), "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (rt *runtimePart) enterLimited(slot aiSlot) bool {
@@ -1077,13 +1141,17 @@ func sendCrashStep(ctx context.Context, h *Host, rt *runtimePart, c *pendingCras
 		}
 		c.statusSent = true
 	}
-	if s.Kind != TaskSession || reason == "stop" {
+	if shouldSkipTaskFail(c, reason) {
 		return true
 	}
 	hdr := homeHeader(h, s.Group, "", "task")
 	fail := proto.TaskFail{TaskCommand: proto.TaskCommand{HomeCommand: hdr, Op: "fail", ID: proto.ID(s.Task)}, Reason: reason, Detail: c.detail}
 	_, err := h.Command(ctx, s.Home, marshalWire(fail))
 	return !isUnreachable(err)
+}
+
+func shouldSkipTaskFail(c *pendingCrash, reason string) bool {
+	return c.keepTask || c.session.Kind != TaskSession || reason == "stop"
 }
 
 func isUnreachable(err error) bool {

@@ -744,4 +744,26 @@ describe('Nodes', () => {
     await call;
     expect(store.infos.get(home)!.offline).toBe(true);
   });
+
+  it('applies pushed host.info only for online owner homes and updates infos without re-firing onhomes', () => {
+    const store = new Nodes();
+    const owner = new Home(me);
+    const foreign = new Home(me);
+    const offline = new Home(me);
+    connectHome(owner, { owner: true, device: deviceId });
+    connectHome(foreign, { owner: false, device: deviceId });
+    const seenHomes: p.HostInfoPush['homes'][] = [];
+    owner.onhomes = (list) => seenHomes.push(list);
+    foreign.onhomes = (list) => seenHomes.push(list);
+    const push = p.decode(p.HostInfoPush, goldens['host-info-push']);
+
+    store.receive(foreign, push);
+    store.receive(offline, push);
+    expect(store.infos.size).toBe(0);
+    expect(seenHomes).toEqual([]);
+
+    store.receive(owner, push);
+    expect(store.infos.get(owner)).toStrictEqual(push);
+    expect(seenHomes).toEqual([]);
+  });
 });

@@ -24,6 +24,12 @@ export function taskTag(group: Group, id: string) {
 
 const turnKey = (reason: string) => (reason === 'crash' || reason === 'timeout' ? reason : 'stop');
 
+const firstLine = (text: string | undefined) =>
+  text
+    ?.split('\n')
+    .map((line) => line.trim())
+    .find(Boolean);
+
 function removed(group: Group, name: string, by: string | undefined) {
   if (by === undefined) return t('thread.sys.member_left').replace('{who}', () => name);
   return t('thread.sys.member_removed')
@@ -42,12 +48,12 @@ const words: { [B in Body as B['code']]?: Wording<B> } = {
     join(
       t(`thread.sys.turn_interrupted.${turnKey(reason)}`).replace('{ai}', () => who(group, ai)),
       task && taskTag(group, task),
-      detail,
+      firstLine(detail),
     ),
   login_invalid: (group, { ai, detail }) =>
     join(
       t('thread.sys.login_invalid').replace('{ai}', () => who(group, ai)),
-      detail,
+      firstLine(detail),
     ),
   session_replaced: (group, { ai, task }) =>
     join(

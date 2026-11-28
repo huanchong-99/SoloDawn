@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { all, closePage, one, show, texts } from '../../../features/page';
 import { Group, Home } from '../../lib/groups.svelte';
 import { goldens } from '../../lib/mock';
+import { nodes } from '../../lib/nodes.svelte';
 import { prefs } from '../../lib/prefs.svelte';
 import * as p from '../../lib/proto';
 import MemberPanel from './MemberPanel.svelte';
@@ -12,20 +13,32 @@ const golden = p.decode(p.AIMemberRow, goldens['row-member-ai']);
 
 /** A group's panel, read by its owner or, with `role`, by another person of that role, who owns
  *  none of the AIs. */
-function setup(changes: Partial<p.AIMemberRow> = {}, role?: string) {
+function setup(changes: Partial<p.AIMemberRow> = {}, role?: string, hostHome?: (h: Home) => void) {
   const home = new Home({
     user: role ? 'reader' : human.user,
     sign: async (payload) => ({ p: payload, k: 'key', s: 'signature' }),
   });
+  hostHome?.(home);
   const group = new Group(home, human.g);
   const ai: p.AIMemberRow = { ...golden, user: human.user, secretary: false, ...changes };
   const reader = { ...human, id: 'reader', user: 'reader', name: 'Reader', role: role ?? 'member' };
   group.apply([p.decode(p.GroupRow, goldens['row-group']), human, reader, ai]);
   home.groups = [group];
-  const request = vi.fn().mockResolvedValue({ re: 1, ok: true });
-  home.ctl = { request: request as p.Ctl['request'] };
-  show(MemberPanel, { group, net: { source: 'mock', homes: [], path: () => undefined } });
-  return { group, ai, home, request };
+  const base = p.decode(p.HostInfoPush, goldens['host-info-push']);
+  const expiredInfo: p.HostInfoPush = {
+    ...base,
+    offline: false,
+    agents: base.agents.map((a) => (a.agent === 'claude' ? { ...a, login_ok: false } : a)),
+  };
+  const request = vi.fn(async (req: { t: string; env: p.Envelope }): Promise<any> =>
+    req.t === 'host.info' ? { re: 1, ok: true, ...expiredInfo } : { re: 1, ok: true },
+  );
+  home.ctl = { request: request as unknown as p.Ctl['request'] };
+  show(MemberPanel, {
+    group,
+    net: { source: 'mock', homes: hostHome ? [home] : [], path: () => undefined },
+  });
+  return { group, ai, home, request, expiredInfo };
 }
 
 const removal = () =>
@@ -41,7 +54,10 @@ async function press() {
 beforeEach(() => {
   prefs.lang = 'en';
 });
-afterEach(closePage);
+afterEach(async () => {
+  nodes.infos.clear();
+  await closePage();
+});
 
 it.each(['claude', 'codex', 'opencode', 'qwen', 'external'])(
   'removes a %s AI after a second press by its owner',
@@ -136,4 +152,31 @@ it('shows the turns of today as plain text and a share of the limit as a meter',
   group.apply([{ ...ai, usage: { turns_today: 15, window_pct: 40 }, seq: ai.seq + 1 }]);
   flushSync();
   expect(texts('.member [role=meter]')).toEqual(['Quota used this window40%']);
+});
+
+it('prompts the owner to re-sign in when a limited AI has login_ok false on its online computer', async () => {
+  const { home, ai, expiredInfo } = setup(
+    {
+      cli: 'claude',
+      state: 'limited',
+      host: golden.host,
+      host_name: 'Studio',
+    },
+    undefined,
+    (h) => {
+      h.device = golden.host;
+      h.owner = true;
+    },
+  );
+  nodes.infos.set(home, expiredInfo);
+  await vi.waitFor(() => {
+    flushSync();
+    expect(one('.member p.st').textContent!.trim()).toBe('Limited · sign-in expired');
+  });
+  const note = one('.member .note[data-tone="danger"]');
+  expect(note.textContent).toContain('Claude Code needs to sign in again.');
+  expect(note.textContent).toContain('Run it directly on Studio');
+  expect(note.querySelector('a')?.getAttribute('href')).toBe('#/nodes');
+  expect(home.device).toBe(golden.host);
+  expect(ai.cli).toBe('claude');
 });
