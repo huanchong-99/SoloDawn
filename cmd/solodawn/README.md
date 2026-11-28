@@ -16,7 +16,7 @@ registers, and turns the result into an exit code. The command line is specified
 
 | File | Holds |
 | --- | --- |
-| `main.go` | `main`, `run` (looks the first word up in `node.Subcommands`), and the registration of `rendezvous`, `pair`, `version`, `node`, `mcp`, `status`, `pair-browser` and `open` |
+| `main.go` | `main`, `run` (handles top-level `-h`/`--help` and looks the first word up in `node.Subcommands`), and the registration of `rendezvous`, `pair`, `version`, `node`, `help`, `mcp`, `status`, `pair-browser` and `open` |
 | `service.go` | `service install` and `service remove` |
 | `Info.plist` | The identity `org.solodawn.node` that the release build embeds in the macOS binaries and signs them with (`.github/workflows/release.yml`), so the macOS firewall tells `solodawn` from other Go programs |
 
@@ -25,16 +25,20 @@ themselves from `internal/node`; this package does not name them.
 
 ## Invariants
 
+- `solodawn --help`, `solodawn -h`, `solodawn help`, `solodawn node --help`, and
+  `solodawn node -h` print help text (including how to start `solodawn node` and
+  `http://localhost:47800`) to stdout and exit 0 without contacting a running node.
 - An empty command line and an unknown first word print `usage: solodawn <command> [arguments]` to
-  stderr and exit 2; so does a wrong argument of any command registered in `main.go` except
+  stderr and exit 2; so does a wrong or extra argument of any command registered in `main.go` except
   `rendezvous` (and `service` in `service.go`). `rendezvous` prints the flag package's own message
   and usage for a bad flag or an extra argument and exits 2. `group` prints its own usage
   (`usage: solodawn group export ...`); `mcp` (`internal/host`), `wait` and `done` print
   `usage: solodawn <command> [arguments]` and exit 2. Success exits 0 and a failed command exits 1; its error
   is printed to stderr on one line (CR and LF become spaces).
-- `version`, `node`, `status`, `pair-browser` and `open` take no arguments. `status`,
+- `version`, `help`, `status`, `pair-browser` and `open` take no arguments; `node` takes only
+  optional `-h` or `--help`. `status`,
   `pair-browser` and `open` talk to the running node through its local socket and fail when none
-  runs; `version` and `service` need no running node. `pair` is the only command that starts a node
+  runs; `version`, `help` and `service` need no running node. `pair` is the only command that starts a node
   when none runs (`dialOrStart`, `internal/node/cmd.go`).
 - `pair <secret> [--name <label>] [--rendezvous <url>]`: the secret is the first word and does not
   start with `-`. Without `--name` the label is the computer's host name.

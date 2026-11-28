@@ -57,6 +57,21 @@ func cmdSteps(sc *godog.ScenarioContext, f fixtures) {
 		}
 		return nil
 	})
+	sc.Step(`^it prints on stdout with exit code (\d+) including:$`, func(want int, table *godog.Table) error {
+		return checkStdoutIncludes(stdout.String(), stderr.String(), code, want, table)
+	})
+}
+
+func checkStdoutIncludes(stdout, stderr string, code, want int, table *godog.Table) error {
+	if stderr != "" || code != want {
+		return fmt.Errorf("got stdout %q, stderr %q, exit code %d", stdout, stderr, code)
+	}
+	for _, row := range table.Rows {
+		if !strings.Contains(stdout, row.Cells[0].Value) {
+			return fmt.Errorf("stdout %q missing %q", stdout, row.Cells[0].Value)
+		}
+	}
+	return nil
 }
 
 // TestFeatures runs every scenario in this directory except @web; the vitest-cucumber suite under web/ runs those.

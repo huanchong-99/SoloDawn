@@ -77,6 +77,31 @@ is not a copy. If your project uses Git, commit or set aside your own
 changes before you give the folder to an AI. If the AI uses Git, it does so
 by the project's own rules, so `git` must be installed for that.
 
+## Start the node
+
+If you are following an onboarding prompt from a browser page (including an AI
+assistant running setup commands): skip this section and go straight to "Pair
+with the browser". Do not run `solodawn node` in your shell — it runs in the
+foreground and never exits. In the pairing flow, `solodawn pair` starts the
+node in the background by itself when none is running yet.
+
+If you are a person setting up on this computer by hand without an existing
+browser page, start the node in a terminal and keep that terminal open:
+
+```text
+solodawn node
+```
+
+The node serves the web client and its built-in `/rv` signalling endpoint at
+`http://localhost:47800` (falling back to another free port if `47800` is in
+use). Open `http://localhost:47800` in your browser to reach the onboarding page
+and copy its pairing prompt, then run `solodawn pair` in another terminal. Keep
+`--rendezvous <url>` when following the page's prompt; when this node is the
+one serving the local page, `solodawn pair <secret> --name "<label>"` also
+works with `--rendezvous` omitted. Do not run `solodawn open` before pairing: it
+is refused until the node has an owner. Run `solodawn --help` or
+`solodawn node --help` for the command list and startup details.
+
 ## Pair with the browser
 
 Run `solodawn version` and confirm it prints the tag you downloaded.

@@ -77,8 +77,15 @@ func TestRun(t *testing.T) {
 		{[]string{"rendezvous", "--listen", "bad", "--unknown"}, 2, "", "flag provided but not defined: -unknown\n" + flags},
 		{[]string{"rendezvous", "--listen", "bad"}, 1, "", "listen tcp: address bad: missing port in address\n"},
 		{[]string{"unknown"}, 2, "", usage},
+		{[]string{"--unknown"}, 2, "", usage},
+		{[]string{"--help", "extra"}, 2, "", usage},
+		{[]string{"-h", "extra"}, 2, "", usage},
+		{[]string{"help", "extra"}, 2, "", usage},
 		{[]string{"version", "extra"}, 2, "", usage},
 		{[]string{"node", "extra"}, 2, "", usage},
+		{[]string{"node", "--help", "extra"}, 2, "", usage},
+		{[]string{"node", "-h", "extra"}, 2, "", usage},
+		{[]string{"node", "--unknown"}, 2, "", usage},
 		{[]string{"status", "extra"}, 2, "", usage},
 		{[]string{"pair"}, 2, "", usage},
 		{[]string{"pair", ""}, 2, "", usage},
@@ -252,4 +259,63 @@ func TestMCPRoundTrip(t *testing.T) {
 	if got := <-received; got != "{\"mcp\":\"tok-9\"}\n" {
 		t.Fatalf("mcp opening = %q", got)
 	}
+}
+
+func TestHelpMentionsNodeStartAndLocalPage(t *testing.T) {
+	mainNeeds := []string{
+		"usage: solodawn <command> [arguments]",
+		"solodawn node",
+		"http://localhost:47800",
+		"pair <secret>",
+		"pair-browser",
+		"open",
+		"status",
+		"service",
+		"group",
+		"rendezvous",
+		"version",
+		"mcp",
+		"wait",
+		"done",
+		"help",
+		"--help",
+	}
+	var topOuts []string
+	for _, args := range [][]string{{"--help"}, {"-h"}, {"help"}} {
+		topOuts = append(topOuts, assertHelpOutput(t, args, mainNeeds))
+	}
+	if topOuts[0] != topOuts[1] || topOuts[0] != topOuts[2] {
+		t.Errorf("--help, -h, and help outputs differ")
+	}
+
+	nodeNeeds := []string{
+		"usage: solodawn node",
+		"solodawn node",
+		"http://localhost:47800",
+		"solodawn pair",
+		"solodawn open",
+	}
+	var nodeOuts []string
+	for _, args := range [][]string{{"node", "--help"}, {"node", "-h"}} {
+		nodeOuts = append(nodeOuts, assertHelpOutput(t, args, nodeNeeds))
+	}
+	if nodeOuts[0] != nodeOuts[1] {
+		t.Errorf("node --help and node -h outputs differ")
+	}
+}
+
+func assertHelpOutput(t *testing.T, args []string, wants []string) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := run(args, &stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("run(%q) = %d, stdout %q, stderr %q; want 0 and empty stderr", args, code, stdout.String(), stderr.String())
+	}
+	got := stdout.String()
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Errorf("run(%q) stdout missing %q:\n%s", args, want, got)
+		}
+	}
+	return got
 }
