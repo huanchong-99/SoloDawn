@@ -306,9 +306,15 @@
     align-items: center;
     justify-content: center;
     gap: 2px 6px;
+    max-width: var(--card-w);
+    margin-inline: auto;
     margin-top: var(--sp-3);
     font-size: var(--fs-xs);
     text-align: center;
+  }
+  .sys > :global(.sys-row) :global(p) {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   /* A quiet line of the home: centred, small, no chip. */
   .note {

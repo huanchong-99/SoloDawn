@@ -191,11 +191,34 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     await syncNode(laptop);
   }
 
-  /** The folder list of the chosen AI has been read, and its newest folder taken. */
-  const folderTaken = () =>
-    vi.waitFor(() => expect(one('dialog .path-row code').textContent).toContain('/home/dev/'));
+  /** Waits for the folder picker to load, confirms "No folder chosen" + "Choose", opens the
+   *  picker dialog, confirms the pre-highlighted folder, and waits for "Change". */
+  async function confirmFolder(scope: Element = one('dialog')) {
+    const btn = () => scope.querySelector<HTMLButtonElement>('.path-row .change')!;
+    const picker = () => scope.querySelector<HTMLDialogElement>(':scope dialog[open]');
+    const useBtn = () => picker()?.querySelector<HTMLButtonElement>('footer .btn-primary') ?? null;
+    await vi.waitFor(() => {
+      flushSync();
+      expect(read(scope.querySelector('.path-row code')!)).toBe('No folder chosen');
+      expect(read(btn())).toBe('Choose');
+    });
+    btn().click();
+    flushSync();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(useBtn()?.disabled).toBe(false);
+    });
+    useBtn()!.click();
+    flushSync();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(picker()).toBeNull();
+      expect(scope.querySelector('.path-row code')!.textContent).toContain('/home/dev/');
+      expect(read(btn())).toBe('Change');
+    });
+  }
 
-  /** Opens "Add AI" and chooses Codex on the laptop, with its folder taken. */
+  /** Opens "Add AI" and chooses Codex on the laptop, confirming its pre-highlighted folder. */
   async function chooseLaptopCodex() {
     one<HTMLButtonElement>('.members .head button').click();
     flushSync();
@@ -203,7 +226,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     flushSync();
     all<HTMLInputElement>('dialog .choice input')[2].click();
     flushSync();
-    await folderTaken();
+    await confirmFolder();
   }
   const submitDialog = () =>
     one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -810,6 +833,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           all<HTMLInputElement>('dialog .choice input')[2].click();
           flushSync();
           expect(one<HTMLInputElement>('dialog input[required]').value).toBe('Codex');
+          await confirmFolder();
         },
       );
       When(
@@ -932,13 +956,12 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     flushSync();
     await vi.waitFor(() => expect(aiRows()).toHaveLength(rows));
   }
-  /** Ticks "Claude Code" on the workstation and waits for its folder. */
+  /** Ticks "Claude Code" on the workstation and confirms its pre-highlighted folder. */
   async function tickWorkstationClaude() {
-    aiRow('Claude Code', 'workstation').querySelector('input')!.click();
+    const row = aiRow('Claude Code', 'workstation');
+    row.querySelector('input')!.click();
     flushSync();
-    await vi.waitFor(() =>
-      expect(one('dialog .ai-fields .path-row code').textContent).toContain('/home/dev/'),
-    );
+    await confirmFolder(row);
   }
   /** Names the group and the owner, and submits the dialog. */
   function createAs(group: string, member: string) {
@@ -968,20 +991,32 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           ];
         },
       );
-      When(
-        'the owner opens "Add AI" with "Claude Code · workstation" chosen and opens its folder list',
-        async () => {
-          one<HTMLButtonElement>('.members .head button').click();
+      When('the owner opens "Add AI" with "Claude Code · workstation" chosen', async () => {
+        one<HTMLButtonElement>('.members .head button').click();
+        flushSync();
+        await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(2));
+        await vi.waitFor(() => {
           flushSync();
-          await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(2));
-          await folderTaken();
-          one<HTMLButtonElement>('dialog .path-row .change').click();
-          await vi.waitFor(() => expect(all('dialog dialog .pick-row')).toHaveLength(2));
-          flushSync();
-        },
-      );
+          expect(read(one('dialog .path-row code'))).toBe('No folder chosen');
+        });
+      });
+      Then('the folder shows "No folder chosen" with "Choose" and "Add AI" is disabled', () => {
+        const btn = one<HTMLButtonElement>('dialog .path-row .change');
+        expect(read(one('dialog .path-row code'))).toBe('No folder chosen');
+        expect(read(btn)).toBe('Choose');
+        expect(btn.getAttribute('aria-label')).toBe('Choose the folder of Claude Code 2');
+        expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(true);
+      });
+      When('the owner opens its folder list', async () => {
+        one<HTMLButtonElement>('dialog .path-row .change').click();
+        await vi.waitFor(() => {
+          expect(one<HTMLDialogElement>('dialog dialog').open).toBe(true);
+          expect(all('dialog dialog .pick-row')).toHaveLength(2);
+        });
+        flushSync();
+      });
       Then(
-        '"/home/dev/website" is chosen and says "Claude Code works here too", and "/home/dev/notes" cannot be chosen and says "Taken by the group Docs"',
+        '"/home/dev/website" is pre-highlighted and says "Claude Code works here too", and "/home/dev/notes" cannot be chosen and says "Taken by the group Docs"',
         () => {
           expect(folderRows()).toEqual([
             {
@@ -999,29 +1034,55 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           ]);
         },
       );
-      When('the owner types "/home/dev/notes" as another folder and takes it', () => {
-        fill(one<HTMLInputElement>('dialog dialog input.mono'), '/home/dev/notes');
-        one<HTMLButtonElement>('dialog dialog footer .btn-primary').click();
+      When('the owner closes the list without confirming', () => {
+        one<HTMLButtonElement>('dialog dialog footer .btn-ghost').click();
         flushSync();
       });
+      Then('the folder still shows "No folder chosen" with "Choose"', () => {
+        expect(all('dialog dialog')).toEqual([]);
+        expect(read(one('dialog .path-row code'))).toBe('No folder chosen');
+        expect(read(one('dialog .path-row .change'))).toBe('Choose');
+        expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(true);
+      });
+      When(
+        'the owner reopens its folder list, types "/home/dev/notes" as another folder and takes it',
+        async () => {
+          one<HTMLButtonElement>('dialog .path-row .change').click();
+          await vi.waitFor(() => {
+            expect(one<HTMLDialogElement>('dialog dialog').open).toBe(true);
+            expect(all('dialog dialog .pick-row')).toHaveLength(2);
+          });
+          flushSync();
+          fill(one<HTMLInputElement>('dialog dialog input.mono'), '/home/dev/notes');
+          one<HTMLButtonElement>('dialog dialog footer .btn-primary').click();
+          flushSync();
+        },
+      );
       Then(
-        'the list says "This folder belongs to the group Docs. Choose another one." and the folder stays "/home/dev/website"',
+        'the list says "This folder belongs to the group Docs. Choose another one." and the folder stays "No folder chosen"',
         () => {
           expect(texts('dialog dialog [role=alert]')).toEqual([
             'This folder belongs to the group Docs. Choose another one.',
           ]);
           expect(one<HTMLDialogElement>('dialog dialog').open).toBe(true);
-          expect(read(one('dialog .path-row code'))).toBe('/home/dev/website');
+          expect(read(one('dialog .path-row code'))).toBe('No folder chosen');
         },
       );
-      When('the owner closes the list', () => {
-        one<HTMLButtonElement>('dialog dialog footer .btn-ghost').click();
+      When('the owner clears the typed folder and presses "Use this folder"', () => {
+        fill(one<HTMLInputElement>('dialog dialog input.mono'), '');
+        flushSync();
+        one<HTMLButtonElement>('dialog dialog footer .btn-primary').click();
         flushSync();
       });
       Then(
-        'the dialog says the folder is shared with Claude Code and takes one task at a time',
+        'the folder shows "/home/dev/website" with "Change", "Add AI" is enabled, and the dialog says the folder is shared with Claude Code and takes one task at a time',
         () => {
           expect(all('dialog dialog')).toEqual([]);
+          expect(read(one('dialog .path-row code'))).toBe('/home/dev/website');
+          const btn = one<HTMLButtonElement>('dialog .path-row .change');
+          expect(read(btn)).toBe('Change');
+          expect(btn.getAttribute('aria-label')).toBe('Change the folder of Claude Code 2');
+          expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(false);
           expect(texts('dialog .folder .hint')).toEqual([
             'Shared with Claude Code: the folder takes one task at a time.',
           ]);
@@ -1089,8 +1150,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
         await vi.waitFor(() =>
           expect(texts('dialog .ai-fields .path-row code')).toEqual([
-            '/home/dev/notes',
-            '/home/dev/website',
+            'No folder chosen',
+            'No folder chosen',
           ]),
         );
         // Turn off following defaults for both AIs so their model and work-share controls are shown.
@@ -1098,8 +1159,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then(
-        '"Claude Code" is the secretary, "Codex" is not, each secretary choice is named for its AI, and each AI has the newest folder that no other group has',
+        'each AI shows "No folder chosen" with "Choose", "Create group" is disabled, "Claude Code" is the secretary, "Codex" is not, and each secretary choice is named for its AI',
         () => {
+          expect(texts('dialog .ai-fields .path-row code')).toEqual([
+            'No folder chosen',
+            'No folder chosen',
+          ]);
+          expect(texts('dialog .ai-fields .path-row .change')).toEqual(['Choose', 'Choose']);
+          expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(true);
           const radios = all<HTMLInputElement>('dialog .ai-fields .check input[type=radio]');
           expect(radios.map((radio) => radio.checked)).toEqual([true, false]);
           expect(new Set(radios.map((radio) => radio.name)).size).toBe(1);
@@ -1110,6 +1177,21 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(
             all<HTMLInputElement>('dialog .ai-fields input[required]').map((input) => input.value),
           ).toEqual(['Claude Code', 'Codex']);
+        },
+      );
+      When('the owner confirms the pre-highlighted folder for each AI', async () => {
+        await confirmFolder(aiRow('Claude Code', 'workstation'));
+        await confirmFolder(aiRow('Codex', 'laptop'));
+      });
+      Then(
+        'each AI has the newest folder that no other group has, with "Change", and "Create group" is enabled',
+        () => {
+          expect(texts('dialog .ai-fields .path-row code')).toEqual([
+            '/home/dev/notes',
+            '/home/dev/website',
+          ]);
+          expect(texts('dialog .ai-fields .path-row .change')).toEqual(['Change', 'Change']);
+          expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(false);
         },
       );
       And('only "Codex", not the secretary, offers a work share, at "Normal"', () =>
@@ -1412,14 +1494,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           await openNewGroup(4);
           one<HTMLInputElement>('dialog .part:first-of-type input[type=checkbox]').click();
           await tickWorkstationClaude();
-          aiRow('Codex', 'laptop').querySelector('input')!.click();
+          const codexRow = aiRow('Codex', 'laptop');
+          codexRow.querySelector('input')!.click();
           flushSync();
-          await vi.waitFor(() =>
-            expect(texts('dialog .ai-fields .path-row code')).toEqual([
-              '/home/dev/notes',
-              '/home/dev/website',
-            ]),
-          );
+          await confirmFolder(codexRow);
+          expect(texts('dialog .ai-fields .path-row code')).toEqual([
+            '/home/dev/notes',
+            '/home/dev/website',
+          ]);
           createAs('Studio', 'Alex');
           await vi.waitFor(() => expect(all('dialog [role=status]')).toHaveLength(1));
         },
@@ -1476,7 +1558,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(4));
       all<HTMLInputElement>('dialog .choice input')[2].click();
       flushSync();
-      await folderTaken();
+      await confirmFolder();
       laptop.drop();
       flushSync();
       one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -1521,7 +1603,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       );
       all<HTMLInputElement>('dialog .choice input')[2].click();
       flushSync();
-      await folderTaken();
+      await confirmFolder();
       one('dialog[open] form').dispatchEvent(
         new Event('submit', { bubbles: true, cancelable: true }),
       );
@@ -1572,7 +1654,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       claudeChoice.click();
       flushSync();
     }
-    await folderTaken();
+    await confirmFolder();
   }
 
   Scenario("A new AI follows the computer's defaults", ({ Given, When, Then, And }) => {
@@ -1677,7 +1759,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
         choices[4].click();
         flushSync();
-        await folderTaken();
+        await confirmFolder();
         expect(all('dialog [role="switch"]')).toHaveLength(0);
         expect(all('dialog .custom-fields')).toHaveLength(1);
         choose(one<HTMLSelectElement>('dialog .custom-fields select'), 'API key');

@@ -152,7 +152,7 @@ describe('V3: Three AIs requirement', () => {
       const members = page.locator('#chat-side .members');
       await poll(() => members.locator('.member').count()).toBe(2);
       await poll(() => page.locator('.line .need-ais').textContent()).toContain(
-        'Add at least 2 working AIs besides the secretary via Add AI',
+        'Before tasks can start, add 2 working AIs besides the secretary',
       );
 
       // Request triggers secretary, which posts a plain message in main line (not a tool error).

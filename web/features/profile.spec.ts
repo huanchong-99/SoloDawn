@@ -328,7 +328,20 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       });
       all<HTMLInputElement>('dialog .choice input')[1].click();
       flushSync();
-      await vi.waitFor(() => expect(one('dialog .path-row code').textContent).toContain('/'));
+      await vi.waitFor(() =>
+        expect(one('dialog .path-row code').textContent?.trim()).toBe('No folder chosen'),
+      );
+      expect(one<HTMLButtonElement>('dialog .btn-primary').disabled).toBe(true);
+      one<HTMLButtonElement>('dialog .path-row .change').click();
+      flushSync();
+      await vi.waitFor(() =>
+        expect(one<HTMLButtonElement>('dialog dialog[open] footer .btn-primary').disabled).toBe(
+          false,
+        ),
+      );
+      one<HTMLButtonElement>('dialog dialog[open] footer .btn-primary').click();
+      flushSync();
+      expect(one('dialog .path-row code').textContent).toContain('/');
       one<HTMLButtonElement>('dialog [role="switch"]').click();
       flushSync();
       one<HTMLInputElement>('dialog input[value="light"]').click();
@@ -341,7 +354,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect(one<HTMLButtonElement>('dialog .btn-primary').disabled).toBe(false);
     });
     And('submits the add-AI dialog', async () => {
-      await vi.waitFor(() => expect(one('dialog .path-row code').textContent).toContain('/'));
       submit(one<HTMLFormElement>('dialog form'));
       await vi.waitFor(() => expect(commands(node)).toHaveLength(1));
     });

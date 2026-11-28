@@ -47,20 +47,18 @@ async function pairAndVerifyOnboarding(
   await welcome.getByRole('button', { name: 'Start', exact: true }).click();
   await page.locator('.guide-dock').waitFor();
 
-  // Navigate to #/onboarding via Connect, then reload so dock mounts fresh on #/onboarding.
+  // Navigate to #/onboarding via Connect, then reload; neither dock nor pill shows on onboarding.
   await page.locator('.guide-dock .step.cur button', { hasText: 'Connect' }).click();
   await poll(() => page.url()).toContain('#/onboarding');
-  await page.locator('.guide-pill').waitFor();
+  await page.locator('#prompt').waitFor();
+  expect(await page.locator('.guide-dock').count()).toBe(0);
+  expect(await page.locator('.guide-pill').count()).toBe(0);
   await page.reload();
   await page.locator('#prompt').waitFor();
 
-  // Dock must auto-collapse to pill on #/onboarding instead of covering cards / status.
-  await page.locator('.guide-pill').waitFor();
+  // Neither dock nor pill is mounted on #/onboarding (before or after pairing updates).
   expect(await page.locator('.guide-dock').count()).toBe(0);
-
-  // Person can open pill, and pairing updates auto-collapse before covering Account type.
-  await page.locator('.guide-pill').click();
-  await page.locator('.guide-dock').waitFor();
+  expect(await page.locator('.guide-pill').count()).toBe(0);
 
   const code = await readPairingCode(page, surface.signal);
   const paired = await net.nodes[0].run(
@@ -75,14 +73,15 @@ async function pairAndVerifyOnboarding(
   expect(paired.code, paired.stderr).toBe(0);
 
   await poll(() => page.locator('fieldset.acct').count()).toBeGreaterThanOrEqual(2);
-  await page.locator('.guide-pill').waitFor();
   expect(await page.locator('.guide-dock').count()).toBe(0);
+  expect(await page.locator('.guide-pill').count()).toBe(0);
 
   await page.locator('input[name="acct-claude"][value="personal"]').check();
   await poll(() => page.locator('fieldset.acct').first().isDisabled()).toBe(false);
   await page.locator('input[name="acct-codex"][value="api_key"]').check();
   await poll(() => page.locator('a.done-btn').count()).toBe(1);
   expect(await page.locator('.guide-dock').count()).toBe(0);
+  expect(await page.locator('.guide-pill').count()).toBe(0);
 }
 
 describe('First-run guide overlap auto-collapse E2E', () => {
@@ -107,7 +106,7 @@ describe('First-run guide overlap auto-collapse E2E', () => {
     { width: 1440, height: 900 },
     { width: 1280, height: 800 },
   ])(
-    'collapses to pill over onboarding, nodes Set defaults/Save, and honors 768-1279 px chat pill rule at $width x $height',
+    'hides guide on onboarding, collapses to pill over nodes Set defaults/Save, and honors 768-1279 px chat pill rule at $width x $height',
     async ({ width, height }) => {
       browser ??= await launch(inject('browser'));
       net = await startNet({ nodes: 1 });
@@ -143,17 +142,65 @@ describe('First-run guide overlap auto-collapse E2E', () => {
       expect(await page.locator('.guide-dock').count()).toBe(0);
       await page.locator('.guide-pill').waitFor();
 
-      // Create a group so step 5 becomes current on chat, then verify 768-1279 px pill rule.
+      // Create a group with 1 secretary + 1 working AI, verify step 4 points to Add AI, then add
+      // a 2nd working AI so step 5 becomes current on chat and test the 768-1279 px pill rule.
       await page.locator('.guide-pill').click();
       await page.locator('.guide-dock').waitFor();
       await page.locator('.guide-dock .step.cur button', { hasText: 'Create a group' }).click();
       await poll(() => page.url()).toContain('#/groups');
-      const folder = await makeFolder(net.dir, 'work');
+      const secFolder = await makeFolder(net.dir, 'work-sec');
+      const codexFolder = await makeFolder(net.dir, 'work-codex');
+      const workerFolder = await makeFolder(net.dir, 'work-worker');
       await createGroup(page, {
         name: 'GuideCheck',
         member: 'Owner',
-        ais: [{ cli: 'Claude Code', computer: 'studio', name: 'Claude', folder, secretary: true }],
+        ais: [
+          {
+            cli: 'Claude Code',
+            computer: 'studio',
+            name: 'Claude',
+            folder: secFolder,
+            secretary: true,
+          },
+          { cli: 'Codex', computer: 'studio', name: 'Codex', folder: codexFolder },
+        ],
       });
+      await page.locator('#chat-side .members button', { hasText: 'Add AI' }).waitFor();
+      await page.locator('.guide-pill.over-chat').click();
+      await page.locator('.guide-dock .step.cur button', { hasText: 'Add AI' }).waitFor();
+      expect(await page.locator('.guide-dock .step.cur .body p').textContent()).toBe(
+        'This group needs 1 more working AI. Click Add AI; you can add the same CLI again with another name.',
+      );
+      expect(await page.locator('.guide-dock .step.cur .tip').count()).toBe(0);
+      await page.locator('.guide-dock .step.cur button', { hasText: 'Add AI' }).click();
+      await page.locator('.guide-beacon').waitFor();
+      expect(
+        boxesOverlap(
+          await boxOf(page.locator('.guide-beacon')),
+          await boxOf(page.locator('[data-guide="add-ai"]')),
+        ),
+      ).toBe(true);
+
+      await page.setViewportSize({ width: 768, height: 900 });
+      await page.locator('.guide-pill.over-chat').waitFor();
+      await expectAllDisjoint(page.locator('.guide-pill.over-chat'), page.locator('.need-ais'));
+      await page.locator('.guide-pill.over-chat').click();
+      await page.locator('.guide-dock .step.cur button', { hasText: 'Add AI' }).click();
+      await page.locator('.guide-beacon').waitFor();
+      expect(
+        boxesOverlap(
+          await boxOf(page.locator('.guide-beacon')),
+          await boxOf(page.locator('.side-open')),
+        ),
+      ).toBe(true);
+      await page.setViewportSize({ width, height });
+      await page.locator('#chat-side .members button', { hasText: 'Add AI' }).click();
+      const addDlg = page.locator('dialog.dlg[open]');
+      await addDlg.locator('.choice', { hasText: 'Claude Code · studio' }).locator('input').check();
+      await addDlg.getByRole('textbox', { name: 'Name in the group' }).fill('Worker');
+      await chooseFolder(addDlg, workerFolder);
+      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.count()).toBe(0);
       await page.locator('.composer .send').waitFor();
       for (const [chatWidth, chatHeight] of [
         [768, 900],

@@ -39,6 +39,11 @@ export function aiMembers(group: Group): AIMemberRow[] {
   return [...all.filter((m) => m.secretary), ...all.filter((m) => !m.secretary)];
 }
 
+/** Non-secretary AI members of the group. */
+export function workingAis(group: Group): AIMemberRow[] {
+  return aiMembers(group).filter((ai) => !ai.secretary && ai.id !== group.info?.secretary);
+}
+
 /** Whether the group has an AI member. */
 export const hasAI = (group: Group): boolean => group.members.some((m) => m.kind === 'ai');
 

@@ -30,6 +30,7 @@ import {
   resetGuideUi,
   sameTargetContext,
   stepActionLabel,
+  stepBodyText,
   stepDoneText,
   stepIntent,
   stepTargetSelector,
@@ -92,6 +93,8 @@ function group(
   const members = opts.members ?? [
     ...(me ? [{ id: me.id, user: me.user, kind: me.kind ?? ('human' as const) }] : []),
     { id: 'm-sec', user: 'u-me', kind: 'ai' as const },
+    { id: 'm-w1', user: 'u-me', kind: 'ai' as const },
+    { id: 'm-w2', user: 'u-me', kind: 'ai' as const },
   ];
   return {
     g,
@@ -303,11 +306,18 @@ describe('step intents, Escape guard, labels, and announcements', () => {
       selector: '[data-guide="defaults"][data-unset]',
     });
     expect(
-      stepIntent({ id: 'group', done: false, name: undefined, g: undefined }, undefined),
+      stepIntent({ id: 'group', done: false, name: undefined, g: undefined, need: 0 }, undefined),
     ).toEqual({
       kind: 'go',
       hash: '#/groups',
       create: true,
+    });
+    expect(
+      stepIntent({ id: 'group', done: false, name: undefined, g: 'g-1', need: 1 }, 'g-1'),
+    ).toEqual({
+      kind: 'go',
+      hash: '#/groups/g-1',
+      selector: '[data-guide="add-ai"], .side-open',
     });
     expect(stepIntent({ id: 'ask', done: false }, 'g-1')).toEqual({
       kind: 'go',
@@ -353,10 +363,12 @@ describe('step intents, Escape guard, labels, and announcements', () => {
       '2 AIs ready',
     );
     expect(stepDoneText({ id: 'defaults', done: true, left: [] })).toBe('Defaults set');
-    expect(stepDoneText({ id: 'group', done: true, name: 'Website', g: 'g1' })).toBe(
+    expect(stepDoneText({ id: 'group', done: true, name: 'Website', g: 'g1', need: 0 })).toBe(
       'Created "Website"',
     );
-    expect(stepDoneText({ id: 'group', done: true, name: undefined, g: 'g1' })).toBe('Created ""');
+    expect(stepDoneText({ id: 'group', done: true, name: undefined, g: 'g1', need: 0 })).toBe(
+      'Created ""',
+    );
     expect(stepDoneText({ id: 'ask', done: true })).toBe('Sent');
 
     expect(stepActionLabel({ id: 'connect', done: false, name: '' })).toBe('Connect');
@@ -367,10 +379,32 @@ describe('step intents, Escape guard, labels, and announcements', () => {
       stepActionLabel({ id: 'ais', done: false, count: 1, none: false, offline: undefined }),
     ).toBe('Check them');
     expect(stepActionLabel({ id: 'defaults', done: false, left: [] })).toBe('Set them');
-    expect(stepActionLabel({ id: 'group', done: false, name: undefined, g: undefined })).toBe(
-      'Create a group',
+    expect(
+      stepActionLabel({ id: 'group', done: false, name: undefined, g: undefined, need: 0 }),
+    ).toBe('Create a group');
+    expect(stepActionLabel({ id: 'group', done: false, name: undefined, g: 'g-1', need: 1 })).toBe(
+      'Add AI',
     );
     expect(stepActionLabel({ id: 'ask', done: false })).toBe('Open the group');
+
+    expect(stepBodyText({ id: 'connect', done: false, name: '' })).toContain('Copy a prompt');
+    expect(
+      stepBodyText({ id: 'group', done: false, name: undefined, g: undefined, need: 0 }),
+    ).toContain('Pick a computer');
+    expect(stepBodyText({ id: 'group', done: false, name: undefined, g: 'g-1', need: 1 })).toBe(
+      'This group needs 1 more working AI. Click Add AI; you can add the same CLI again with another name.',
+    );
+    expect(stepBodyText({ id: 'group', done: false, name: undefined, g: 'g-1', need: 2 })).toBe(
+      'This group needs 2 more working AIs. Click Add AI; you can add the same CLI again with another name.',
+    );
+    prefs.lang = 'zh-CN';
+    expect(stepBodyText({ id: 'group', done: false, name: undefined, g: 'g-1', need: 1 })).toBe(
+      '这个群还差 1 个工作 AI。点「添加 AI」，同一个 CLI 可以换个名字再加一次。',
+    );
+    expect(stepBodyText({ id: 'group', done: false, name: undefined, g: 'g-1', need: 2 })).toBe(
+      '这个群还差 2 个工作 AI。点「添加 AI」，同一个 CLI 可以换个名字再加一次。',
+    );
+    prefs.lang = 'en';
   });
 
   it('suppresses Done announcements on initial load and offline-online flips until host.info is seen', () => {
@@ -445,7 +479,7 @@ describe('guideSteps (B.3 matrix, operand flips, and boundaries)', () => {
       { id: 'connect', done: false, name: '' },
       { id: 'ais', done: false, count: 0, none: false, offline: undefined },
       { id: 'defaults', done: false, left: [] },
-      { id: 'group', done: false, name: undefined, g: undefined },
+      { id: 'group', done: false, name: undefined, g: undefined, need: 0 },
       { id: 'ask', done: false },
     ]);
   });
@@ -460,7 +494,7 @@ describe('guideSteps (B.3 matrix, operand flips, and boundaries)', () => {
       { id: 'connect', done: true, name: 'Studio Mac' },
       { id: 'ais', done: false, count: 0, none: false, offline: 'Studio Mac' },
       { id: 'defaults', done: false, left: [] },
-      { id: 'group', done: false, name: undefined, g: undefined },
+      { id: 'group', done: false, name: undefined, g: undefined, need: 0 },
       { id: 'ask', done: false },
     ]);
 
@@ -607,6 +641,38 @@ describe('guideSteps (B.3 matrix, operand flips, and boundaries)', () => {
       done: false,
       name: undefined,
       g: undefined,
+      need: 0,
+    });
+
+    const secOnly = group('g5a', {
+      name: 'Sec Only',
+      members: [
+        { id: 'm-me', user: 'u-me', kind: 'human' },
+        { id: 'm-sec', user: 'u-me', kind: 'ai' },
+      ],
+    });
+    expect(guideSteps([readyComp], [noSecretary, secOnly])[3]).toEqual({
+      id: 'group',
+      done: false,
+      name: undefined,
+      g: 'g5a',
+      need: 2,
+    });
+
+    const oneWorker = group('g5b', {
+      name: 'One Worker',
+      members: [
+        { id: 'm-me', user: 'u-me', kind: 'human' },
+        { id: 'm-sec', user: 'u-me', kind: 'ai' },
+        { id: 'm-other-ai', user: 'u-other', kind: 'ai' },
+      ],
+    });
+    expect(guideSteps([readyComp], [noSecretary, oneWorker, secOnly])[3]).toEqual({
+      id: 'group',
+      done: false,
+      name: undefined,
+      g: 'g5b',
+      need: 1,
     });
 
     const starterOne = group('g5', {
@@ -614,16 +680,18 @@ describe('guideSteps (B.3 matrix, operand flips, and boundaries)', () => {
       members: [
         { id: 'm-me', user: 'u-me', kind: 'human' },
         { id: 'm-other-ai', user: 'u-other', kind: 'ai' },
+        { id: 'm-w2', user: 'u-me', kind: 'ai' },
         { id: 'm-sec', user: 'u-me', kind: 'ai' },
       ],
     });
     const starterTwo = group('g6', { name: 'Older Team' });
 
-    expect(guideSteps([readyComp], [noSecretary, starterOne, starterTwo])[3]).toEqual({
+    expect(guideSteps([readyComp], [noSecretary, oneWorker, starterOne, starterTwo])[3]).toEqual({
       id: 'group',
       done: true,
       name: 'First Team',
       g: 'g5',
+      need: 0,
     });
   });
 
@@ -744,15 +812,9 @@ describe('user-opened tracking, step targets, box overlap, and layout observer',
 
   it('maps each page and step to its interactive target selector', () => {
     expect(stepTargetSelector(undefined, 'onboarding')).toBeUndefined();
-    expect(stepTargetSelector('connect', 'onboarding')).toBe(
-      '.onboarding .card, .onboarding fieldset.acct, .onboarding .done-btn',
-    );
-    expect(stepTargetSelector('ais', 'onboarding')).toBe(
-      '.onboarding .card, .onboarding fieldset.acct, .onboarding .done-btn',
-    );
-    expect(stepTargetSelector('defaults', 'onboarding')).toBe(
-      '.onboarding .card, .onboarding fieldset.acct, .onboarding .done-btn',
-    );
+    expect(stepTargetSelector('connect', 'onboarding')).toBeUndefined();
+    expect(stepTargetSelector('ais', 'onboarding')).toBeUndefined();
+    expect(stepTargetSelector('defaults', 'onboarding')).toBeUndefined();
 
     expect(stepTargetSelector('ais', 'nodes')).toBe('.ai-row fieldset.acct');
     expect(stepTargetSelector('defaults', 'nodes')).toBe(
@@ -764,8 +826,8 @@ describe('user-opened tracking, step targets, box overlap, and layout observer',
     expect(stepTargetSelector('group', 'groups')).toBe('.list .head button, .list .empty button');
     expect(stepTargetSelector('connect', 'groups')).toBeUndefined();
 
+    expect(stepTargetSelector('group', 'chat')).toBe('[data-guide="add-ai"], .side-open');
     expect(stepTargetSelector('ask', 'chat')).toBe('.composer:not(.in-thread)');
-    expect(stepTargetSelector('group', 'chat')).toBeUndefined();
 
     expect(stepTargetSelector('connect', 'settings')).toBeUndefined();
   });

@@ -17,6 +17,7 @@
     guideUi,
     modal,
     stepActionLabel,
+    stepBodyText,
     stepDoneText,
     stepIntent,
     type GuideStep,
@@ -39,7 +40,9 @@
   const doneCount = $derived(steps.filter((s) => s.done).length);
   const allDone = $derived(doneCount === steps.length);
   const current = $derived(steps.find((s) => !s.done));
-  const visible = $derived(guideState.value === 'open' && route.page !== 'join');
+  const visible = $derived(
+    guideState.value === 'open' && route.page !== 'join' && route.page !== 'onboarding',
+  );
   const hidePill = $derived(narrow.current && (route.page === 'chat' || route.page === 'terminal'));
 
   let beaconLayer = $state<HTMLElement>();
@@ -267,7 +270,7 @@
                   {stepActionLabel(step)}
                 </button>
               {:else}
-                <p>{t(`guide.step.${step.id}.body`)}</p>
+                <p>{stepBodyText(step)}</p>
                 {#if step.id === 'defaults' && step.left.length > 0}
                   <span class="left">
                     {t('guide.step.defaults.left').replace(
@@ -276,7 +279,7 @@
                     )}
                   </span>
                 {/if}
-                {#if step.id === 'group'}
+                {#if step.id === 'group' && step.need === 0}
                   <p class="tip">{t('guide.step.group.tip')}</p>
                 {/if}
                 <button type="button" class="btn btn-sm btn-primary" onclick={() => act(step)}>
@@ -298,7 +301,6 @@
     class="guide-pill"
     class:phone
     class:over-chat={!phone && route.page === 'chat'}
-    class:over-full={phone && route.page === 'onboarding'}
     aria-label={pillLabel}
     onclick={expand}
   >
@@ -606,9 +608,6 @@
     right: 16px;
     bottom: calc(var(--tab-h) + 12px + env(safe-area-inset-bottom));
     max-width: calc(100vw - 32px);
-  }
-  .guide-pill.phone.over-full {
-    bottom: calc(16px + env(safe-area-inset-bottom));
   }
   @media (min-width: 768px) and (max-width: 1279px) {
     .guide-pill.over-chat {

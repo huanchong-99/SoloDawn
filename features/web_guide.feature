@@ -8,7 +8,7 @@ Feature: The first-run guide
     When the person chooses "Start"
     Then the guide dock is open at 0 of 5 with "Connect your computer" current
     When the person chooses "Connect"
-    Then the address is "#/onboarding" and the dock is a pill saying "0/5 · Connect your computer"
+    Then the address is "#/onboarding" and neither the guide dock nor its pill is shown
 
   Scenario: Each step checks off from the real state (G.2)
     Given the guide is open
@@ -18,7 +18,9 @@ Feature: The first-run guide
     Then step 2 is done and step 3 is current, saying "Still to set: Claude Code"
     When host.info gives Claude Code defaults
     Then step 3 is done and step 4 is current
-    When the group "Website" has a secretary and the person's Claude Code
+    When the group "Website" has a secretary and 1 working AI
+    Then step 4 stays current and its action is "Add AI"
+    When the group "Website" has a secretary and 2 working AIs besides it
     Then step 4 is done with "Created "Website"" and step 5 is current
     When the person's text message appears in the main line of "Website"
     Then the dock shows "You're all set" with 5 of 5

@@ -11,7 +11,8 @@
   /** The folder an AI works in (contracts/local.md section 7): a row that says which, and a dialog
    *  over the dialog that lists the folders its CLI was used in on its computer, newest first, and
    *  takes one typed by hand. A folder of another group cannot be chosen; one of an AI of `group`
-   *  can, and is shared. Until the person chooses, the newest folder that no other group has is taken. */
+   *  can, and is shared. `workspace` stays empty until the person confirms a folder in the dialog
+   *  (which pre-highlights the newest folder not held by another group). */
   let {
     home,
     agent,
@@ -55,7 +56,7 @@
       return;
     }
     folders = answer;
-    workspace ||= newest(answer);
+    if (choosing) picked ||= newest(answer);
   }
   $effect(() => {
     void [home, agent];
@@ -64,14 +65,19 @@
 
   const holder = $derived(workspace ? nodes.holder(home, workspace, group) : {});
 
-  // A folder typed before is in the field again, where it can be read whole and changed.
+  // Pre-highlight the newest unused folder in the dialog without filling `workspace` until confirmed.
   async function choose() {
-    picked = workspace;
+    picked = workspace || newest(folders ?? []);
     typed = folders?.some((folder) => folder.path === workspace) ? '' : workspace;
     refused = '';
     choosing = true;
     await tick();
     dialog!.showModal();
+  }
+
+  function close() {
+    dialog?.close();
+    choosing = false;
   }
 
   /** Takes the folder typed, else the one ticked; a folder of another group is refused here. */
@@ -81,7 +87,7 @@
     if (other) refused = t('member.folder.taken').replace('{group}', () => other);
     else if (path) {
       workspace = path;
-      dialog!.close();
+      close();
     }
   }
 
@@ -100,13 +106,16 @@
 <div class="folder">
   <div class="path-row">
     <Icon name="folder" sm />
-    <code id={`${uid}-path`} class="path" title={workspace}>
+    <code id={`${uid}-path`} class="path" class:unset={!workspace} title={workspace}>
       <bdi>{workspace || t(folders ? 'member.folder.none' : 'member.folder.loading')}</bdi>
     </code>
     <button
       type="button"
       class="btn btn-sm change"
-      aria-label={t('member.folder.change.of').replace('{ai}', () => ai)}
+      aria-label={t(workspace ? 'member.folder.change.of' : 'member.folder.choose.of').replace(
+        '{ai}',
+        () => ai,
+      )}
       onclick={choose}
     >
       {t(workspace ? 'member.folder.change' : 'member.folder.choose')}
@@ -189,7 +198,7 @@
       {#if refused}<p class="fail" role="alert">{refused}</p>{/if}
       <footer class="row">
         <span class="grow"></span>
-        <button type="button" class="btn btn-ghost" onclick={() => dialog!.close()}>
+        <button type="button" class="btn btn-ghost" onclick={close}>
           {t('member.folder.cancel')}
         </button>
         <button
@@ -211,6 +220,10 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 4px;
+  }
+  .path.unset {
+    color: var(--text-3);
+    font-family: inherit;
   }
   /* A link in the row: the accent text, no frame of its own. */
   .change {

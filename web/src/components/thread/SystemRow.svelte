@@ -50,7 +50,7 @@
     {:else}
       {systemText(group, msg)}
     {/if}
-    · <time datetime={iso}>{time}</time>
+    {' '}<span class="when">· <time datetime={iso}>{time}</time></span>
   </p>
 </div>
 
@@ -58,5 +58,9 @@
   b,
   .title {
     color: var(--text-2);
+  }
+  .when,
+  time {
+    white-space: nowrap;
   }
 </style>

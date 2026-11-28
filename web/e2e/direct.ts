@@ -490,7 +490,7 @@ export async function makeFolder(dir: string, name: string): Promise<string> {
 
 /** Types `folder` in the folder list of the one folder picker in `scope`, and takes it. */
 export async function chooseFolder(scope: Locator, folder: string): Promise<void> {
-  await scope.getByRole('button', { name: /^Change the folder of / }).click();
+  await scope.getByRole('button', { name: /^(?:Choose|Change) the folder of / }).click();
   const list = scope.page().getByRole('dialog', { name: 'Choose a folder' });
   await list.getByLabel('Another folder').fill(folder);
   await list.getByRole('button', { name: 'Use this folder' }).click();

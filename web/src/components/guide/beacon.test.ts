@@ -277,4 +277,52 @@ describe('beacon', () => {
     expect(host.querySelector('.guide-beacon')).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('skips hidden matches and polls until a matching target is visible with visibilityProperty check', async () => {
+    const callbacks = new Map<number, FrameRequestCallback>();
+    let nextId = 1;
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      const id = nextId++;
+      callbacks.set(id, cb);
+      return id;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      callbacks.delete(id);
+    });
+    const flushFrame = () => {
+      const entries = [...callbacks.entries()];
+      callbacks.clear();
+      for (const [, cb] of entries) cb(performance.now());
+    };
+
+    const hiddenOffscreen = document.createElement('button');
+    hiddenOffscreen.className = 'step4-target';
+    hiddenOffscreen.style.visibility = 'hidden';
+    const visSpy = vi.spyOn(hiddenOffscreen, 'checkVisibility');
+    mockRect(hiddenOffscreen, { left: 1000, top: 20, width: 80, height: 30 });
+
+    const visibleToggle = document.createElement('button');
+    visibleToggle.className = 'step4-target';
+    visibleToggle.scrollIntoView = vi.fn();
+    mockRect(visibleToggle, { left: 20, top: 12, width: 40, height: 32 });
+    document.body.append(hiddenOffscreen, visibleToggle);
+
+    await beacon('.step4-target');
+    expect(visSpy).toHaveBeenCalledWith({ visibilityProperty: true });
+    expect(host.querySelector<HTMLElement>('.guide-beacon')?.style.left).toBe('16px');
+    clearBeacon();
+
+    // Poll keeps waiting while match is hidden, then highlights once visible.
+    visibleToggle.style.display = 'none';
+    const pending = beacon('.step4-target');
+    expect(callbacks.size).toBe(1);
+    flushFrame();
+    expect(host.querySelector('.guide-beacon')).toBeNull();
+    expect(callbacks.size).toBe(1);
+
+    visibleToggle.style.display = '';
+    flushFrame();
+    await pending;
+    expect(host.querySelector<HTMLElement>('.guide-beacon')?.style.left).toBe('16px');
+  });
 });

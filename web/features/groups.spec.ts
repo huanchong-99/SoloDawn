@@ -930,10 +930,26 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       }
       await vi.waitFor(() =>
         expect(texts('dialog .ai-fields .path-row code')).toEqual([
-          '/home/dev/website',
-          '/home/dev/website',
+          'No folder chosen',
+          'No folder chosen',
         ]),
       );
+      for (const cli of ['Claude Code', 'Codex']) {
+        const row = aiSection(cli);
+        row.querySelector<HTMLButtonElement>('.path-row .change')!.click();
+        flushSync();
+        await vi.waitFor(() =>
+          expect(
+            row.querySelector<HTMLButtonElement>('dialog[open] footer .btn-primary')?.disabled,
+          ).toBe(false),
+        );
+        row.querySelector<HTMLButtonElement>('dialog[open] footer .btn-primary')!.click();
+        flushSync();
+      }
+      expect(texts('dialog .ai-fields .path-row code')).toEqual([
+        '/home/dev/website',
+        '/home/dev/website',
+      ]);
     });
 
     Then('each has the switch on', () => {

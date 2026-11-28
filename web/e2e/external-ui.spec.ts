@@ -29,6 +29,8 @@ const layouts = [
 const expected = {
   add: ['Add AI', '添加 AI'],
   submit: ['Add AI', '添加'],
+  chooseFolder: ['Choose the folder of Scout', '选择 Scout 的文件夹'],
+  useFolder: ['Use this folder', '用这个文件夹'],
   external: ['External AI', '外部 AI'],
   name: ['Name in the group', '在群里的名字'],
   form: ['Add an AI', '添加 AI 到本群'],
@@ -91,6 +93,8 @@ test.each(layouts)(
     const account = add.getByRole('combobox', { name: /^(Account|账号)$/ });
     expect(await account.evaluate((el: HTMLSelectElement) => el.validity.valueMissing)).toBe(true);
     await account.selectOption('api_key');
+    await add.getByRole('button', { name: label('chooseFolder'), exact: true }).click();
+    await page.getByRole('button', { name: label('useFolder'), exact: true }).click();
     await fits(add, width);
     await add.getByRole('button', { name: label('submit'), exact: true }).click();
     const joined = () => page.evaluate(() => window.externalCast.join());
@@ -99,7 +103,7 @@ test.each(layouts)(
       agent: 'external',
       to: host,
       name: 'Scout',
-      // The newest folder its computer lists, which the dialog takes until another is chosen.
+      // The newest folder its computer lists, pre-highlighted and confirmed in the folder dialog.
       workspace: '/home/dev/website',
       account: 'api_key',
       tool: 'ZCode',

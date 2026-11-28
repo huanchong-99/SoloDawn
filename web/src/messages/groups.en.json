@@ -31,7 +31,7 @@
   "groups.create.people.hint": "Anyone else can join by an invitation code or link once the group exists.",
   "groups.create.code": "Also make an invitation code",
   "groups.create.ais": "AIs",
-  "groups.create.ais.need": "A working group needs 3 AIs: 1 secretary + at least 2 working AIs (so the assignee and reviewer of a task are different AIs). You can mix two CLIs, or add the same CLI twice with different AI names and folders using Add AI after creating the group.",
+  "groups.create.ais.need": "A working group needs 3 AIs: 1 secretary + at least 2 working AIs (so the assignee and reviewer of a task are different AIs). You can mix two CLIs, or add the same CLI twice with different names using Add AI after creating the group. AIs can share one folder (tasks there take turns), or use separate folders to work at the same time.",
   "groups.create.ais.none": "No AI is connected yet. Connect a computer and choose an account type for its AI on the Computers page.",
   "groups.create.ai.name": "Name of {ai} in the group",
   "groups.create.ai.secretary": "Make {ai} the secretary",

@@ -5,7 +5,7 @@
   import { withoutInlineReplies } from '../../lib/call';
   import type { Group } from '../../lib/groups.svelte';
   import { release } from '../../lib/jump';
-  import { aiMembers, hasAI } from '../../lib/members';
+  import { hasAI, workingAis } from '../../lib/members';
   import type { Net } from '../../lib/net.svelte';
   import { card as cardOf, mounts, side } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
@@ -49,9 +49,7 @@
   const line = $derived(days(withoutInlineReplies(group.main, Boolean(cardOf('call')))));
   // A group of people only has nobody to turn a request into a brief.
   const emptyBody = $derived(hasAI(group) ? 'chat.empty.body' : 'chat.empty.people');
-  const workingCount = $derived(
-    aiMembers(group).filter((ai) => !ai.secretary && ai.id !== group.info?.secretary).length,
-  );
+  const workingCount = $derived(workingAis(group).length);
   const newest = $derived(group.main.at(-1)?.id);
   // Older messages may exist and cannot be had now: the home refused a page, or is not reachable.
   const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
@@ -465,6 +463,11 @@
     .chat-head {
       padding-left: var(--sp-2);
       gap: var(--sp-2);
+    }
+  }
+  @media (min-width: 768px) and (max-width: 1023px) {
+    :global(body:has(.guide-pill.over-chat)) .line {
+      padding-bottom: 68px;
     }
   }
   @media (max-width: 767px) {
