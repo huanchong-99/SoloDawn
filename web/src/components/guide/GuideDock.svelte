@@ -9,6 +9,7 @@
     closeGuide,
     collapseGuide,
     createAnnouncer,
+    createOverlapTracker,
     expandGuide,
     finishGuide,
     guideState,
@@ -56,6 +57,14 @@
   let wasAllDone = untrack(() => allDone);
   let wasExpanded = untrack(() => visible && guideUi.expanded);
   let returnFocus = false;
+  const overlap = untrack(() =>
+    createOverlapTracker(
+      { page: route.page, group: route.params.g, stepId: current?.id, doneCount },
+      () => {
+        returnFocus = true;
+      },
+    ),
+  );
 
   $effect(() => {
     setBeaconHost(beaconLayer);
@@ -114,6 +123,18 @@
     }
     wasExpanded = openExpanded;
   });
+
+  $effect(() =>
+    overlap.sync({
+      visible,
+      narrow: narrow.current,
+      dock,
+      stepId: current?.id,
+      page: route.page,
+      group: route.params.g,
+      doneCount,
+    }),
+  );
 
   const ringCirc = 2 * Math.PI * 11;
   const ringGap = 4;

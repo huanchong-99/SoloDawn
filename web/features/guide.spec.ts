@@ -3,7 +3,7 @@ import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { chromium, type Browser, type Page } from 'playwright';
 import { flushSync, tick } from 'svelte';
 import { createServer, type ViteDevServer } from 'vite';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { clearBeacon } from '../src/components/guide/beacon';
 import { DeviceLog } from '../src/lib/devlog';
 import { creating, find, homes, newId, type Home } from '../src/lib/groups.svelte';
@@ -1084,5 +1084,321 @@ describe('guide layout, focus, and reduced motion in Chromium', () => {
     expect(check.pulseCount).toBe(0);
     expect(check.runningAnimations).toBe(0);
     await ctx.close();
+  });
+
+  async function seedOnboardingGuide(page: Page, withAgents: boolean) {
+    await page.evaluate(
+      `(async () => {
+        const withAgents = ${JSON.stringify(withAgents)};
+        const { guideState, guideUi } = await import('/src/lib/guide.svelte.ts');
+        guideState.value = 'open';
+        guideUi.expanded = true;
+        if (!withAgents) return;
+        const wrap = document.querySelector('.onboarding .wrap > div:nth-child(2)');
+        if (!wrap) return;
+        const card = document.createElement('section');
+        card.className = 'card';
+        const fs = document.createElement('fieldset');
+        fs.className = 'acct';
+        fs.textContent = 'Account type';
+        card.appendChild(fs);
+        const nextBtn = document.createElement('a');
+        nextBtn.className = 'btn btn-dawn done-btn';
+        nextBtn.textContent = "Next: set your AIs' defaults";
+        wrap.append(card, nextBtn);
+      })()`,
+    );
+  }
+
+  async function seedTwoNodesGuide(page: Page) {
+    await page.evaluate(
+      `(async () => {
+        const { homes } = await import('/src/lib/groups.svelte.ts');
+        const { guideState, guideUi } = await import('/src/lib/guide.svelte.ts');
+        const { ownedNode } = await import('/features/home.ts');
+        const rig = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
+          homes: [],
+          agents: [
+            {
+              agent: 'claude',
+              cli_version: '1.0.0',
+              account: 'personal',
+              login_ok: true,
+              driver: { accounts: ['personal', 'team', 'api'], takeover: 'none' },
+              models: [],
+              caps: {},
+              defaults: undefined,
+              groups: [],
+            },
+            {
+              agent: 'codex',
+              cli_version: '0.164.0',
+              account: 'personal',
+              login_ok: true,
+              driver: { accounts: ['personal', 'team', 'api'], takeover: 'none' },
+              models: [],
+              caps: {},
+              defaults: undefined,
+              groups: [],
+            },
+          ],
+        });
+        homes.push(rig.store);
+        await rig.connect();
+        guideState.value = 'open';
+        guideUi.expanded = true;
+      })()`,
+    );
+  }
+
+  it.each([
+    { width: 1440, height: 900 },
+    { width: 1280, height: 800 },
+  ])(
+    'auto-collapses to pill on #/onboarding at $width x $height and never covers pairing or Account type',
+    async ({ width, height }) => {
+      const ctx = await browser.newContext({ viewport: { width, height }, locale: 'en-US' });
+      const page = await ctx.newPage();
+      await page.goto(`${server.resolvedUrls!.local[0]}?nomock#/onboarding`);
+      await seedOnboardingGuide(page, false);
+      await page.locator('.guide-pill').waitFor();
+      expect(await page.locator('.guide-dock').count()).toBe(0);
+
+      // Re-open manually via pill, then simulate Account type / Next button arriving -> collapses again.
+      await page.locator('.guide-pill').click();
+      await page.locator('.guide-dock').waitFor();
+      await seedOnboardingGuide(page, true);
+      await page.locator('.guide-pill').waitFor();
+      expect(await page.locator('.guide-dock').count()).toBe(0);
+      await ctx.close();
+    },
+  );
+
+  it.each([
+    { width: 1440, height: 900 },
+    { width: 1280, height: 800 },
+  ])(
+    'auto-collapses on #/nodes at $width x $height over Set defaults and Save editor, and expands only when opened',
+    async ({ width, height }) => {
+      const ctx = await browser.newContext({ viewport: { width, height }, locale: 'en-US' });
+      const page = await ctx.newPage();
+      await page.goto(`${server.resolvedUrls!.local[0]}?nomock#/nodes`);
+      await seedTwoNodesGuide(page);
+      await page.locator('[data-guide="defaults"][data-unset]').first().waitFor();
+      await page.locator('.guide-pill').waitFor();
+      expect(await page.locator('.guide-dock').count()).toBe(0);
+
+      // Click first Set defaults -> Save editor opens cleanly uncovered; guide stays collapsed.
+      await page.locator('[data-guide="defaults"][data-unset]').first().click();
+      await page.locator('.defaults .editor .btn-primary').waitFor();
+      expect(await page.locator('.guide-dock').count()).toBe(0);
+
+      // Person can still reopen pill and trigger beacon cleanly.
+      await page.locator('.guide-pill').click();
+      await page.locator('.guide-dock').waitFor();
+      await page.locator('.guide-dock .step.cur button').click();
+      await page.locator('.guide-pill').waitFor();
+      await page.locator('.guide-beacon').waitFor();
+      await ctx.close();
+    },
+  );
+
+  it('auto-collapses when opening Save editor on 1-AI #/nodes at 1440x900 and collapses on resize to 1280x800', async () => {
+    const ctx = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      locale: 'en-US',
+    });
+    const page = await ctx.newPage();
+    await page.goto(`${server.resolvedUrls!.local[0]}?nomock#/nodes`);
+    await seedBrowserGuide(page, { defaultsSet: false, hasGroup: false, collapsed: false });
+    await page.locator('.guide-dock').waitFor();
+    await page.locator('[data-guide="defaults"][data-unset]').click();
+    await page.locator('.defaults .editor .btn-primary').waitFor();
+    await page.locator('.guide-pill').waitFor();
+    expect(await page.locator('.guide-dock').count()).toBe(0);
+
+    // Closing editor keeps it collapsed (expands only when person opens it).
+    await page.locator('.defaults .editor button', { hasText: 'Cancel' }).click();
+    await page.locator('.defaults .editor').waitFor({ state: 'hidden' });
+    expect(await page.locator('.guide-pill').count()).toBe(1);
+    expect(await page.locator('.guide-dock').count()).toBe(0);
+
+    // Reopen at 1440x900 (no overlap on 1 AI), then resize to 1280x800 -> overlaps and auto-collapses.
+    await page.locator('.guide-pill').click();
+    await page.locator('.guide-dock').waitFor();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.locator('.guide-pill').waitFor();
+    expect(await page.locator('.guide-dock').count()).toBe(0);
+    await ctx.close();
+  });
+
+  it('1279 px chat pill rule keeps collapsed pill clear of composer send button', async () => {
+    const ctx = await browser.newContext({
+      viewport: { width: 1279, height: 900 },
+      locale: 'en-US',
+    });
+    const page = await ctx.newPage();
+    await page.goto(`${server.resolvedUrls!.local[0]}?nomock#/groups/rZNvy-1jH6Z-BcPqA5U5BQ`);
+    await seedBrowserGuide(page, { defaultsSet: true, hasGroup: true, collapsed: false });
+    await page.locator('.guide-pill.over-chat').waitFor();
+    await page.locator('.composer .send').waitFor();
+
+    const rects = await page.evaluate(() => {
+      const pill = document.querySelector('.guide-pill')!.getBoundingClientRect();
+      const send = document.querySelector('.composer .send')!.getBoundingClientRect();
+      return {
+        pill: { left: pill.left, top: pill.top, right: pill.right, bottom: pill.bottom },
+        send: { left: send.left, top: send.top, right: send.right, bottom: send.bottom },
+      };
+    });
+    const disjoint =
+      rects.pill.bottom <= rects.send.top ||
+      rects.pill.top >= rects.send.bottom ||
+      rects.pill.right <= rects.send.left ||
+      rects.pill.left >= rects.send.right;
+    expect(disjoint).toBe(true);
+    await ctx.close();
+  });
+});
+
+describe('guide overlap auto-collapse in happy-dom', () => {
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await closePage();
+    clearBeacon();
+    resetGuideUi();
+    homes.length = 0;
+    paths.clear();
+    nodes.infos.clear();
+    localStorage.clear();
+    guideState.value = 'new';
+  });
+
+  it('auto-collapses when dock overlaps target, preserves focus, and restores pill focus if dock held focus', async () => {
+    await clearSolodawnIdb();
+    await seedOwnerRecord();
+    guideState.value = 'open';
+    const rig = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
+      homes: [],
+      agents: [makeAgent({ account: 'personal', defaults: undefined })],
+    });
+    homes.push(rig.store);
+    await rig.connect();
+
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains('guide-dock')) {
+          return {
+            left: 1000,
+            top: 450,
+            right: 1344,
+            bottom: 850,
+            width: 344,
+            height: 400,
+          } as DOMRect;
+        }
+        if (this.matches('[data-guide="defaults"][data-unset], .defaults .editor')) {
+          return {
+            left: 1010,
+            top: 500,
+            right: 1120,
+            bottom: 540,
+            width: 110,
+            height: 40,
+          } as DOMRect;
+        }
+        return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 } as DOMRect;
+      });
+
+    openPage('#/nodes', 1440, 'fine');
+    await waitDone(() => expect(all('.guide-pill')).toHaveLength(1));
+    expect(all('.guide-dock')).toHaveLength(0);
+    expect(guideUi.expanded).toBe(false);
+
+    // Reopening via pill focuses dock heading; mutating main while dock holds focus returns focus to pill.
+    one<HTMLButtonElement>('.guide-pill').click();
+    flushSync();
+    await tick();
+    expect(all('.guide-dock')).toHaveLength(1);
+    expect(document.activeElement).toBe(one('.guide-dock h2'));
+
+    one('main').appendChild(document.createElement('div'));
+    await waitDone(() => expect(all('.guide-pill')).toHaveLength(1));
+    await tick();
+    expect(document.activeElement).toBe(one('.guide-pill'));
+    rectSpy.mockRestore();
+  });
+
+  it('keeps active focus on a main control when DOM mutation causes overlap without pointer or focusin', async () => {
+    await clearSolodawnIdb();
+    await seedOwnerRecord();
+    guideState.value = 'open';
+    const rig = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
+      homes: [],
+      agents: [makeAgent({ account: 'personal', defaults: undefined })],
+    });
+    homes.push(rig.store);
+    await rig.connect();
+
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains('guide-dock')) {
+          return {
+            left: 1000,
+            top: 450,
+            right: 1344,
+            bottom: 850,
+            width: 344,
+            height: 400,
+          } as DOMRect;
+        }
+        if (this.matches('[data-guide="defaults"][data-unset]')) {
+          return {
+            left: 100,
+            top: 100,
+            right: 220,
+            bottom: 132,
+            width: 120,
+            height: 32,
+          } as DOMRect;
+        }
+        if (this.matches('.defaults .editor')) {
+          return {
+            left: 1010,
+            top: 500,
+            right: 1200,
+            bottom: 600,
+            width: 190,
+            height: 100,
+          } as DOMRect;
+        }
+        return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 } as DOMRect;
+      });
+
+    openPage('#/nodes', 1440, 'fine');
+    await waitDone(() => expect(all('main [data-guide="defaults"][data-unset]')).toHaveLength(1));
+    expect(all('.guide-dock')).toHaveLength(1);
+
+    const mainBtn = one<HTMLButtonElement>('main [data-guide="defaults"][data-unset]');
+    mainBtn.focus();
+    await tick();
+    expect(document.activeElement).toBe(mainBtn);
+    expect(all('.guide-dock')).toHaveLength(1);
+
+    // Trigger overlap strictly via a DOM mutation (MutationObserver), with no pointerdown/focusin.
+    const defaultsWrap = document.createElement('div');
+    defaultsWrap.className = 'defaults';
+    const editor = document.createElement('div');
+    editor.className = 'editor';
+    defaultsWrap.appendChild(editor);
+    one('main').appendChild(defaultsWrap);
+
+    await waitDone(() => expect(all('.guide-pill')).toHaveLength(1));
+    await tick();
+    expect(all('.guide-dock')).toHaveLength(0);
+    expect(document.activeElement).toBe(mainBtn);
+    rectSpy.mockRestore();
   });
 });
