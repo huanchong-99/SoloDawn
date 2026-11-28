@@ -9,3 +9,12 @@ Feature: Failed turns report visibly while keeping the open CLI waiting
     When the owner sends "@Claude Code try once more" to "Website"
     Then "Claude Code" replies with "Recovered reply" in "Website"
     And the fake "claude" log records 1 process for that group conversation
+
+  Scenario: A turn ending with login_invalid posts a login_invalid notice and notifies LoginChanged after Dormant and limited
+    Given a group "Website" with a configured "Claude Code" member on "claude" whose failed turn keeps the CLI open
+    And the host records LoginChanged snapshots for "Claude Code" in "Website"
+    And "Claude Code" is scripted to fail sign-in with "Failed to authenticate: OAuth token has expired"
+    When the owner sends "@Claude Code please check the build" to "Website"
+    Then a "login_invalid" notice for "Claude Code" with detail "Failed to authenticate: OAuth token has expired" is posted in "Website"
+    And "Claude Code" enters state "limited" in "Website"
+    And LoginChanged fired once with session "dormant", 0 open sessions, member state "limited", and "claude" login_ok false

@@ -4,15 +4,67 @@ package features
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cucumber/godog"
+	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 func init() {
 	stepSets["host_turn_failed"] = hostTurnFailedSteps
+}
+
+type loginChangedSnap struct {
+	sessionState host.State
+	open         int
+	memberState  string
+	loginOK      bool
+}
+
+type loginSnapRecorder struct {
+	mu    sync.Mutex
+	snaps []loginChangedSnap
+}
+
+func (r *loginSnapRecorder) record(w *m3World, aiName, groupName string) {
+	h := w.node().Host
+	aiID := w.aiByName[aiName].ID
+	gid := w.groups[groupName]
+	s, _ := h.Sessions.Get(host.SessionKey{Group: gid, Member: aiID})
+	open := 0
+	for _, sess := range h.Sessions.All() {
+		if sess.State != host.Dormant {
+			open++
+		}
+	}
+	memState, _ := h.MemberState(gid, aiID)
+	agents, err := h.Agents(context.Background(), false)
+	loginOK := false
+	if err == nil {
+		for _, a := range agents {
+			if a.Agent == w.aiByName[aiName].CLI {
+				loginOK = a.LoginOK
+			}
+		}
+	}
+	r.mu.Lock()
+	r.snaps = append(r.snaps, loginChangedSnap{
+		sessionState: s.State,
+		open:         open,
+		memberState:  memState,
+		loginOK:      loginOK,
+	})
+	r.mu.Unlock()
+}
+
+func (r *loginSnapRecorder) snapshot() []loginChangedSnap {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]loginChangedSnap(nil), r.snaps...)
 }
 
 func hostTurnFailedSteps(sc *godog.ScenarioContext, f fixtures) {
@@ -21,6 +73,7 @@ func hostTurnFailedSteps(sc *godog.ScenarioContext, f fixtures) {
 		groups:   map[string]string{},
 		homeView: newHomeView(),
 	}
+	rec := &loginSnapRecorder{}
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w.activeHost != nil {
 			waitHostDormant(w.activeHost)
@@ -32,16 +85,86 @@ func hostTurnFailedSteps(sc *godog.ScenarioContext, f fixtures) {
 	noConfirmCardAfter(sc, func() map[string]proto.MsgRow { return w.msgs })
 
 	sc.Step(`^a group "([^"]+)" with a configured "([^"]+)" member on "([^"]+)" whose failed turn keeps the CLI open$`, w.givenSingleAINode)
+	sc.Step(`^the host records LoginChanged snapshots for "([^"]+)" in "([^"]+)"$`, func(aiName, groupName string) {
+		w.node().Host.LoginChanged = func() { rec.record(w, aiName, groupName) }
+	})
 	sc.Step(`^"([^"]+)" is scripted to fail once with "([^"]+)" and later post "([^"]+)"$`, func(_, detail, reply string) error {
 		return scriptClaudeFailedThenReply(w, detail, reply)
+	})
+	sc.Step(`^"([^"]+)" is scripted to fail sign-in with "([^"]+)"$`, func(_, detail string) error {
+		return scriptClaudeLoginInvalid(w, detail)
 	})
 	sc.Step(`^the owner sends "([^"]+)" to "([^"]+)"$`, w.whenOwnerPosts)
 	sc.Step(`^a "turn_interrupted" crash row for "([^"]+)" with detail "([^"]+)" is posted in "([^"]+)"$`, func(aiName, detail, _ string) error {
 		return awaitInterruptedDetail(w, aiName, "crash", detail)
 	})
-	sc.Step(`^"([^"]+)" stays in state "([^"]+)" in "([^"]+)"$`, w.thenAIHasState)
+	sc.Step(`^a "login_invalid" notice for "([^"]+)" with detail "([^"]+)" is posted in "([^"]+)"$`, func(aiName, detail, _ string) error {
+		return awaitLoginInvalidNotice(w, aiName, detail)
+	})
+	sc.Step(`^"([^"]+)" (?:stays in|enters) state "([^"]+)" in "([^"]+)"$`, w.thenAIHasState)
+	sc.Step(`^LoginChanged fired once with session "([^"]+)", (\d+) open sessions, member state "([^"]+)", and "([^"]+)" login_ok (true|false)$`, func(sessState string, wantOpen int, memState, _ string, wantLogin string) error {
+		return awaitLoginChangedSnapshot(rec, host.State(sessState), wantOpen, memState, wantLogin == "true")
+	})
 	sc.Step(`^"([^"]+)" replies with "([^"]+)" in "([^"]+)"$`, w.thenAIPosts)
 	sc.Step(`^the fake "([^"]+)" log records 1 process for that group conversation$`, w.thenOneProcessLogged)
+}
+
+func scriptClaudeLoginInvalid(w *m3World, detail string) error {
+	steps := []map[string]any{claudeUserStdinStep("")}
+	steps = append(steps, claudeInitMCP(0)...)
+	steps = append(steps,
+		map[string]any{"dir": "stdout", "msg": map[string]any{"type": "system", "subtype": "init", "session_id": "$session"}},
+		map[string]any{"dir": "stdout", "msg": map[string]any{
+			"type":       "result",
+			"subtype":    "success",
+			"is_error":   true,
+			"result":     detail,
+			"session_id": "$session",
+		}},
+	)
+	return w.setScript("claude", map[string]any{"steps": steps, "exit": 1})
+}
+
+func awaitLoginInvalidNotice(w *m3World, aiName, wantDetail string) error {
+	aiID := w.aiByName[aiName].ID
+	found := func() bool {
+		return viewHasLoginInvalidDetail(&w.homeView, aiID, wantDetail)
+	}
+	return w.drainBrowserUntil(10*time.Second, found, nil)
+}
+
+func viewHasLoginInvalidDetail(v *homeView, aiID, wantDetail string) bool {
+	for _, m := range v.msgs {
+		if isLoginInvalidMsg(m, aiID, wantDetail) {
+			return true
+		}
+	}
+	return false
+}
+
+func isLoginInvalidMsg(m proto.MsgRow, aiID, wantDetail string) bool {
+	if m.Kind != "system" {
+		return false
+	}
+	var body proto.LoginInvalidBody
+	if proto.Decode(m.Body, &body) != nil || body.Detail == nil {
+		return false
+	}
+	return body.Code == "login_invalid" && body.AI == aiID && *body.Detail == wantDetail
+}
+
+func awaitLoginChangedSnapshot(rec *loginSnapRecorder, wantSess host.State, wantOpen int, wantMem string, wantLogin bool) error {
+	want := loginChangedSnap{sessionState: wantSess, open: wantOpen, memberState: wantMem, loginOK: wantLogin}
+	return waitUntil(5*time.Second, "LoginChanged snapshot", func() error {
+		snaps := rec.snapshot()
+		if len(snaps) == 0 {
+			return fmt.Errorf("no LoginChanged snapshot yet")
+		}
+		if len(snaps) != 1 || snaps[0] != want {
+			return abort(fmt.Errorf("LoginChanged snapshots = %+v, want [%+v]", snaps, want))
+		}
+		return nil
+	})
 }
 
 func scriptClaudeFailedThenReply(w *m3World, detail, reply string) error {

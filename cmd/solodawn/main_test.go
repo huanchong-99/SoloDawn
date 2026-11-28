@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -136,6 +137,23 @@ func TestNodeAlreadyRunning(t *testing.T) {
 	testListener(t, testDataDir(t))
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"node"}, &stdout, &stderr); code != 1 || stdout.Len() != 0 || stderr.String() != "a node is already running\n" {
+		t.Fatalf("node: exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestNodeForwardsStdout(t *testing.T) {
+	saved := runForeground
+	t.Cleanup(func() { runForeground = saved })
+	var stdout, stderr bytes.Buffer
+	const line = "SoloDawn node is running: http://localhost:51234\n"
+	runForeground = func(w io.Writer) error {
+		if w != &stdout {
+			t.Fatalf("Foreground got writer %v, want %v", w, &stdout)
+		}
+		_, err := io.WriteString(w, line)
+		return err
+	}
+	if code := run([]string{"node"}, &stdout, &stderr); code != 0 || stdout.String() != line || stderr.Len() != 0 {
 		t.Fatalf("node: exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 }

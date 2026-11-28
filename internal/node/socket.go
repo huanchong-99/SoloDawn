@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -195,7 +196,7 @@ func ReadPair(line []byte, owner string, configured []string) (PairRequest, erro
 var startNode = runForegroundNode
 
 // Foreground gives the node runtime its data directory and local listener.
-func Foreground() error {
+func Foreground(stdout io.Writer) error {
 	dir, err := DataDir()
 	if err != nil {
 		return err
@@ -205,5 +206,5 @@ func Foreground() error {
 		return err
 	}
 	defer l.Close()
-	return startNode(dir, l)
+	return startNode(dir, l, stdout)
 }

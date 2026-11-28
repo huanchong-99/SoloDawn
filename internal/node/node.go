@@ -141,6 +141,7 @@ type nodeRuntime struct {
 	ctx       context.Context
 	stop      context.CancelFunc
 	dir, exe  string
+	stdout    io.Writer
 	logFile   *logFile
 	resetLog  func()
 	level     slog.Level
@@ -168,14 +169,14 @@ type nodeRuntime struct {
 	rvLoops map[string]*rvLoop
 }
 
-func runForegroundNode(dir string, l *Local) error {
+func runForegroundNode(dir string, l *Local, stdout io.Writer) error {
 	ctx, stop := foregroundContext()
 	defer stop()
-	return runNode(ctx, dir, l)
+	return runNodeOut(ctx, dir, l, stdout)
 }
 
-func runNode(ctx context.Context, dir string, l *Local) error {
-	n, err := openNode(ctx, dir)
+func runNodeOut(ctx context.Context, dir string, l *Local, stdout io.Writer) error {
+	n, err := openNodeOut(ctx, dir, stdout)
 	if err != nil {
 		return err
 	}
@@ -185,9 +186,13 @@ func runNode(ctx context.Context, dir string, l *Local) error {
 }
 
 func openNode(parent context.Context, dir string) (*nodeRuntime, error) {
+	return openNodeOut(parent, dir, io.Discard)
+}
+
+func openNodeOut(parent context.Context, dir string, stdout io.Writer) (*nodeRuntime, error) {
 	ctx, cancel := context.WithCancel(parent)
 	n := &nodeRuntime{
-		ctx: ctx, stop: cancel, dir: dir,
+		ctx: ctx, stop: cancel, dir: dir, stdout: stdout,
 		rvPaths: map[string]*peer.Path{}, rvLoops: map[string]*rvLoop{},
 	}
 	for _, step := range []func() error{n.stepLog, n.stepIdentity, n.stepServices, n.stepNetwork, n.stepStartup} {
@@ -309,6 +314,9 @@ func (n *nodeRuntime) startLocalHTTP(ln net.Listener) error {
 	n.httpPort = ln.Addr().(*net.TCPAddr).Port
 	n.httpSrv = &http.Server{Handler: rendezvous.Handler(web)}
 	go n.httpSrv.Serve(peer.Steady(n.ctx, ln, n.diag, "http"))
+	if _, err := fmt.Fprintf(n.stdout, "SoloDawn node is running: http://localhost:%d\n", n.httpPort); err != nil {
+		return err
+	}
 	path, err := peer.Dial(n.ctx, "ws://127.0.0.1:"+strconv.Itoa(n.httpPort)+"/rv", n.key)
 	if err != nil {
 		return err

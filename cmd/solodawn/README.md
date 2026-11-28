@@ -36,7 +36,8 @@ themselves from `internal/node`; this package does not name them.
   `usage: solodawn <command> [arguments]` and exit 2. Success exits 0 and a failed command exits 1; its error
   is printed to stderr on one line (CR and LF become spaces).
 - `version`, `help`, `status`, `pair-browser` and `open` take no arguments; `node` takes only
-  optional `-h` or `--help`. `status`,
+  optional `-h` or `--help` and forwards `stdout` to `node.Foreground(stdout)` so foreground
+  startup prints `SoloDawn node is running: http://localhost:<port>`. `status`,
   `pair-browser` and `open` talk to the running node through its local socket and fail when none
   runs; `version`, `help` and `service` need no running node. `pair` is the only command that starts a node
   when none runs (`dialOrStart`, `internal/node/cmd.go`).

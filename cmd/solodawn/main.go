@@ -10,7 +10,10 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/node"
 )
 
-var exit = os.Exit
+var (
+	exit          = os.Exit
+	runForeground = node.Foreground
+)
 
 func main() {
 	exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -106,7 +109,7 @@ func nodeCommand(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 0 {
 		return usage(stderr)
 	}
-	return result(node.Foreground(), stderr)
+	return result(runForeground(stdout), stderr)
 }
 
 func isHelpFlag(arg string) bool {

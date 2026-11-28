@@ -597,7 +597,12 @@ func TestClaudeOAuthAndFailedTurnInRuntime(t *testing.T) {
 	claudeEqual(t, "login invalid code", stLim.Event.Code, "login_invalid")
 	claudeEqual(t, "oauth detail", stLim.Event.Detail, oauthMsg)
 	waitForState(t, h, grpKey, Dormant)
-	claudeEqual(t, "login changes", loginChanges.Load(), int32(1))
+	poll(t, 5*time.Second, "LoginChanged after LoginInvalid", func() string {
+		if n := loginChanges.Load(); n != 1 {
+			return fmt.Sprintf("login changes = %d, want 1", n)
+		}
+		return ""
+	})
 
 	t.Setenv("SOLODAWN_FAKE_CLAUDE_SCRIPT", writeClaudeScript(t, `[
 		{"dir":"stdout","msg":{"type":"system","subtype":"init","session_id":"s-fail"}},

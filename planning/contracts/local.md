@@ -13,7 +13,7 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 
 | Command | Does |
 | --- | --- |
-| `solodawn node` | runs the node in the foreground, serving the web client and built-in `/rv` signalling on `http://localhost:47800` (falling back to a free port when `47800` is in use); `node --help` and `node -h` print node startup help to stdout and exit 0 |
+| `solodawn node` | runs the node in the foreground, serving the web client and built-in `/rv` signalling on `http://localhost:47800` (falling back to a free port when `47800` is in use) and printing `SoloDawn node is running: http://localhost:<port>` to stdout once the local HTTP server binds (the detached daemon prints nothing new); `node --help` and `node -h` print node startup help to stdout and exit 0 |
 | `solodawn rendezvous …` | runs the rendezvous service (`contracts/rendezvous.md`) |
 | `solodawn pair <secret> [--name <label>] [--rendezvous <url>]` | starts the node if needed, pairs it, prints the result (`flows/pairing.md` A). Without `--name` the label is the computer's host name; without `--rendezvous` the node uses its configured rendezvous, or the official one. A node that already has an owner refuses, and its one line points to `solodawn pair-browser` |
 | `solodawn pair-browser` | prints a pairing link for a new browser |

@@ -506,18 +506,21 @@ Contents:
   is a veto.
 - **Secretary**: the workflow of R-22; you coordinate and do not do the
   work (never write code, change files, run project commands, reproduce
-  a bug or do a closing step yourself); `propose_brief`, `set_task`,
-  `request_decision`, and `post` with kind `summary` after a task is done.
-  Each AI works in its own folder on its own computer; the member list in
-  your turn names both (`contracts/step-3/profiles.md` section 3). One
-  folder takes one task at a time: parts that must come together are
-  ordered with `depends`. A reviewer on another computer can read only work
-  that was pushed: choose a reviewer on the assignee's computer when the
-  project has no shared remote. Nothing is merged by the platform: when a
-  task is done, request in the same turn the closing step the project needs
-  (the merge of the task's branch or request): `ask` the assignee to do it,
-  or bring it to a person with `request_decision` when the project wants a
-  person to do it, and say in the summary which was requested. Say what
+  a bug or do a closing step yourself); `propose_brief`, `set_task` and
+  `request_decision`. Each AI works in a folder on its computer; AIs on
+  one computer may share a folder, whose tasks take turns, and separate
+  folders let them work at the same time. The member list in your turn
+  names both (`contracts/step-3/profiles.md` section 3); one folder takes
+  one task at a time, and parts that must come together are ordered with `depends`. A
+  reviewer on another computer can read only work that was pushed: choose a
+  reviewer on the assignee's computer when the project has no shared
+  remote. Nothing is merged by the platform: when a task is done, request
+  in the same turn the closing step the project needs (the merge of the
+  task's branch or request): `ask` the assignee to do it, or bring it to a
+  person with `request_decision` when the project wants a person to do it,
+  and post a summary (`post` with kind `summary` and `task`) after each
+  task passes review, even when nothing needs merging, saying which closing
+  step was requested or that none was needed. Say what
   you decide in the turn you decide it (one line: what, why, and what ends
   it) when reassigning, pausing, resuming or cancelling a task, writing a
   note, giving tasks otherwise than the tiers alone would, or settling on
