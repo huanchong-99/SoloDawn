@@ -23,3 +23,10 @@ Feature: One active tab per browser
     Given the second tab took the connection from the first
     When the first tab is asked to reconnect and to probe
     Then the first tab opens no signalling or peer connection
+
+  Scenario: The inactive second tab shows only the other-tab placeholder in an empty group list
+    Given the first tab has connected
+    When a second tab opens its empty group list
+    Then the group list shows "SoloDawn is open in another tab." and hides the empty-state prompt
+    When the person chooses "Use here" in the second tab
+    Then the group list returns to the normal empty state

@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { announcement, prefs } from '../../lib/prefs.svelte';
+import { messages } from '../../messages/texts';
 import FolderGate from './FolderGate.svelte';
 import Permit from './Permit.svelte';
 import SystemAsks from './SystemAsks.svelte';
@@ -539,4 +540,99 @@ describe('permit components', () => {
     expect(host.textContent).toContain('Files and Folders is open on “workstation”');
     unmount(fg);
   });
+
+  const stalePermitTexts = [
+    '查找本地网络上的设备',
+    'would like to find devices',
+    '应用程序',
+    'Applications folder',
+  ] as const;
+
+  it.each([
+    {
+      lang: 'en' as const,
+      coach:
+        'Look at the screen of “studio”: macOS is asking “Allow “SoloDawn” to find devices on local networks?”. Click Allow.',
+      coachMsg:
+        'Look at the screen of “{name}”: macOS is asking “Allow “SoloDawn” to find devices on local networks?”. Click Allow.',
+      filesPlus:
+        "Can't drop it? Click + under the list, press ⇧⌘G, type ~/Applications, and choose SoloDawn.",
+      sysMac1: '“Allow “SoloDawn” to find devices on local networks?”: click Allow.',
+    },
+    {
+      lang: 'zh-CN' as const,
+      coach: '看「studio」的屏幕：macOS 在问「允许“SoloDawn”查找本地网络中的设备？」，点「允许」。',
+      coachMsg:
+        '看「{name}」的屏幕：macOS 在问「允许“SoloDawn”查找本地网络中的设备？」，点「允许」。',
+      filesPlus: '拖不进去？点列表下方的「+」，按 ⇧⌘G，输入 ~/Applications，再选 SoloDawn。',
+      sysMac1: '「允许“SoloDawn”查找本地网络中的设备？」：点「允许」。',
+    },
+  ])(
+    'Permit and SystemAsks match updated macOS Local Network and ~/Applications wording in $lang',
+    ({ lang, coach, coachMsg, filesPlus, sysMac1 }) => {
+      prefs.lang = lang;
+
+      expect(messages[lang]['permit.lan.coach']).toBe(coachMsg);
+      expect(messages[lang]['permit.files.plus']).toBe(filesPlus);
+      expect(messages[lang]['permit.sys.mac.1']).toBe(sysMac1);
+
+      for (const key of ['permit.lan.coach', 'permit.files.plus', 'permit.sys.mac.1'] as const) {
+        for (const bad of stalePermitTexts) {
+          expect(messages[lang][key]).not.toContain(bad);
+        }
+      }
+      for (const [key, text] of Object.entries(messages[lang])) {
+        for (const bad of stalePermitTexts) {
+          // permit.sys.mac.2 keeps macOS's literal Chinese firewall prompt ("你要应用程序“solodawn”...").
+          if (key === 'permit.sys.mac.2' && bad === '应用程序') continue;
+          expect(text).not.toContain(bad);
+        }
+      }
+
+      const app = mount(Permit, {
+        target: host,
+        props: {
+          name: 'studio',
+          os: 'darwin/arm64',
+          relayed: false,
+          permissions: perms({ local_network: false, full_disk: false }),
+          ask: async () => ({ re: 1, ok: true as const }),
+          open: true,
+        },
+      });
+      flushSync();
+
+      const allowAll = [...host.querySelectorAll<HTMLButtonElement>('.perm-rows .act')].find((b) =>
+        b.textContent?.includes(messages[lang]['permit.files.all']),
+      )!;
+      allowAll.click();
+      flushSync();
+
+      expect(host.querySelectorAll('.coach p[role="status"]')[0]?.textContent).toBe(coach);
+      expect(host.querySelector('.coach .more')?.textContent).toBe(filesPlus);
+      for (const bad of stalePermitTexts) {
+        expect(host.textContent).not.toContain(bad);
+      }
+      unmount(app);
+
+      vi.stubGlobal('navigator', {
+        userAgentData: { platform: 'macOS' },
+        platform: '',
+        userAgent: '',
+      });
+      const sys = mount(SystemAsks, { target: host });
+      flushSync();
+
+      const items = host.querySelectorAll('.sys-asks li');
+      expect(items[0]?.textContent).toBe(sysMac1);
+      for (const bad of stalePermitTexts) {
+        expect(items[0]?.textContent).not.toContain(bad);
+      }
+      for (const bad of stalePermitTexts) {
+        if (lang === 'zh-CN' && bad === '应用程序') continue;
+        expect(host.textContent).not.toContain(bad);
+      }
+      unmount(sys);
+    },
+  );
 });

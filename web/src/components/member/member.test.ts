@@ -1,11 +1,12 @@
 import { flushSync, tick } from 'svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { all, closePage, one, show, texts } from '../../../features/page';
-import { Group, Home } from '../../lib/groups.svelte';
+import { all, closePage, fill, one, show, texts } from '../../../features/page';
+import { Group, Home, homes } from '../../lib/groups.svelte';
 import { goldens } from '../../lib/mock';
 import { nodes } from '../../lib/nodes.svelte';
 import { prefs } from '../../lib/prefs.svelte';
 import * as p from '../../lib/proto';
+import AddAI from './AddAI.svelte';
 import MemberPanel from './MemberPanel.svelte';
 
 const human = p.decode(p.HumanMemberRow, goldens['row-member-human']);
@@ -179,4 +180,266 @@ it('prompts the owner to re-sign in when a limited AI has login_ok false on its 
   expect(note.querySelector('a')?.getAttribute('href')).toBe('#/nodes');
   expect(home.device).toBe(golden.host);
   expect(ai.cli).toBe('claude');
+});
+
+async function pickFolderInAddAI(path: string) {
+  one<HTMLButtonElement>('dialog .path-row .change').click();
+  flushSync();
+  await vi.waitFor(() => expect(one<HTMLDialogElement>('dialog dialog[open]')).not.toBeNull());
+  const picker = one<HTMLDialogElement>('dialog dialog[open]');
+  fill(picker.querySelector<HTMLInputElement>('input.mono')!, path);
+  flushSync();
+  picker.querySelector<HTMLButtonElement>('footer .btn-primary')!.click();
+  flushSync();
+}
+
+function setupAddAIGroup() {
+  const home = new Home({
+    user: human.user,
+    sign: async (payload) => ({ p: payload, k: 'key', s: 'sig' }),
+  });
+  home.owner = true;
+  home.device = 'dev-ws';
+  home.name = 'Workstation';
+  const group = new Group(home, human.g);
+  const infoRow = p.decode(p.GroupRow, goldens['row-group']);
+  delete infoRow.secretary;
+  group.apply([infoRow, human]);
+  home.groups = [group];
+  return { group, home, infoRow };
+}
+
+function setupAddAINode(opts: {
+  user: string;
+  device: string;
+  name: string;
+  agents: p.HostInfoPush['agents'];
+  request?: ReturnType<typeof vi.fn>;
+}) {
+  const home = new Home({
+    user: opts.user,
+    sign: async (payload) => ({ p: payload, k: 'key', s: 'sig' }),
+  });
+  home.owner = true;
+  home.device = opts.device;
+  home.name = opts.name;
+  const base = p.decode(p.HostInfoPush, goldens['host-info-push']);
+  const info: p.HostInfoPush = {
+    ...base,
+    device: opts.device,
+    name: opts.name,
+    agents: opts.agents,
+  };
+  const folders = p.decode(p.HostWorkspaces, goldens['host-workspaces-answer']);
+  const request =
+    opts.request ??
+    vi.fn(async (req: { t: string }) =>
+      req.t === 'host.workspaces' ? folders : { ...info, re: 1, ok: true },
+    );
+  home.ctl = { request: request as unknown as p.Ctl['request'] };
+  return { home, info, request };
+}
+
+it('defaults AddAI folder from nodes.infos, resets across computers, and keeps manual choice on same computer', async () => {
+  const { group, home: home1, infoRow } = setupAddAIGroup();
+  const base = p.decode(p.HostInfoPush, goldens['host-info-push']);
+  const folders = p.decode(p.HostWorkspaces, goldens['host-workspaces-answer']);
+  const hostEntry = (member: string, workspace: string) => ({
+    g: group.g,
+    member,
+    workspace,
+    level: 3,
+    state: 'dormant',
+    queued: 0,
+    watchers: [],
+  });
+
+  // Home 1 has a secretary in group (codex) and a worker (claude); qwen is not in group yet.
+  group.apply([
+    { ...infoRow, seq: 100, secretary: 'sec-ws' },
+    { ...golden, id: 'wrk-ws', seq: 101, cli: 'claude', host: 'dev-ws', secretary: false },
+    { ...golden, id: 'sec-ws', seq: 102, cli: 'codex', host: 'dev-ws', secretary: true },
+  ]);
+  const info1: p.HostInfoPush = {
+    ...base,
+    device: 'dev-ws',
+    name: 'Workstation',
+    agents: [
+      { ...base.agents[0], agent: 'qwen', account: 'personal', groups: [] },
+      {
+        ...base.agents[0],
+        agent: 'claude',
+        account: 'personal',
+        groups: [hostEntry('wrk-ws', '/srv/ws-worker')],
+      },
+      {
+        ...base.agents[1],
+        agent: 'codex',
+        account: 'api_key',
+        groups: [hostEntry('sec-ws', '/srv/ws-sec')],
+      },
+    ],
+  };
+  home1.ctl = {
+    request: vi.fn(async (req: { t: string }) =>
+      req.t === 'host.workspaces' ? folders : { ...info1, re: 1, ok: true },
+    ) as unknown as p.Ctl['request'],
+  };
+
+  // Home 2 has two CLIs and an existing group workspace '/srv/laptop'.
+  const { home: home2, info: info2 } = setupAddAINode({
+    user: human.user,
+    device: 'dev-lap',
+    name: 'Laptop',
+    agents: [
+      {
+        ...base.agents[0],
+        agent: 'claude',
+        account: 'personal',
+        groups: [hostEntry('wrk-lap', '/srv/laptop')],
+      },
+      { ...base.agents[1], agent: 'codex', account: 'api_key', groups: [] },
+    ],
+  });
+  homes.push(home1, home2);
+  nodes.infos.set(home1, info1);
+  nodes.infos.set(home2, info2);
+
+  show(AddAI, { group, open: true });
+  const radios = () => all<HTMLInputElement>('dialog input[name="candidate"]');
+  const pathCode = () => one('dialog .path-row code');
+  const folderBtn = () => one<HTMLButtonElement>('dialog .path-row .change');
+  const submitBtn = () => one<HTMLButtonElement>('dialog > form > footer .btn-primary');
+
+  await vi.waitFor(() => expect(radios()[0].checked).toBe(true));
+  // Prefers the secretary's workspace on Workstation and offers "Change".
+  expect(pathCode().textContent?.trim()).toBe('/srv/ws-sec');
+  expect(folderBtn().textContent?.trim()).toBe('Change');
+  expect(submitBtn().disabled).toBe(false);
+  expect(submitBtn().hasAttribute('aria-describedby')).toBe(false);
+
+  // Switching to another computer picks that computer's default folder.
+  radios()[3].click();
+  flushSync();
+  expect(pathCode().textContent?.trim()).toBe('/srv/laptop');
+
+  // Manually choosing a folder is preserved when switching CLI on the same computer and on nodes.infos updates.
+  await pickFolderInAddAI('/srv/manual-lap');
+  expect(pathCode().textContent?.trim()).toBe('/srv/manual-lap');
+  radios()[4].click();
+  flushSync();
+  expect(pathCode().textContent?.trim()).toBe('/srv/manual-lap');
+  nodes.infos.set(home2, {
+    ...info2,
+    agents: info2.agents.map((a) =>
+      a.agent === 'codex' ? { ...a, groups: [hostEntry('other', '/srv/lap-new')] } : a,
+    ),
+  });
+  flushSync();
+  expect(pathCode().textContent?.trim()).toBe('/srv/manual-lap');
+
+  // Switching back to Workstation resets to Workstation's default folder.
+  radios()[0].click();
+  flushSync();
+  expect(pathCode().textContent?.trim()).toBe('/srv/ws-sec');
+});
+
+it('fills AddAI folder when nodes.infos arrives after opening unless user chose one, and explains disabled submit', async () => {
+  const { group, home } = setupAddAIGroup();
+  const base = p.decode(p.HostInfoPush, goldens['host-info-push']);
+  const folders = p.decode(p.HostWorkspaces, goldens['host-workspaces-answer']);
+  const initialInfo: p.HostInfoPush = {
+    ...base,
+    device: 'dev-ws',
+    name: 'Workstation',
+    agents: [{ ...base.agents[0], agent: 'claude', account: 'personal', groups: [] }],
+  };
+  let resolveJoin!: (value: unknown) => void;
+  const request = vi.fn((req: { t: string }) => {
+    if (req.t === 'host.workspaces') return Promise.resolve(folders);
+    if (req.t === 'host.info') return Promise.resolve({ ...initialInfo, re: 1, ok: true });
+    return new Promise((resolve) => {
+      resolveJoin = resolve;
+    });
+  });
+  home.ctl = { request: request as unknown as p.Ctl['request'] };
+  homes.push(home);
+  nodes.infos.set(home, initialInfo);
+
+  show(AddAI, { group, open: true });
+  const submitBtn = () => one<HTMLButtonElement>('dialog > form > footer .btn-primary');
+  const whyEl = () => document.querySelector('dialog > form > p.hint');
+  const whyText = () => {
+    const id = submitBtn().getAttribute('aria-describedby');
+    return id ? document.getElementById(id)?.textContent?.trim() : undefined;
+  };
+  await vi.waitFor(() =>
+    expect(one<HTMLInputElement>('dialog input[name="candidate"]').checked).toBe(true),
+  );
+
+  // Missing folder reason.
+  expect(submitBtn().disabled).toBe(true);
+  expect(whyText()).toBe('Choose a folder for Claude Code first');
+  expect(whyEl()?.textContent?.trim()).toBe('Choose a folder for Claude Code first');
+
+  // Delayed nodes.infos arrival fills the group's folder automatically.
+  nodes.infos.set(home, {
+    ...initialInfo,
+    agents: [
+      {
+        ...initialInfo.agents[0],
+        groups: [
+          {
+            g: group.g,
+            member: 'm1',
+            workspace: '/srv/delayed',
+            level: 3,
+            state: 'dormant',
+            queued: 0,
+            watchers: [],
+          },
+        ],
+      },
+    ],
+  });
+  flushSync();
+  expect(one('dialog .path-row code').textContent?.trim()).toBe('/srv/delayed');
+  expect(submitBtn().disabled).toBe(false);
+  expect(submitBtn().hasAttribute('aria-describedby')).toBe(false);
+  expect(whyEl()).toBeNull();
+
+  // Empty name reason.
+  const nameInput = one<HTMLInputElement>('dialog label.field input.input');
+  fill(nameInput, '   ');
+  flushSync();
+  expect(submitBtn().disabled).toBe(true);
+  expect(whyText()).toBe('Enter a name for Claude Code first');
+
+  // Skills too long reason (when follow switch is off).
+  fill(nameInput, 'Reviewer');
+  flushSync();
+  one<HTMLButtonElement>('dialog [role="switch"]').click();
+  flushSync();
+  const skillsInput = one<HTMLInputElement>('dialog .custom-fields > label.field input.input');
+  fill(skillsInput, 'x'.repeat(201));
+  flushSync();
+  expect(submitBtn().disabled).toBe(true);
+  expect(whyText()).toBe('Shorten what Reviewer is good at first');
+
+  // Fixing skills enables submit and clears the hint.
+  fill(skillsInput, 'x'.repeat(200));
+  flushSync();
+  expect(submitBtn().disabled).toBe(false);
+  expect(submitBtn().hasAttribute('aria-describedby')).toBe(false);
+  expect(whyEl()).toBeNull();
+
+  // While busy submitting, button is disabled without showing any hint.
+  one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  flushSync();
+  expect(submitBtn().disabled).toBe(true);
+  expect(submitBtn().hasAttribute('aria-describedby')).toBe(false);
+  expect(whyEl()).toBeNull();
+  await vi.waitFor(() => expect(resolveJoin).toBeTypeOf('function'));
+  resolveJoin({ re: 1, ok: true });
+  await vi.waitFor(() => expect(one<HTMLDialogElement>('dialog').open).toBe(false));
 });

@@ -321,6 +321,21 @@ export function suggestedName(
   return agent ? freeName(names, cliName(agent)) : '';
 }
 
+/** Default folder for a new AI on `home` in `group`: the folder another AI of `group` on `home`
+ *  already uses (preferring the secretary when it runs on `home`), or empty if none does. */
+export function groupWorkspace(
+  group: Group,
+  home: Home,
+  infos: ReadonlyMap<Home, HostInfoPush>,
+): string {
+  const entries = (infos.get(home)?.agents ?? [])
+    .flatMap(({ groups }) => groups)
+    .filter((entry) => entry.g === group.g && Boolean(entry.workspace));
+  if (entries.length === 0) return '';
+  const sec = group.info?.secretary ?? aiMembers(group).find((m) => m.secretary)?.id;
+  return (entries.find((entry) => entry.member === sec) ?? entries[0]).workspace;
+}
+
 /** A refusal: its code, and the words of the node or home that refused. */
 export type Refusal = ErrorResponse['err'];
 

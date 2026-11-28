@@ -14,7 +14,7 @@ Feature: What a person does with a task: answer in its thread, stop it, carry it
     When Alex opens the thread of T-12
     Then its composer is named "Message in T-12's thread" and says "Write in T-12's thread, @ an AI to reach it"
     When Alex types "@" there
-    Then it offers "Codex", "Claude Code", "Alex" and "Secretary" in this order
+    Then it offers "Codex", "Claude Code" and "Secretary" in this order
     When Alex types "Yes, keep it." there
     Then it says "@ an AI if one should answer. Otherwise this just stays in the thread."
     When Alex folds the thread and opens it again

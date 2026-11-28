@@ -3,7 +3,8 @@
 import type { Group } from './groups.svelte';
 import type { Kind } from './mounts.svelte';
 import { t } from './prefs.svelte';
-import type { TaskRow } from './proto';
+import type { MsgRow, TaskRow } from './proto';
+import { systemText } from './system';
 
 /** Highlight state of one segment in the three-step task bar. */
 export type StepMark = 'done' | 'now' | 'wait' | 'fail' | undefined;
@@ -89,8 +90,10 @@ export function taskBadge(group: Group, task: TaskRow): Badge {
   const ended = finalBadge(task);
   if (ended) return ended;
   if (takenOver(group, task)) return { text: t('task.badge.takeover'), dot: 'takeover' };
+  if (task.state === 'queued') return { text: t('task.badge.queued') };
+  if (group.info?.paused) return { text: t('task.badge.group_paused'), dot: 'paused' };
   if (task.state === 'paused') return { text: t('task.badge.paused'), dot: 'paused' };
-  return task.state === 'queued' ? { text: t('task.badge.queued') } : activeBadge(group, task);
+  return activeBadge(group, task);
 }
 
 function waitsOnViewer(group: Group, task: TaskRow): boolean {
@@ -101,6 +104,7 @@ function waitsOnViewer(group: Group, task: TaskRow): boolean {
 function currentMark(group: Group, task: TaskRow): StepMark {
   if (task.state === 'failed') return 'fail';
   if (idleStates.has(task.state)) return undefined;
+  if (group.info?.paused && !takenOver(group, task)) return undefined;
   return waitsOnViewer(group, task) ? 'wait' : 'now';
 }
 
@@ -158,11 +162,23 @@ function pending(group: Group, task: TaskRow, pass: string) {
   return { meta };
 }
 
+type SystemMsg = Extract<MsgRow, { kind: 'system' }>;
+
+function systemPreview(group: Group, taskId: string, ts: number): string | undefined {
+  const msg = group
+    .thread(taskId)
+    .findLast((m): m is SystemMsg => m.kind === 'system' && m.ts === ts);
+  return msg ? systemText(group, msg).split('\n')[0] : undefined;
+}
+
 /** Formats the collapsed thread preview line from `task.thread`. */
 export function threadPreview(group: Group, task: TaskRow): string {
   const last = task.thread.last;
   if (!last) return task.thread.count === 0 ? t('task.thread.empty') : '';
   const who = last.by === 'system' ? t('chat.system') : group.nameOf(last.by);
-  const said = last.text || t(`chat.kind.${last.kind as Kind}`);
-  return t('task.thread.last').replace('{who}', who).replace('{text}', said);
+  const sys = last.kind === 'system' ? systemPreview(group, task.id, last.ts) : undefined;
+  const said = sys ?? (last.text || t(`chat.kind.${last.kind as Kind}`));
+  return t('task.thread.last')
+    .replace('{who}', () => who)
+    .replace('{text}', () => said);
 }

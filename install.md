@@ -57,8 +57,8 @@ app's executable. Add `$HOME/.local/bin` to your `PATH` if needed.
 macOS shows a "Background Items Added" notice for SoloDawn (nothing to do), and
 then may ask up to two questions: if the Application Firewall is on,
 "Do you want the application "solodawn" to accept incoming network connections?"
-(naming the executable `solodawn`), and, in SoloDawn's name, "SoloDawn would like
-to find devices on your local networks". Tell the person to click **Allow** on
+(naming the executable `solodawn`), and, in SoloDawn's name, "Allow "SoloDawn"
+to find devices on local networks?". Tell the person to click **Allow** on
 both — otherwise direct connections fail and only the relay works. If either was
 refused or no window appeared, repair it from the Computers page in the browser
 (which opens the right place in System Settings; the firewall lists the

@@ -604,6 +604,132 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario(
+    'Pausing the group pauses active task cards while queued tasks stay queued, and system thread previews show their notice text',
+    ({ When, Then, And }) => {
+      const card = (id: string) => one(`#m-${id}`);
+      const cardMarks = (id: string) =>
+        [...card(id).querySelectorAll('.steps i')]
+          .map((el) => el.getAttribute('data-s') ?? '-')
+          .join(', ');
+      const t12 = (changes: Record<string, unknown> = {}) =>
+        ({
+          ...example('row-task'),
+          state: 'active',
+          step: 'work',
+          wait: null,
+          review: undefined,
+          report: undefined,
+          thread: {
+            count: 1,
+            rounds: 0,
+            last: { by: 'system', kind: 'system', text: '', ts: 1763599999500 },
+          },
+          ...changes,
+        }) as p.Row & Record<string, unknown>;
+      const t15 = () =>
+        ({
+          ...example('row-task'),
+          id: task15,
+          num: 15,
+          title: 'Add path badge',
+          state: 'queued',
+          step: 'work',
+          wait: { kind: 'depends', since: 1763600000000 },
+          depends: [task12],
+          review: undefined,
+          report: undefined,
+          thread: { count: 0, rounds: 0 },
+        }) as p.Row & Record<string, unknown>;
+
+      When(
+        'the home writes an active task "T-12" at step "work" with an unloaded system notice, and a queued task "T-15"',
+        () => {
+          home.write(website, t12());
+          home.write(website, taskMsg('msg-t12', task12));
+          home.write(website, t15());
+          home.write(website, taskMsg('msg-t15', task15));
+          flushSync();
+        },
+      );
+      Then('the card of T-12 shows "Latest: System · Notice"', () => {
+        expect(card('msg-t12').querySelector('.fold summary .grow')?.textContent?.trim()).toBe(
+          'Latest: System · Notice',
+        );
+      });
+      When('the home writes the group as paused and loads the system notice for T-12', () => {
+        home.write(
+          website,
+          example('row-member-human', {
+            id: 'multiline-member',
+            user: 'multiline-user',
+            name: 'Mina\nsecond line',
+          }),
+        );
+        home.write(
+          website,
+          example('row-msg-system', {
+            id: 'sys-t12',
+            thread: task12,
+            ts: 1763599999500,
+            body: { code: 'member_joined', member: codexId, by: 'multiline-member' },
+          }),
+        );
+        home.write(website, example('row-group-paused'));
+        flushSync();
+      });
+      Then(
+        'the card of T-12 shows paused badge "Group paused", steps "-, -, -" with "Work · 1 / 3", and preview "Latest: System · Codex joined, invited by Mina"',
+        () => {
+          const badge = card('msg-t12').querySelector('.card-head .badge')!;
+          expect(badge.textContent?.trim()).toBe('Group paused');
+          expect(badge.querySelector('.st')?.getAttribute('data-st')).toBe('paused');
+          expect(cardMarks('msg-t12')).toBe('-, -, -');
+          expect(card('msg-t12').querySelector('.steps span')?.textContent).toBe('Work · 1 / 3');
+          expect(card('msg-t12').querySelector('.fold summary .grow')?.textContent?.trim()).toBe(
+            'Latest: System · Codex joined, invited by Mina',
+          );
+        },
+      );
+      And('the card of T-15 still shows "Queued" and steps "-, -, -"', () => {
+        expect(card('msg-t15').querySelector('.card-head .badge')?.textContent?.trim()).toBe(
+          'Queued',
+        );
+        expect(cardMarks('msg-t15')).toBe('-, -, -');
+      });
+      When('T-12 moves to step "review" while the group is paused', () => {
+        home.write(website, t12({ step: 'review', report: 'report-t12' }));
+        flushSync();
+      });
+      Then(
+        'the card of T-12 shows paused badge "Group paused" and steps "done, -, -" with "Review · 2 / 3"',
+        () => {
+          const badge = card('msg-t12').querySelector('.card-head .badge')!;
+          expect(badge.textContent?.trim()).toBe('Group paused');
+          expect(badge.querySelector('.st')?.getAttribute('data-st')).toBe('paused');
+          expect(cardMarks('msg-t12')).toBe('done, -, -');
+          expect(card('msg-t12').querySelector('.steps span')?.textContent).toBe('Review · 2 / 3');
+        },
+      );
+      When('the home resumes the group', () => {
+        const current = home.groups.get(website)!.rows.get(`group ${website}`)!;
+        home.write(website, { ...current, paused: null });
+        flushSync();
+      });
+      Then(
+        'the card of T-12 shows working badge "In progress" and steps "done, now, -" with "Review · 2 / 3"',
+        () => {
+          const badge = card('msg-t12').querySelector('.card-head .badge')!;
+          expect(badge.textContent?.trim()).toBe('In progress');
+          expect(badge.getAttribute('data-tone')).toBe('sky');
+          expect(badge.querySelector('.st')?.getAttribute('data-st')).toBe('working');
+          expect(cardMarks('msg-t12')).toBe('done, now, -');
+          expect(card('msg-t12').querySelector('.steps span')?.textContent).toBe('Review · 2 / 3');
+        },
+      );
+    },
+  );
+
+  Scenario(
     'The development states sheet mounts the task card for the wire example',
     ({ Given, When, Then }) => {
       Given('a development server', () => {

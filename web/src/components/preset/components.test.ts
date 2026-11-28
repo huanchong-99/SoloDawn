@@ -223,3 +223,48 @@ it('returns focus to the brief when membership disappears during an act', async 
     expect(document.activeElement).toBe(one('.card'));
   });
 });
+
+it('shows field placeholders, groups row actions, and distinguishes preset delete wording', async () => {
+  group.apply([row('row-note-preset')]);
+  show(PresetPanel, { group });
+  await open();
+
+  const editBtn = one<HTMLButtonElement>('.preset .mem-meta .edit');
+  const delBtn = one<HTMLButtonElement>('.preset .mem-meta .del');
+  expect(editBtn.parentElement).toBe(delBtn.parentElement);
+  expect(editBtn.parentElement?.classList.contains('mem-acts')).toBe(true);
+  expect(delBtn.getAttribute('aria-label')).toBe('Delete preset: Calm dashboard');
+
+  editBtn.click();
+  flushSync();
+  expect(one<HTMLInputElement>('.preset .edit-field input').placeholder).toBe('Preset name');
+  expect(one<HTMLTextAreaElement>('.preset .edit-field textarea').placeholder).toBe('Preset text');
+  one<HTMLButtonElement>('.preset .edit-field .btn-ghost').click();
+  await tick();
+  flushSync();
+
+  one<HTMLButtonElement>('.preset .add').click();
+  flushSync();
+  expect(one<HTMLInputElement>('.preset .edit-field input').placeholder).toBe('Preset name');
+  expect(one<HTMLTextAreaElement>('.preset .edit-field textarea').placeholder).toBe('Preset text');
+
+  delBtn.click();
+  flushSync();
+  expect(texts('dialog h2')).toEqual(['Delete this preset?']);
+  expect(texts('dialog .lead')).toEqual([
+    "This removes it permanently from the group's style presets on every connected device.",
+  ]);
+  one<HTMLButtonElement>('dialog .btn-ghost').click();
+  await tick();
+  flushSync();
+
+  prefs.lang = 'zh-CN';
+  flushSync();
+  expect(one<HTMLButtonElement>('.preset .mem-meta .del').getAttribute('aria-label')).toBe(
+    '删除预设：Calm dashboard',
+  );
+  one<HTMLButtonElement>('.preset .mem-meta .del').click();
+  flushSync();
+  expect(texts('dialog h2')).toEqual(['删除这个预设？']);
+  expect(texts('dialog .lead')).toEqual(['这会把它从群的风格预设里永久删除。']);
+});

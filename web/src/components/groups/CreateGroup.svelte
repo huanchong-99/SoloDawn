@@ -45,9 +45,9 @@
   let name = $state('');
   let member = $state('');
   let people = $state<Record<string, boolean>>({});
-  /** The AIs ticked, by candidate key, with their name, folder, follow flag, model, level and tier. */
+  /** The AIs ticked, by candidate key, with their computer, name, folder, follow flag, model, level and tier. */
   let ais = $state<
-    Record<string, { name: string; workspace: string; follow: boolean; draft: Draft }>
+    Record<string, { home: Home; name: string; workspace: string; follow: boolean; draft: Draft }>
   >({});
   let secretary = $state('');
   let busy = $state(false);
@@ -109,12 +109,45 @@
     if (on) {
       const name = freeName(taken, cliName(candidate.agent));
       const defaults = defaultsOf(candidate.home, candidate.agent);
-      ais[candidate.key] = { name, workspace: '', follow: true, draft: draftOf(defaults) };
+      const workspace =
+        Object.values(ais).find((other) => other.home === candidate.home && other.workspace)
+          ?.workspace ?? '';
+      ais[candidate.key] = {
+        home: candidate.home,
+        name,
+        workspace,
+        follow: true,
+        draft: draftOf(defaults),
+      };
     } else delete ais[candidate.key];
     if (!ais[secretary]) secretary = Object.keys(ais)[0] ?? '';
   }
 
+  /** Sets `candidate`'s folder and fills any ticked AI on the same computer with an empty folder. */
+  function setWorkspace(candidate: Candidate, path: string) {
+    const ai = ais[candidate.key];
+    if (!ai) return;
+    ai.workspace = path;
+    if (!path) return;
+    for (const other of Object.values(ais)) {
+      if (other.home === candidate.home && !other.workspace) other.workspace = path;
+    }
+  }
+
   const ready = $derived(Object.values(ais).every((ai) => ai.workspace && ai.name.trim()));
+  const submitWhy = $derived.by(() => {
+    if (outcome || busy || !owned.length || ready) return undefined;
+    for (const [key, ai] of Object.entries(ais)) {
+      if (ai.workspace && ai.name.trim()) continue;
+      const agent = candidates.find((each) => each.key === key)?.agent ?? '';
+      const cli = agent ? cliName(agent) : '';
+      if (!ai.workspace) {
+        return t('groups.create.why.folder').replace('{ai}', () => ai.name.trim() || cli);
+      }
+      return t('groups.create.why.name').replace('{ai}', () => cli);
+    }
+    return undefined;
+  });
   const workingCount = $derived(Object.keys(ais).filter((key) => key !== secretary).length);
 
   async function submit(event: SubmitEvent) {
@@ -319,7 +352,9 @@
                 agent={candidate.agent}
                 ai={ai.name || cliName(candidate.agent)}
                 computer={candidate.hostName}
-                bind:workspace={ai.workspace}
+                bind:workspace={
+                  () => ais[candidate.key]?.workspace ?? '', (path) => setWorkspace(candidate, path)
+                }
               />
               <label class="field">
                 <span>
@@ -398,6 +433,7 @@
         {/if}
       </div>
     {/if}
+    {#if submitWhy}<p id={`${uid}-why`} class="hint">{submitWhy}</p>{/if}
     <footer class="row">
       <span class="grow"></span>
       {#if !outcome}
@@ -405,7 +441,11 @@
           {t('groups.create.cancel')}
         </button>
       {/if}
-      <button class="btn btn-primary" disabled={busy || !owned.length || !ready}>
+      <button
+        class="btn btn-primary"
+        disabled={busy || !owned.length || !ready}
+        aria-describedby={submitWhy ? `${uid}-why` : undefined}
+      >
         {t(outcome ? 'groups.create.open' : 'groups.create.submit')}
       </button>
     </footer>

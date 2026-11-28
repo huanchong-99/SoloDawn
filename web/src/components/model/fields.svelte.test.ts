@@ -13,6 +13,9 @@ const models = [
   { model: 'haiku', name: 'Haiku', efforts: [], tier: 'light' },
 ];
 const ai = decode(AIMemberRow, goldens['row-member-ai']);
+const modelSelect = () => all<HTMLSelectElement>('select')[0];
+const modelOptions = () =>
+  [...modelSelect().options].map((option) => [option.value, option.text.trim()]);
 const level = () => all<HTMLSelectElement>('select')[1];
 const levels = () => [...level().options].map((option) => [option.value, option.text.trim()]);
 
@@ -64,6 +67,141 @@ it('keeps a stored level that the list does not hold as a choice', () => {
     ['high', 'high'],
     ['deep', 'deep · Not listed'],
   ]);
+});
+
+it('merges a listed default model into the CLI default option and restores its levels, badge, and tier', () => {
+  const listed = [
+    {
+      model: 'default',
+      name: 'Default (recommended)',
+      efforts: ['low', 'medium', 'high'],
+      fast: true as const,
+      tier: 'strong',
+    },
+    ...models,
+  ];
+  const draft = $state(newDraft());
+  show(ModelFields, { draft, models: listed, suggest: true });
+  expect(modelOptions()).toEqual([
+    ['', "The CLI's default"],
+    ['opus', 'Opus'],
+    ['haiku', 'Haiku'],
+  ]);
+  expect(modelSelect().querySelector('option[value="default"]')).toBeNull();
+  expect(draft.model).toBe('');
+  expect(modelSelect().value).toBe('');
+  expect(level().disabled).toBe(false);
+  expect(levels()).toEqual([
+    ['', "The CLI's default"],
+    ['low', 'low'],
+    ['medium', 'medium'],
+    ['high', 'high'],
+  ]);
+  expect(texts('.fast')).toEqual(['Fast mode']);
+  expect(all('.why')).toEqual([]);
+
+  choose(level(), 'medium');
+  expect(draft).toMatchObject({ model: '', effort: 'medium' });
+
+  choose(modelSelect(), 'Opus');
+  expect(draft).toMatchObject({ model: 'opus', effort: '', tier: 'strong' });
+  expect(all('.fast')).toEqual([]);
+  expect(levels()).toEqual([
+    ['', "The CLI's default"],
+    ['low', 'low'],
+    ['high', 'high'],
+  ]);
+
+  choose(level(), 'high');
+  choose(modelSelect(), "The CLI's default");
+  expect(draft).toMatchObject({ model: '', effort: 'high', tier: 'strong' });
+  expect(modelSelect().value).toBe('');
+  expect(level().disabled).toBe(false);
+  expect(levels()).toEqual([
+    ['', "The CLI's default"],
+    ['low', 'low'],
+    ['medium', 'medium'],
+    ['high', 'high'],
+  ]);
+  expect(texts('.fast')).toEqual(['Fast mode']);
+
+  choose(modelSelect(), 'Haiku');
+  expect(draft).toMatchObject({ model: 'haiku', effort: '', tier: 'light' });
+  expect(level().disabled).toBe(true);
+
+  choose(modelSelect(), "The CLI's default");
+  expect(draft).toMatchObject({ model: '', effort: '', tier: 'strong' });
+  expect(level().disabled).toBe(false);
+  expect(levels()).toEqual([
+    ['', "The CLI's default"],
+    ['low', 'low'],
+    ['medium', 'medium'],
+    ['high', 'high'],
+  ]);
+  expect(texts('.fast')).toEqual(['Fast mode']);
+
+  prefs.lang = 'zh-CN';
+  flushSync();
+  expect(modelOptions()).toEqual([
+    ['', 'CLI 默认'],
+    ['opus', 'Opus'],
+    ['haiku', 'Haiku'],
+  ]);
+});
+
+it('shows no-levels reason when a listed default model has empty efforts', () => {
+  const listed = [
+    { model: 'default', name: 'Default (recommended)', efforts: [], tier: 'standard' },
+    ...models,
+  ];
+  const draft = $state(newDraft());
+  show(ModelFields, { draft, models: listed });
+  expect(modelOptions()).toEqual([
+    ['', "The CLI's default"],
+    ['opus', 'Opus'],
+    ['haiku', 'Haiku'],
+  ]);
+  expect(draft.model).toBe('');
+  expect(level().disabled).toBe(true);
+  expect(levels()).toEqual([['', "The CLI's default"]]);
+  expect(texts('.why')).toEqual(['This model has no levels']);
+  expect(all('.fast')).toEqual([]);
+});
+
+it('keeps a listed default model visible and selected for a member already saved with "default"', () => {
+  const listed = [
+    {
+      model: 'default',
+      name: 'Default (recommended)',
+      efforts: ['low', 'medium', 'high'],
+      fast: true as const,
+      tier: 'strong',
+    },
+    ...models,
+  ];
+  const draft = $state({ ...newDraft(), model: 'default', effort: 'high' });
+  show(ModelFields, { draft, models: listed, suggest: true });
+  expect(modelOptions()).toEqual([
+    ['', "The CLI's default"],
+    ['default', 'Default (recommended)'],
+    ['opus', 'Opus'],
+    ['haiku', 'Haiku'],
+  ]);
+  expect(modelSelect().value).toBe('default');
+  expect(modelSelect().selectedIndex).toBe(1);
+  expect(level().value).toBe('high');
+  expect(texts('.fast')).toEqual(['Fast mode']);
+
+  choose(modelSelect(), "The CLI's default");
+  expect(draft.model).toBe('');
+  expect(modelSelect().value).toBe('');
+  expect(level().value).toBe('high');
+  expect(modelOptions()).toEqual([
+    ['', "The CLI's default"],
+    ['opus', 'Opus'],
+    ['haiku', 'Haiku'],
+  ]);
+  expect(modelSelect().querySelector('option[value="default"]')).toBeNull();
 });
 
 it('words the work share with its hint, shows the quota with an AI and can leave out skills', () => {

@@ -19,7 +19,7 @@ afterEach(async () => {
   nodes.infos.clear();
 });
 
-function setupCreateGroupNodes() {
+function setupCreateGroupNodes(extraFirst: string[] = []) {
   const me = {
     user: 'owner',
     sign: async (payload: string) => ({ p: payload, k: 'key', s: 'sig' }),
@@ -31,6 +31,12 @@ function setupCreateGroupNodes() {
   info1.agents = [
     { ...info1.agents[0], agent: 'claude', account: 'personal', groups: [] },
     { ...info1.agents[0], agent: 'codex', account: 'api_key', groups: [] },
+    ...extraFirst.map((agent) => ({
+      ...info1.agents[0],
+      agent,
+      account: 'personal',
+      groups: [],
+    })),
   ];
   info2.device = 'dev-lap';
   info2.agents = [{ ...info2.agents[0], agent: 'claude', account: 'personal', groups: [] }];
@@ -54,6 +60,7 @@ function setupCreateGroupNodes() {
   homes.push(home1, home2);
   nodes.infos.set(home1, info1);
   nodes.infos.set(home2, info2);
+  return { home1, home2 };
 }
 
 it('shows the 3-AI hint in CreateGroup while workingCount < 2 without blocking creation', () => {
@@ -167,4 +174,114 @@ it('explains the 3-AI rule and shared-folder choice in guide step 4, CreateGroup
   expect(t('groups.create.ais.need')).toContain('共用同一个文件夹');
   expect(t('chat.need_working_ais')).toContain('执行和复核不能是同一个');
   expect(t('chat.need_working_ais')).toContain('同一个 CLI 可以再加一次');
+});
+
+async function pickFolder(aiRow: Element, path: string) {
+  aiRow.querySelector<HTMLButtonElement>('.path-row .change')!.click();
+  flushSync();
+  await vi.waitFor(() =>
+    expect(aiRow.querySelector<HTMLDialogElement>('dialog[open]')).not.toBeNull(),
+  );
+  const picker = aiRow.querySelector<HTMLDialogElement>('dialog[open]')!;
+  fill(picker.querySelector<HTMLInputElement>('input.mono')!, path);
+  flushSync();
+  picker.querySelector<HTMLButtonElement>('footer .btn-primary')!.click();
+  flushSync();
+}
+
+it('shares chosen folders within the same computer in CreateGroup and explains disabled submit', async () => {
+  const { home1 } = setupCreateGroupNodes(['qwen']);
+  show(CreateGroup, { open: true });
+
+  const rows = () => [...document.querySelectorAll('dialog > form div.ai')];
+  const tickOf = (row: Element) => row.querySelector<HTMLInputElement>('input[type=checkbox]')!;
+  const folderText = (row: Element) => row.querySelector('.path-row code')!.textContent!.trim();
+  const folderBtn = (row: Element) =>
+    row.querySelector<HTMLButtonElement>('.path-row .change')!.textContent!.trim();
+  const nameInputOf = (row: Element) =>
+    row.querySelector<HTMLInputElement>('.ai-fields label.field input.input')!;
+  const submit = () => one<HTMLButtonElement>('dialog > form > footer .btn-primary');
+  const whyText = () => {
+    const id = submit().getAttribute('aria-describedby');
+    return id ? document.getElementById(id)?.textContent?.trim() : undefined;
+  };
+
+  const [wsClaude, wsCodex, wsQwen, lapClaude] = rows();
+  // Tick 2 AIs on comp 1 and 1 on comp 2; leave all folders empty initially.
+  tickOf(wsClaude).click();
+  tickOf(wsCodex).click();
+  tickOf(lapClaude).click();
+  flushSync();
+  await vi.waitFor(() =>
+    expect([folderText(wsClaude), folderText(wsCodex), folderText(lapClaude)]).toEqual([
+      'No folder chosen',
+      'No folder chosen',
+      'No folder chosen',
+    ]),
+  );
+  expect(submit().disabled).toBe(true);
+  expect(whyText()).toBe('Choose a folder for Claude Code first');
+
+  // Choosing the first AI's folder fills the empty AI on comp 1, leaves comp 2 empty.
+  await pickFolder(wsClaude, '/proj/one');
+  expect(folderText(wsClaude)).toBe('/proj/one');
+  expect(folderText(wsCodex)).toBe('/proj/one');
+  expect(folderBtn(wsCodex)).toBe('Change');
+  expect(folderText(lapClaude)).toBe('No folder chosen');
+  expect(folderBtn(lapClaude)).toBe('Choose');
+  expect(submit().disabled).toBe(true);
+  expect(whyText()).toBe('Choose a folder for Claude Code 2 first');
+
+  // A non-empty folder on comp 1 is never overwritten when another AI on comp 1 changes folder.
+  await pickFolder(wsCodex, '/proj/two');
+  await pickFolder(wsClaude, '/proj/three');
+  expect(folderText(wsClaude)).toBe('/proj/three');
+  expect(folderText(wsCodex)).toBe('/proj/two');
+  expect(folderText(lapClaude)).toBe('No folder chosen');
+
+  // Newly ticked AI on comp 1 copies the first ticked folder on comp 1.
+  tickOf(wsQwen).click();
+  flushSync();
+  expect(folderText(wsQwen)).toBe('/proj/three');
+  expect(folderBtn(wsQwen)).toBe('Change');
+
+  // Filling comp 2 enables submit and removes the hint + aria-describedby.
+  await pickFolder(lapClaude, '/proj/lap');
+  expect(submit().disabled).toBe(false);
+  expect(submit().hasAttribute('aria-describedby')).toBe(false);
+  expect(document.querySelector('dialog > form > p.hint')).toBeNull();
+
+  // Clearing an AI's name disables submit and explains which AI needs a name.
+  fill(nameInputOf(wsCodex), '   ');
+  flushSync();
+  expect(submit().disabled).toBe(true);
+  expect(whyText()).toBe('Enter a name for Codex first');
+  fill(nameInputOf(wsCodex), 'Codex');
+  flushSync();
+  expect(submit().disabled).toBe(false);
+  expect(submit().hasAttribute('aria-describedby')).toBe(false);
+
+  // While busy submitting, the button is disabled without showing any why hint.
+  let resolveCreate!: (value: unknown) => void;
+  const origRequest = home1.ctl!.request;
+  home1.ctl!.request = vi.fn((req: { t: string }) =>
+    req.t === 'cmd'
+      ? new Promise((resolve) => {
+          resolveCreate = resolve;
+        })
+      : (origRequest as (req: unknown) => Promise<unknown>)(req),
+  ) as unknown as p.Ctl['request'];
+  const [groupName, memberName] = [
+    ...document.querySelectorAll<HTMLInputElement>('dialog > form > .two input.input'),
+  ];
+  fill(groupName, 'Studio');
+  fill(memberName, 'Alex');
+  one('dialog > form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  flushSync();
+  expect(submit().disabled).toBe(true);
+  expect(submit().hasAttribute('aria-describedby')).toBe(false);
+  expect(whyText()).toBeUndefined();
+  await vi.waitFor(() => expect(resolveCreate).toBeTypeOf('function'));
+  resolveCreate({ err: { code: 'internal', msg: 'done' } });
+  await vi.waitFor(() => expect(submit().disabled).toBe(false));
 });

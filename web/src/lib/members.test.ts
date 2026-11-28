@@ -11,6 +11,7 @@ import {
   addPerson,
   found,
   freeName,
+  groupWorkspace,
   hasAI,
   hasHostAgent,
   invitationText,
@@ -980,6 +981,76 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
     // When the group already has a secretary, toggling secretary keeps the CLI's free name.
     const { group: withSec } = makeGroup({ secretary: 'sec-id' });
     expect(suggestedName(withSec, 'codex', true)).toBe('Codex');
+  });
+
+  it('finds the default groupWorkspace on a home, preferring the secretary', () => {
+    const baseInfo = p.decode(p.HostInfoPush, goldens['host-info-push']);
+    const entry = (g: string, member: string, workspace: string) => ({
+      g,
+      member,
+      workspace,
+      level: 3,
+      state: 'dormant',
+      queued: 0,
+      watchers: [],
+    });
+
+    const { home, group } = makeGroup({ secretary: 'sec-by-info' });
+    // No host info -> empty string.
+    expect(groupWorkspace(group, home, new Map())).toBe('');
+
+    // Host info with only another group or empty workspace -> empty string.
+    const noMatchInfo: p.HostInfoPush = {
+      ...baseInfo,
+      agents: [
+        { ...baseInfo.agents[0], agent: 'claude', groups: [entry('other-g', 'm0', '/srv/other')] },
+        { ...baseInfo.agents[1], agent: 'codex', groups: [entry(gid, 'm1', '')] },
+      ],
+    };
+    expect(groupWorkspace(group, home, new Map([[home, noMatchInfo]]))).toBe('');
+
+    // Single matching AI in this group -> returns its workspace.
+    const singleInfo: p.HostInfoPush = {
+      ...baseInfo,
+      agents: [
+        {
+          ...baseInfo.agents[0],
+          agent: 'claude',
+          groups: [entry('other-g', 'm0', '/srv/other'), entry(gid, 'm1', '/srv/single')],
+        },
+      ],
+    };
+    expect(groupWorkspace(group, home, new Map([[home, singleInfo]]))).toBe('/srv/single');
+
+    // Differing folders on the same home: prefers the secretary (from group.info.secretary).
+    const multiInfo: p.HostInfoPush = {
+      ...baseInfo,
+      agents: [
+        { ...baseInfo.agents[0], agent: 'claude', groups: [entry(gid, 'wrk-1', '/srv/worker')] },
+        {
+          ...baseInfo.agents[1],
+          agent: 'codex',
+          groups: [entry(gid, 'sec-by-info', '/srv/secretary')],
+        },
+      ],
+    };
+    expect(groupWorkspace(group, home, new Map([[home, multiInfo]]))).toBe('/srv/secretary');
+
+    // Differing folders without group.info: still prefers AI member with secretary === true.
+    const { home: homeNoInfo, group: groupNoInfo } = makeGroup({ withInfo: false });
+    groupNoInfo.apply([
+      row<p.AIMemberRow>('row-member-ai', { id: 'wrk-1', g: gid, secretary: false }),
+      row<p.AIMemberRow>('row-member-ai', { id: 'sec-by-info', g: gid, secretary: true }),
+    ]);
+    expect(groupWorkspace(groupNoInfo, homeNoInfo, new Map([[homeNoInfo, multiInfo]]))).toBe(
+      '/srv/secretary',
+    );
+
+    // Differing folders without any secretary -> uses the first listed matching entry.
+    const { home: homeNoSec, group: groupNoSec } = makeGroup({ secretary: undefined });
+    expect(groupWorkspace(groupNoSec, homeNoSec, new Map([[homeNoSec, multiInfo]]))).toBe(
+      '/srv/worker',
+    );
   });
 
   it('words home_unreachable, conflict and lost in joinError and leaves others to Failure', () => {

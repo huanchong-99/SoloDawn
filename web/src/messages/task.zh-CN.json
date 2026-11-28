@@ -5,6 +5,7 @@
   "task.badge.rejected": "打回 · 第 {n} 轮",
   "task.badge.reviewer": "等派评审",
   "task.badge.paused": "已暂停",
+  "task.badge.group_paused": "群已暂停",
   "task.badge.takeover": "主人正在直接操作",
   "task.badge.failed": "已停",
   "task.badge.failed.count": "连续失败 {n} 次，已停",

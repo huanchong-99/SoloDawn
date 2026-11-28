@@ -21,6 +21,20 @@ export function typing(text: string, caret: number) {
 export const matching = <M extends Named>(members: M[], query: string) =>
   members.filter(({ name }) => name.toLowerCase().startsWith(query.toLowerCase()));
 
+/** The members the writer may pick from `@`: without the writer, the secretary first, and
+ *  the rest in their order. */
+export function mentionable<M extends Named>(
+  members: readonly M[],
+  meId: string | undefined,
+  secretaryId: string | undefined,
+): M[] {
+  const others = members.filter((member) => member.id !== meId);
+  return [
+    ...others.filter((member) => member.id === secretaryId),
+    ...others.filter((member) => member.id !== secretaryId),
+  ];
+}
+
 /** The text with the mention typed from `at` to the caret replaced by the member's name and a
  *  space, and the caret after it. */
 export function complete(text: string, caret: number, at: number, name: string) {

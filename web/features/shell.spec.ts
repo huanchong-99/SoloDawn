@@ -106,6 +106,46 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
   });
 
   Scenario(
+    'On wide screens the Chats tab reopens the last opened group while it exists',
+    ({ Given, When, Then }) => {
+      Given('the home of the group "Website" is reached', () => reach(website, 'Website'));
+      When(
+        'the person opens the client at "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ" on a wide screen and goes to "#/settings"',
+        () => {
+          openPage(`#/groups/${website}`, 1440);
+          go('#/settings');
+        },
+      );
+      Then(
+        'the Chats tab links to "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ" and the logo links to "#/groups"',
+        () => {
+          expect(one('.rail .tabs a').getAttribute('href')).toBe(`#/groups/${website}`);
+          expect(one('.rail a.logo').getAttribute('href')).toBe('#/groups');
+        },
+      );
+      When('the screen is 600 px wide at "#/settings"', async () => {
+        await closePage();
+        await reach(website, 'Website');
+        openPage('#/settings', 600);
+      });
+      Then('on a narrow screen the Chats tab links to "#/groups"', () => {
+        expect(one('.rail .tabs a').getAttribute('href')).toBe('#/groups');
+      });
+      When('the screen is 1440 px wide at "#/settings" and the group is removed', async () => {
+        await closePage();
+        await reach(website, 'Website');
+        openPage('#/settings', 1440);
+        expect(one('.rail .tabs a').getAttribute('href')).toBe(`#/groups/${website}`);
+        homes[0].groups = [];
+        flushSync();
+      });
+      Then('once the group is gone the Chats tab links to "#/groups"', () => {
+        expect(one('.rail .tabs a').getAttribute('href')).toBe('#/groups');
+      });
+    },
+  );
+
+  Scenario(
     "The address of a group that has not been read keeps the chat's place, with a way back",
     ({ When, Then, And }) => {
       When('the person opens the client at "#/groups/not-read-yet"', () =>

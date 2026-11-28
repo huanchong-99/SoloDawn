@@ -14,5 +14,8 @@
   "kb.edit": "Change document: {name}",
   "kb.name": "Document name",
   "kb.text": "Document text",
-  "kb.taken": "Not saved: another document already has that name."
+  "kb.taken": "Not saved: another document already has that name.",
+  "kb.forget": "Delete document: {text}",
+  "kb.confirm": "Delete this document?",
+  "kb.confirm.body": "This removes it permanently from the group's knowledge base on every connected device."
 }

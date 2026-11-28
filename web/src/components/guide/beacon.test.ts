@@ -1,4 +1,10 @@
+import 'fake-indexeddb/auto';
+import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { guideState, resetGuideUi } from '../../lib/guide.svelte';
+import type { Net } from '../../lib/net.svelte';
+import { announcement, prefs } from '../../lib/prefs.svelte';
+import Welcome from './Welcome.svelte';
 import { beacon, clearBeacon, setBeaconHost } from './beacon';
 
 function mockRect(target: HTMLElement, rect: Partial<DOMRect>) {
@@ -324,5 +330,80 @@ describe('beacon', () => {
     flushFrame();
     await pending;
     expect(host.querySelector<HTMLElement>('.guide-beacon')?.style.left).toBe('16px');
+  });
+});
+
+describe('Welcome', () => {
+  let mounted: ReturnType<typeof mount> | undefined;
+
+  function setHash(hash: string) {
+    location.hash = hash;
+    dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+    prefs.lang = 'en';
+    guideState.value = 'new';
+    announcement.text = '';
+    resetGuideUi();
+    setHash('#/groups');
+  });
+
+  afterEach(async () => {
+    if (mounted) {
+      await unmount(mounted);
+      mounted = undefined;
+    }
+    setHash('');
+    resetGuideUi();
+    guideState.value = 'new';
+    prefs.lang = 'en';
+    announcement.text = '';
+    localStorage.clear();
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('switches language inside the open welcome dialog without closing it', async () => {
+    const net: Net = { source: 'live', homes: [], path: () => undefined };
+    mounted = mount(Welcome, { target: document.body, props: { net } });
+
+    await vi.waitFor(() => {
+      flushSync();
+      expect(document.querySelector<HTMLDialogElement>('dialog.welcome')?.open).toBe(true);
+    });
+
+    const dlg = document.querySelector<HTMLDialogElement>('dialog.welcome')!;
+    const acts = dlg.querySelector<HTMLElement>('footer.acts')!;
+    const ghostButtons = [...acts.querySelectorAll<HTMLButtonElement>('button.btn-ghost')];
+    expect(ghostButtons).toHaveLength(2);
+
+    const langBtn = ghostButtons[1]!;
+    expect(langBtn.querySelector<HTMLElement>('.swap')?.textContent).toBe('中');
+    expect(langBtn.querySelector<HTMLElement>('.swap')?.getAttribute('lang')).toBe('zh-CN');
+    expect(langBtn.querySelector('.sr span[lang="en"]')?.textContent).toBe('Switch language');
+    expect(langBtn.querySelector('.sr span[lang="zh-CN"]')?.textContent).toBe('切换语言');
+
+    langBtn.click();
+    flushSync();
+
+    expect(prefs.lang).toBe('zh-CN');
+    expect(dlg.querySelector('h2')?.textContent).toBe('欢迎使用 SoloDawn');
+    expect(dlg.open).toBe(true);
+    expect(guideState.value).toBe('new');
+    expect(langBtn.querySelector<HTMLElement>('.swap')?.textContent).toBe('EN');
+    expect(langBtn.querySelector<HTMLElement>('.swap')?.getAttribute('lang')).toBe('en');
+
+    langBtn.click();
+    flushSync();
+
+    expect(prefs.lang).toBe('en');
+    expect(dlg.querySelector('h2')?.textContent).toBe('Welcome to SoloDawn');
+    expect(dlg.open).toBe(true);
+    expect(guideState.value).toBe('new');
+    expect(langBtn.querySelector<HTMLElement>('.swap')?.textContent).toBe('中');
+    expect(langBtn.querySelector<HTMLElement>('.swap')?.getAttribute('lang')).toBe('zh-CN');
   });
 });
