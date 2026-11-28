@@ -21,6 +21,7 @@ const (
 
 func init() {
 	Register(Surface, "agent.set", agtSet)
+	Register(Surface, "agent.recheck", agtRecheck)
 	Register(Listeners, "agents", agtListen)
 }
 
@@ -261,6 +262,25 @@ func agtSet(_ context.Context, h *Host, _ Owner, by string, data json.RawMessage
 	if Part[agtPart](h).setLoginOK(cmd.Agent, true) {
 		notifyLoginChanged(h)
 	}
+	return nil, nil
+}
+
+// agtRecheck ends what a failed sign-in left of a CLI, for an owner who has
+// signed in again (contracts/commands.md section 2): login_ok is true, the
+// CLI's AIs are no longer limited by it and are reported, and what waits for
+// them is delivered. The start of the next turn is what tries the sign-in.
+func agtRecheck(ctx context.Context, h *Host, _ Owner, _ string, data json.RawMessage) (any, error) {
+	var cmd proto.AgentRecheck
+	if err := proto.Decode(data, &cmd); err != nil {
+		return nil, &Error{Code: "bad_request", Message: err.Error()}
+	}
+	if !agtValidAgent(cmd.Agent) {
+		return nil, &Error{Code: "bad_request", Message: "unknown agent: " + cmd.Agent}
+	}
+	Part[agtPart](h).setLoginOK(cmd.Agent, true)
+	stateOf(h).endLoginLimit(hostedSlots(h, cmd.Agent))
+	releaseHeld(ctx, h, cmd.Agent)
+	notifyLoginChanged(h)
 	return nil, nil
 }
 

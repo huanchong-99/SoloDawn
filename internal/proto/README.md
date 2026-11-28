@@ -182,6 +182,9 @@ the type does not name, not with `Decode`.
   section 1a) add `follow` (`True`) to `AIMemberRow`, `MemberAddAI`, `MemberSet` and `HostJoin`,
   `defaults` (`*Profile`) on each agent of `host.info`, `AgentDefaults` (`agent.defaults`), and
   `ValidProfile` in [`profile.go`](profile.go).
+- `AgentRecheck` (`agent.recheck`) is the host command of an owner who has signed a CLI in again
+  ([commands.md, section 2](../../planning/contracts/commands.md)). It has no wire example yet:
+  the example comes with the web's schema.
 - `HostPermit` (`host.permit`, answered with `CmdResult` / `Success`) and
   `Permissions` (`permissions` on `HostState`, present only for a node running
   from its macOS app) carry macOS permission state and requests

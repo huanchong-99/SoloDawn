@@ -1005,6 +1005,16 @@ func (rt *runtimePart) enterLimited(slot aiSlot) bool {
 	return true
 }
 
+// endLoginLimit ends the limited state of slots. Only a failed sign-in enters
+// it (finishLoginInvalid); a rate limit is a hold of the limits unit.
+func (rt *runtimePart) endLoginLimit(slots []memberHomeSlot) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	for _, s := range slots {
+		delete(rt.limited, aiSlot{group: s.group, member: s.member})
+	}
+}
+
 func (rt *runtimePart) isLimited(slot aiSlot) bool {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()

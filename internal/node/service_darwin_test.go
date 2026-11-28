@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestServiceLoginAgent(t *testing.T) {
@@ -101,12 +103,69 @@ func TestStartAgentAndExecLaunchctl(t *testing.T) {
 
 	failErr := errors.New("bootstrap failed")
 	runLaunchctl = func(args ...string) error {
-		if args[0] == "bootstrap" {
-			return failErr
+		if args[0] == "bootout" {
+			return nil
 		}
-		return nil
+		return failErr
 	}
 	if err := startAgent("/tmp/agent.plist"); !errors.Is(err, failErr) {
 		t.Fatalf("startAgent bootstrap err = %v; want %v", err, failErr)
 	}
+}
+
+// bootout answers while the old node is still stopping: launchd keeps the
+// service, and refuses bootstrap, until that process has ended.
+func TestStartAgentWaitsUntilLaunchdHasRemovedTheOldService(t *testing.T) {
+	const service = "gui/501/org.solodawn.node"
+	calls, pauses := fakeStoppingAgent(t, 3)
+	serviceOK(t, startAgent("/tmp/agent.plist"))
+	want := []string{"bootout " + service, "print " + service, "print " + service, "print " + service, "print " + service, "bootstrap gui/501 /tmp/agent.plist"}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls = %q; want %q", *calls, want)
+	}
+	if want := []time.Duration{50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond}; !reflect.DeepEqual(*pauses, want) {
+		t.Fatalf("pauses = %v; want %v", *pauses, want)
+	}
+}
+
+// A service that launchd still has 10 seconds after bootout is given up:
+// 200 pauses of 50 ms, and no bootstrap.
+func TestStartAgentGivesUpWhenLaunchdKeepsTheOldService(t *testing.T) {
+	calls, pauses := fakeStoppingAgent(t, 1000)
+	serviceError(t, startAgent("/tmp/agent.plist"), "launchd did not remove gui/501/org.solodawn.node within 10s of bootout")
+	if len(*pauses) != 200 || len(*calls) != 202 || (*calls)[201] != "print gui/501/org.solodawn.node" {
+		t.Fatalf("%d pauses and %d calls, the last %q; want 200 and 202, the last a print", len(*pauses), len(*calls), (*calls)[len(*calls)-1])
+	}
+}
+
+// fakeStoppingAgent stands in for launchd with a loaded agent whose node
+// takes stopping answers of print to stop after bootout, and for the pause
+// between two of them. It returns the launchctl calls and the pauses.
+func fakeStoppingAgent(t *testing.T, stopping int) (*[]string, *[]time.Duration) {
+	savedRun, savedUID, savedPause := runLaunchctl, getUID, agentPause
+	t.Cleanup(func() {
+		runLaunchctl = savedRun
+		getUID = savedUID
+		agentPause = savedPause
+	})
+	getUID = func() int { return 501 }
+	var calls []string
+	var pauses []time.Duration
+	agentPause = func(d time.Duration) { pauses = append(pauses, d) }
+	runLaunchctl = func(args ...string) error {
+		calls = append(calls, strings.Join(args, " "))
+		switch {
+		case args[0] == "bootout":
+			return nil
+		case args[0] == "print" && stopping > 0:
+			stopping--
+			return nil
+		case args[0] == "print":
+			return errors.New("launchctl print: exit status 113 (Could not find service)")
+		case stopping > 0:
+			return errors.New("launchctl bootstrap: exit status 5 (Bootstrap failed: 5: Input/output error)")
+		}
+		return nil
+	}
+	return &calls, &pauses
 }

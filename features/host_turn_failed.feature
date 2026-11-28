@@ -18,3 +18,6 @@ Feature: Failed turns report visibly while keeping the open CLI waiting
     Then a "login_invalid" notice for "Claude Code" with detail "Failed to authenticate: OAuth token has expired" is posted in "Website"
     And "Claude Code" enters state "limited" in "Website"
     And LoginChanged fired once with session "dormant", 0 open sessions, member state "limited", and "claude" login_ok false
+    When owner device "owner-1" sends agent.recheck for "claude"
+    Then "Claude Code" enters state "dormant" in "Website"
+    And LoginChanged fired twice with session "dormant", 0 open sessions, member state "dormant", and "claude" login_ok true
