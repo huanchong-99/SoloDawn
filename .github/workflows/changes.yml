@@ -18,6 +18,7 @@ name: Changes
 #           Go changes cannot affect
 #   netsim  network simulation: internal/peer/, internal/rendezvous/, features/netsim/, go.mod, go.sum
 #   smoke   service smoke tests: internal/node/service*, cmd/solodawn/
+#   macos   macOS app bundle and helper: macos/, cmd/, internal/node/, go.mod, go.sum
 #
 # Documentation changes (*.md, planning/, docs/, issues.md) touch none of them, except the *.md
 # files that are built into the binary (internal/host/instructions/) and install.md.
@@ -40,6 +41,9 @@ on:
       smoke:
         description: Whether the service smoke tests apply.
         value: ${{ jobs.detect.outputs.smoke }}
+      macos:
+        description: Whether the macOS app bundle checks apply.
+        value: ${{ jobs.detect.outputs.macos }}
 
 permissions:
   contents: read
@@ -57,6 +61,7 @@ jobs:
       e2e: ${{ steps.files.outputs.e2e }}
       netsim: ${{ steps.files.outputs.netsim }}
       smoke: ${{ steps.files.outputs.smoke }}
+      macos: ${{ steps.files.outputs.macos }}
     steps:
       - id: files
         env:
@@ -65,8 +70,8 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          go=false web=false e2e=false netsim=false smoke=false
-          everything() { go=true web=true e2e=true netsim=true smoke=true; }
+          go=false web=false e2e=false netsim=false smoke=false macos=false
+          everything() { go=true web=true e2e=true netsim=true smoke=true macos=true; }
 
           if [[ "$EVENT" != pull_request ]]; then
             everything
@@ -105,6 +110,9 @@ jobs:
               case "$f" in
                 internal/node/service* | cmd/solodawn/*) smoke=true known=true ;;
               esac
+              case "$f" in
+                macos/* | cmd/* | internal/node/* | go.mod | go.sum) macos=true known=true ;;
+              esac
               if [[ "$known" == false ]]; then
                 echo "::notice::$f is not a file this list knows; every job runs."
                 everything
@@ -118,6 +126,7 @@ jobs:
             echo "e2e=$e2e"
             echo "netsim=$netsim"
             echo "smoke=$smoke"
+            echo "macos=$macos"
           } >> "$GITHUB_OUTPUT"
-          printf '| Checks | Run |\n| --- | --- |\n| go | %s |\n| web | %s |\n| e2e | %s |\n| netsim | %s |\n| smoke | %s |\n' \
-            "$go" "$web" "$e2e" "$netsim" "$smoke" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Checks | Run |\n| --- | --- |\n| go | %s |\n| web | %s |\n| e2e | %s |\n| netsim | %s |\n| smoke | %s |\n| macos | %s |\n' \
+            "$go" "$web" "$e2e" "$netsim" "$smoke" "$macos" >> "$GITHUB_STEP_SUMMARY"

@@ -3,3 +3,4 @@
 *.test
 *.test.exe
 /dist/
+/macos/.build/

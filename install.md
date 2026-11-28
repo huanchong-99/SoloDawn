@@ -1,13 +1,15 @@
 # Install and pair SoloDawn
 
 From the [SoloDawn releases](https://github.com/huanchong-99/SoloDawn/releases),
-download `SHA256SUMS` and the binary for your computer **from the same release**.
-Save both in an empty directory. Each binary is named
-`solodawn_<version>_<os>_<arch>`, with an extra `.exe` on Windows.
+download `SHA256SUMS` and the release file for your computer **from the same release**.
+Save both in an empty directory. Each file is named
+`solodawn_<version>_<os>_<arch>`, with an extra `.exe` on Windows, and `.zip` on macOS,
+which holds the app.
 `<version>` is the release's tag as the releases page shows it, including its
 leading `v`. A tag ending in `-rc.N` is a release candidate, a pre-release for testing.
 For example, a Linux x86-64 binary for `v1.10.2` is named
-`solodawn_v1.10.2_linux_amd64`.
+`solodawn_v1.10.2_linux_amd64`, and an Apple silicon macOS app archive is named
+`solodawn_v1.10.2_darwin_arm64.zip`.
 
 | System | `<os>` | `<arch>` |
 | --- | --- | --- |
@@ -17,36 +19,51 @@ For example, a Linux x86-64 binary for `v1.10.2` is named
 
 ## Verify and install
 
-In the download directory, set `asset` to the downloaded binary's filename.
+In the download directory, set `asset` to the downloaded file's name.
 The commands below check the SHA-256 digest and filename against the manifest
-before installing the executable.
+before installing.
 
-**Linux and macOS** (Bash or Zsh)
+**Linux** (Bash or Zsh)
 
 ```sh
 asset='REPLACE_WITH_BINARY_FILENAME'
-if [ "$(uname -s)" = Darwin ]; then
-  shasum -a 256 "$asset"
-else
-  sha256sum "$asset"
-fi | grep -Fxf SHA256SUMS &&
+sha256sum "$asset" | grep -Fxf SHA256SUMS &&
   mkdir -p "$HOME/.local/bin" &&
-  install -m 755 "$asset" "$HOME/.local/bin/solodawn" &&
-  if [ "$(uname -s)" = Darwin ]; then
-    xattr -d com.apple.quarantine "$HOME/.local/bin/solodawn" 2>/dev/null || true
-  fi
+  install -m 755 "$asset" "$HOME/.local/bin/solodawn"
 ```
 
-On success the matching line appears. On macOS the last step clears the
-quarantine mark that a browser download carries, which would otherwise
-stop the ad-hoc-signed binary from running; it runs only after the checksum
-matched. On macOS with the Application Firewall enabled, macOS asks once
-whether `solodawn` may accept incoming connections: allow it, or direct
-connections to it fail and only the relay works. If it never asks and direct
-connections fail, remove a blocked `solodawn` or other Go program (often a
-`.test` binary) under System Settings, Network, Firewall, Options, then
-restart the node. macOS may ask again after an update: allow it again. Add
-`$HOME/.local/bin` to your `PATH` if needed.
+On success the matching line appears. Add `$HOME/.local/bin` to your `PATH` if
+needed.
+
+**macOS** (Zsh or Bash)
+
+```sh
+asset='REPLACE_WITH_ZIP_FILENAME'
+shasum -a 256 "$asset" | grep -Fxf SHA256SUMS &&
+  mkdir -p "$HOME/Applications" "$HOME/.local/bin" &&
+  rm -rf "$HOME/Applications/SoloDawn.app" &&
+  ditto -x -k "$asset" "$HOME/Applications" &&
+  { xattr -dr com.apple.quarantine "$HOME/Applications/SoloDawn.app" 2>/dev/null || true; } &&
+  ln -sf "$HOME/Applications/SoloDawn.app/Contents/MacOS/solodawn" "$HOME/.local/bin/solodawn"
+```
+
+On success the matching line appears. This unpacks `SoloDawn.app` into
+`$HOME/Applications`, clears the quarantine mark that a browser download carries
+(which runs only after the checksum matches, and would otherwise stop the
+ad-hoc-signed app from running), and links `$HOME/.local/bin/solodawn` to the
+app's executable. Add `$HOME/.local/bin` to your `PATH` if needed.
+
+**What macOS asks.** When `solodawn pair` registers and starts the login agent,
+macOS shows a "Background Items Added" notice for SoloDawn (nothing to do), and
+then may ask up to two questions: if the Application Firewall is on,
+"Do you want the application "solodawn" to accept incoming network connections?"
+(naming the executable `solodawn`), and, in SoloDawn's name, "SoloDawn would like
+to find devices on your local networks". Tell the person to click **Allow** on
+both — otherwise direct connections fail and only the relay works. If either was
+refused or no window appeared, repair it from the Computers page in the browser
+(which opens the right place in System Settings; the firewall lists the
+executable `solodawn`). Because `SoloDawn.app` is signed ad hoc, macOS asks
+again after an update: allow it again.
 
 **Windows** (PowerShell)
 
@@ -62,7 +79,11 @@ Copy-Item -LiteralPath $asset -Destination (Join-Path $bin 'solodawn.exe')
 ```
 
 Add the installation directory to your user `Path` or run the executable
-by its full path.
+by its full path. On Windows, a "Windows Security" window about the firewall
+may appear: tell the person to tick **Private networks**, then click **Allow
+access** (if it asks for an administrator password they do not have, click
+**Cancel** so SoloDawn uses the relay; no firewall rule is registered at
+install time because that needs an administrator).
 
 ## What the node needs
 
@@ -86,11 +107,16 @@ foreground and never exits. In the pairing flow, `solodawn pair` starts the
 node in the background by itself when none is running yet.
 
 If you are a person setting up on this computer by hand without an existing
-browser page, start the node in a terminal and keep that terminal open:
+browser page, start the node on Linux or Windows in a terminal and keep that
+terminal open:
 
 ```text
 solodawn node
 ```
+
+On macOS, open **SoloDawn** from `$HOME/Applications` (or run
+`open -a "$HOME/Applications/SoloDawn.app"`) instead of `solodawn node` in a
+terminal, so macOS asks for permissions in SoloDawn's name.
 
 The node serves the web client and its built-in `/rv` signalling endpoint at
 `http://localhost:47800` (falling back to another free port if `47800` is in
@@ -120,7 +146,8 @@ shown under "Identity verified" in the browser.
 When pairing succeeds, the node registers itself to start at login:
 `~/Library/LaunchAgents/org.solodawn.node.plist` on macOS, the systemd user
 unit `solodawn.service` on Linux, and the scheduled task `SoloDawn-<user>` on
-Windows.
+Windows. If you move `SoloDawn.app`, update the `$HOME/.local/bin/solodawn` link
+and run `solodawn service install` so the login agent points at the new place.
 
 Give an AI only folders of projects you trust, because their `CLAUDE.md`,
 `AGENTS.md` and hooks are used by the AIs that work in them. A Qwen Code AI
@@ -131,8 +158,8 @@ even in a group session: Qwen Code has no known switch to keep it out.
 
 Version 1 does not update itself. The node keeps its pairing and groups;
 they are not in the binary. To update a computer, download the new release's
-`SHA256SUMS` and binary into an empty directory, then for your system do three
-things in this order: stop the node, replace the binary with the commands of
+`SHA256SUMS` and release file into an empty directory, then for your system do three
+things in this order: stop the node, replace the installation with the commands of
 "Verify and install" above (set `asset` to the new filename in that block),
 and start the node. Confirm the new tag with `solodawn version`.
 
@@ -148,9 +175,9 @@ forgotten and must be invited again by code or by link. A file made by
 folder in the data directory is not touched: it may hold task branches and
 worktrees that were never pushed, so copy what you need, then delete it.
 
-If the node runs in a terminal, press Ctrl+C there first, replace the binary,
-then start `solodawn node` again. If it runs as the login service, use the
-commands below.
+If the node runs in a terminal (Linux or Windows), press Ctrl+C there first,
+replace the binary, then start `solodawn node` again. If it runs as the login
+service, use the commands below.
 
 **Linux**
 
@@ -170,10 +197,14 @@ systemctl --user start solodawn.service
 launchctl bootout "gui/$(id -u)/org.solodawn.node" 2>/dev/null || true
 ```
 
-Replace the binary, then:
+Unpack the new `SoloDawn.app` and update the link with the macOS commands of
+"Verify and install" above (set `asset` to the new `.zip` filename in that
+block), then register the app path (this also moves an installation made with
+an earlier bare binary) and start the agent:
 
 ```sh
-launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.solodawn.node.plist"
+solodawn service install &&
+  launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.solodawn.node.plist"
 ```
 
 **Windows** (PowerShell). A running `solodawn.exe` cannot be overwritten, so

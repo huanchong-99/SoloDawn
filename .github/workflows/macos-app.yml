@@ -1,0 +1,139 @@
+name: macOS app
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [rebuild]
+  push:
+    branches: [rebuild]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
+  macos:
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
+    name: app (macos-26)
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      TAG: v3.0.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+
+      - name: Run Swift tests for SoloDawnPermissions
+        working-directory: macos
+        run: swift test
+
+      - name: Build and verify SoloDawn.app for both architectures
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/darwin" "$RUNNER_TEMP/out"
+          for arch in amd64 arm64; do
+            CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=13.0 GOOS=darwin GOARCH="$arch" go build -trimpath \
+              -ldflags="-s -w -X github.com/huanchong-99/SoloDawn/internal/node.Version=$TAG" \
+              -o "$RUNNER_TEMP/darwin/solodawn_${TAG}_darwin_${arch}" ./cmd/solodawn
+            ./macos/build-app.sh "$TAG" "$arch" \
+              "$RUNNER_TEMP/darwin/solodawn_${TAG}_darwin_${arch}" "$RUNNER_TEMP/out"
+            test -f "$RUNNER_TEMP/out/solodawn_${TAG}_darwin_${arch}.zip"
+          done
+
+      - name: Unpack, verify bundle, smoke test launchd and helper stdin
+        run: |
+          set -euo pipefail
+          host_arch="arm64"
+          if [[ "$(uname -m)" == "x86_64" ]]; then host_arch="amd64"; fi
+
+          mkdir -p "$HOME/Applications" "$HOME/.local/bin" "$RUNNER_TEMP/cli/bin"
+          rm -rf "$HOME/Applications/SoloDawn.app"
+          ditto -x -k "$RUNNER_TEMP/out/solodawn_${TAG}_darwin_${host_arch}.zip" "$HOME/Applications"
+
+          app="$HOME/Applications/SoloDawn.app"
+          ln -sf "$app/Contents/MacOS/solodawn" "$HOME/.local/bin/solodawn"
+
+          codesign --verify --deep --strict "$app"
+          codesign -dv "$app" 2>&1 | grep -Fx "Identifier=org.solodawn.node"
+          plutil -lint \
+            "$app/Contents/Info.plist" \
+            "$app/Contents/Resources/en.lproj/InfoPlist.strings" \
+            "$app/Contents/Resources/zh-Hans.lproj/InfoPlist.strings"
+          test -f "$app/Contents/Resources/THIRD-PARTY-NOTICES.txt"
+          test -d "$app/Contents/Resources/PermissionFlow_PermissionFlow.bundle"
+          test "$("$HOME/.local/bin/solodawn" version)" = "$TAG"
+          "$app/Contents/MacOS/SoloDawnPermissions" --verify-resources
+
+          expected_path="$RUNNER_TEMP/cli/bin:$PATH"
+          PATH="$expected_path" "$HOME/.local/bin/solodawn" service install
+
+          plist="$HOME/Library/LaunchAgents/org.solodawn.node.plist"
+          test -f "$plist"
+
+          uid=$(id -u)
+          if launchctl bootstrap "gui/$uid" "$plist"; then
+            domain="gui/$uid"
+          else
+            launchctl bootstrap "user/$uid" "$plist"
+            domain="user/$uid"
+          fi
+
+          deadline=$((SECONDS + 15))
+          until status_out=$("$HOME/.local/bin/solodawn" status 2>/dev/null); do
+            if (( SECONDS >= deadline )); then
+              launchctl print "$domain/org.solodawn.node" || true
+              "$HOME/.local/bin/solodawn" status
+              exit 1
+            fi
+            sleep 0.2
+          done
+          test -n "$status_out"
+          echo "solodawn status: $status_out"
+
+          print_out=$(launchctl print "$domain/org.solodawn.node")
+          echo "$print_out"
+          grep -Fq "$app/Contents/MacOS/solodawn" <<<"$print_out"
+
+          "$HOME/.local/bin/solodawn" service remove
+          if [[ -e "$plist" ]]; then
+            echo "launchd plist still exists after service remove" >&2
+            exit 1
+          fi
+          launchctl bootout "$domain/org.solodawn.node" 2>/dev/null || true
+
+          python3 - "$app/Contents/MacOS/SoloDawnPermissions" <<'PY'
+          import subprocess, sys
+          proc = subprocess.Popen(
+              [sys.argv[1], "--lang", "en"],
+              stdin=subprocess.PIPE,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+          )
+          out, err = proc.communicate(input=b"a line\n", timeout=20)
+          if proc.returncode != 0:
+              raise SystemExit(f"SoloDawnPermissions exited {proc.returncode}: {err!r}")
+          PY
+
+      - name: Clean up on failure
+        if: failure()
+        run: |
+          uid=$(id -u)
+          launchctl bootout "gui/$uid/org.solodawn.node" 2>/dev/null || true
+          launchctl bootout "user/$uid/org.solodawn.node" 2>/dev/null || true
+          rm -f "$HOME/Library/LaunchAgents/org.solodawn.node.plist" "$HOME/.local/bin/solodawn"
+          rm -rf "$HOME/Applications/SoloDawn.app"

@@ -1,0 +1,7 @@
+"NSLocalNetworkUsageDescription" = "SoloDawn 通过你的网络，让你的手机、浏览器和其他电脑直接连到这台 Mac。";
+"NSDesktopFolderUsageDescription" = "你在 SoloDawn 里运行的 AI 需要使用「桌面」文件夹里的文件。";
+"NSDocumentsFolderUsageDescription" = "你在 SoloDawn 里运行的 AI 需要使用「文稿」文件夹里的文件。";
+"NSDownloadsFolderUsageDescription" = "你在 SoloDawn 里运行的 AI 需要使用「下载」文件夹里的文件。";
+"NSRemovableVolumesUsageDescription" = "你在 SoloDawn 里运行的 AI 需要使用外接磁盘上的文件。";
+"NSNetworkVolumesUsageDescription" = "你在 SoloDawn 里运行的 AI 需要使用网络磁盘上的文件。";
+"NSFileProviderDomainUsageDescription" = "你在 SoloDawn 里运行的 AI 需要使用 iCloud 云盘等云端文件夹里的文件。";

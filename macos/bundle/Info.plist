@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>org.solodawn.node</string>
+	<key>CFBundleName</key>
+	<string>SoloDawn</string>
+	<key>CFBundleDisplayName</key>
+	<string>SoloDawn</string>
+	<key>CFBundleExecutable</key>
+	<string>solodawn</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleIconFile</key>
+	<string>SoloDawn</string>
+	<key>CFBundleShortVersionString</key>
+	<string>3.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>3.0.0</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>SoloDawn connects your phone, your browsers and your other computers straight to this Mac over your network.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>An AI you run in SoloDawn needs files in your Desktop folder.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>An AI you run in SoloDawn needs files in your Documents folder.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>An AI you run in SoloDawn needs files in your Downloads folder.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>An AI you run in SoloDawn needs files on an external disk.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>An AI you run in SoloDawn needs files on a network disk.</string>
+	<key>NSFileProviderDomainUsageDescription</key>
+	<string>An AI you run in SoloDawn needs files in iCloud Drive or another cloud folder.</string>
+</dict>
+</plist>
