@@ -133,8 +133,12 @@ codex app-server
   -c mcp_servers.solodawn.required=true   (app-server only)       [verified]
   -c notify=[]
   -c features.default_mode_request_user_input=true                [unverified]
+  -c projects={"<folder>"={trust_level="trusted"}}  (task, review) [verified]
 ```
 
+- Structured `codex app-server` is started with `NO_COLOR=1` in its
+  environment so `stderr` tracing/error lines carry plain text without ANSI
+  colour escape codes (`[verified]` on Codex CLI 0.164.0).
 - `default_tools_approval_mode="approve"`: without it a call of the node's
   own tools needs an approval, and under `approvalPolicy: never` fails.
 - `tool_timeout_sec`: without it Codex ends a long tool call
@@ -149,6 +153,21 @@ codex app-server
   (`flows/agent-turn.md` E, first row).
 - `notify=[]` keeps the owner's own notification program from running for
   the node's sessions (it ran in the spike).
+- `projects={"<folder>"={trust_level="trusted"}}` (TOML inline table, with
+  `<folder>` encoded as a quoted string): Codex opens threads in untrusted and
+  non-Git folders normally without `--skip-git-repo-check` (`app-server`
+  accepts no such flag; section 4 keeps task AIs working with plain files
+  instead of demanding `.git`). This flag is passed only when repository
+  configuration is enabled (`RepoConfig` in task and review sessions, never in
+  group sessions: `risks.md` Q-24, K-25) so Codex loads that project's
+  `.codex/config.toml` and MCP servers for the folder string as given (Codex
+  may look up trust under a canonicalised cwd such as a resolved symlink, in
+  which case trust silently does not apply), merging with existing `projects`
+  entries in `~/.codex/config.toml` without modifying it. Inline table syntax
+  is used instead of dotted `projects."<folder>".trust_level="trusted"`
+  because Codex's config override parser rejects dotted keys when `<folder>`
+  contains `.` (`[verified]` with `codex app-server --strict-config
+  --print-startup-config` on Codex CLI 0.164.0).
 
 JSON-RPC over stdio, one JSON object per line `[verified]`:
 
@@ -164,7 +183,16 @@ JSON-RPC over stdio, one JSON object per line `[verified]`:
    reported as `no_session` `[verified]`; an unauthenticated turn ends with
    `turn/completed` status `failed` and `turn.error.codexErrorInfo`
    `"unauthorized"` or HTTP status `401` (or a startup authentication error)
-   and is reported as `login_invalid` `[verified]`.
+   and is reported as `login_invalid` `[verified]`. Before examining `stderr`
+   for a pre-ready exit or a non-zero mid-turn exit, only the last non-empty
+   line is kept, so earlier log noise (such as transient websocket warnings
+   containing `"401 Unauthorized"`) does not replace the fatal message or
+   trigger `LoginInvalid`. A pre-ready exit with non-empty `stderr` surfaces
+   that last line from `Turn` and maps it to `NoSession`, `LoginInvalid`, or
+   `Active` (`Text`). During an active turn, `error` notifications emit
+   `Active` (`Text`) and update the remembered turn error (ignoring
+   `willRetry`, cleared on `turn/completed`) as fallback when a non-zero
+   mid-turn exit leaves `stderr` empty.
 4. Approval and user-input requests arrive as server requests.
    `item/commandExecution/requestApproval` carries `command`, `cwd` and
    `reason`, and `item/fileChange/requestApproval` carries ids only, with the
@@ -249,7 +277,12 @@ codex resume <thread id> --no-alt-screen --no-daemon -C <folder>
   The workspace is a folder its owner chose and, when it came from the list
   of `host.workspaces`, already uses with that CLI, so the question comes
   at most once for a workspace, not once per task. The owner answers in
-  the terminal. Codex does not ask.
+  the terminal. Codex receives `-c projects={"<folder>"={trust_level="trusted"}}`
+  through `<the -c settings of 1.2>` only in task and review sessions
+  (`RepoConfig` true; never in group sessions) for the folder string as given
+  (`[verified]` accepted by `codex resume --strict-config` on Codex CLI
+  0.164.0), and never receives `--skip-git-repo-check`, which `codex resume`
+  rejects (`exit 2`).
 - A session that does not exist yet: Claude Code starts one in the
   terminal with `--session-id <uuid>`, passing `--append-system-prompt`
   when instructions are given so the first request records them. Codex
@@ -425,29 +458,33 @@ Contents:
 - **Task session**:
   - Work only in this folder; it is your workspace in this group. Other
     members work in their own folders, some of them on other computers.
-  - Before you start, look at the folder's state (with Git: `git status`)
-    and treat every change you did not make as someone else's, its
-    owner's or another task's. Leave them. If the thread shows that
-    another AI worked on this task before you, find out first where its
+  - Before you start, look at the folder's state (if it has `.git`, run
+    `git status`; otherwise inspect the files directly, and do not demand
+    `.git`, run `git init`, or stop because the folder is empty or has no
+    Git repository) and treat every change you did not make as someone
+    else's, its owner's or another task's. Leave them. If the thread shows
+    that another AI worked on this task before you, find out first where its
     work is: read the thread, ask it.
-  - Then bring the folder up to date the way the project does; with Git,
-    `git pull --ff-only` when the current branch has an upstream (without
-    one there is nothing to bring in). If it cannot fast-forward, or the
-    folder is not clean enough to update, stop and say so in the thread
-    instead of forcing it.
+  - Then, if the folder uses Git or another sync step, bring the folder up
+    to date the way the project does; with Git, `git pull --ff-only` when
+    the current branch has an upstream (without one there is nothing to
+    bring in). If it cannot fast-forward, or the folder is not clean enough
+    to update, stop and say so in the thread instead of forcing it.
   - In this folder never stash, reset, clean, `git add -A`, `git add .`,
     `git commit -a`, check out over files, rebase, switch branches or
-    force push; stage and commit only your own files, by path. Never
-    rewrite history that was published.
-  - Test the way the project does: its own test, build and lint commands,
-    as its README, its contributor notes, its scripts and its CI describe
-    them. SoloDawn runs no checks for you.
+    force push; when using Git, stage and commit only your own files, by
+    path. Never rewrite history that was published.
+  - Test the way the project does when it has checks: its own test, build
+    and lint commands, as its README, its contributor notes, its scripts and
+    its CI describe them. SoloDawn runs no checks for you.
   - Publishing. Follow the project's own rules for publishing work when it
-    has them. When it has none: commit your work; never push to a branch
-    that others use (such as `main`) before the review has passed; when
-    your reviewer works on another computer, push to a branch of your own.
-    SoloDawn creates no branch and merges nothing. After the review has
-    passed, closing steps such as a merge are arranged by the secretary.
+    has them. When it has none and the folder is a Git repository: commit
+    your work; never push to a branch that others use (such as `main`) before
+    the review has passed; when your reviewer works on another computer, push
+    to a branch of your own. Without Git, keep your work as plain files in
+    this folder and report what you created or changed. SoloDawn creates no
+    branch and merges nothing. After the review has passed, closing steps
+    such as a merge are arranged by the secretary.
   - Report progress briefly. Call `submit_task` last, and say in it what
     you changed, what you ran and how it ended, and which branch and commit
     hold the work, or that it is in this folder only. After it, end your

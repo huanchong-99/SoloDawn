@@ -64,8 +64,9 @@ func runTestCodexTree(treeFile string) int {
 }
 
 type codexBridgeHeader struct {
-	Args []string `json:"args"`
-	Dir  string   `json:"dir"`
+	Args    []string `json:"args"`
+	Dir     string   `json:"dir"`
+	NoColor string   `json:"no_color"`
 }
 
 func runTestCodexBridge(addr string) int {
@@ -75,7 +76,7 @@ func runTestCodexBridge(addr string) int {
 	}
 	defer conn.Close()
 	cwd, _ := os.Getwd()
-	data, _ := json.Marshal(codexBridgeHeader{Args: os.Args[1:], Dir: cwd})
+	data, _ := json.Marshal(codexBridgeHeader{Args: os.Args[1:], Dir: cwd, NoColor: os.Getenv("NO_COLOR")})
 	fmt.Fprintln(conn, string(data))
 	go func() {
 		io.Copy(conn, os.Stdin)
@@ -295,21 +296,25 @@ func TestCodexInteractiveFlagsAcrossLevels(t *testing.T) {
 		"-c", "mcp_servers.solodawn.tool_timeout_sec=600",
 		"-c", "notify=[]",
 		"-c", "features.default_mode_request_user_input=true",
+		"-c", `projects={"/work/task-1"={trust_level="trusted"}}`,
 		"-s", "workspace-write",
 		"-a", "on-request",
 		"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
 		"-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
 	})
+	codexCheck(t, !slices.Contains(argv2, "--skip-git-repo-check"), "unexpected --skip-git-repo-check in resume argv")
 
 	argv1, _, err := drv.Interactive(Launch{Folder: "/repo", Session: "thr-1", Level: 1, Shim: []string{"solodawn"}})
 	codexNoErr(t, err)
 	codexCheck(t, slices.Contains(argv1, `mcp_servers.solodawn.args=[]`), "expected empty JSON args array")
+	codexCheck(t, !slices.ContainsFunc(argv1, func(a string) bool { return strings.HasPrefix(a, "projects=") }), "unexpected projects flag for group session")
 	codexEqual(t, argv1[len(argv1)-2:], []string{"-c", "project_doc_max_bytes=0"})
 	codexEqual(t, argv1[slices.Index(argv1, "-s")+1], "read-only")
 	codexEqual(t, argv1[slices.Index(argv1, "-a")+1], "never")
 
 	argv3, _, err := drv.Interactive(Launch{Folder: "/work/review-3", Session: "thr-3", Level: 3, Shim: []string{"solodawn"}, RepoConfig: true})
 	codexNoErr(t, err)
+	codexCheck(t, slices.Contains(argv3, `projects={"/work/review-3"={trust_level="trusted"}}`), "expected trust flag for review session")
 	codexCheck(t, !slices.Contains(argv3, "project_doc_max_bytes=0"), "unexpected project_doc_max_bytes=0")
 	codexEqual(t, argv3[slices.Index(argv3, "-s")+1], "danger-full-access")
 	codexEqual(t, argv3[slices.Index(argv3, "-a")+1], "never")
@@ -541,6 +546,9 @@ func verifyHandshakeCase(t *testing.T, tc codexHandshakeCase) {
 	proc, peer := startPeerCodex(t, l)
 	initMsg, threadMsg := completePeerHandshake(t, peer, "thr-9")
 	codexEqual(t, peer.header.Args[0], "app-server")
+	codexEqual(t, peer.header.NoColor, "1")
+	wantTrust := "projects={" + marshalWire(l.Folder) + `={trust_level="trusted"}}`
+	codexEqual(t, slices.Contains(peer.header.Args, wantTrust), tc.repoConfig)
 	codexCheck(t, slices.Contains(peer.header.Args, "mcp_servers.solodawn.required=true"), "missing required on app-server")
 	codexCheck(t, slices.Contains(peer.header.Args, "features.default_mode_request_user_input=true"), "missing default_mode_request_user_input flag on app-server")
 	codexEqual(t, initMsg["method"], "initialize")
@@ -879,16 +887,17 @@ type codexStartupFailureCase struct {
 	failID   int
 	reply    string
 	wantKind EventKind
+	wantErr  string
 }
 
 func TestCodexStartupFailuresNoSessionAndLoginInvalid(t *testing.T) {
 	for _, tc := range []codexStartupFailureCase{
-		{"resume missing thread", "thr-missing", 2, `{"id":2,"error":{"code":-32600,"message":"no rollout found for thread id thr-missing"}}`, NoSession},
-		{"resume init auth error", "thr-missing", 1, `{"id":1,"error":{"code":-32000,"message":"Not Authenticated"}}`, LoginInvalid},
-		{"start login error", "", 2, `{"id":2,"error":{"code":-32000,"message":"Login required"}}`, LoginInvalid},
-		{"start non-auth error", "", 2, `{"id":2,"error":{"code":-32000,"message":"invalid configuration"}}`, ""},
-		{"malformed thread result", "", 2, `{"id":2,"result":"bad"}`, ""},
-		{"empty thread id", "", 2, `{"id":2,"result":{"thread":{}}}`, ""},
+		{"resume missing thread", "thr-missing", 2, `{"id":2,"error":{"code":-32600,"message":"no rollout found for thread id thr-missing"}}`, NoSession, "no rollout found for thread id thr-missing"},
+		{"resume init auth error", "thr-missing", 1, `{"id":1,"error":{"code":-32000,"message":"Not Authenticated"}}`, LoginInvalid, "Not Authenticated"},
+		{"start login error", "", 2, `{"id":2,"error":{"code":-32000,"message":"Login required"}}`, LoginInvalid, "Login required"},
+		{"start non-auth error", "", 2, `{"id":2,"error":{"code":-32000,"message":"invalid configuration"}}`, "", "invalid configuration"},
+		{"malformed thread result", "", 2, `{"id":2,"result":"bad"}`, "", "codex: missing thread id"},
+		{"empty thread id", "", 2, `{"id":2,"result":{"thread":{}}}`, "", "codex: missing thread id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runStartupFailureCase(t, tc)
@@ -912,7 +921,208 @@ func runStartupFailureCase(t *testing.T, tc codexStartupFailureCase) {
 	peer.conn.Close()
 	events := waitEventsClosed(t, proc.Events())
 	assertStartupEvents(t, events, tc.wantKind)
-	codexWantErr(t, proc.Turn("hello"))
+	err := proc.Turn("hello")
+	codexWantErr(t, err)
+	codexEqual(t, err.Error(), tc.wantErr)
+}
+
+func TestCodexTrustsFolderWithInlineTableForDotAndQuotedPaths(t *testing.T) {
+	drv := Drivers["codex"]
+	for _, tc := range []struct {
+		name   string
+		folder string
+		want   string
+	}{
+		{"dot path", "/tmp/a.b/c", `projects={"/tmp/a.b/c"={trust_level="trusted"}}`},
+		{"quoted dot path", `/tmp/a.b/"q"/dir`, `projects={"/tmp/a.b/\"q\"/dir"={trust_level="trusted"}}`},
+		{"windows space dot path", `C:\Users\a.b\my proj`, `projects={"C:\\Users\\a.b\\my proj"={trust_level="trusted"}}`},
+	} {
+		t.Run("interactive "+tc.name, func(t *testing.T) {
+			argv, _, err := drv.Interactive(Launch{Folder: tc.folder, Session: "thr-1", Level: 3, RepoConfig: true, Shim: []string{"solodawn"}})
+			codexNoErr(t, err)
+			codexCheck(t, slices.Contains(argv, tc.want), fmt.Sprintf("argv %q missing %q", argv, tc.want))
+			codexCheck(t, !slices.Contains(argv, "--skip-git-repo-check"), "unexpected --skip-git-repo-check")
+		})
+	}
+
+	emptyArgv, _, err := drv.Interactive(Launch{Folder: "", Session: "thr-1", Level: 3, RepoConfig: true, Shim: []string{"solodawn"}})
+	codexNoErr(t, err)
+	codexCheck(t, !slices.ContainsFunc(emptyArgv, func(a string) bool { return strings.HasPrefix(a, "projects=") }), "unexpected projects flag for empty folder")
+
+	groupArgv, _, err := drv.Interactive(Launch{Folder: "/tmp/a.b/group", Session: "thr-1", Level: 3, RepoConfig: false, Shim: []string{"solodawn"}})
+	codexNoErr(t, err)
+	codexCheck(t, !slices.ContainsFunc(groupArgv, func(a string) bool { return strings.HasPrefix(a, "projects=") }), "unexpected projects flag for interactive group session")
+
+	dotFolder := filepath.Join(t.TempDir(), "non.git", "work space.v1")
+	codexNoErr(t, os.MkdirAll(dotFolder, 0o755))
+
+	groupLaunch := codexTestLaunch(t, 1)
+	groupLaunch.Folder = dotFolder
+	groupLaunch.RepoConfig = false
+	groupProc, groupPeer := startPeerCodex(t, groupLaunch)
+	completePeerHandshake(t, groupPeer, "thr-group")
+	codexCheck(t, !slices.ContainsFunc(groupPeer.header.Args, func(a string) bool { return strings.HasPrefix(a, "projects=") }), fmt.Sprintf("app-server group args %q carried projects trust", groupPeer.header.Args))
+	codexEqual(t, nextCodexEvent(t, groupProc.Events()), Event{Kind: Ready, Session: "thr-group"})
+	codexNoErr(t, groupProc.Close())
+	groupPeer.expectEOF()
+	groupPeer.conn.Close()
+	waitEventsClosed(t, groupProc.Events())
+
+	t.Setenv("NO_COLOR", "0")
+	l := codexTestLaunch(t, 3)
+	l.Folder = dotFolder
+	l.RepoConfig = true
+	proc, peer := startPeerCodex(t, l)
+	completePeerHandshake(t, peer, "thr-dot")
+	codexEqual(t, peer.header.NoColor, "1")
+	wantTrust := "projects={" + marshalWire(dotFolder) + `={trust_level="trusted"}}`
+	codexCheck(t, slices.Contains(peer.header.Args, wantTrust), fmt.Sprintf("app-server args %q missing %q", peer.header.Args, wantTrust))
+	codexCheck(t, !slices.Contains(peer.header.Args, "--skip-git-repo-check"), "unexpected --skip-git-repo-check on app-server")
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Ready, Session: "thr-dot"})
+	codexNoErr(t, proc.Close())
+	peer.expectEOF()
+	peer.conn.Close()
+	waitEventsClosed(t, proc.Events())
+}
+
+func writeCodexScript(t *testing.T, steps string, exit int) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "codex-script.json")
+	logPath := filepath.Join(t.TempDir(), "fakecli.log")
+	body := fmt.Sprintf(`{"session":"thr-err","steps":%s,"exit":%d}`, steps, exit)
+	codexNoErr(t, os.WriteFile(path, []byte(body), 0o600))
+	t.Setenv("SOLODAWN_FAKECLI_LOG", logPath)
+	t.Setenv("SOLODAWN_FAKE_CODEX_SCRIPT", path)
+}
+
+func TestCodexStartupStderrAndErrorNotificationsPreserved(t *testing.T) {
+	t.Run("startup non-auth stderr", func(t *testing.T) {
+		installFakeCodexBinary(t)
+		writeCodexScript(t, `[{"dir":"stderr","msg":"Error: unknown configuration field"}]`, 1)
+		proc, err := Drivers["codex"].Start(t.Context(), codexTestLaunch(t, 3))
+		codexNoErr(t, err)
+		events := waitEventsClosed(t, proc.Events())
+		codexEqual(t, events, []Event{{Kind: Active, Text: "Error: unknown configuration field"}})
+		turnErr := proc.Turn("hello")
+		codexWantErr(t, turnErr)
+		codexEqual(t, turnErr.Error(), "Error: unknown configuration field")
+	})
+
+	t.Run("startup auth stderr", func(t *testing.T) {
+		installFakeCodexBinary(t)
+		writeCodexScript(t, `[{"dir":"stderr","msg":"401 Unauthorized: login required"}]`, 1)
+		proc, err := Drivers["codex"].Start(t.Context(), codexTestLaunch(t, 3))
+		codexNoErr(t, err)
+		events := waitEventsClosed(t, proc.Events())
+		codexEqual(t, events, []Event{{Kind: LoginInvalid, Text: "401 Unauthorized: login required"}})
+		turnErr := proc.Turn("hello")
+		codexWantErr(t, turnErr)
+		codexEqual(t, turnErr.Error(), "401 Unauthorized: login required")
+	})
+
+	t.Run("startup resume missing session stderr", func(t *testing.T) {
+		installFakeCodexBinary(t)
+		writeCodexScript(t, `[{"dir":"stderr","msg":"no rollout found for thread id thr-old"}]`, 1)
+		l := codexTestLaunch(t, 3)
+		l.Session = "thr-old"
+		proc, err := Drivers["codex"].Start(t.Context(), l)
+		codexNoErr(t, err)
+		events := waitEventsClosed(t, proc.Events())
+		codexEqual(t, events, []Event{{Kind: NoSession, Text: "no rollout found for thread id thr-old"}})
+		turnErr := proc.Turn("hello")
+		codexWantErr(t, turnErr)
+		codexEqual(t, turnErr.Error(), "no rollout found for thread id thr-old")
+	})
+
+	t.Run("startup silent exit", func(t *testing.T) {
+		installFakeCodexBinary(t)
+		writeCodexScript(t, `[]`, 0)
+		proc, err := Drivers["codex"].Start(t.Context(), codexTestLaunch(t, 3))
+		codexNoErr(t, err)
+		codexEqual(t, len(waitEventsClosed(t, proc.Events())), 0)
+		codexEqual(t, proc.Turn("hello"), errCodexClosed)
+	})
+
+	t.Run("error notification during active turn", func(t *testing.T) {
+		proc, peer := startPeerCodex(t, codexTestLaunch(t, 3))
+		completePeerHandshake(t, peer, "thr-note")
+		codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Ready, Session: "thr-note"})
+		codexNoErr(t, proc.Turn("work"))
+		turnReq := peer.readJSON()
+		peer.writeLine(fmt.Sprintf(`{"id":%d,"result":{"turn":{"id":"t1"}}}`, int(turnReq["id"].(float64))))
+		peer.writeLine(`{"method":"error","params":"bad"}`)
+		codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Active})
+		peer.writeLine(`{"method":"error","params":{"error":{"message":"stream hiccup"}}}`)
+		codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Active, Text: "stream hiccup"})
+		peer.writeLine(`{"method":"turn/completed","params":{"turn":{"id":"t1","status":"completed","error":null}}}`)
+		codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "completed"})
+		codexNoErr(t, proc.Close())
+		peer.expectEOF()
+		peer.conn.Close()
+		codexEqual(t, len(waitEventsClosed(t, proc.Events())), 0)
+	})
+
+	t.Run("mid-turn crash falls back to error notification", func(t *testing.T) {
+		installFakeCodexBinary(t)
+		writeCodexScript(t, `[
+			{"dir":"stdin","msg":{"method":"initialize"}},
+			{"dir":"stdout","msg":{"id":"$id","result":{}}},
+			{"dir":"stdin","msg":{"method":"initialized"}},
+			{"dir":"stdin","msg":{"method":"thread/start"}},
+			{"dir":"stdout","msg":{"id":"$id","result":{"thread":{"id":"thr-err"}}}},
+			{"dir":"stdin","msg":{"method":"turn/start"}},
+			{"dir":"stdout","msg":{"id":"$id","result":{"turn":{"id":"t-1"}}}},
+			{"dir":"stdout","msg":{"method":"error","params":{"error":{"message":"stream disconnected"}}}}
+		]`, 1)
+		proc, err := Drivers["codex"].Start(t.Context(), codexTestLaunch(t, 3))
+		codexNoErr(t, err)
+		codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Ready, Session: "thr-err"})
+		codexNoErr(t, proc.Turn("work"))
+		codexEqual(t, waitEventsClosed(t, proc.Events()), []Event{
+			{Kind: Active, Text: "stream disconnected"},
+			{Kind: Active, Text: "stream disconnected"},
+		})
+	})
+
+	t.Run("mid-turn crash preserves stderr", func(t *testing.T) {
+		installFakeCodexBinary(t)
+		writeCodexScript(t, `[
+			{"dir":"stdin","msg":{"method":"initialize"}},
+			{"dir":"stdout","msg":{"id":"$id","result":{}}},
+			{"dir":"stdin","msg":{"method":"initialized"}},
+			{"dir":"stdin","msg":{"method":"thread/start"}},
+			{"dir":"stdout","msg":{"id":"$id","result":{"thread":{"id":"thr-err"}}}},
+			{"dir":"stdin","msg":{"method":"turn/start"}},
+			{"dir":"stdout","msg":{"id":"$id","result":{"turn":{"id":"t-1"}}}},
+			{"dir":"stderr","msg":"fatal worker stderr"}
+		]`, 1)
+		proc, err := Drivers["codex"].Start(t.Context(), codexTestLaunch(t, 3))
+		codexNoErr(t, err)
+		codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Ready, Session: "thr-err"})
+		codexNoErr(t, proc.Turn("work"))
+		codexEqual(t, waitEventsClosed(t, proc.Events()), []Event{{Kind: Active, Text: "fatal worker stderr"}})
+	})
+
+	t.Run("earlier 401 stderr log does not override panic line", func(t *testing.T) {
+		installFakeCodexBinary(t)
+		writeCodexScript(t, `[
+			{"dir":"stderr","msg":"ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized"},
+			{"dir":"stdin","msg":{"method":"initialize"}},
+			{"dir":"stdout","msg":{"id":"$id","result":{}}},
+			{"dir":"stdin","msg":{"method":"initialized"}},
+			{"dir":"stdin","msg":{"method":"thread/start"}},
+			{"dir":"stdout","msg":{"id":"$id","result":{"thread":{"id":"thr-err"}}}},
+			{"dir":"stdin","msg":{"method":"turn/start"}},
+			{"dir":"stdout","msg":{"id":"$id","result":{"turn":{"id":"t-1"}}}},
+			{"dir":"stderr","msg":"thread 'main' panicked: out of memory"},
+			{"dir":"stderr","msg":"   "}
+		]`, 1)
+		proc, err := Drivers["codex"].Start(t.Context(), codexTestLaunch(t, 3))
+		codexNoErr(t, err)
+		codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Ready, Session: "thr-err"})
+		codexNoErr(t, proc.Turn("work"))
+		codexEqual(t, waitEventsClosed(t, proc.Events()), []Event{{Kind: Active, Text: "thread 'main' panicked: out of memory"}})
+	})
 }
 
 func assertStartupEvents(t *testing.T, events []Event, wantKind EventKind) {
