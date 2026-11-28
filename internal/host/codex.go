@@ -85,8 +85,11 @@ func (codexDriver) Start(ctx context.Context, l Launch) (Process, error) {
 	}
 	cmd := exec.CommandContext(ctx, "codex", append([]string{"app-server", "-c", "mcp_servers.solodawn.required=true"}, flags...)...)
 	cmd.Dir = l.Folder
+	cmd.Env = append(os.Environ(), "NO_COLOR=1")
 	detachTerminal(cmd)
 	cmd.WaitDelay = time.Second
+	var stderr outputTail
+	cmd.Stderr = &stderr
 	stdin, stdout, err := startCodexCmd(cmd)
 	if err != nil {
 		return nil, err
@@ -110,10 +113,11 @@ func (codexDriver) Start(ctx context.Context, l Launch) (Process, error) {
 		Method: "initialize",
 		Params: map[string]any{"clientInfo": map[string]string{"name": "solodawn", "version": "1"}},
 	})
-	wait := func() {
+	wait := func() (error, string) {
 		stdout.Close()
-		cmd.Wait()
+		waitErr := cmd.Wait()
 		kill()
+		return waitErr, lastNonEmptyLine(string(stderr))
 	}
 	go p.readLoop(stdout, wait)
 	return p, nil
@@ -138,14 +142,18 @@ func codexBaseFlags(l Launch) ([]string, error) {
 		return nil, errors.New("codex: missing MCP shim command")
 	}
 	timeout := fmt.Sprintf("%d", int64(l.ToolTimeout.Seconds()))
-	return []string{
+	flags := []string{
 		"-c", "mcp_servers.solodawn.command=" + marshalWire(l.Shim[0]),
 		"-c", "mcp_servers.solodawn.args=" + marshalWire(l.Shim[1:]),
 		"-c", `mcp_servers.solodawn.default_tools_approval_mode="approve"`,
 		"-c", "mcp_servers.solodawn.tool_timeout_sec=" + timeout,
 		"-c", "notify=[]",
 		"-c", "features.default_mode_request_user_input=true",
-	}, nil
+	}
+	if l.RepoConfig && l.Folder != "" {
+		flags = append(flags, "-c", "projects={"+marshalWire(l.Folder)+`={trust_level="trusted"}}`)
+	}
+	return flags, nil
 }
 
 func codexLevel(level int) (sandbox, approval string, err error) {
@@ -196,6 +204,8 @@ type codexProcess struct {
 	// ready is closed once by finishReady; Turn is its single waiter per turn.
 	ready     chan struct{}
 	readyOnce sync.Once
+	// lastErr holds the latest active-turn error notification message, read and reset only by readLoop.
+	lastErr string
 
 	mu               sync.Mutex
 	threadID         string
@@ -233,8 +243,10 @@ func (p *codexProcess) send(v any) error {
 	return err
 }
 
-func (p *codexProcess) finishReady(threadID string, err error) {
+func (p *codexProcess) finishReady(threadID string, err error) bool {
+	ran := false
 	done := func() {
+		ran = true
 		p.mu.Lock()
 		p.threadID = threadID
 		p.startErr = err
@@ -242,6 +254,7 @@ func (p *codexProcess) finishReady(threadID string, err error) {
 		close(p.ready)
 	}
 	p.readyOnce.Do(done)
+	return ran
 }
 
 func (p *codexProcess) Turn(text string) error {
@@ -376,18 +389,65 @@ func (p *codexProcess) replyUserInput(askID string, answers map[string][]string)
 	return p.send(codexRPCResult{ID: rawID, Result: map[string]any{"answers": out}})
 }
 
-func (p *codexProcess) readLoop(stdout *os.File, wait func()) {
+func (p *codexProcess) readLoop(stdout *os.File, wait func() (error, string)) {
 	defer close(p.events)
-	defer wait()
-	defer p.finishReady("", errCodexClosed)
 	reader := bufio.NewReader(stdout)
 	for {
 		line, err := reader.ReadBytes('\n')
 		p.handleLine(line)
 		if err != nil {
-			return
+			break
 		}
 	}
+	waitErr, stderrText := wait()
+	p.finishExit(waitErr, stderrText)
+}
+
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+func (p *codexProcess) finishExit(waitErr error, stderrText string) {
+	if p.finishReady("", cmp.Or(errFromText(stderrText), errCodexClosed)) {
+		p.emitStartupDetail(stderrText)
+		return
+	}
+	detail := cmp.Or(stderrText, p.lastErr)
+	if waitErr != nil && detail != "" && p.isTurnActive() {
+		p.emitExitDetail(detail)
+	}
+}
+
+func errFromText(text string) error {
+	if text == "" {
+		return nil
+	}
+	return errors.New(text)
+}
+
+func (p *codexProcess) emitStartupDetail(detail string) {
+	if detail == "" {
+		return
+	}
+	if p.launch.Session != "" && codexSessionMissing(detail) {
+		p.events <- Event{Kind: NoSession, Text: detail}
+		return
+	}
+	p.emitExitDetail(detail)
+}
+
+func (p *codexProcess) emitExitDetail(detail string) {
+	if isCodexAuthText(detail) {
+		p.events <- Event{Kind: LoginInvalid, Text: detail}
+		return
+	}
+	p.events <- Event{Kind: Active, Text: detail}
 }
 
 func (p *codexProcess) handleLine(line []byte) {
@@ -540,6 +600,10 @@ func (p *codexProcess) handleNotification(msg codexMessage) {
 		p.onTurnCompleted(msg.Params)
 		return
 	}
+	if msg.Method == "error" {
+		p.onErrorNotification(msg.Params)
+		return
+	}
 	if p.isTurnActive() {
 		p.events <- Event{Kind: Active}
 	}
@@ -548,6 +612,26 @@ func (p *codexProcess) handleNotification(msg codexMessage) {
 		return
 	}
 	p.onItemNotification(msg.Method, msg.Params)
+}
+
+func (p *codexProcess) onErrorNotification(raw json.RawMessage) {
+	text := codexNotificationError(raw)
+	if text != "" {
+		p.lastErr = text
+	}
+	if p.isTurnActive() {
+		p.events <- Event{Kind: Active, Text: text}
+	}
+}
+
+func codexNotificationError(raw json.RawMessage) string {
+	var note struct {
+		Error *codexTurnError `json:"error"`
+	}
+	if json.Unmarshal(raw, &note) != nil || note.Error == nil {
+		return ""
+	}
+	return strings.TrimSpace(note.Error.Message)
 }
 
 func (p *codexProcess) onItemNotification(method string, raw json.RawMessage) {
@@ -623,6 +707,7 @@ func (p *codexProcess) onTurnCompleted(raw json.RawMessage) {
 	if json.Unmarshal(raw, &note) != nil {
 		return
 	}
+	p.lastErr = ""
 	resets := p.finishTurn()
 	var errText string
 	if note.Turn.Error != nil {
