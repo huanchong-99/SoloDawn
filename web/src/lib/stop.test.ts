@@ -6,6 +6,7 @@ import { prefs } from './prefs.svelte';
 import * as p from './proto';
 import {
   computers,
+  isLoginInvalid,
   isOffline,
   mayPause,
   names,
@@ -164,6 +165,46 @@ describe('statusIn', () => {
     expect(statusIn(group, ai('a', { state: 'offline' }), undefined)).toEqual({
       st: 'offline',
       text: 'Offline',
+    });
+  });
+
+  it('distinguishes sign-in expiration on online owned computers from quota limits', () => {
+    const home = computer('workstation');
+    const group = groupOf(home);
+    const rowOf = (state: string, cli = 'claude') => ai('a', { cli, state, task: undefined });
+    expect(isLoginInvalid(undefined, 'claude')).toBe(false);
+    expect(isLoginInvalid(home, 'claude')).toBe(false);
+
+    const base = p.decode(p.HostInfoPush, goldens['host-info-push']);
+    nodes.infos.set(home, {
+      ...base,
+      offline: false,
+      agents: base.agents.map((entry) => ({
+        ...entry,
+        account: entry.account ?? 'personal',
+        login_ok: entry.agent !== 'claude',
+      })),
+    });
+    expect(isLoginInvalid(home, 'claude')).toBe(true);
+    expect(isLoginInvalid(home, 'codex')).toBe(false);
+    expect(statusIn(group, rowOf('limited', 'claude'), home)).toEqual({
+      st: 'limited',
+      text: 'Limited · sign-in expired',
+    });
+    expect(statusIn(group, rowOf('limited', 'codex'), home)).toEqual({
+      st: 'limited',
+      text: 'Limited',
+    });
+    expect(statusIn(group, rowOf('dormant', 'claude'), home)).toEqual({
+      st: 'sleeping',
+      text: 'Sleeping · wakes when @mentioned',
+    });
+
+    home.ctl = undefined;
+    expect(isLoginInvalid(home, 'claude')).toBe(false);
+    expect(statusIn(group, rowOf('limited', 'claude'), home)).toEqual({
+      st: 'limited',
+      text: 'Limited',
     });
   });
 });

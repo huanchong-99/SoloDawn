@@ -237,7 +237,11 @@
                   {:else if stopped}
                     <p class="st" data-st="offline"><i></i>{t('stop.ai.offline')}</p>
                   {:else if !agent.login_ok}
-                    <p class="st" data-st="down"><i></i>{t('nodes.ai.notSignedIn')}</p>
+                    <p class="st" data-st="down">
+                      <i></i>{t(
+                        agent.account !== null ? 'nodes.ai.loginExpired' : 'nodes.ai.notSignedIn',
+                      )}
+                    </p>
                   {:else}
                     <p class="st" data-st="ok"><i></i>{t('nodes.ai.signedIn')}</p>
                   {/if}
@@ -254,6 +258,16 @@
                   </button>
                 {/if}
               </div>
+
+              {#if comp.online && !stopped && agent.account !== null && !agent.login_ok}
+                <div class="note" data-tone="danger" role="status">
+                  <Icon name="alert" sm />
+                  <div class="grow">
+                    <b>{t('nodes.ai.reauth.title').replace('{cli}', label)}</b>
+                    {' '}{t('nodes.ai.reauth.body').replace('{name}', comp.info.name)}
+                  </div>
+                </div>
+              {/if}
 
               {#if open}
                 <header class="card-head">

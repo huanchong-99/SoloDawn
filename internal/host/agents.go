@@ -41,17 +41,19 @@ type agtPart struct {
 	invalid   map[string]bool
 }
 
-func (p *agtPart) setLoginOK(agent string, ok bool) {
+func (p *agtPart) setLoginOK(agent string, ok bool) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	prev := !p.invalid[agent]
 	if ok {
 		delete(p.invalid, agent)
-		return
+	} else {
+		if p.invalid == nil {
+			p.invalid = map[string]bool{}
+		}
+		p.invalid[agent] = true
 	}
-	if p.invalid == nil {
-		p.invalid = map[string]bool{}
-	}
-	p.invalid[agent] = true
+	return prev != ok
 }
 
 func (p *agtPart) loginOK(agent string) bool {
@@ -226,8 +228,14 @@ func agtListen(h *Host, key SessionKey, e Event) {
 	if !ok {
 		return
 	}
-	if loginOK, changed := agtLoginChange(e); changed {
-		Part[agtPart](h).setLoginOK(s.Agent, loginOK)
+	if loginOK, changed := agtLoginChange(e); changed && Part[agtPart](h).setLoginOK(s.Agent, loginOK) {
+		notifyLoginChanged(h)
+	}
+}
+
+func notifyLoginChanged(h *Host) {
+	if h.LoginChanged != nil {
+		h.LoginChanged()
 	}
 }
 
@@ -250,7 +258,9 @@ func agtSet(_ context.Context, h *Host, _ Owner, by string, data json.RawMessage
 	if err := agtWriteAccount(h, cmd.Agent, cmd.Account, by); err != nil {
 		return nil, err
 	}
-	Part[agtPart](h).setLoginOK(cmd.Agent, true)
+	if Part[agtPart](h).setLoginOK(cmd.Agent, true) {
+		notifyLoginChanged(h)
+	}
 	return nil, nil
 }
 

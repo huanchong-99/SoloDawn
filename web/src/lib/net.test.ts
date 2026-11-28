@@ -10,6 +10,7 @@ import { Device, ed25519, encode, loadDevice } from './identity';
 import { readCode, readInvitation } from './join';
 import { goldens } from './mock';
 import { mockHome, sourceOf, start } from './net.svelte';
+import { nodes } from './nodes.svelte';
 import * as owner from './owner';
 import { loadJoined, loadOwner, saveJoined, saveOwner } from './owner';
 import { mac, parseSecret, room, shown } from './pairing';
@@ -165,6 +166,7 @@ beforeEach(() => {
   FakePC.reset();
   clients.length = 0;
   homes.length = 0;
+  nodes.infos.clear();
   asked.length = 0;
   location.hash = '';
   prefs.lang = 'en';
@@ -173,6 +175,7 @@ beforeEach(() => {
 afterEach(() => {
   while (stops.length) stops.pop()!();
   homes.length = 0;
+  nodes.infos.clear();
   asked.length = 0;
   clients.length = 0;
   FakePC.reset();
@@ -1380,6 +1383,40 @@ describe('start (live)', () => {
     expect(homes[1].name).toBe('laptop');
 
     stop();
+  });
+
+  it('forwards incoming host.info pushes to nodes.infos for connected owner nodes', async () => {
+    const browserDev = await loadDevice({ crypto, idb: () => idb });
+    const nodeA = await newDevice();
+    const log = new DeviceLog(crypto, browserDev.id);
+    await log.apply(
+      await signDeviceEntry(browserDev, browserDev.id, 1, 'add', browserDev.id, 'browser', 'Web'),
+    );
+    await log.apply(
+      await signDeviceEntry(browserDev, browserDev.id, 2, 'add', nodeA.id, 'node', 'Studio'),
+    );
+    await saveOwner(() => idb, log, { [nodeA.id]: ['wss://rv.example/rv'] });
+    const client = startTracked('live');
+    await vi.waitFor(() =>
+      expect(clients.some((way) => way.url === 'wss://rv.example/rv')).toBe(true),
+    );
+    const rv = clients.find((way) => way.url === 'wss://rv.example/rv')!;
+    rv.ready();
+    const pc = await answerNode(rv, nodeA, browserDev.id, 0);
+    const hello = pc.ctl.frames().find((frame) => frame.t === 'hello')!;
+    pc.ctl.deliver(welcomeFrame(hello.id, nodeA.id, 'Studio'));
+    await vi.waitFor(() => expect(client.net.homes[0]?.ctl).toBeDefined());
+    const home = client.net.homes[0];
+    expect(home.owner).toBe(true);
+    const base = p.decode(p.HostInfoPush, goldens['host-info-push']);
+    pc.ctl.deliver({
+      ...base,
+      device: nodeA.id,
+      name: 'Studio',
+      agents: base.agents.map((a) => (a.agent === 'claude' ? { ...a, login_ok: false } : a)),
+    });
+    expect(nodes.infos.get(home)?.agents.find((a) => a.agent === 'claude')?.login_ok).toBe(false);
+    expect(nodes.infos.get(home)?.device).toBe(nodeA.id);
   });
 
   it('enforces one active tab with runTab and renders the other-tab notice with Use here in App', async () => {

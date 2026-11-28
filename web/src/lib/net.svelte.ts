@@ -10,6 +10,7 @@ import { loadDevice, type Device } from './identity';
 import { joinGroup, JoinError, presentLog, type Invitation } from './join';
 import { browserName, signalUrlOf } from './onboard.svelte';
 import { loadJoined, loadOwner, saveJoined, saveOwner, type JoinedHomes } from './owner';
+import { nodes } from './nodes.svelte';
 import { connect, type Peer, type Session } from './peer';
 import type { Devlog, Welcome } from './proto';
 import { parse } from './route.svelte';
@@ -161,6 +162,10 @@ function startLive(
             switch (frame.t) {
               case 'devlog':
                 if (frame.user === log.user) void onDevlog(frame);
+                break;
+              case 'host.info':
+                nodes.receive(home, frame);
+                break;
             }
           },
         };

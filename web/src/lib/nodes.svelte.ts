@@ -229,13 +229,22 @@ export class Nodes {
     return this.#read(home, home.ctl!, true);
   }
 
+  /** Applies a pushed `host.info` frame from `home` when its owner connection is online. */
+  receive(home: Home, info: p.HostInfoPush) {
+    if (home.owner && home.ctl) this.#apply(home, home.ctl, info);
+  }
+
   async #read(home: Home, ctl: p.Ctl, refresh?: true) {
     const answer = await ctl.request({ t: 'host.info', ...(refresh && { refresh }) }).catch(lost);
     if (home.ctl !== ctl || answer.err) return;
     const { re: _re, ok: _ok, ...info } = answer;
+    this.#apply(home, ctl, info);
+    home.onhomes?.(info.homes);
+  }
+
+  #apply(home: Home, ctl: p.Ctl, info: p.HostInfoPush) {
     this.#learn(ctl, info);
     this.infos.set(home, info);
-    home.onhomes?.(info.homes);
   }
 
   #learn(ctl: p.Ctl, { homes }: p.HostInfoPush) {

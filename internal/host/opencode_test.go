@@ -165,6 +165,12 @@ func TestOpenCodeTakesTurnsAndAnswersInOneServer(t *testing.T) {
 		{"dir":"http","msg":{"call":"POST /session/ses_1/prompt_async","body":{"parts":[{"type":"text","text":"third"}]}}},
 		{"dir":"sse","msg":{"type":"server.heartbeat","properties":{}}},
 		{"dir":"sse","msg":{"type":"session.idle","properties":{"sessionID":"$session"}}},
+		{"dir":"http","msg":{"call":"POST /session/ses_1/prompt_async","body":{"parts":[{"type":"text","text":"fourth"}]}}},
+		{"dir":"sse","msg":{"type":"session.error","properties":{"sessionID":"$session","error":{"name":"APIError","data":{"message":"  model overloaded\nretry later  "}}}}},
+		{"dir":"sse","msg":{"type":"session.idle","properties":{"sessionID":"$session"}}},
+		{"dir":"http","msg":{"call":"POST /session/ses_1/prompt_async","body":{"parts":[{"type":"text","text":"fifth"}]}}},
+		{"dir":"sse","msg":{"type":"session.error","properties":{"sessionID":"$session","error":{"name":"UnknownError"}}}},
+		{"dir":"sse","msg":{"type":"session.idle","properties":{"sessionID":"$session"}}},
 		{"dir":"http","msg":{"call":"POST /never","body":{}}}]}`, openCodeLaunch(t, "", 1))
 	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Ready, Session: "ses_1"})
 	codexNoErr(t, proc.Turn("hello"))
@@ -176,9 +182,13 @@ func TestOpenCodeTakesTurnsAndAnswersInOneServer(t *testing.T) {
 	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "interrupted"})
 	codexNoErr(t, proc.Turn("again"))
 	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: LoginInvalid, Text: "no API key"})
-	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "failed"})
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "failed", Text: "no API key"})
 	codexNoErr(t, proc.Turn("third"))
 	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "completed"})
+	codexNoErr(t, proc.Turn("fourth"))
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "failed", Text: "model overloaded\nretry later"})
+	codexNoErr(t, proc.Turn("fifth"))
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "failed", Text: "UnknownError"})
 	codexNoErr(t, proc.Close())
 	codexEqual(t, len(waitEventsClosed(t, proc.Events())), 0)
 }

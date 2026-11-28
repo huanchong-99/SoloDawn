@@ -270,9 +270,11 @@ func (n *nodeRuntime) wireServices() {
 		ID: n.key.ID(), Version: Version, Exe: n.exe, Store: n.db,
 		Sessions: n.sessions, Host: n.host, Name: nameFn, Agents: n.host.Agents,
 	})
-	n.host.WatchersChanged = func() {
+	pushHostInfo := func() {
 		n.spawn("host_info", func() { surface.pushHostInfo(n.ctx, false) })
 	}
+	n.host.WatchersChanged = pushHostInfo
+	n.host.LoginChanged = pushHostInfo
 	n.pairer.bind(n.sessions)
 	host.Part[netStatusPart](n.host).status = n.netStatus
 }

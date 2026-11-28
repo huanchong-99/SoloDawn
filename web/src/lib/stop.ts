@@ -47,10 +47,22 @@ export const offlineAIs = (home: Home, homes: readonly Home[]) =>
     .map((ai) => ai.id)
     .join(' ');
 
+/** Whether `host` is an online owned computer whose last `host.info` reports invalid sign-in for `cli`. */
+export function isLoginInvalid(host: Home | undefined, cli: string) {
+  return Boolean(
+    host?.ctl &&
+    nodes.infos.get(host)?.agents.some((agent) => agent.agent === cli && !agent.login_ok),
+  );
+}
+
 /** An AI's status, where `host` is its computer when this person owns that: it says so when they
- *  took it offline. A running turn or an open terminal tells more than the last `host.info`. */
+ *  took it offline or its sign-in expired. A running turn or an open terminal tells more than the last `host.info`. */
 export function statusIn(group: Group, ai: AIMemberRow, host: Home | undefined) {
-  return isOffline(host) && ai.state !== 'working' && ai.state !== 'takeover'
-    ? { st: 'offline', text: t('stop.ai.offline') }
-    : statusOf(group, ai);
+  if (isOffline(host) && ai.state !== 'working' && ai.state !== 'takeover') {
+    return { st: 'offline', text: t('stop.ai.offline') };
+  }
+  if (ai.state === 'limited' && isLoginInvalid(host, ai.cli)) {
+    return { st: 'limited', text: t('member.state.loginInvalid') };
+  }
+  return statusOf(group, ai);
 }

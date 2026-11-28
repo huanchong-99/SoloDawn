@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -278,19 +279,19 @@ func checkClaudeStatuses(t *testing.T) {
 	cases := []struct {
 		msg         claudeResultMsg
 		interrupted bool
-		wantStatus  string
+		want        Event
 	}{
-		{claudeResultMsg{Subtype: "success"}, false, "completed"},
-		{claudeResultMsg{Subtype: "success", IsError: true, Result: "boom"}, false, "failed"},
-		{claudeResultMsg{Subtype: "error_max_turns"}, false, "failed"},
-		{claudeResultMsg{Subtype: "error_during_execution", IsError: true}, true, "interrupted"},
-		{claudeResultMsg{Subtype: "error_during_execution", TerminalReason: "aborted_tools"}, false, "interrupted"},
-		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Result: "Please run /login"}, true, "interrupted"},
+		{claudeResultMsg{Subtype: "success"}, false, Event{Kind: TurnEnded, Status: "completed"}},
+		{claudeResultMsg{Subtype: "success", IsError: true, Result: "  boom  "}, false, Event{Kind: TurnEnded, Status: "failed", Text: "boom"}},
+		{claudeResultMsg{Subtype: "error_max_turns"}, false, Event{Kind: TurnEnded, Status: "failed"}},
+		{claudeResultMsg{Subtype: "error_during_execution", IsError: true}, true, Event{Kind: TurnEnded, Status: "interrupted"}},
+		{claudeResultMsg{Subtype: "error_during_execution", TerminalReason: "aborted_tools"}, false, Event{Kind: TurnEnded, Status: "interrupted"}},
+		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Result: "Please run /login"}, true, Event{Kind: TurnEnded, Status: "interrupted"}},
 	}
 	for _, tc := range cases {
 		ev, diag := claudeResultEvent(tc.msg, tc.interrupted, true)
 		claudeTrue(t, !diag, "unexpected diagnostic result")
-		claudeEqual(t, "turn status", ev, Event{Kind: TurnEnded, Status: tc.wantStatus})
+		claudeEqual(t, "turn status", ev, tc.want)
 	}
 }
 
@@ -304,14 +305,23 @@ func checkClaudeDiagnostics(t *testing.T) {
 	}{
 		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Errors: []string{"No conversation found with session ID: x"}}, true, Event{Kind: NoSession, Text: "No conversation found with session ID: x"}, true},
 		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Result: "Session not found"}, true, Event{Kind: NoSession, Text: "Session not found"}, true},
-		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Result: "No conversation found"}, false, Event{Kind: TurnEnded, Status: "failed"}, false},
-		{claudeResultMsg{Subtype: "success", IsError: true, APIErrorStatus: 400, Result: "HTTP 400"}, false, Event{Kind: TurnEnded, Status: "failed"}, false},
+		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Result: "No conversation found"}, false, Event{Kind: TurnEnded, Status: "failed", Text: "No conversation found"}, false},
+		{claudeResultMsg{Subtype: "success", IsError: true, APIErrorStatus: 400, Result: "HTTP 400"}, false, Event{Kind: TurnEnded, Status: "failed", Text: "HTTP 400"}, false},
 		{claudeResultMsg{Subtype: "success", IsError: true, APIErrorStatus: 401, Result: "HTTP 401"}, false, Event{Kind: LoginInvalid, Text: "HTTP 401"}, true},
-		{claudeResultMsg{Subtype: "success", IsError: true, APIErrorStatus: 402, Result: "HTTP 402"}, false, Event{Kind: TurnEnded, Status: "failed"}, false},
+		{claudeResultMsg{Subtype: "success", IsError: true, APIErrorStatus: 402, Result: "HTTP 402"}, false, Event{Kind: TurnEnded, Status: "failed", Text: "HTTP 402"}, false},
+		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Result: "  \n", Errors: []string{"first line\nsecond"}}, false, Event{Kind: TurnEnded, Status: "failed", Text: "first line\nsecond"}, false},
 		{claudeResultMsg{Subtype: "success", IsError: true, Result: "Please run /login"}, false, Event{Kind: LoginInvalid, Text: "Please run /login"}, true},
 		{claudeResultMsg{Subtype: "success", IsError: true, Result: "Not logged in"}, false, Event{Kind: LoginInvalid, Text: "Not logged in"}, true},
 		{claudeResultMsg{Subtype: "success", IsError: true, Result: "Invalid API key"}, false, Event{Kind: LoginInvalid, Text: "Invalid API key"}, true},
+		{claudeResultMsg{Subtype: "success", IsError: true, Result: "authentication_error"}, false, Event{Kind: LoginInvalid, Text: "authentication_error"}, true},
 		{claudeResultMsg{Subtype: "success", IsError: true, Result: "authentication_failed"}, false, Event{Kind: LoginInvalid, Text: "authentication_failed"}, true},
+		{claudeResultMsg{Subtype: "success", IsError: true, Result: "Authentication failed"}, false, Event{Kind: LoginInvalid, Text: "Authentication failed"}, true},
+		{claudeResultMsg{Subtype: "success", IsError: true, Result: `Failed to authenticate. API Error: 401 {"error":{"message":"OAuth token has expired"}}`}, false, Event{Kind: LoginInvalid, Text: `Failed to authenticate. API Error: 401 {"error":{"message":"OAuth token has expired"}}`}, true},
+		{claudeResultMsg{Subtype: "success", IsError: true, Result: "OAuth session expired"}, false, Event{Kind: LoginInvalid, Text: "OAuth session expired"}, true},
+		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, APIErrorStatus: 401, Result: "Unauthorized request"}, false, Event{Kind: LoginInvalid, Text: "Unauthorized request"}, true},
+		{claudeResultMsg{Subtype: "success", IsError: true, Result: "Unauthorized request"}, false, Event{Kind: TurnEnded, Status: "failed", Text: "Unauthorized request"}, false},
+		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, APIErrorStatus: 500, Result: "HTTP 401 Unauthorized from upstream proxy"}, false, Event{Kind: TurnEnded, Status: "failed", Text: "HTTP 401 Unauthorized from upstream proxy"}, false},
+		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Result: "third-party oauth callback failed"}, false, Event{Kind: TurnEnded, Status: "failed", Text: "third-party oauth callback failed"}, false},
 		{claudeResultMsg{Subtype: "success", APIErrorStatus: 401, Result: "Not logged in"}, false, Event{Kind: TurnEnded, Status: "completed"}, false},
 	}
 	for _, tc := range cases {
@@ -537,6 +547,7 @@ func TestClaudeWithoutItsToolsIsACrash(t *testing.T) {
 	claudeNoErr(t, err)
 	t.Setenv("SOLODAWN_FAKE_CLAUDE_SCRIPT", script)
 	h, rh, _, _ := setupRunEnv(t)
+	Listeners["agents"] = agtListen
 	Drivers["claude"] = claudeDriver{}
 	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
 	claudeNoErr(t, h.Sessions.Create(makeRunSession(key, TaskSession, t.TempDir())))
@@ -555,6 +566,102 @@ func TestClaudeWithoutItsToolsIsACrash(t *testing.T) {
 	written, err := os.ReadFile(log)
 	claudeNoErr(t, err)
 	claudeTrue(t, !strings.Contains(string(written), "exit claude"), "the CLI ended by itself")
+}
+
+// A Claude OAuth expiration failure moves the session to dormant, sets limited
+// + login_invalid (with login_ok=false), and a non-auth failed result keeps
+// the open CLI in Waiting while emitting turn_interrupted (crash) with no task fail.
+func TestClaudeOAuthAndFailedTurnInRuntime(t *testing.T) {
+	buildFakeClaudeBinary(t)
+	t.Setenv("SOLODAWN_FAKECLI_LOG", filepath.Join(t.TempDir(), "log"))
+	oauthMsg := `Failed to authenticate. API Error: 401 {"error":{"message":"OAuth token has expired"}}`
+	t.Setenv("SOLODAWN_FAKE_CLAUDE_SCRIPT", writeClaudeScript(t, fmt.Sprintf(`[
+		{"dir":"stdout","msg":{"type":"system","subtype":"init","session_id":"s-oauth"}},
+		{"dir":"stdin","msg":{"type":"user"}},
+		{"dir":"stdout","msg":{"type":"result","subtype":"success","is_error":true,"result":%q}}
+	]`, oauthMsg), 1))
+	h, rh, _, _ := setupRunEnv(t)
+	Listeners["agents"] = agtListen
+	Drivers["claude"] = claudeDriver{}
+	var loginChanges atomic.Int32
+	h.LoginChanged = func() { loginChanges.Add(1) }
+
+	grpKey := SessionKey{Group: runGroup1, Member: runAI1}
+	claudeNoErr(t, h.Sessions.Create(makeRunSession(grpKey, GroupSession, t.TempDir())))
+	claudeNoErr(t, Runner.Turn(t.Context(), h, grpKey, "hello", Turn{Kind: ItemsTurn}))
+	rh.waitCmd(t) // working
+
+	var stLim proto.MemberStatus[proto.LoginInvalidEvent]
+	claudeNoErr(t, proto.Decode([]byte(rh.waitCmd(t).raw), &stLim))
+	claudeEqual(t, "limited state", stLim.State, "limited")
+	claudeEqual(t, "login invalid code", stLim.Event.Code, "login_invalid")
+	claudeEqual(t, "oauth detail", stLim.Event.Detail, oauthMsg)
+	waitForState(t, h, grpKey, Dormant)
+	claudeEqual(t, "login changes", loginChanges.Load(), int32(1))
+
+	t.Setenv("SOLODAWN_FAKE_CLAUDE_SCRIPT", writeClaudeScript(t, `[
+		{"dir":"stdout","msg":{"type":"system","subtype":"init","session_id":"s-fail"}},
+		{"dir":"stdin","msg":{"type":"user"}},
+		{"dir":"stdout","msg":{"type":"result","subtype":"error_during_execution","is_error":true,"api_error_status":400,"result":"API error 400\nline two"}},
+		{"dir":"stdin","msg":{"type":"user"}},
+		{"dir":"stdout","msg":{"type":"result","subtype":"success","session_id":"s-fail","result":"recovered"}},
+		{"dir":"eof"}
+	]`, 0))
+	taskKey := SessionKey{Group: runGroup2, Member: runAI2, Task: runTask1}
+	claudeNoErr(t, h.Sessions.Create(makeRunSession(taskKey, TaskSession, t.TempDir())))
+	claudeNoErr(t, Runner.Turn(t.Context(), h, taskKey, "work", Turn{Kind: ItemsTurn, Thread: runTask1}))
+	rh.waitCmd(t) // working
+
+	var stCrash proto.MemberStatus[proto.TurnInterruptedEvent]
+	claudeNoErr(t, proto.Decode([]byte(rh.waitCmd(t).raw), &stCrash))
+	claudeEqual(t, "waiting state", stCrash.State, "waiting")
+	claudeEqual(t, "crash task", string(stCrash.Event.Task), runTask1)
+	claudeEqual(t, "crash reason", stCrash.Event.Reason, "crash")
+	claudeEqual(t, "crash detail", stCrash.Event.Detail, "API error 400")
+	waitForState(t, h, taskKey, Waiting)
+	for _, cmd := range rh.snapshotCmds() {
+		claudeTrue(t, cmd.payload["op"] != "fail", "stay-open failed turn must not fail task: "+cmd.raw)
+	}
+
+	claudeNoErr(t, Runner.Turn(t.Context(), h, taskKey, "follow-up", Turn{Kind: ItemsTurn, Thread: runTask1}))
+	rh.waitCmd(t) // working on same open CLI
+	var stOK proto.MemberStatus[proto.TurnInterruptedEvent]
+	claudeNoErr(t, proto.Decode([]byte(rh.waitCmd(t).raw), &stOK))
+	claudeEqual(t, "waiting after recovery", stOK.State, "waiting")
+	claudeTrue(t, stOK.Event == nil, "unexpected event after recovery")
+	waitForState(t, h, taskKey, Waiting)
+}
+
+// Foreign 401 Unauthorized or third-party oauth errors (without APIErrorStatus 401)
+// do not emit LoginInvalid or flip login_ok.
+func TestClaudeForeignAuthDoesNotFlipLoginOK(t *testing.T) {
+	buildFakeClaudeBinary(t)
+	t.Setenv("SOLODAWN_FAKECLI_LOG", filepath.Join(t.TempDir(), "log"))
+	t.Setenv("SOLODAWN_FAKE_CLAUDE_SCRIPT", writeClaudeScript(t, `[
+		{"dir":"stdout","msg":{"type":"system","subtype":"init","session_id":"s-foreign"}},
+		{"dir":"stdin","msg":{"type":"user"}},
+		{"dir":"stderr","msg":"proxy reported 401 Unauthorized on third-party oauth endpoint"},
+		{"dir":"stdout","msg":{"type":"result","subtype":"error_during_execution","is_error":true,"api_error_status":500,"result":"401 Unauthorized from external oauth proxy\nretry"}},
+		{"dir":"eof"}
+	]`, 1))
+	h, rh, _, _ := setupRunEnv(t)
+	Listeners["agents"] = agtListen
+	Drivers["claude"] = claudeDriver{}
+	var loginChanges atomic.Int32
+	h.LoginChanged = func() { loginChanges.Add(1) }
+
+	grpKey := SessionKey{Group: runGroup1, Member: runAI1}
+	claudeNoErr(t, h.Sessions.Create(makeRunSession(grpKey, GroupSession, t.TempDir())))
+	claudeNoErr(t, Runner.Turn(t.Context(), h, grpKey, "hello", Turn{Kind: ItemsTurn}))
+	rh.waitCmd(t) // working
+
+	var stCrash proto.MemberStatus[proto.TurnInterruptedEvent]
+	claudeNoErr(t, proto.Decode([]byte(rh.waitCmd(t).raw), &stCrash))
+	claudeEqual(t, "crash code", stCrash.Event.Code, "turn_interrupted")
+	claudeEqual(t, "crash detail", stCrash.Event.Detail, "401 Unauthorized from external oauth proxy")
+	claudeEqual(t, "login changes", loginChanges.Load(), int32(0))
+	st, _ := h.MemberState(runGroup1, runAI1)
+	claudeTrue(t, st != "limited", "foreign 401 must not enter limited state")
 }
 
 func testClaudeContextCancelKillsTree(t *testing.T) {

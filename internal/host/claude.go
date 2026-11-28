@@ -455,15 +455,25 @@ func (p *claudeProcess) handleResult(line []byte) bool {
 
 func claudeResultEvent(msg claudeResultMsg, interrupted, resumed bool) (Event, bool) {
 	failed := msg.IsError || msg.Subtype != "success"
+	errText := claudeErrorText(msg)
 	if failed && !claudeTurnAborted(msg, interrupted) {
-		if diag, ok := claudeDiagEvent(msg.APIErrorStatus, claudeErrorText(msg), resumed); ok {
+		if diag, ok := claudeDiagEvent(msg.APIErrorStatus, errText, resumed); ok {
 			return diag, true
 		}
 	}
+	status := claudeTurnStatus(msg, interrupted, failed)
 	return Event{
 		Kind:   TurnEnded,
-		Status: claudeTurnStatus(msg, interrupted, failed),
+		Status: status,
+		Text:   claudeFailedText(status, errText),
 	}, false
+}
+
+func claudeFailedText(status, errText string) string {
+	if status == "failed" {
+		return errText
+	}
+	return ""
 }
 
 func claudeTurnAborted(msg claudeResultMsg, interrupted bool) bool {
@@ -481,14 +491,25 @@ func claudeTurnStatus(msg claudeResultMsg, interrupted, failed bool) string {
 }
 
 func claudeErrorText(msg claudeResultMsg) string {
-	return strings.TrimSpace(cmp.Or(msg.Result, strings.Join(msg.Errors, "\n")))
+	return strings.TrimSpace(cmp.Or(strings.TrimSpace(msg.Result), strings.Join(msg.Errors, "\n")))
 }
 
 func claudeDiagEvent(status int, text string, resumed bool) (Event, bool) {
 	if resumed && containsClaudeFold(text, "no conversation found", "session not found") {
 		return Event{Kind: NoSession, Text: text}, true
 	}
-	if status == 401 || containsClaudeFold(text, "/login", "not logged in", "invalid api key", "authentication") {
+	if status == 401 || containsClaudeFold(
+		text,
+		"/login",
+		"not logged in",
+		"invalid api key",
+		"failed to authenticate",
+		"authentication_error",
+		"authentication_failed",
+		"authentication failed",
+		"oauth token has expired",
+		"oauth session expired",
+	) {
 		return Event{Kind: LoginInvalid, Text: text}, true
 	}
 	return Event{}, false
