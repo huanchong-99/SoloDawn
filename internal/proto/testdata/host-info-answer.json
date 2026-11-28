@@ -22,6 +22,11 @@
     "used": 3250000,
     "limit": 52428800
   },
+  "permissions": {
+    "local_network": true,
+    "incoming": true,
+    "full_disk": false
+  },
   "agents": [
     {
       "agent": "claude",

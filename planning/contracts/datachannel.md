@@ -254,6 +254,7 @@ and without `re` and `ok` (`contracts/conventions.md` section 3):
  "os":"darwin/arm64","version":"v0.3.1","exe":"/usr/local/bin/solodawn","open":2,"max_open":4,"offline":false,
  "update":null,"homes":[{"g":"Qm1…","home":"<device id>","name":"Website"}],
  "relay":{"used":3250000,"limit":52428800},
+ "permissions":{"local_network":true,"incoming":true,"full_disk":false},
  "agents":[{"agent":"claude","cli_version":"2.1.311","account":"personal",
    "login_ok":true,"caps":{"day":{"unit":"turns","max":200}},
    "driver":{"accounts":["personal","team","api_key"],"takeover":"new"},
@@ -272,6 +273,10 @@ and without `re` and `ok` (`contracts/conventions.md` section 3):
   (`contracts/rendezvous.md` section 2), without its `t`; `null` while the
   node has no such answer. `account` is `null` until the
   owner has declared it. `agents` lists every supported CLI found here.
+- `permissions`: only from a node that runs from its macOS app (`contracts/local.md` section 11);
+  no other node has it. `local_network`, `incoming` and `full_disk` say what macOS let the node do
+  at its last check, each `true` or `false`, all three always there. The node checks them when it
+  starts and at each `host.permit`.
 - `caps`: the agent's caps as `settings.set` sets them (`contracts/commands.md`
   section 2): `day` and `task` are optional, a cap that is not there is not
   set, and `{}` is an agent with none. `max` may be a fraction (`usd`,
@@ -316,6 +321,30 @@ Asked when a dialog needs it, never pushed:
   `[]`, not an error.
 - A folder that is not in the list is typed by the person; `host.join`
   judges every folder alike (`contracts/commands.md` section 2).
+
+### `host.permit` (request)
+
+Only a node that has `permissions` in `host.info` answers it; any other answers `bad_request`.
+Asked by the Permissions card and the folder dialog, never pushed:
+
+```json
+{"t":"host.permit","id":7}
+{"t":"host.permit","id":7,"open":"full_disk","lang":"zh-CN"}
+{"t":"host.permit","id":7,"path":"/Users/me/Documents/site"}
+{"re":7,"ok":true}
+```
+
+- Without `path`: the node checks the three permissions again, pushes `host.info` if one changed,
+  then answers `ok`. For the next 3 minutes, and for as long as its drag panel is open, it checks
+  every second and pushes each change.
+- `open`, optional, also opens a page of System Settings on the node's screen: `local_network`,
+  `incoming` or `folders`. `full_disk` shows the drag panel for Full Disk Access there, in the
+  language `lang` (`zh-CN` or `en`), and closes it when `full_disk` turns `true`. Any other value
+  is `bad_request`.
+- With `path`: the node resolves the folder as `host.join` does, with the same errors, and asks
+  macOS for it. `ok` when the node may list the folder; `permission` when macOS refuses. The
+  answer waits for the person's answer to the system's question.
+- What is checked and how is in `contracts/local.md` section 11.
 
 ### `audit` (request)
 
@@ -367,6 +396,7 @@ the table itself is in `contracts/storage.md` section 3.
 | `cli` | the CLI program failed; `msg` carries its error text |
 | `secret` | host only: text from an AI matched the outbound secret check and was not sent (R-137) |
 | `home_unreachable` | host only: the home of that group is not connected |
+| `permission` | host only: macOS does not let the node use the folder that `msg` names (`contracts/local.md` section 11) |
 | `internal` | the node itself failed; the cause is in its log, not in `msg` |
 
 Every boundary failure maps to exactly one of the codes above `internal`;

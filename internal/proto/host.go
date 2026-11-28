@@ -15,19 +15,28 @@ type Groups struct {
 // HostState is everything host.info shows: its answer and its pushes carry
 // the whole object.
 type HostState struct {
-	Device   string       `json:"device"`
-	Name     string       `json:"name"`
-	OS       string       `json:"os"`
-	Version  string       `json:"version"`
-	Exe      string       `json:"exe"`
-	Open     int          `json:"open"`
-	MaxOpen  int          `json:"max_open"`
-	Offline  bool         `json:"offline"`
-	Update   *Update      `json:"update"`
-	Homes    []Home       `json:"homes"`
-	Relay    *RelayUse    `json:"relay"`
-	Agents   []HostAgent  `json:"agents"`
-	Settings HostSettings `json:"settings"`
+	Device      string       `json:"device"`
+	Name        string       `json:"name"`
+	OS          string       `json:"os"`
+	Version     string       `json:"version"`
+	Exe         string       `json:"exe"`
+	Open        int          `json:"open"`
+	MaxOpen     int          `json:"max_open"`
+	Offline     bool         `json:"offline"`
+	Update      *Update      `json:"update"`
+	Homes       []Home       `json:"homes"`
+	Relay       *RelayUse    `json:"relay"`
+	Permissions *Permissions `json:"permissions,omitempty"`
+	Agents      []HostAgent  `json:"agents"`
+	Settings    HostSettings `json:"settings"`
+}
+
+// Permissions reports what macOS lets a node running from its app do
+// (contracts/datachannel.md section 7, contracts/local.md section 11).
+type Permissions struct {
+	LocalNetwork bool `json:"local_network"`
+	Incoming     bool `json:"incoming"`
+	FullDisk     bool `json:"full_disk"`
 }
 
 // HostInfoRequest asks for host.info; Refresh skips what was kept of the
@@ -148,6 +157,16 @@ type HostWorkspaces struct {
 type Workspace struct {
 	Path string `json:"path"`
 	Used int64  `json:"used"`
+}
+
+// HostPermit checks macOS permissions, opens a System Settings page or the
+// Full Disk Access drag panel, or probes a folder on a macOS app node
+// (contracts/datachannel.md section 7).
+type HostPermit struct {
+	Request
+	Open string `json:"open,omitempty"`
+	Lang string `json:"lang,omitempty"`
+	Path string `json:"path,omitempty"`
 }
 
 // WatchStart opens a terminal watch for a granted person.

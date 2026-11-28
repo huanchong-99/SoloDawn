@@ -240,3 +240,22 @@ fake CLIs fail reviews on script.
 - **A10.32** Node CLI defaults: `agent.defaults` stores `model`, `effort`, `tier` and `skills` per managed CLI in setting `defaults` (refusing `external`, invalid tiers, or missing fields with `bad_request`) and exposes them under that agent in `host.info`.
 - **A10.33** Joining with defaults: `host.join` with `follow` sends `member add_ai` carrying `follow` and the CLI's current defaults (ignoring any four fields on `host.join`), while joining without `follow` gives the new AI its own profile.
 - **A10.34** Propagating changed defaults: updating `agent.defaults` pushes the new four fields via `member set` with `follow` to every following member of that CLI across online and reconnecting homes, leaving own-profile members and other CLIs untouched.
+
+## macOS permissions (`contracts/local.md` section 11)
+
+- **A11.1** `host.info` of a node that runs from its macOS app has `permissions` with three
+  booleans; a node elsewhere has none and answers `host.permit` with `bad_request`.
+- **A11.2** `host.permit` checks again, pushes `host.info` if a value changed, answers `ok`, and
+  for 3 minutes pushes each later change.
+- **A11.3** `host.permit` with `open` opens that page of System Settings; `full_disk` starts the
+  drag panel in the given language, starts no second one, and ends it when `full_disk` turns
+  `true`; another value is `bad_request`.
+- **A11.4** `host.permit` with `path` answers `ok` for a folder macOS lets the node list and
+  `permission` for one it refuses, and `not_found` and `bad_request` as `host.join` does.
+- **A11.5** `host.join` with a folder that macOS refuses, or has not answered for within 2
+  seconds, answers `permission` and adds no member.
+- **A11.6** A session whose folder macOS refuses starts no CLI: the member reports
+  `turn_interrupted` with `crash` and the folder in `detail`.
+- **A11.7** From the app, `solodawn pair` with no node running writes the login agent and loads
+  it; outside an app it starts a detached node; `solodawn` without arguments inside the app
+  starts the agent and opens the local page.

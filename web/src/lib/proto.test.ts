@@ -410,6 +410,7 @@ describe('decode', () => {
     ['cmd-noted', 'cmd'],
     ['host-info-answer', 'host.info'],
     ['host-workspaces-answer', 'host.workspaces'],
+    ['cmd-ok', 'host.permit'],
   ];
   const pushes = ['rows', 'reset', 'devlog', 'groups', 'host-info-push'];
 
@@ -486,7 +487,10 @@ describe('decode', () => {
       const missing = JSON.parse(goldens[name]);
       delete missing[key];
       const read = () => p.decodeAnswer(t, JSON.stringify(missing));
-      if (schemaOf[name] === p.CmdResult && !['re', 'ok'].includes(key)) {
+      if (
+        (schemaOf[name] === p.CmdResult && !['re', 'ok'].includes(key)) ||
+        (name === 'host-info-answer' && key === 'permissions')
+      ) {
         expect(read, `without ${key}`).not.toThrow();
       } else {
         expect(read, `without ${key}`).toThrow(v.ValiError);
@@ -828,6 +832,48 @@ describe('host surface', () => {
     expect(start.member).toBe(resize.ai);
     expect(accepts('takeover-start', { ...start, member: 'codex' })).toBe(false);
     expect(accepts('pty-resize', { ...resize, ai: 'codex' })).toBe(false);
+  });
+
+  it('reads permissions on host.info and host.permit requests, refusing invalid open targets', async () => {
+    const info = p.decode(p.HostInfo, goldens['host-info-answer']);
+    const push = p.decode(p.HostInfoPush, goldens['host-info-push']);
+    expect(info.permissions).toStrictEqual({
+      local_network: true,
+      incoming: true,
+      full_disk: false,
+    });
+    expect(push.permissions).toBeUndefined();
+
+    expect(p.decode(p.HostPermitRequest, goldens['host-permit'])).toStrictEqual({
+      t: 'host.permit',
+      id: 7,
+    });
+    expect(p.decode(p.HostPermitRequest, goldens['host-permit-open'])).toStrictEqual({
+      t: 'host.permit',
+      id: 7,
+      open: 'full_disk',
+      lang: 'zh-CN',
+    });
+    expect(p.decode(p.HostPermitRequest, goldens['host-permit-path'])).toStrictEqual({
+      t: 'host.permit',
+      id: 7,
+      path: '/Users/me/Documents/site',
+    });
+
+    for (const open of ['local_network', 'incoming', 'folders', 'full_disk'] as const) {
+      expect(v.is(p.HostPermitRequest, { t: 'host.permit', id: 7, open })).toBe(true);
+    }
+    for (const open of ['screen', '', 'accessibility']) {
+      expect(v.is(p.HostPermitRequest, { t: 'host.permit', id: 7, open }), open).toBe(false);
+    }
+    expect(v.is(p.HostPermitRequest, { t: 'host.unknown', id: 7 })).toBe(false);
+
+    expect(p.decodeAnswer('host.permit', goldens['cmd-ok'])).toStrictEqual({ re: 4, ok: true });
+    const ctl = mockCtl(() => {});
+    expect(await ctl.request({ t: 'host.permit', open: 'folders' })).toStrictEqual({
+      re: 1,
+      ok: true,
+    });
   });
 });
 
