@@ -12,7 +12,8 @@ check refusing binaries built from a modified or dirty source tree (`vcs.modifie
 ## Decision
 
 Updated [the release workflow](../../../../.github/workflows/release.yml) and added
-[cmd/solodawn/Info.plist](../../../../cmd/solodawn/Info.plist):
+`cmd/solodawn/Info.plist` (later moved to
+[macos/bundle/Info.plist](../../../../macos/bundle/Info.plist)):
 
 1. **macOS identity `org.solodawn.node`:** Release builds run on macOS (`macos-26`), compile
    `darwin/amd64` and `darwin/arm64` with `CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=13.0` and

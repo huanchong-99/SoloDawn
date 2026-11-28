@@ -1,0 +1,7 @@
+"NSLocalNetworkUsageDescription" = "SoloDawn connects your phone, your browsers and your other computers straight to this Mac over your network.";
+"NSDesktopFolderUsageDescription" = "An AI you run in SoloDawn needs files in your Desktop folder.";
+"NSDocumentsFolderUsageDescription" = "An AI you run in SoloDawn needs files in your Documents folder.";
+"NSDownloadsFolderUsageDescription" = "An AI you run in SoloDawn needs files in your Downloads folder.";
+"NSRemovableVolumesUsageDescription" = "An AI you run in SoloDawn needs files on an external disk.";
+"NSNetworkVolumesUsageDescription" = "An AI you run in SoloDawn needs files on a network disk.";
+"NSFileProviderDomainUsageDescription" = "An AI you run in SoloDawn needs files in iCloud Drive or another cloud folder.";

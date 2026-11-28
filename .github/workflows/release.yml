@@ -1,15 +1,15 @@
 name: Release
 
 # For a pushed vMAJOR.MINOR.PATCH tag, or release candidate tag
-# vMAJOR.MINOR.PATCH-rc.N, builds the six binaries stamped with the tag and
-# their SHA256SUMS, and keeps them as a workflow artifact. It creates no
-# release and no tag.
+# vMAJOR.MINOR.PATCH-rc.N, builds the six released artifacts stamped with the
+# tag (four Linux and Windows binaries plus two zipped macOS SoloDawn.app
+# bundles) and their SHA256SUMS, and keeps them as a workflow artifact. It
+# creates no release and no tag.
 #
-# It runs on macOS because the two darwin binaries are linked by Apple's linker
-# with cmd/solodawn/Info.plist embedded and signed ad hoc as org.solodawn.node:
-# the macOS Application Firewall keys its decisions on that identity, and every
-# other Go binary shares the identity a.out. The Linux and Windows binaries are
-# cross-compiled exactly as before.
+# It runs on macOS because the two darwin apps are assembled into SoloDawn.app
+# with the native Swift helper SoloDawnPermissions and signed ad hoc as
+# org.solodawn.node. The Linux and Windows binaries are cross-compiled exactly
+# as before.
 
 on:
   push:
@@ -55,41 +55,45 @@ jobs:
           pnpm build
           cp ../install.md ../internal/node/webdist/
 
-      - name: Build six binaries stamped with the tag
+      - name: Build the six Go binaries stamped with the tag
         run: |
-          mkdir dist
+          mkdir -p dist "$RUNNER_TEMP/darwin"
           for os in linux darwin windows; do
             suffix=
             cgo=0
-            link=
             if [[ "$os" == windows ]]; then suffix=.exe; fi
-            if [[ "$os" == darwin ]]; then
-              cgo=1
-              link="-linkmode=external -extldflags '-sectcreate __TEXT __info_plist $PWD/cmd/solodawn/Info.plist'"
-            fi
+            if [[ "$os" == darwin ]]; then cgo=1; fi
             for arch in amd64 arm64; do
+              out="dist/solodawn_${GITHUB_REF_NAME}_${os}_${arch}${suffix}"
+              if [[ "$os" == darwin ]]; then
+                out="$RUNNER_TEMP/darwin/solodawn_${GITHUB_REF_NAME}_${os}_${arch}"
+              fi
               # The deployment target is Go's own macOS minimum; Apple's linker would use the runner's.
               CGO_ENABLED="$cgo" MACOSX_DEPLOYMENT_TARGET=13.0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-                -ldflags="-s -w -X github.com/huanchong-99/SoloDawn/internal/node.Version=$GITHUB_REF_NAME $link" \
-                -o "dist/solodawn_${GITHUB_REF_NAME}_${os}_${arch}${suffix}" ./cmd/solodawn
+                -ldflags="-s -w -X github.com/huanchong-99/SoloDawn/internal/node.Version=$GITHUB_REF_NAME" \
+                -o "$out" ./cmd/solodawn
             done
           done
-          for arch in amd64 arm64; do
-            bin="dist/solodawn_${GITHUB_REF_NAME}_darwin_${arch}"
-            codesign -s - -f "$bin"
-            codesign -dv "$bin" 2>&1 | grep -Fx Identifier=org.solodawn.node
-          done
-          test "$("dist/solodawn_${GITHUB_REF_NAME}_darwin_arm64" version)" = "$GITHUB_REF_NAME"
+          test "$("$RUNNER_TEMP/darwin/solodawn_${GITHUB_REF_NAME}_darwin_arm64" version)" = "$GITHUB_REF_NAME"
 
       - name: Refuse a binary built from a modified work tree
         run: |
-          for bin in dist/solodawn_*; do
+          for bin in dist/solodawn_* "$RUNNER_TEMP"/darwin/solodawn_*; do
             go version -m "$bin" | grep -Fx $'\tbuild\tvcs.modified=false'
           done
 
-      - name: Checksum the six binaries
+      - name: Build and pack SoloDawn.app for macOS
+        run: |
+          for arch in amd64 arm64; do
+            ./macos/build-app.sh "$GITHUB_REF_NAME" "$arch" \
+              "$RUNNER_TEMP/darwin/solodawn_${GITHUB_REF_NAME}_darwin_${arch}" dist
+          done
+
+      - name: Checksum the six released files
         working-directory: dist
-        run: shasum -a 256 solodawn_* > SHA256SUMS
+        run: |
+          shasum -a 256 solodawn_* > SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 6
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
