@@ -1351,6 +1351,10 @@ func verifyEnqueueHeldOrdering(t *testing.T) {
 func TestStillCurrentTaskRoleStepReportMismatches(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
+	// The attach's sync starts an afterGroupState of its own after the group
+	// is live; it ends here, before the task row below gives task 1 to another
+	// AI, or its clean-up would end the task session the mention is for.
+	settleDelivery(r.h)
 	var held atomic.Bool
 	var holdChecks atomic.Int32
 	held.Store(true)
@@ -1711,6 +1715,9 @@ func TestTaskSessionStartsAfterObsoleteSessionsAreClosed(t *testing.T) {
 func TestSessionsEndWithTheirTaskRoleAndMember(t *testing.T) {
 	r := newDeliverRig(t, true)
 	r.seedGroupAndMembers()
+	// The attach's afterGroupState ends here, before the rows below make the
+	// sessions obsolete, or its clean-up would end them before the test does.
+	settleDelivery(r.h)
 	marker := filepath.Join(r.folder, "work.txt")
 	tskNoErr(t, os.WriteFile(marker, []byte("uncommitted\n"), 0o600))
 	seed := func(task string) (SessionKey, SessionKey) {
