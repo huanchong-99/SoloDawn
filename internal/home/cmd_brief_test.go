@@ -518,3 +518,58 @@ func TestBriefReviseRefusals(t *testing.T) {
 }
 
 func briefText(v string) *string { return &v }
+
+func TestBriefRefusesWithFewerThanTwoWorkingAIs(t *testing.T) {
+	checkActionable := func(t *testing.T, res home.Result) {
+		t.Helper()
+		briefRefused(t, res, "conflict")
+		for _, want := range []string{"2 working AIs", "secretary", "assignee and reviewer", "Add AI"} {
+			if !strings.Contains(res.Msg, want) {
+				t.Fatalf("refusal %q missing %q", res.Msg, want)
+			}
+		}
+	}
+
+	t.Run("zero working AIs beside secretary", func(t *testing.T) {
+		s := briefState(t)
+		delete(s.AIs, briefA)
+		delete(s.AIs, briefB)
+		delete(s.AIs, briefC)
+		res := briefApply(t, s, disk{}, receipts{}, laptop, briefSign(laptop, briefPost(50, briefBody())))
+		checkActionable(t, res)
+	})
+
+	t.Run("one working AI beside secretary even with same AI in both roles", func(t *testing.T) {
+		s := briefState(t)
+		delete(s.AIs, briefB)
+		delete(s.AIs, briefC)
+		body := briefBody()
+		body.Tasks[0].Assignee = briefA
+		body.Tasks[0].Reviewer = briefA
+		body.Tasks[1].Assignee = briefA
+		body.Tasks[1].Reviewer = briefA
+		res := briefApply(t, s, disk{}, receipts{}, laptop, briefSign(laptop, briefPost(50, body)))
+		checkActionable(t, res)
+	})
+
+	t.Run("two working AIs beside secretary is accepted and same AI in both roles stays bad_request", func(t *testing.T) {
+		s := briefState(t)
+		delete(s.AIs, briefC)
+		res := briefApply(t, s, disk{}, receipts{}, laptop, briefSign(laptop, briefPost(50, briefBody())))
+		if res.Answer.Code != "" || !res.Answer.OK {
+			t.Fatalf("expected brief post with 2 working AIs to commit, got %+v (%s)", res.Answer, res.Msg)
+		}
+		bad := briefBody()
+		bad.Tasks[1].Reviewer = briefB
+		briefRefused(t, briefApply(t, s, disk{}, receipts{}, laptop, briefSign(laptop, briefPost(51, bad))), "bad_request")
+	})
+
+	t.Run("act confirm refuses after working AIs drop below two", func(t *testing.T) {
+		s := briefState(t)
+		card, d := briefPosted(t, s, briefBody())
+		delete(s.AIs, briefB)
+		delete(s.AIs, briefC)
+		res := briefApply(t, s, d, receipts{}, browser, briefAct(browser, 51, "confirm", card.ID, ""))
+		checkActionable(t, res)
+	})
+}

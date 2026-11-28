@@ -97,11 +97,13 @@ Listed by the server only when the calling session is the group's secretary.
 
 | Tool | Arguments | Returns | Maps to |
 | --- | --- | --- | --- |
-| `propose_brief` | `title`; `goal`; `criteria` (list); `scope_in`, `scope_out` (lists); `tasks`: list of `{title, assignee, reviewer, foundation, depends}`; `requester` (name, default the author of the request); `replaces` (id of an earlier brief) | `{"id":"…"}`; confirmation arrives later as a turn | `post` kind `brief` |
+| `propose_brief` | `title`; `goal`; `criteria` (list); `scope_in`, `scope_out` (lists); `tasks`: list of `{title, assignee, reviewer, foundation, depends}`; `requester` (name, default the author of the request); `replaces` (id of an earlier brief) | `{"id":"…"}`; confirmation arrives later as a turn (or local `conflict` if `< 2` working AIs besides the secretary) | `post` kind `brief` |
 | `set_task` | `task`; any of `assignee`, `reviewer`; `action` = `pause`, `resume`, `cancel` | `{"ok":true}` | `task assign`, `task pause`, `task resume`, `task cancel` |
 
 `propose_brief` has no `pass` argument: the host fills the brief's `pass`
-from `group.pass`. It sets `mentions` to `[requester]`, and when `requester`
+from `group.pass`. When fewer than two working AIs exist besides the
+secretary, the host refuses `propose_brief` locally with `conflict` before
+sending any home command. It sets `mentions` to `[requester]`, and when `requester`
 is omitted it defaults to the group's only person (refusing with
 `bad_request` when the group has no person or more than one, naming them).
 `set_task` requires at least one of `assignee`, `reviewer` or `action` (else

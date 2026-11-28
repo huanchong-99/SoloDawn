@@ -69,6 +69,26 @@ func hostToolsSecSteps(sc *godog.ScenarioContext, _ fixtures) {
 	sc.Step(`^a host group with secretary "([^"]+)", AIs "([^"]+)" and "([^"]+)", owner "([^"]+)", and task "T-12"$`, func(secName, ai1, ai2, ownerName string) error {
 		return w.setup(cleanup, secName, ai1, ai2, ownerName)
 	})
+	sc.Step(`^a host group with secretary "([^"]+)", one working AI "([^"]+)", owner "([^"]+)"$`, func(secName, ai1, ownerName string) error {
+		if err := w.setup(cleanup, secName, ai1, "Codex", ownerName); err != nil {
+			return err
+		}
+		raw, err := json.Marshal(proto.GoneRow{
+			RowHeader: proto.RowHeader{Type: "member", ID: w.home.codexMID, Seq: 9},
+			Gone:      true,
+		})
+		if err != nil {
+			return err
+		}
+		w.h.Rows.Put(w.home.groupID, "member", w.home.codexMID, raw)
+		return nil
+	})
+	sc.Step(`^the home received no commands$`, func() error {
+		if len(w.home.cmds) != 0 {
+			return fmt.Errorf("got %d cmds, want 0", len(w.home.cmds))
+		}
+		return nil
+	})
 	sc.Step(`^only "request_decision" of the HS-11 tools is listed to working AI "([^"]+)"$`, func(_ string) error {
 		listed := host.ToolsFor(w.tskCaller)
 		_, hasBrief := listed["propose_brief"]

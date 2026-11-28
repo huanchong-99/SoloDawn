@@ -115,6 +115,7 @@
   }
 
   const ready = $derived(Object.values(ais).every((ai) => ai.workspace && ai.name.trim()));
+  const workingCount = $derived(Object.keys(ais).filter((key) => key !== secretary).length);
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -287,6 +288,9 @@
 
     <fieldset class="part">
       <legend class="sec-title">{t('groups.create.ais')} · {candidates.length}</legend>
+      {#if workingCount < 2}
+        <p class="hint three-ais">{t('groups.create.ais.need')}</p>
+      {/if}
       {#each candidates as candidate (candidate.key)}
         {@const why = unavailable(candidate)}
         {@const ai = ais[candidate.key]}
@@ -439,6 +443,9 @@
   }
   .part > .hint {
     margin-top: var(--sp-1);
+  }
+  .three-ais {
+    margin-bottom: var(--sp-3);
   }
   .pick-row input {
     margin: 0 4px 0 0;

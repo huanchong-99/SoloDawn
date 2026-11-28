@@ -66,3 +66,9 @@ Feature: Briefs and their confirmation in the home
       | the owner's laptop, for "ai-one"    | confirm | forbidden |
       | the owner's laptop, for "ai-one"    | revise  | forbidden |
       | the owner, with an arg              | confirm | bad_request |
+
+  Scenario: Proposing a brief fails with conflict when the group has fewer than two working AIs beside the secretary
+    Given a group home with a secretary and one working AI
+    When the secretary posts a brief assigning "ai-one" and reviewing with "Ghost"
+    Then the home answers "conflict" with "Add AI"
+    And the home holds no task and has queued no item

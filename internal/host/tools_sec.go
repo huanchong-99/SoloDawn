@@ -127,6 +127,16 @@ func (d secDirectory) memberID(name string) (proto.ID, error) {
 	return "", missingTargetError("member", name, d.members)
 }
 
+func (d secDirectory) workingCount(secretary string) int {
+	n := 0
+	for _, m := range d.byName {
+		if m.Kind == "ai" && m.ID != secretary {
+			n++
+		}
+	}
+	return n
+}
+
 func (d secDirectory) person(name string) (proto.MemberRow, error) {
 	if m, ok := d.byName[name]; ok && m.Kind == "human" {
 		return m, nil
@@ -184,11 +194,17 @@ func checkBriefSecrets(in proposeBriefInput) error {
 }
 
 func prepareBriefBody(rows *Rows, group string, in proposeBriefInput) (proto.BriefBody, proto.ID, error) {
-	pass, err := readGroupPass(rows, group)
+	grp, err := readSecGroup(rows, group)
 	if err != nil {
 		return proto.BriefBody{}, "", err
 	}
 	dir := loadSecDirectory(rows, group)
+	if dir.workingCount(grp.Secretary) < 2 {
+		return proto.BriefBody{}, "", &Error{
+			Code:    "conflict",
+			Message: "cannot propose brief: a group needs at least 2 working AIs besides the secretary so assignee and reviewer are different AIs; do not invent AI names — tell the person in the main line to add working AIs via Add AI",
+		}
+	}
 	tasks, err := buildBriefTasks(dir, in.Tasks)
 	if err != nil {
 		return proto.BriefBody{}, "", err
@@ -203,23 +219,23 @@ func prepareBriefBody(rows *Rows, group string, in proposeBriefInput) (proto.Bri
 		Criteria:  in.Criteria,
 		Scope:     proto.BriefScope{In: in.ScopeIn, Out: in.ScopeOut},
 		Tasks:     tasks,
-		Pass:      pass,
+		Pass:      grp.Pass,
 		Requester: string(requester),
 		Replaces:  in.Replaces,
 		Preset:    in.Preset,
 	}, requester, nil
 }
 
-func readGroupPass(rows *Rows, group string) (int, error) {
+func readSecGroup(rows *Rows, group string) (proto.GroupRow, error) {
 	raw, ok := rows.Get(group, "group", group)
 	if !ok {
-		return 0, &Error{Code: "not_found", Message: "group state is not loaded"}
+		return proto.GroupRow{}, &Error{Code: "not_found", Message: "group state is not loaded"}
 	}
 	var grp proto.GroupRow
 	if proto.Decode(raw, &grp) != nil {
-		return 0, &Error{Code: "bad_request", Message: "invalid group row"}
+		return proto.GroupRow{}, &Error{Code: "bad_request", Message: "invalid group row"}
 	}
-	return grp.Pass, nil
+	return grp, nil
 }
 
 func buildBriefTasks(dir secDirectory, inputs []briefTaskInput) ([]proto.BriefTask, error) {
