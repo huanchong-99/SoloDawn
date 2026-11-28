@@ -58,17 +58,37 @@ func (c *Connection) Ready() <-chan struct{} { return c.ready }
 func (c *Connection) Done() <-chan struct{}  { return c.ctx.Done() }
 func (c *Connection) Close() error           { return c.close("closed") }
 
-// finishWait bounds how long a finished connection waits for its peer's
-// close, which may never arrive; a removed member's connections must close
-// within 1 second (A9.4).
-const finishWait = 500 * time.Millisecond
+// finishWait is how long a finished connection waits for the peer to
+// acknowledge more of what was sent before it closes; finishTick is how often
+// it looks. The peer's close may never arrive, and a removed member's
+// connections must close within 1 second (A9.4).
+const (
+	finishWait = 500 * time.Millisecond
+	finishTick = finishWait / 10
+)
 
 // Finish closes ctl after everything sent on it has arrived; the connection
-// ends when the peer closes its side, or this side finishWait later. Close
-// drops what is still on its way.
+// ends when the peer closes its side, or this side once the peer has
+// acknowledged nothing more for finishWait. Close drops what is still on its
+// way.
 func (c *Connection) Finish() {
 	c.dc.Close()
-	time.AfterFunc(finishWait, func() { c.Close() })
+	go c.endIdle(c.dc.BufferedAmount)
+}
+
+// endIdle closes the connection once unacked, the bytes sent that the peer
+// has not acknowledged, has not fallen for finishWait: the peer has what was
+// sent, or it is gone.
+func (c *Connection) endIdle(unacked func() uint64) {
+	left, idle := unacked(), time.Duration(0)
+	for idle < finishWait {
+		time.Sleep(finishTick)
+		idle += finishTick
+		if now := unacked(); now < left {
+			left, idle = now, 0
+		}
+	}
+	c.Close()
 }
 
 func (c *Connection) isClosed() bool { return c.ctx.Err() != nil }

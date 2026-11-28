@@ -189,16 +189,37 @@ func TestFinishEndsAfterWhatWasSent(t *testing.T) {
 
 // Finish ends the connection within A9.4's 1 second also when the peer's
 // close never arrives: here the peer's ICE stops without a word, as Q1's
-// close never reached P1 in CI run 46086770739.
+// close never reached P1 in CI run 46086770739. What was sent last is then
+// never acknowledged either: the acknowledgement of a lone small frame waits
+// 200 ms, and a peer that tears down at once never sends it.
 func TestFinishEndsWithoutThePeersClose(t *testing.T) {
 	f := newPair(t)
 	n := f.open(t, 0)
 	check(t, n.client.pc.SCTP().Transport().ICETransport().Stop())
+	check(t, n.server.Send(proto.RVFrame{Type: "last"}))
 	n.server.Finish()
 	select {
 	case <-n.server.Done():
 	case <-time.After(time.Second):
 		t.Fatal("the finished connection is still open after 1 second")
+	}
+}
+
+// A finished connection stays open while the peer acknowledges more of what
+// was sent within every finishWait, however long the whole takes, and ends
+// finishWait after the last acknowledgement: a fixed time after Finish cut
+// what was still on its way on a slow machine (CI run 46116816286).
+func TestFinishWaitsWhileThePeerAcknowledges(t *testing.T) {
+	// Of 4 bytes sent the peer acknowledges one every 450 ms, acks times.
+	for _, acks := range []int{0, 3} {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			c := &Connection{ctx: ctx, close: func(string) error { cancel(); return nil }}
+			start, every := time.Now(), finishWait-finishTick
+			go c.endIdle(func() uint64 { return uint64(4 - min(acks, int(time.Since(start)/every))) })
+			recv(t, c.Done())
+			eq(t, time.Since(start), time.Duration(acks)*every+finishWait)
+		})
 	}
 }
 
