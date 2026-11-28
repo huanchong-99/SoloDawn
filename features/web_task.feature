@@ -72,6 +72,17 @@ Feature: Task card in the chat main line
     When the task becomes "cancelled"
     Then the task card shows "Cancelled" with no active step marker
 
+  Scenario: Pausing the group pauses active task cards while queued tasks stay queued, and system thread previews show their notice text
+    When the home writes an active task "T-12" at step "work" with an unloaded system notice, and a queued task "T-15"
+    Then the card of T-12 shows "Latest: System · Notice"
+    When the home writes the group as paused and loads the system notice for T-12
+    Then the card of T-12 shows paused badge "Group paused", steps "-, -, -" with "Work · 1 / 3", and preview "Latest: System · Codex joined, invited by Mina"
+    And the card of T-15 still shows "Queued" and steps "-, -, -"
+    When T-12 moves to step "review" while the group is paused
+    Then the card of T-12 shows paused badge "Group paused" and steps "done, -, -" with "Review · 2 / 3"
+    When the home resumes the group
+    Then the card of T-12 shows working badge "In progress" and steps "done, now, -" with "Review · 2 / 3"
+
   Scenario: The development states sheet mounts the task card for the wire example
     Given a development server
     When the person opens the client at "#/states"
