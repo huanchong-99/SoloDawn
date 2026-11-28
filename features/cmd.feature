@@ -11,7 +11,40 @@ Feature: Command line
     Then it prints "usage: solodawn <command> [arguments]" on stderr and exits with code 2
 
     Examples:
-      | arguments     |
-      |               |
-      | unknown       |
-      | version extra |
+      | arguments         |
+      |                   |
+      | unknown           |
+      | --unknown         |
+      | version extra     |
+      | help extra        |
+      | --help extra      |
+      | -h extra          |
+      | node extra        |
+      | node --help extra |
+      | node -h extra     |
+      | node --unknown    |
+
+  Scenario Outline: Top-level help explains how to start the node and where the local page is
+    When I run "solodawn <arguments>"
+    Then it prints on stdout with exit code 0 including:
+      | usage: solodawn <command> [arguments] |
+      | solodawn node                         |
+      | http://localhost:47800                |
+
+    Examples:
+      | arguments |
+      | --help    |
+      | -h        |
+      | help      |
+
+  Scenario Outline: Node help explains how to start the node and where the local page is
+    When I run "solodawn <arguments>"
+    Then it prints on stdout with exit code 0 including:
+      | usage: solodawn node   |
+      | http://localhost:47800 |
+      | solodawn pair          |
+
+    Examples:
+      | arguments   |
+      | node --help |
+      | node -h     |

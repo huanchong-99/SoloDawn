@@ -25,8 +25,10 @@ func init() {
 		_, err := fmt.Fprintln(stdout, node.Version)
 		return err
 	})
-	node.Subcommands["node"] = noArgs(func(io.Writer) error {
-		return node.Foreground()
+	node.Subcommands["node"] = nodeCommand
+	node.Subcommands["help"] = noArgs(func(stdout io.Writer) error {
+		_, err := fmt.Fprint(stdout, mainHelp)
+		return err
 	})
 	node.Subcommands["mcp"] = func(args []string, stdout, stderr io.Writer) int {
 		return node.MCP(args, os.Stdin, stdout, stderr)
@@ -36,15 +38,79 @@ func init() {
 	}
 }
 
+const mainHelp = `usage: solodawn <command> [arguments]
+
+Start the local node and open http://localhost:47800 in your browser (falls back
+to another free port if 47800 is in use):
+  solodawn node
+
+Commands:
+  node                                       Run the node in the foreground (local UI at http://localhost:47800)
+  pair <secret> [--name <label>] [--rendezvous <url>]
+                                             Pair this node with a browser (starts the node if needed)
+  pair-browser                               Print a pairing link for a new browser
+  open                                       Open the local web client with a new browser pairing link
+  status                                     Print version, fingerprint, connections, and open sessions
+  service install | remove                   Register or remove start-at-login for the current user
+  group export <id> <file> [--to <device>]   Export a group to a file
+  group import <file>                        Import a group from a file
+  rendezvous [flags]                         Run the rendezvous service ("rendezvous -h" for flags)
+  version                                    Print the binary version
+  mcp --token <t> | --member <id>            Run the stdio MCP shim
+  wait --member <id> [--timeout <s>]         Wait for an external AI item
+  done --member <id> --run <n> [--failed <text>]
+                                             End an external AI run
+  help                                       Show this help
+
+Options:
+  -h, --help                                 Show this help
+
+Run "solodawn node --help" for node startup details.
+`
+
+const nodeHelp = `usage: solodawn node
+
+Runs the SoloDawn node in the foreground, keeping its local socket open and
+serving the web client and built-in /rv signalling endpoint at
+http://localhost:47800 (falling back to another free port if 47800 is in use).
+
+First run:
+  1. Run "solodawn node" in a terminal and keep it running.
+  2. Open http://localhost:47800 in your browser to begin onboarding.
+  3. Run "solodawn pair <secret> --name <label>" in another terminal.
+     Do not run "solodawn open" before pairing: it requires an owner first.
+
+Options:
+  -h, --help    Show this help
+`
+
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		return usage(stderr)
+	}
+	if len(args) == 1 && isHelpFlag(args[0]) {
+		return node.Subcommands["help"](nil, stdout, stderr)
 	}
 	cmd, ok := node.Subcommands[args[0]]
 	if !ok {
 		return usage(stderr)
 	}
 	return cmd(args[1:], stdout, stderr)
+}
+
+func nodeCommand(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && isHelpFlag(args[0]) {
+		fmt.Fprint(stdout, nodeHelp)
+		return 0
+	}
+	if len(args) != 0 {
+		return usage(stderr)
+	}
+	return result(node.Foreground(), stderr)
+}
+
+func isHelpFlag(arg string) bool {
+	return arg == "--help" || arg == "-h"
 }
 
 func usage(stderr io.Writer) int {

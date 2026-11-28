@@ -13,7 +13,7 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 
 | Command | Does |
 | --- | --- |
-| `solodawn node` | runs the node in the foreground |
+| `solodawn node` | runs the node in the foreground, serving the web client and built-in `/rv` signalling on `http://localhost:47800` (falling back to a free port when `47800` is in use); `node --help` and `node -h` print node startup help to stdout and exit 0 |
 | `solodawn rendezvous …` | runs the rendezvous service (`contracts/rendezvous.md`) |
 | `solodawn pair <secret> [--name <label>] [--rendezvous <url>]` | starts the node if needed, pairs it, prints the result (`flows/pairing.md` A). Without `--name` the label is the computer's host name; without `--rendezvous` the node uses its configured rendezvous, or the official one. A node that already has an owner refuses, and its one line points to `solodawn pair-browser` |
 | `solodawn pair-browser` | prints a pairing link for a new browser |
@@ -24,13 +24,17 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 | `solodawn mcp --token <t>` | the MCP shim; started by a CLI, not by people |
 | `solodawn mcp --member <id>`, `solodawn wait --member <id> [--timeout <s>]`, `solodawn done --member <id> --run <n> [--failed <text>]` | step 3, for an external AI and its runner: the shim under a member id, taking an item, ending a run (`contracts/step-3/external.md` sections 3 and 5) |
 | `solodawn version` | prints the version |
+| `solodawn --help`, `solodawn -h`, `solodawn help` | prints the command summary, including how to start `solodawn node` and `http://localhost:47800`, to stdout and exits 0 |
 
-`version` prints the version of its own binary, and `service install` and
-`service remove` write or delete the start-at-login entry themselves; these
-need no running node (`install.md` runs `version` before pairing). Every
-other command except `node`, `rendezvous` and `mcp` talks to the running
-node through the local socket and exits non-zero with one line of text on
-failure.
+`version` prints the version of its own binary, `help` (`--help`, `-h`, `node
+--help`, `node -h`) prints CLI usage to stdout and exits 0, and `service
+install` and `service remove` write or delete the start-at-login entry
+themselves; these need no running node (`install.md` runs `version` before
+pairing). Every other command except `node`, `rendezvous` and `mcp` talks to
+the running node through the local socket and exits non-zero with one line of
+text on failure. Unknown commands, unknown flags, or extra unexpected
+arguments print `usage: solodawn <command> [arguments]` to stderr and exit 2
+(`rendezvous` prints its flag usage to stderr and exits 2).
 
 ## 2. Data directory
 
