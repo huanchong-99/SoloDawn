@@ -10,6 +10,7 @@ import {
   type FakeTimersConfig,
 } from 'vitest';
 import { DeviceLog } from './devlog';
+import { lost } from './groups.svelte';
 import { Device, ed25519, encode, loadDevice, verifyEnvelope } from './identity';
 import {
   accountLabel,
@@ -1162,5 +1163,60 @@ describe('PairingSession live role a and role b flows', () => {
     await until(() => expect(second.session.stage).toBe('ready'));
     expect((await loadOwner(crypto, () => idb)).addrs[node.id]).toEqual(['wss://other/rv']);
     second.session.destroy();
+  });
+
+  it('tracks permissions from host.info/pushes and sends host.permit on the active connection', async () => {
+    const session = new PairingSession('live');
+    expect(session.permissions).toBeUndefined();
+    expect(await session.permit()).toStrictEqual(lost());
+
+    const node = await newDevice();
+    await until(() => expect(hubs).toHaveLength(1));
+    const hub = hubs[0];
+    const secret = parseSecret(session.code);
+    const self = { role: 'b' as const, k: node.id, kind: 'node' as const, name: 'mac' };
+    hub.options.heard!(hub.options.urls[0], {
+      t: 'room',
+      room: await room(crypto, secret),
+      data: { t: 'pair', ...self, mac: await mac(crypto, secret, self) },
+    });
+    await until(() => expect(hub.peers).toHaveLength(1));
+
+    const requests: unknown[] = [];
+    let failPermit = false;
+    const initialPerms = { local_network: false, incoming: true, full_disk: false };
+    const ctl = makeCtl(async (req) => {
+      requests.push(req);
+      if (req.t === 'hello') return welcomeOf(node.id, true, 'mac');
+      if (req.t === 'host.permit') {
+        if (failPermit) throw new Error('dropped');
+        return { re: 3, ok: true };
+      }
+      return { ...hostInfoOf(node.id, []), permissions: initialPerms };
+    });
+
+    const peer = hub.peers[0];
+    peer.listener.online(ctl, welcomeOf(node.id, false, 'mac'));
+    await until(() => expect(session.stage).toBe('ready'));
+    expect(session.permissions).toEqual(initialPerms);
+
+    expect(await session.permit()).toStrictEqual({ re: 3, ok: true });
+    expect(await session.permit({ open: 'incoming' })).toStrictEqual({ re: 3, ok: true });
+    expect(requests.slice(-2)).toEqual([
+      { t: 'host.permit' },
+      { t: 'host.permit', open: 'incoming' },
+    ]);
+
+    failPermit = true;
+    expect(await session.permit()).toStrictEqual(lost());
+
+    const updatedPerms = { local_network: true, incoming: true, full_disk: true };
+    peer.listener.push({ ...hostInfoOf(node.id, []), permissions: updatedPerms });
+    expect(session.permissions).toEqual(updatedPerms);
+
+    const restart = session.start();
+    expect(session.permissions).toBeUndefined();
+    session.destroy();
+    await restart;
   });
 });

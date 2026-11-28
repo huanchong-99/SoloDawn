@@ -18,6 +18,7 @@ import type {
   ErrorResponse,
   HostInfo,
   HostInfoPush,
+  HostPermitRequest,
   Pair,
   Push,
   Welcome,
@@ -154,6 +155,7 @@ export class PairingSession {
   enrolled = $state<boolean>()!;
   hasRelay = $state<boolean>()!;
   agents = $state<HostInfo['agents'] | undefined>();
+  permissions = $state<HostInfo['permissions']>();
   busy = $state<boolean>()!;
   error = $state<FailureInfo | undefined>();
 
@@ -205,6 +207,12 @@ export class PairingSession {
     this.#applyAccountAnswer(this.#runId, agent, account, answer);
   }
 
+  /** Asks the paired node to check permissions, open Settings, or gate a folder. */
+  permit(body: Omit<HostPermitRequest, 't' | 'id'> = {}) {
+    const ctl = this.#ctl;
+    return ctl ? ctl.request({ t: 'host.permit', ...body }).catch(lost) : Promise.resolve(lost());
+  }
+
   /** Stops timers and closes any open signalling session. */
   destroy() {
     this.#stop();
@@ -239,6 +247,7 @@ export class PairingSession {
     this.enrolled = false;
     this.hasRelay = false;
     this.agents = undefined;
+    this.permissions = undefined;
     this.busy = false;
     this.error = undefined;
     this.#candidateLog = undefined;
@@ -528,6 +537,7 @@ export class PairingSession {
   #applyHostInfo(info: HostInfo | HostInfoPush) {
     this.node = { ...this.node!, name: info.name, os: info.os, version: info.version };
     this.agents = info.agents.filter((agent) => agent.agent !== 'external');
+    this.permissions = info.permissions;
     this.#syncStage();
   }
 

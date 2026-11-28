@@ -6,6 +6,7 @@
   import Icon from '../components/Icon.svelte';
   import { offeredAccounts } from '../components/driver/driver';
   import PairBrowserDialog from '../components/nodes/PairBrowserDialog.svelte';
+  import Permit from '../components/permit/Permit.svelte';
   import NodeOffline from '../components/stop/NodeOffline.svelte';
   import { find } from '../lib/groups.svelte';
   import type { Net } from '../lib/net.svelte';
@@ -211,7 +212,19 @@
           </p>
         {/if}
 
-        {#if comp.online && comp.info}<NodeOffline home={comp.home} />{/if}
+        {#if comp.online && comp.info}
+          {#key comp.home.ctl}
+            <Permit
+              name={comp.info.name}
+              os={comp.info.os}
+              relayed={comp.path?.kind === 'relay'}
+              permissions={comp.info.permissions}
+              ask={(body) => nodes.permit(comp.home, body)}
+              plain
+            />
+          {/key}
+          <NodeOffline home={comp.home} />
+        {/if}
 
         {#if comp.info}
           {#each comp.info.agents.filter((entry) => entry.agent !== 'external') as agent (agent.agent)}

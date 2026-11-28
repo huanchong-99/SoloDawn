@@ -2,6 +2,7 @@
   import { onDestroy, untrack } from 'svelte';
   import Icon from '../components/Icon.svelte';
   import StatusPanel from '../components/pairing/StatusPanel.svelte';
+  import SystemAsks from '../components/permit/SystemAsks.svelte';
   import type { Net } from '../lib/net.svelte';
   import { PairingSession, promptFor } from '../lib/onboard.svelte';
   import {
@@ -158,6 +159,7 @@
             </div>
           </li>
         </ol>
+        <SystemAsks />
       {/if}
     </div>
 

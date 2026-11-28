@@ -47,7 +47,10 @@ it('lists a group that moved on the computer it moved to, and not on the one it 
 
 it('distinguishes expired login from unconfigured account across pushed host.info without re-fetching on open', async () => {
   const box = computer('node-1', 'Workstation');
-  const answer = p.decode(p.HostInfo, goldens['host-info-answer']);
+  const { permissions: _permissions, ...answer } = p.decode(
+    p.HostInfo,
+    goldens['host-info-answer'],
+  );
   let calls = 0;
   box.ctl = {
     request: vi.fn(async () => {

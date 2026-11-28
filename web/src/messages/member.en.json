@@ -15,6 +15,7 @@
   "member.join.cli": "Computer and AI",
   "member.join.error.conflict": "That name is already used in this group.",
   "member.join.error.folder": "This folder is already the workspace of another group. The computer said: {msg}",
+  "member.join.error.permission": "macOS has not allowed SoloDawn to use this folder. Press Change, choose it again and answer macOS's question.",
   "member.join.error.bad_request": "Give the whole path of the folder, such as /Users/you/project.",
   "member.join.error.not_found": "There is no such folder on that computer.",
   "member.join.error.home_unreachable": "The AI's computer cannot reach this group's home right now. Try again when both are online.",
