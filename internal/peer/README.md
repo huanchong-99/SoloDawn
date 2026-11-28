@@ -66,6 +66,8 @@ the channel handlers are the caller's.
 - **Path.** `Connection.Path` is `relay` when either candidate of the selected pair is a relay
   candidate, `direct` for any other pair and `""` while none is selected. `PathChanged` signals
   that it may have changed.
+- **Finish.** `Finish` closes `ctl`; the connection ends when the peer closes its side, or this
+  side 500 ms later, since the peer's close may never arrive.
 - **Close.** `Close` waits, under the `Peer` lock, for pion to free the mux, so no callback that
   takes the `Peer` lock may run inside `Close`.
 - **Locks.** The `Peer` lock covers its own decisions only. It is never held while `known`, `paths`,

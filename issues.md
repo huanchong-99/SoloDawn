@@ -793,6 +793,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-28 · bug · A finished connection stayed listed after a removed member's peer tore down at once (A9.4 flake)
+
+- Symptom: CI run 46086770739 (`acceptance-race`) failed A9.4 once: P1 still listed the removed member's connection 990 ms after the removal, past the 1-second contract (`planning/steps/step-2-3-acceptance.md:39`).
+- Cause: `Connection.Finish` (`internal/peer/ctl.go:63` before the fix) only closed this side's ctl stream and left the end of the connection to the peer. In that run the peer tore its connection down at once, its reset and close never reached P1, and P1 kept the connection until ICE failed (about 25 s). `Finish` had not changed since PR #399.
+- Status: resolved in the commit "Peer: a finished connection ends half a second later when the peer's close does not come": `Finish` also closes the connection `finishWait` (500 ms) later (`internal/peer/ctl.go:61-72`; `TestFinishEndsWithoutThePeersClose` in `internal/peer/ctl_test.go`).
+
 ### 2026-11-28 · bug · Local browser pairing blocked when a host firewall holds LAN traffic and no relay is configured
 
 - Symptom: opening a node's own web UI on the local computer and running `solodawn pair` with the macOS Application Firewall prompt unanswered held incoming LAN connections (`10.90.10.20`) so ICE failed (`ice_failed`) even though `localhost:47800` and `/rv` worked over IPv4 loopback (`127.0.0.1`). Meanwhile, the onboarding panel showed `pairing.status.relay_note` promising relay takeover even though the node's own `/rv` (`internal/rendezvous/relay.go:43-47`) returns `"ice": []` with no TURN server, so no relay could start; when a TURN server is provided, pairing falls back to `relay` cleanly behind the pending prompt.
