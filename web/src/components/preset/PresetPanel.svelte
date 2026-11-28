@@ -20,8 +20,8 @@
   const close = () => void editing.close();
   const reasons = $derived({ conflict: t('preset.taken'), not_found: t('groupinfo.edit.gone') });
   const fields = (name: string, text: string): Field[] => [
-    { label: t('preset.name'), value: name, maxlength: 80 },
-    { label: t('preset.text'), value: text, multiline: true },
+    { label: t('preset.name'), value: name, maxlength: 80, placeholder: t('preset.name') },
+    { label: t('preset.text'), value: text, multiline: true, placeholder: t('preset.text') },
   ];
   let open = $state(false);
   let heading = $state<HTMLElement>();
@@ -64,23 +64,32 @@
                 <time datetime={new Date(note.ts).toISOString()}>
                   {shortWhen(note.ts, now(), prefs.lang)}
                 </time>
-                {#if group.me}
-                  <EditButton
-                    id={editId}
-                    label={t('preset.edit').replace('{name}', note.name!)}
-                    {editing}
-                    disabled={offline}
-                  />
-                {/if}
-                <button
-                  type="button"
-                  class="btn btn-sm btn-ghost del"
-                  disabled={!deletable}
-                  aria-label={t('groupinfo.forget.note').replace('{text}', note.name!)}
-                  onclick={() => (pending = { r: 'note', id: note.id, label: note.name!, heading })}
-                >
-                  {t('groupinfo.forget')}
-                </button>
+                <span class="mem-acts">
+                  {#if group.me}
+                    <EditButton
+                      id={editId}
+                      label={t('preset.edit').replace('{name}', note.name!)}
+                      {editing}
+                      disabled={offline}
+                    />
+                  {/if}
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost del"
+                    disabled={!deletable}
+                    aria-label={t('preset.forget').replace('{text}', note.name!)}
+                    onclick={() =>
+                      (pending = {
+                        r: 'note',
+                        kind: 'preset',
+                        id: note.id,
+                        label: note.name!,
+                        heading,
+                      })}
+                  >
+                    {t('groupinfo.forget')}
+                  </button>
+                </span>
               </div>
               {#if editing.id === editId}
                 <EditField
@@ -165,12 +174,13 @@
     color: var(--text);
     font-size: var(--fs-sm);
   }
-  .del,
-  .mem-meta :global(.edit) {
+  .mem-acts {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    white-space: nowrap;
     margin-left: auto;
-  }
-  .mem-meta :global(.edit + .del) {
-    margin-left: 0;
   }
   .del:not([disabled]) {
     color: var(--danger);

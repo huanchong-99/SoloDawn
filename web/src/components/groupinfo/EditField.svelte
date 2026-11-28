@@ -1,6 +1,6 @@
 <script lang="ts" module>
-  /** One value of an edit in place: a line, a text, or a choice of `options`, which offers
-   *  `placeholder` while nothing is chosen. */
+  /** One value of an edit in place: a line, a text, or a choice of `options`; `placeholder` shows
+   *  in an empty field or before an option is chosen. */
   export interface Field {
     label: string;
     value: string;
@@ -80,6 +80,7 @@
         class="input"
         aria-label={field.label}
         aria-describedby={`${uid}-keys`}
+        placeholder={field.placeholder}
         rows="4"
         maxlength={field.maxlength}
         readonly={busy}
@@ -89,6 +90,7 @@
       <input
         class="input"
         aria-label={field.label}
+        placeholder={field.placeholder}
         maxlength={field.maxlength}
         readonly={busy}
         onkeydown={keydown}

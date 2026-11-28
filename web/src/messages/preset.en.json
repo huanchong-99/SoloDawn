@@ -10,5 +10,8 @@
   "preset.offline": "Cannot reach the group home. Presets are read-only.",
   "preset.loading": "Loading presets…",
   "preset.add": "New preset",
-  "preset.taken": "Not saved: another preset already has that name."
+  "preset.taken": "Not saved: another preset already has that name.",
+  "preset.forget": "Delete preset: {text}",
+  "preset.confirm": "Delete this preset?",
+  "preset.confirm.body": "This removes it permanently from the group's style presets on every connected device."
 }

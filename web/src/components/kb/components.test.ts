@@ -119,3 +119,50 @@ it('supports list, match, no-match and deletion with a cancellable confirmation'
   await search('writer');
   expect(texts('.kb .mem-item > b')).toEqual([]);
 });
+
+it('shows field placeholders, groups row actions, and distinguishes document delete wording', async () => {
+  group.apply([decode(Row, goldens['row-note-kb'])]);
+  show(KnowledgePanel, { group });
+  await open();
+
+  const editBtn = one<HTMLButtonElement>('.kb .mem-meta .edit');
+  const delBtn = one<HTMLButtonElement>('.kb .mem-meta .del');
+  expect(editBtn.parentElement).toBe(delBtn.parentElement);
+  expect(editBtn.parentElement?.classList.contains('mem-acts')).toBe(true);
+  expect(delBtn.getAttribute('aria-label')).toBe(
+    'Delete document: Decision: the home is the single writer',
+  );
+
+  editBtn.click();
+  flushSync();
+  expect(one<HTMLInputElement>('.kb .edit-field input').placeholder).toBe('Document name');
+  expect(one<HTMLTextAreaElement>('.kb .edit-field textarea').placeholder).toBe('Document text');
+  one<HTMLButtonElement>('.kb .edit-field .btn-ghost').click();
+  await tick();
+  flushSync();
+
+  one<HTMLButtonElement>('.kb .add').click();
+  flushSync();
+  expect(one<HTMLInputElement>('.kb .edit-field input').placeholder).toBe('Document name');
+  expect(one<HTMLTextAreaElement>('.kb .edit-field textarea').placeholder).toBe('Document text');
+
+  delBtn.click();
+  flushSync();
+  expect(texts('dialog h2')).toEqual(['Delete this document?']);
+  expect(texts('dialog .lead')).toEqual([
+    "This removes it permanently from the group's knowledge base on every connected device.",
+  ]);
+  one<HTMLButtonElement>('dialog .btn-ghost').click();
+  await tick();
+  flushSync();
+
+  prefs.lang = 'zh-CN';
+  flushSync();
+  expect(one<HTMLButtonElement>('.kb .mem-meta .del').getAttribute('aria-label')).toBe(
+    '删除文档：Decision: the home is the single writer',
+  );
+  one<HTMLButtonElement>('.kb .mem-meta .del').click();
+  flushSync();
+  expect(texts('dialog h2')).toEqual(['删除这个文档？']);
+  expect(texts('dialog .lead')).toEqual(['这会把它从群的知识库里永久删除。']);
+});
