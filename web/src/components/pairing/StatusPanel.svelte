@@ -29,14 +29,16 @@
       ? [session.node.name, session.node.os, session.node.version].filter(Boolean).join(' · ')
       : t(session.role === 'b' ? 'pairing.step.node_wait_browser' : 'pairing.step.node_wait'),
   );
+  // Once enrolled, the step is named by the path that carries the connection.
+  const connectTitle = $derived(
+    t(
+      session.enrolled && session.path
+        ? `pairing.step.connect_${session.path.kind}`
+        : 'pairing.step.connect',
+    ),
+  );
   const connectLine = $derived(
-    !session.enrolled
-      ? t('pairing.step.connect_try')
-      : session.path?.kind === 'relay'
-        ? t('pairing.step.connect_relay')
-        : session.path?.kind === 'direct'
-          ? t('pairing.step.connect_direct')
-          : t('pairing.step.connect_ready'),
+    t(session.enrolled ? 'pairing.step.connect_ready' : 'pairing.step.connect_try'),
   );
   const foundLine = $derived.by(() => {
     if (!session.agents) return t('pairing.step.ai_wait');
@@ -119,7 +121,7 @@
       <li class:todo={stepState(3) === 'todo'}>
         {@render marker(stepState(3))}
         <div>
-          <b>{t('pairing.step.connect')}</b>
+          <b>{connectTitle}</b>
           <span class="muted">{connectLine}</span>
         </div>
       </li>

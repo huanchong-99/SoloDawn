@@ -31,6 +31,20 @@ export interface Path {
   since: number;
 }
 
+/** A valid device of the owner, as the latest entry of their device log that adds it says
+ *  (planning/contracts/envelope.md section 4). */
+export interface OwnerDevice {
+  id: string;
+  kind: 'node' | 'browser';
+  name: string;
+  /** The device that signed the entry. */
+  by: string;
+  /** When the entry was signed, in Unix milliseconds: the log does not read it. */
+  added?: number;
+  /** Whether it is this browser. */
+  self: boolean;
+}
+
 /** What every page is given. */
 export interface Net {
   readonly source: Source;
@@ -38,6 +52,8 @@ export interface Net {
   readonly homes: Home[];
   /** How this browser reaches a home now; undefined while it does not. */
   path(home: Home): Path | undefined;
+  /** The owner's valid devices, in the order their log adds them; none before a session opens. */
+  readonly devices?: OwnerDevice[];
   /** True while another tab of this browser holds the device's connection lock. */
   readonly otherTab?: boolean;
   /** Steals the device's connection lock for this tab after the person chooses "Use here". */
@@ -75,14 +91,26 @@ export async function mockHome() {
   return { home, online: () => link.online(ctl, welcome) };
 }
 
-function pairedNodes(log: DeviceLog): [string, string][] {
-  const found = new Map<string, string>();
+function ownerDevices(log: DeviceLog, self?: string): OwnerDevice[] {
+  const found = new Map<string, OwnerDevice>();
   for (const env of log.entries) {
-    const entry = JSON.parse(env.p) as { dev: string; kind?: string; name?: string };
-    if (entry.kind === 'node' && log.valid(entry.dev)) found.set(entry.dev, entry.name!);
+    const { dev, kind, name, ts } = JSON.parse(env.p) as {
+      dev: string;
+      kind?: OwnerDevice['kind'];
+      name?: string;
+      ts?: number;
+    };
+    if (kind && log.valid(dev)) {
+      found.set(dev, { id: dev, kind, name: name!, by: env.k, added: ts, self: dev === self });
+    }
   }
-  return [...found];
+  return [...found.values()];
 }
+
+const pairedNodes = (log: DeviceLog): [string, string][] =>
+  ownerDevices(log)
+    .filter((device) => device.kind === 'node')
+    .map((device) => [device.id, device.name]);
 
 async function appendEntries(log: DeviceLog, entries: Devlog['entries']): Promise<boolean> {
   let changed = false;
@@ -99,6 +127,7 @@ function startLive(
   waitForUseHere: () => Promise<void>,
   setJoin: (join: Join | undefined) => void,
   setWatchHost: (watch: WatchHost | undefined) => void,
+  setDevices: (devices: OwnerDevice[]) => void,
 ) {
   const activeTab = (device: Device, signal: AbortSignal) => {
     let session: Session | undefined;
@@ -116,6 +145,8 @@ function startLive(
     };
     const openSession = (log: DeviceLog, addrs: Record<string, string[]>, joined: JoinedHomes) => {
       if (!pairedNodes(log).length) return undefined;
+      const publish = () => setDevices(ownerDevices(log, device.id));
+      publish();
       const url = signalUrlOf();
       // This page's rendezvous and the addresses its nodes gave: a code is looked for on each
       // (contracts/step-2/people.md 4.1).
@@ -135,6 +166,7 @@ function startLive(
       const onDevlog = async (frame: Devlog) => {
         if (!(await appendEntries(log, frame.entries)) || session !== hub) return;
         await saveOwner(() => indexedDB, log, addrs);
+        publish();
         syncPeers();
         for (const p of peers.values()) presentLog(p, log);
       };
@@ -319,6 +351,7 @@ export function start(source: Source) {
   let chooseHere: (() => void) | undefined;
   let join: Join | undefined;
   let watchHost = $state.raw<WatchHost>();
+  let devices = $state.raw<OwnerDevice[]>([]);
   const net: Net = {
     source,
     homes,
@@ -326,6 +359,9 @@ export function start(source: Source) {
       return watchHost;
     },
     path: (home) => (home.ctl ? paths.get(home) : undefined),
+    get devices() {
+      return devices;
+    },
     get otherTab() {
       return otherTab;
     },
@@ -364,6 +400,7 @@ export function start(source: Source) {
       waitForUseHere,
       (run) => (join = run),
       (run) => (watchHost = run),
+      (list) => (devices = list),
     );
   }
   const stop = () => {

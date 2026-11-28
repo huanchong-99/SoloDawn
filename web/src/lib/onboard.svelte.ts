@@ -63,13 +63,23 @@ export const signalUrlOf = (loc: Pick<Location, 'protocol' | 'host'> = location)
 const hasTurn = (ice: Extract<Heard, { t: 'ready' | 'ice' }>['ice']) =>
   ice.some(({ urls }) => urls.some((url) => url.startsWith('turn')));
 
-/** Builds the onboarding prompt in `lang` with the page's install and signalling URLs. */
+/** The fingerprint of a device, from its id. */
+export const fingerprintOf = (device: string) => fingerprint(crypto, decode(device)!);
+
+const loopback = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** Whether an address names the computer it is opened on: only a browser on the computer that
+ *  serves it reaches that computer by it (`contracts/rendezvous.md` section 1). */
+export const isLocal = (address: string) => loopback.has(new URL(address).hostname);
+
+/** Builds the onboarding prompt in `lang` with the page's install and signalling URLs. A page that
+ *  a node serves to its own computer says that the node is installed and running there. */
 export function promptFor(
   lang: Lang,
   code: string,
   loc: Pick<Location, 'origin' | 'protocol' | 'host'> = location,
 ): string {
-  return textIn(lang, 'pairing.prompt.text_rv')
+  return textIn(lang, isLocal(loc.origin) ? 'pairing.prompt.text_local' : 'pairing.prompt.text_rv')
     .replace('{install}', `${loc.origin}/install.md`)
     .replace('{code}', code)
     .replace('{rv}', signalUrlOf(loc));
@@ -121,7 +131,7 @@ async function openMock(onpush: (push: Push) => void) {
   if (!device) return undefined;
   const ctl = mockCtl(onpush);
   const welcome = (await hello(ctl.request, browserName)) as Welcome;
-  const nodeFp = await fingerprint(crypto, decode(welcome.device)!);
+  const nodeFp = await fingerprintOf(welcome.device);
   return { device, ctl, welcome, nodeFp };
 }
 
@@ -400,7 +410,7 @@ export class PairingSession {
   }
 
   async #dialNode(run: symbol, data: Pair) {
-    const nodeFp = await fingerprint(crypto, decode(data.k)!);
+    const nodeFp = await fingerprintOf(data.k);
     if (!this.#active(run) || this.node) return;
     this.node = { id: data.k, name: data.name, fingerprint: nodeFp };
     this.stage = 'linking';
