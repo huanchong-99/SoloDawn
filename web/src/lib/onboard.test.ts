@@ -17,6 +17,7 @@ import {
   accounts,
   capturePairHash,
   cliName,
+  isLocal,
   PairingSession,
   promptFor,
   setAccount,
@@ -251,19 +252,46 @@ describe('labels, URLs, prompts and #pair= capture', () => {
     expect(enPrompt).toContain('--rendezvous wss://solodawn.org/rv');
 
     const zhPrompt = promptFor('zh-CN', code, {
-      origin: 'http://127.0.0.1:47800',
+      origin: 'http://192.0.2.10:47800',
       protocol: 'http:',
-      host: '127.0.0.1:47800',
+      host: '192.0.2.10:47800',
     });
-    expect(zhPrompt).toContain('http://127.0.0.1:47800/install.md');
+    expect(zhPrompt).toContain('http://192.0.2.10:47800/install.md');
     expect(zhPrompt).toContain('2. 下载适合本机系统的节点程序');
     expect(zhPrompt).toContain('3. 用配对码');
     expect(zhPrompt).not.toContain('git config');
     expect(zhPrompt).not.toContain('4. ');
     expect(zhPrompt).toContain(code);
-    expect(zhPrompt).toContain('--rendezvous ws://127.0.0.1:47800/rv');
+    expect(zhPrompt).toContain('--rendezvous ws://192.0.2.10:47800/rv');
 
     expect(promptFor('en', code)).toContain(`${location.origin}/install.md`);
+  });
+
+  it('tells the AI that the node is installed and running when a node serves the page to its own computer', () => {
+    const code = '7K2M-9QXD-4F8T-WB3N';
+    for (const host of ['localhost:47800', '127.0.0.1:47800', '[::1]:47800']) {
+      const loc = { origin: `http://${host}`, protocol: 'http:', host };
+      expect(isLocal(loc.origin)).toBe(true);
+      const en = promptFor('en', code, loc);
+      expect(en).toContain('already installed and running on this computer');
+      expect(en).toContain(`2. Run: solodawn pair ${code} --rendezvous ws://${host}/rv`);
+      expect(en).toContain(`http://${host}/install.md`);
+      expect(en).not.toContain('SHA-256');
+      expect(en).not.toMatch(/\{(install|code|rv)\}/);
+      const zh = promptFor('zh-CN', code, loc);
+      expect(zh).toContain('已经装在这台电脑上并且正在运行');
+      expect(zh).toContain(`2. 直接运行：solodawn pair ${code} --rendezvous ws://${host}/rv`);
+      expect(zh).toContain(`http://${host}/install.md`);
+      expect(zh).not.toContain('SHA-256');
+      expect(zh).not.toMatch(/\{(install|code|rv)\}/);
+    }
+    expect(isLocal('https://rv.example/#pair=7K2M-9QXD-4F8T-WB3N')).toBe(false);
+    expect(isLocal('http://localhost.example:47800')).toBe(false);
+  });
+
+  it('marks where the Chinese headline of link pairing may break, as Chinese headlines break only at a mark', () => {
+    // onboarding.css keeps a Chinese headline whole between its marks (word-break: keep-all).
+    expect(textIn('zh-CN', 'pairing.browser.title')).toBe('正在把这个浏览器\u200b接入你的电脑');
   });
 
   it('captures only #pair=<secret> fragments and claims each secret once', () => {

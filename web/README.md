@@ -163,6 +163,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
   (`src/lib/version.ts`). `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)`
   is how this browser reaches a home now (`direct` or `relay`, the round trip, since when), and
   undefined while it does not; the mock's path is direct. `net.source` says which it is.
+  `net.devices` is the owner's valid devices from their device log, in the order the log adds
+  them, each with `kind`, `name`, `by` (the device that signed the entry), `added` (the entry's
+  `ts`) and `self`; it is set when the live session opens and after each accepted `devlog`, and
+  is empty before a session opens and in the mock.
 - **Joining a group.** `readInvitation` in `src/lib/join.ts` reads a `#join=` fragment without
   contacting its home; `readCode` reads a typed invitation code: it removes white space and reads
   the rest as a typed pairing secret, and the page refuses any other text before anything is sent
@@ -662,7 +666,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
   computers with their link path, hosted groups and registered AIs, sends `agent.set` followed by
   a fresh `host.info` read when the owner chooses an unset AI account type, offering only the
   types in the AI's `driver.accounts` (`offeredAccounts`, as the pairing cards do), and opens
-  `PairBrowserDialog` (`pair.browser`).
+  `PairBrowserDialog` (`pair.browser`). The dialog says of a `localhost` link that it opens only
+  on the computer that created it. Once a browser that the link's computer added, and that was
+  not among the owner's when the link was made, appears in `net.devices`, the dialog marks the
+  link used and shows that browser's fingerprint. Under the computers the page lists the owner's
+  browsers ("Browsers and phones") from `net.devices`, each with its fingerprint and when it was
+  added; the list is read-only.
 - **Emergency stop (R-64).** `src/components/stop/` and `src/lib/stop.ts`. "Stop AIs" is in the top
   bar (`bar`, `order: 20`) and, below 768 px, in a chat's head (`chat.head`). It shows while there
   is something to stop: for an admin, the open group while it is not paused; for an owner,

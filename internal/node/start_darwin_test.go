@@ -1,8 +1,12 @@
 package node
 
 import (
+	"bytes"
+	"errors"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,8 +42,10 @@ func TestStartBackgroundDarwinAndA117(t *testing.T) {
 	serviceOK(t, os.MkdirAll(filepath.Dir(bundleExe), 0o700))
 	serviceOK(t, os.WriteFile(bundleExe, []byte("#!/bin/sh\n"), 0o700))
 	t.Setenv("HOME", "")
-	if err := startBackground(bundleExe, true); err == nil || len(calls) != 0 {
-		t.Fatalf("bundle startBackground without HOME = %v, launchctl calls=%v", err, calls)
+	for _, rewrite := range []bool{true, false} {
+		if err := startBackground(bundleExe, rewrite); err == nil || len(calls) != 0 {
+			t.Fatalf("bundle startBackground(rewrite=%v) without HOME = %v, launchctl calls=%v", rewrite, err, calls)
+		}
 	}
 
 	// A11.7: symlinked executable resolves into .app, writes LaunchAgent plist,
@@ -50,6 +56,7 @@ func TestStartBackgroundDarwinAndA117(t *testing.T) {
 	serviceOK(t, err)
 	const shellPath = "/Users/me/.local/bin:/opt/homebrew/bin:/usr/bin:/bin"
 	t.Setenv("PATH", shellPath)
+	t.Setenv("SHELL", "/usr/bin/false")
 
 	appExe := filepath.Join(appRoot, "Applications", "SoloDawn.app", "Contents", "MacOS", "solodawn")
 	serviceOK(t, os.MkdirAll(filepath.Dir(appExe), 0o700))
@@ -77,6 +84,9 @@ func TestStartBackgroundDarwinAndA117(t *testing.T) {
 	var launchctlArgs [][]string
 	runLaunchctl = func(args ...string) error {
 		launchctlArgs = append(launchctlArgs, append([]string(nil), args...))
+		if args[0] == "bootout" {
+			return errors.New("no agent is loaded")
+		}
 		if args[0] == "bootstrap" {
 			var listenErr error
 			bg, listenErr = ListenLocal(dataDir)
@@ -114,7 +124,8 @@ func TestStartBackgroundDarwinAndA117(t *testing.T) {
 `
 	serviceFile(t, plist, wantShellPlist)
 
-	// N1-1: Launch() from LaunchServices (system-only PATH) keeps the existing plist's PATH.
+	// N1-1: Launch() from LaunchServices (system-only PATH) keeps the existing
+	// plist's PATH; like pair above, it does not ask the shell, which fails here.
 	bg.Close()
 	bg = nil
 	launchctlArgs = nil
@@ -133,29 +144,55 @@ func TestStartBackgroundDarwinAndA117(t *testing.T) {
 	}
 	serviceFile(t, plist, wantShellPlist)
 
-	// N1-1: Launch() with no existing plist writes one and loads it via bootout+bootstrap.
-	bg.Close()
-	bg = nil
-	serviceOK(t, os.Remove(plist))
-	launchctlArgs = nil
-	openedURL = ""
-	if err := Launch(); err != nil {
-		t.Fatalf("Launch missing plist = %v", err)
+	// Launch() with no plist, as when the app is opened before anything else,
+	// writes one and loads it via bootout+bootstrap.
+	plistWith := func(path string) string { return strings.Replace(wantShellPlist, shellPath, path, 1) }
+	var logged bytes.Buffer
+	prevLog := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(prevLog) })
+	launchFirst := func(what, shell, wantPath, wantLog string) {
+		t.Helper()
+		bg.Close()
+		bg = nil
+		serviceOK(t, os.Remove(plist))
+		launchctlArgs = nil
+		openedURL = ""
+		logged.Reset()
+		t.Setenv("SHELL", shell)
+		if err := Launch(); err != nil {
+			t.Fatalf("Launch with %s = %v", what, err)
+		}
+		if len(launchctlArgs) != 2 || launchctlArgs[0][0] != "bootout" || launchctlArgs[1][0] != "bootstrap" || openedURL != "http://localhost:47800" {
+			t.Fatalf("Launch with %s: launchctl=%v opened=%q", what, launchctlArgs, openedURL)
+		}
+		serviceFile(t, plist, plistWith(wantPath))
+		if !strings.HasSuffix(logged.String(), wantLog) {
+			t.Fatalf("Launch with %s logged %q; want the end %q", what, logged.String(), wantLog)
+		}
 	}
-	if len(launchctlArgs) != 2 || launchctlArgs[0][0] != "bootout" || launchctlArgs[1][0] != "bootstrap" || openedURL != "http://localhost:47800" {
-		t.Fatalf("Launch missing plist: launchctl=%v opened=%q", launchctlArgs, openedURL)
+	fakeShell := func(name, script string) string {
+		shell := filepath.Join(t.TempDir(), name)
+		serviceOK(t, os.WriteFile(shell, []byte("#!/bin/sh\n"+script), 0o700))
+		return shell
 	}
-	serviceFile(t, plist, `<?xml version="1.0" encoding="UTF-8"?>
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>org.solodawn.node</string>
-  <key>ProgramArguments</key><array><string>`+appExe+`</string><string>node</string></array>
-  <key>AssociatedBundleIdentifiers</key><string>org.solodawn.node</string>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>`+systemPath+`</string></dict>
-  <key>RunAtLoad</key><true/>
-</dict>
-</plist>
-`)
+
+	// The PATH is the one of the user's shell, not the system-only PATH that
+	// LaunchServices gave the app.
+	const userPath = "/Users/me/.local/bin:/Users/me/My Tools/bin:/opt/homebrew/bin:/usr/bin:/bin"
+	launchFirst("the user's shell", fakeShell("zsh", "[ \"$1\" = -ilc ] || exit 64\necho 'Last login: today'\nprintf 'a start file left this line open'\nPATH='"+userPath+"'\neval \"$2\"\n"), userPath, "")
+
+	// A shell that fails leaves the PATH of the app, and one line says so.
+	launchFirst("a failing shell", "/usr/bin/false", systemPath,
+		"node: read PATH from /usr/bin/false: exit status 1; the login agent gets the PATH of the app\n")
+
+	// So does one whose start files hang.
+	savedShellWait := shellPathWait
+	t.Cleanup(func() { shellPathWait = savedShellWait })
+	shellPathWait = 50 * time.Millisecond
+	hung := fakeShell("hung", "exec sleep 30\n")
+	launchFirst("a hung shell", hung, systemPath,
+		"node: read PATH from "+hung+": context deadline exceeded; the login agent gets the PATH of the app\n")
 }
 
 type byteSink struct{ buf *[]byte }

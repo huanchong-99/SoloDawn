@@ -1075,6 +1075,7 @@ describe('start (live)', () => {
     await vi.waitFor(() => expect(entriesIter).toHaveBeenCalledOnce());
     expect(homes).toEqual([]);
     expect(clients).toEqual([]);
+    expect(second.net.devices).toEqual([]);
     second.stop();
     replaySpy.mockRestore();
 
@@ -1128,6 +1129,16 @@ describe('start (live)', () => {
     expect(homeA.name).toBe('workstation');
     expect(homeA.owner).toBe(true);
     expect(net.path(homeA)).toBeUndefined();
+
+    // The owner's devices are the valid ones of the log, in its order: not the revoked node.
+    const added = (env: { p: string }) => (JSON.parse(env.p) as { ts: number }).ts;
+    const by = browserDev.id;
+    const web = { id: browserDev.id, kind: 'browser', name: 'Web', by, self: true };
+    const workstation = { id: nodeA.id, kind: 'node', name: 'workstation', by, self: false };
+    expect(net.devices).toEqual([
+      { ...web, added: added(log.entries[0]) },
+      { ...workstation, added: added(log.entries[1]) },
+    ]);
 
     // Signalling URLs include both page origin and nodeA's remembered rendezvous.
     const urls = clients.map((c) => c.url);
@@ -1244,6 +1255,34 @@ describe('start (live)', () => {
         sentDevlogsBefore,
       );
     });
+
+    // A browser that a node added is among the owner's devices once its entry arrives.
+    const phone = await newDevice();
+    const e6 = await signDeviceEntry(
+      nodeA,
+      browserDev.id,
+      6,
+      'add',
+      phone.id,
+      'browser',
+      'Browser',
+    );
+    pcA.ctl.deliver({ t: 'devlog', user: browserDev.id, entries: [e6] });
+    await vi.waitFor(() => expect(net.devices).toHaveLength(4));
+    expect(net.devices![3]).toEqual({
+      id: phone.id,
+      kind: 'browser',
+      name: 'Browser',
+      by: nodeA.id,
+      added: added(e6),
+      self: false,
+    });
+    expect(net.devices!.map((device) => device.name)).toEqual([
+      'Web',
+      'workstation',
+      'laptop',
+      'Browser',
+    ]);
 
     // Connection drop clears ctl and path; stop() closes connections and removes only added homes.
     pcA.ctl.onclose();

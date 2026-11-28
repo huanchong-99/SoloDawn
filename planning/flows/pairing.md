@@ -18,10 +18,16 @@ rendezvous.
    `install.md` and the pairing secret, with a 10-minute countdown. When the
    page's origin is not the official rendezvous, the prompt also gives
    `--rendezvous <url>` with the page's own signalling URL, `wss://<host>/rv`.
+   At a `localhost`, `127.0.0.1` or `[::1]` origin the node of this computer
+   serves the page (`contracts/rendezvous.md` section 1): the prompt says
+   that the node is installed and running and gives
+   `solodawn pair <secret> --rendezvous <url>`, without the download and
+   SHA-256 steps.
 4. The owner copies the prompt to the AI on the computer to be added.
 5. The AI follows `install.md`: download the release for this system, check
    its SHA-256, run `solodawn pair <secret> --name <label>`, with
-   `--rendezvous <url>` when the prompt gives one.
+   `--rendezvous <url>` when the prompt gives one. With the prompt of the
+   node's own page (step 3) it only runs the command.
 6. `solodawn pair` starts the node process if it is not running and hands it
    the secret over the local socket. On a Mac, from the app, it starts the
    node as the login agent (`contracts/local.md` section 11). The node
@@ -77,6 +83,8 @@ Used for a phone, a second browser, or after site data was cleared.
    joins the room, and prints a link
    `https://<web client>/#pair=<secret>` (no QR code). From the
    web client the owner can ask a node to do the same and display the link.
+   That dialog marks the link used and shows the joining browser's
+   fingerprint when the `add` entry that the node signed arrives (step 5).
 2. The new browser opens the link, generates its key, joins the room.
 3. `pair` messages are exchanged and verified. The browser offers; `ctl`
    opens.

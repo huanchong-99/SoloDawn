@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -635,4 +636,52 @@ func TestAgentsDefaultsInHostInfo(t *testing.T) {
 	if _, err := h.Agents(t.Context(), false); err == nil {
 		t.Fatal("expected error for corrupt defaults JSON")
 	}
+}
+
+// agent.recheck, for an owner who signed in again: the CLI's login_ok is true
+// and its AIs are no longer limited and are reported; another CLI's failed
+// sign-in stays as it is.
+func TestAgentRecheckEndsTheLoginLimitOfThatCLI(t *testing.T) {
+	saveRuntimeGlobals(t)
+	base := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		h, rh, _, shutdown := setupLimBubble(t, base)
+		defer shutdown()
+		var loginChanges int
+		h.LoginChanged = func() { loginChanges++ }
+		d := deliv(h)
+		d.mu.Lock()
+		d.groupLocked(runGroup1, "home-dev").live = true
+		d.mu.Unlock()
+		putLimLocalAI(h, runGroup1, runAI1, "claude")
+		putLimLocalAI(h, runGroup1, runAI2, "codex")
+		rt, part := stateOf(h), Part[agtPart](h)
+		claude, codex := aiSlot{group: runGroup1, member: runAI1}, aiSlot{group: runGroup1, member: runAI2}
+		for agent, slot := range map[string]aiSlot{"claude": claude, "codex": codex} {
+			part.setLoginOK(agent, false)
+			rt.enterLimited(slot)
+		}
+		recheck := func(agent string) (any, error) {
+			cmd := proto.AgentRecheck{HostCommand: proto.HostCommand{Type: "agent.recheck", Nonce: proto.NewNonce(), Timestamp: h.Now().UnixMilli(), To: h.Key.ID()}, Agent: agent}
+			return Surface["agent.recheck"](t.Context(), h, nil, "owner-dev", json.RawMessage(marshalWire(cmd)))
+		}
+
+		n := len(rh.snapshotCmds())
+		res, err := recheck("claude")
+		agtCheck(t, err)
+		agtEqual(t, res, nil)
+		synctest.Wait()
+		agtEqual(t, limStates(rh, runGroup1, n), map[string]string{runAI1: "dormant"})
+		agtEqual(t, [2]bool{part.loginOK("claude"), part.loginOK("codex")}, [2]bool{true, false})
+		agtEqual(t, [2]bool{rt.isLimited(claude), rt.isLimited(codex)}, [2]bool{false, true})
+		agtEqual(t, loginChanges, 1)
+
+		if _, err := Surface["agent.recheck"](t.Context(), h, nil, "owner-dev", json.RawMessage(`{"t":"agent.recheck"}`)); err == nil || !strings.HasPrefix(err.Error(), "bad_request: ") {
+			t.Fatalf("agent.recheck without its fields = %v", err)
+		}
+		if _, err := recheck("gemini"); err == nil || err.Error() != "bad_request: unknown agent: gemini" {
+			t.Fatalf("agent.recheck of an unknown agent = %v", err)
+		}
+		agtEqual(t, [2]any{rt.isLimited(codex), loginChanges}, [2]any{true, 1})
+	})
 }

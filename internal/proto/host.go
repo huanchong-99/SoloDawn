@@ -231,6 +231,13 @@ type AgentSet struct {
 	Account string `json:"account"`
 }
 
+// AgentRecheck ends what a failed sign-in left of a CLI found on this machine
+// (contracts/commands.md section 2).
+type AgentRecheck struct {
+	HostCommand
+	Agent string `json:"agent"`
+}
+
 // AgentDefaults sets the default profile of a CLI on this machine
 // (contracts/commands.md section 2, contracts/step-3/profiles.md section 1a).
 type AgentDefaults struct {

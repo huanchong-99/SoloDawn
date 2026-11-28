@@ -6,6 +6,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-28 · deviation · `login_ok` is shown as 「已登录」, and nothing checks the sign-in before the first turn
+
+- Symptom: at pairing the Computers page listed Claude Code as 「已登录」 (`nodes.ai.signedIn`, `web/src/messages/nodes.zh-CN.json:31`, `web/src/routes/Nodes.svelte:259`), while its OAuth session had expired long before; the first turn failed with "Failed to authenticate: OAuth session expired and could not be refreshed" and the member became 「受限 · 登录已失效」.
+- Cause: `login_ok` is `true` for every CLI that is found until a session reports `login_invalid` (`agtPart.loginOK`, `internal/host/agents.go:59-63`, filled in at `:212`; `agtListen`, `:226-235`), as `planning/contracts/drivers.md` 1.4 says: the node reads no credential file and learns of an unusable sign-in from the CLI's own error. So `true` means "no sign-in failure seen since the node started", and the page words it as a checked sign-in. No check without a turn can tell: Claude Code 2.1.332 has `claude auth status` (read in the command table of the installed program, not run), and its code sets `loggedIn` from whether a token is stored, without asking the server, so a session that can no longer be refreshed still reads as logged in.
+- Status: open for the wording, which is the web's (`nodes.ai.signedIn`); the host keeps the contract. For an owner who has signed in again the host now has `agent.recheck` (`agtRecheck`, `internal/host/agents.go`; `planning/contracts/commands.md` section 2): it sets `login_ok` back, ends the `limited` state of that CLI's AIs and reports them, and the next start tries the sign-in. The page has no button for it yet, and no wire example (`internal/proto/testdata`) exists: the web's `proto.test.ts` wants a schema for every example, so the example comes with the web's schema.
+### 2026-11-28 · limitation · A node with no HTTPS web client gives a `localhost` pairing link, and a link to its LAN address would not work either (T36)
+
+- Symptom: "Add a browser or phone" on a node whose rendezvous is its own (`--rendezvous ws://localhost:47800/rv`, or none) gave `http://localhost:47800/#pair=…`. On a phone or another computer `localhost` is that device itself.
+- Cause: the link's origin is the node's web client address, else the host of its first rendezvous (`pairWebBase`, `internal/node/pair.go:563`), else `http://localhost:<port>` (`defaultWebURL`, `internal/node/node.go:483`). The listener itself is on every address (`listenUnshadowed`, `internal/node/node.go:476`), but a link to `http://<LAN address or .local name>:47800` cannot pair: that page is no secure context, so it has no `crypto.subtle` (measured in Chromium on 2026-11-28 at an IPv4 address and at a `.local` name; `localhost` has it), `canKeepEd25519Key` is false and the client shows the upgrade notice in place of the application (`web/src/lib/boot.ts:39`). Only an HTTPS web client makes a link that another device can use (`planning/flows/pairing.md` C.1; `planning/contracts/rendezvous.md` section 4).
+- Status: open, accepted for version 1; how a phone reaches an HTTPS web client is a question of the multi-machine test plan. The dialog says that a `localhost` link opens only on the computer that created it (`nodes.pair.local`, `web/src/components/nodes/PairBrowserDialog.svelte:147`; `web/src/components/nodes/pair.test.ts`).
+
 ### 2026-11-28 · limitation · Firefox and Safari/WebKit cannot pair over same-machine loopback without TURN while a host firewall holds LAN traffic
 
 - Symptom: on the same computer, with the macOS Application Firewall prompt unanswered (or LAN traffic blocked) and no TURN server configured, Chromium pairs over IPv4 loopback (`127.0.0.1`), whereas Firefox (default preferences, `media.peerconnection.ice.loopback`) and Safari/WebKit (`web/e2e/connect.spec.ts`, Apple WebKit e2e run `46072171616`) do not pair over loopback ICE and time out after 60 s.
@@ -445,7 +456,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: after `login_invalid` puts an AI member into `limited`, fixing sign-in and sending `agent.set` sets `login_ok` back to `true` in `host.info`, while the group still shows the member as `limited` until the next item arrives and its turn completes.
 - Cause: `agent.set` clears `agtPart.invalid` (`internal/host/agents.go`) and is not a session `Event`, while the member status overlay `runtimePart.limited` (`internal/host/run.go:69`, set at `:664-680`) is cleared in `finishActiveTurn` (`internal/host/run.go:473-482`) when a turn finishes. `runtimePart.isLimited` (`:682-686`) feeds member status only and holds no delivery.
-- Status: open, accepted by the coordinator's decision of 2026-11-21 (`HS-3`, `HS-15`); `planning/contracts/commands.md` section 2 and `planning/flows/agent-turn.md` section E match this behaviour.
+- Status: open, accepted by the coordinator's decision of 2026-11-21 (`HS-3`, `HS-15`); `planning/contracts/commands.md` section 2 and `planning/flows/agent-turn.md` section E match this behaviour. Since 2026-11-28 `agent.recheck` ends it at once (`planning/contracts/commands.md` section 2); `agent.set` is unchanged.
 
 ### 2026-11-21 · limitation · Claude driver matches English error text for `LoginInvalid` and `NoSession`
 
@@ -792,6 +803,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted limitation.
 
 ## Resolved
+
+### 2026-11-28 · bug (test) · The LoginChanged snapshot of `host_turn_failed.feature` read the scenario's view on the host's goroutine
+
+- Symptom: `go test -tags acceptance -race -count=3 -run 'TestFeatures/A_turn_ending_with_login_invalid'` on a Mac: 1 run of 3 failed with `race detected during execution of test`, while all its steps passed.
+- Cause: `loginSnapRecorder.record` (`features/host_turn_failed_test.go:33-36` before the fix) runs inside `Host.LoginChanged`, on the goroutine of the CLI's process loop (`finishLoginInvalid`, `internal/host/run.go:984`), and read `w.aiByName` there. The step "a login_invalid notice … is posted" writes that map at the same time from the frames it drains (`recordViewMember`, `features/helpers_test.go:1227`). Both sides are older than `agent.recheck`: the race is in the first snapshot.
+- Status: resolved in the commit "Acceptance: agent.recheck ends the login limit": the step reads the group's id, the AI's id and its CLI when it runs and hands them to the recorder, which reads nothing of the scenario's view.
+
+### 2026-11-28 · bug · Opening SoloDawn.app before any login agent existed left the node without the AI CLIs
+
+- Symptom: on a Mac with no `~/Library/LaunchAgents/org.solodawn.node.plist`, opening `SoloDawn.app` from the Finder started a node that found no AI CLI (`claude`, `codex` in `~/.local/bin`, Homebrew or an npm folder). A later `solodawn pair` did not help: the node already answered, so nothing was rewritten, and at adoption the node wrote the same `PATH` again (`internal/node/node.go:609`). `install.md` (PR #439) told users to run `solodawn service install` first.
+- Cause: `Launch` starts the node with `rewrite` false, and `agentPlist` (`internal/node/start_darwin.go:35` before the fix) wrote a missing plist with `os.Getenv("PATH")`. For an app opened by LaunchServices that is `/usr/bin:/bin:/usr/sbin:/sbin`; only `pair` and `service install` run in a shell whose `PATH` holds the CLIs. (`open` passes its caller's environment on: `open(1)`, and seen on macOS 27.2.1 with a throwaway app. So after `open -a` from a terminal the plist held that terminal's `PATH`, and the order only mattered for an app opened from the Finder, the Dock or Spotlight.)
+- Status: resolved in the commit "macOS: an app opened first finds the CLIs, and a stopping node's agent is waited for": when `Launch` finds no plist it writes one with the `PATH` of the user's shell, started as a terminal starts it (`$SHELL -ilc 'echo; printenv PATH'`, last line; `userShellPath`, `internal/node/start_darwin.go`), which is the value the terminal commands take from their own environment. A shell that fails, or does not answer within 5 seconds because a start file hangs, leaves the app's own `PATH` as before, and one log line says so. An existing plist is kept as before, and `pair` still writes its own shell's `PATH`. Checked on macOS 27.2.1 from a launchd job with the system-only `PATH`: `/bin/zsh -ilc` answered with `~/.local/bin`, Homebrew and the other folders of the start files, nothing on stderr. `TestStartBackgroundDarwinAndA117` (`internal/node/start_darwin_test.go`, "the user's shell") fails on the old code with `PATH` `/usr/bin:/bin:/usr/sbin:/sbin` in the plist. A plist written by an earlier build with the system-only `PATH` is kept: `solodawn service install` from a terminal replaces it.
+
+### 2026-11-28 · bug · Starting the login agent failed with `Bootstrap failed: 5: Input/output error` while the old node was still stopping
+
+- Symptom: final walk of 2026-11-28 (`DRYRUN-1128-2`): on a live node with three Codex sessions, `launchctl bootout` followed 15.7 ms later by `launchctl bootstrap` failed with exit 5; once the node had finished stopping (under 1 second) the same `bootstrap` succeeded.
+- Cause: `startAgent` (`internal/node/service_darwin.go:70-74` before the fix) ran `bootout` and at once `bootstrap`. `bootout` answers when launchd has sent SIGTERM, not when the service is gone: launchd keeps the service until its process has ended, and refuses `bootstrap` of the same label until then. Measured on macOS 27.2.1 with a throwaway agent that takes 1.5 seconds to stop: `bootout` exit 0 after 29 ms, `print` exit 0 and `bootstrap` exit 5 right after, `print` exit 113 after 1.6 seconds, then `bootstrap` exit 0.
+- Status: resolved in the same commit: after a `bootout` that succeeded, `startAgent` asks `launchctl print gui/<uid>/org.solodawn.node` every 50 ms until it finds no service, then runs `bootstrap` (`awaitRemoval`, `internal/node/service_darwin.go`). After 10 seconds it gives up with "launchd did not remove gui/<uid>/org.solodawn.node within 10s of bootout". `launchctl bootout --wait` does the same in one call on macOS 27.2.1 (measured: it returned after 1.66 seconds, with the service gone), and is not used because macOS 15 takes `--wait` as a usage error and stops nothing (reports of other projects; the app's deployment target is macOS 13). `TestStartAgentWaitsUntilLaunchdHasRemovedTheOldService` (`internal/node/service_darwin_test.go`) fails on the old code with `launchctl bootstrap: exit status 5`.
 
 ### 2026-11-28 · bug · A finished connection was closed 500 ms after `Finish` while what was sent was still on its way
 
@@ -2509,3 +2538,56 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: `deliver_test.go:1831: got 2, want 1` (PR #434, run 46074428110, macOS); about 2 in 100 runs locally with `-race`, on `rebuild` before the join-race fix as well.
 - Cause: `seedGroupAndMembers` returns once the attach's sync made the group live (`internal/host/deliver_test.go:416`), but that sync's `afterGroupState` starts on a goroutine after `finishGroupSync` (`internal/host/home_moved.go:83`). When it reached `followDefaults` (`internal/host/deliver.go`, end of `afterGroupState`) after the test had put the stale follower row and set the group live again, it sent one `member set`, and the test's own push sent the second. Two group-state events that each see a stale follower each send one; the test counted the setup's.
 - Status: resolved on branch `fix/join-group-race`: the test settles the setup's background work (`settleDelivery`) before its first step.
+
+### 2026-11-28 · expectation mismatch · After a reassignment the secretary also mentioned the new assignee in the main line, and its group session asked for an owner's confirmation
+
+- Symptom: in the owner's single-machine test of v3.0.0-rc.2 the secretary reassigned a task with `set_task`; the new assignee got the `assign` item with the brief and did the task in its task session. The secretary also posted a main-line message that mentioned the assignee. After the task turn ended, a fresh group session of that AI read the mention and posted that the hand-over needed its owner's confirmation and that it had no brief: to the owner the task looked stuck although it was done.
+- Cause: nothing told the secretary that `set_task` already delivers the task; its "say what you decide" line (`internal/host/instructions/secretary.md:28` before the fix) asks for a post on every reassignment. A mention from an AI is `information` (`mentionInstruct`, `internal/host/turn_info.go:44-52`), and `internal/host/instructions/group.md:10` tells a session to say that such an item needs its owner; a group session was not told that its tasks run in their own sessions.
+- Status: resolved on branch `y2/ai-voice`, by wording only; the authority label is unchanged. `secretary.md:30` and the description of `set_task` (`internal/host/tools_sec.go:29`) say not to mention a new assignee or reviewer about the task; `group.md:20` says a message about a task that is already the AI's is not new work: it asks for no confirmation and does not start the task again. Goldens in `TestSessionInstructionsCoverEveryRole` and `TestSecToolDescriptionsSayHowTheyReachPeopleAndAIs`.
+
+### 2026-11-28 · expectation mismatch · AIs asked a person to decide with plain messages instead of a decision card
+
+- Symptom: same test. A working AI asked in the main line whether the owner agreed to a swap; the secretary asked whether to name a reviewer and which line to add, and asked the owner to edit a note it could not delete: all as chat messages, one of kind `question`, none as a card.
+- Cause: `request_decision` was listed to every session, the secretary's included (`internal/host/tools_sec.go:34`, no `For`), so no tool was missing. The instructions only said "to have a person choose, use `request_decision`", the secretary's did not say it at all, and `secretary.md:17` offered `post` with kind `question` for anything unclear.
+- Status: resolved on branch `y2/ai-voice`. Every role's instructions say that what needs a person's word (a choice, an agreement, an approval, a step only a person can take) goes as a decision card that names that person in `to`, never as a question in a message (`group.md:8`, `task.md:8`, `review.md:8`, `secretary.md:8`, `:19`, `:37`); the tool's description says the same. `TestSecretaryRaisesADecisionCardInTheMainLine` pins the card from the secretary's session.
+
+### 2026-11-28 · expectation mismatch · Messages to people used protocol and state words, and an AI called the secretary the person in charge
+
+- Symptom: same test. Messages to the owner said that a member's "state is busy", that its "state is takeover", and that "the current message is marked information". One AI called the secretary 负责人 (the person in charge), which the owner read as himself; the secretary is 秘书.
+- Cause: the instructions gave the turn's labels and the member states to the AIs and never said these are not words for people, nor what to call the secretary.
+- Status: resolved on branch `y2/ai-voice`: one line in every role's instructions (`group.md:11`, `task.md:11`, `review.md:11`, `secretary.md:11`).
+
+### 2026-11-28 · expectation mismatch · The secretary added an acceptance criterion nobody asked for and voided it after the brief was confirmed
+
+- Symptom: same test. The brief carried a criterion about a signature line in the commit message that the owner had not asked for. After the owner confirmed the brief, the secretary declared that criterion void and told him afterwards.
+- Cause: `internal/host/instructions/secretary.md` did not say whose the criteria are. A brief changes only by a new brief that the person confirms (`planning/contracts/step-2/labels.md` section 4, A9.13).
+- Status: resolved on branch `y2/ai-voice`: `secretary.md:21`.
+
+### 2026-11-28 · expectation mismatch · Completion messages in the main line led with hashes and gave only a shell command to open the result
+
+- Symptom: same test. The messages that told the owner a task was finished listed SHA-256 values, byte counts and how much temporary data was removed, and named the result only inside an `open` command.
+- Cause: the instructions said what a summary reports about the closing step (`secretary.md:31` before the fix) and nothing about who reads it; the report of `submit_task` was not asked for the path a person opens.
+- Status: resolved on branch `y2/ai-voice`: `secretary.md:35` (result first, full path as plain text, proof in the task's thread), `task.md:25-26`.
+### 2026-11-28 · deviation · The pairing prompt told the AI to download the node on the computer whose node served the page (T1)
+
+- Symptom: on the onboarding page that a running node serves at `http://localhost:47800`, the prompt still said "download the node program and verify its SHA-256"; Codex spent minutes looking for a matching release.
+- Cause: `promptFor` (`web/src/lib/onboard.svelte.ts:74`) had one text, `pairing.prompt.text_rv`, for every origin. A page at a `localhost` address is served by the node of the computer it is opened on (`planning/contracts/rendezvous.md` section 1), and its `--rendezvous ws://localhost:…/rv` reaches no other computer.
+- Status: resolved on branch `y2/pair-devices`: at a `localhost`, `127.0.0.1` or `[::1]` origin the prompt is `pairing.prompt.text_local`, which says that the node is installed and running and gives `solodawn pair <code> --rendezvous <url>`; other origins keep the download wording. `onboard.test.ts` fails on the old code.
+
+### 2026-11-28 · bug · The connection step of pairing kept the title "Opening a direct connection" once the connection was made (T2)
+
+- Symptom: with the direct connection up, step 3 of "Connection status" had a check mark, the title 「正在建立直连」 and only the line under it said 「已建立直连」.
+- Cause: `StatusPanel.svelte:122` (before the fix) drew `pairing.step.connect` as the title in every state; the result was in the line under it.
+- Status: resolved on branch `y2/pair-devices`: once the browser is enrolled the title is the path's, `pairing.step.connect_direct` or `pairing.step.connect_relay` (`connectTitle`, `web/src/components/pairing/StatusPanel.svelte:33`), and the line under it says "Enrolled as your device". `web/src/components/pairing/status.test.ts` fails on the old code.
+
+### 2026-11-28 · bug · The Chinese headline of link pairing was cut at the right edge on a narrow screen (T37)
+
+- Symptom: at about 430 px, 「正在把这个浏览器接入你的电脑」 ran past the right edge of the onboarding page and was cut.
+- Cause: a Chinese onboarding headline breaks only at a mark (`word-break: keep-all`, `web/src/styles/onboarding.css:72`), and this text, `pairing.browser.title`, had none: no punctuation and no space.
+- Status: resolved on branch `y2/pair-devices`: the text has a zero-width space between its two phrases, so it wraps as 「正在把这个浏览器 / 接入你的电脑」 (seen at 430 px in Chromium). `onboard.test.ts` fails on the old text.
+
+### 2026-11-28 · deviation · The owner's page does not show that a pairing link was used, and lists no browser to compare or revoke (T38)
+
+- Symptom: a browser opened from a pairing link showed its own fingerprint and asked the person to compare it with "what your computer prints"; nothing on the computer or on the owner's page shows a browser's fingerprint. After the link was used the owner's dialog still said "expires in 10 min and works once". The Computers page lists computers only, so a paired browser can be neither seen nor revoked.
+- Cause: the owner's browser gets the new `add` entry in a `devlog` push (`planning/flows/pairing.md` C.5) and keeps the log inside `openSession` (`web/src/lib/net.svelte.ts:117`, `onDevlog` at `:135`); `Net` gives no page the owner's devices, so neither `PairBrowserDialog.svelte` nor `routes/Nodes.svelte` can read them. No wire command is missing: a list needs none, and a revoke is a `device` entry with `op: "revoke"` in a `devlog` frame (`planning/contracts/envelope.md` section 4), which the node applies. `planning/flows/pairing.md:107` postpones the revoke screen after version 1.
+- Status: resolved on branch `y2/pair-devices`. `Net.devices` gives pages the owner's valid devices (`ownerDevices`, `web/src/lib/net.svelte.ts:94`; published when the session opens and after each accepted `devlog`). The pair dialog says that the link was used and shows the fingerprint of the browser that joined, one that the computer of the link added since (`joined`, `web/src/components/nodes/PairBrowserDialog.svelte:32`), the Computers page lists the owner's browsers with fingerprint and time added (`web/src/routes/Nodes.svelte`, `.browsers`), and the joining browser's page asks for that comparison (`pairing.browser.body`). `net.test.ts`, `components/nodes/pair.test.ts` and `routes/nodes.test.ts` fail without it. Revoking stays postponed after version 1 (`planning/flows/pairing.md` section D).
