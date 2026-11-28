@@ -300,5 +300,242 @@ describe('task helpers', () => {
         },
       }),
     ).toBe('Latest: Former member · Review');
+
+    const withSystemLast = (ts: number): TaskRow => ({
+      ...base,
+      thread: {
+        count: 1,
+        rounds: 0,
+        last: { by: 'system', kind: 'system', text: '', ts },
+      },
+    });
+
+    // Not loaded yet: falls back to the generic kind label.
+    expect(threadPreview(group, withSystemLast(1000))).toBe('Latest: System · Notice');
+    prefs.lang = 'zh-CN';
+    expect(threadPreview(group, withSystemLast(1000))).toBe('最新：系统 · 通知');
+    prefs.lang = 'en';
+
+    // Loaded single-line system message matching ts.
+    group.apply([
+      base,
+      row('row-msg-system', {
+        id: 'sys-single',
+        seq: 10,
+        pos: 10,
+        thread: base.id,
+        ts: 1000,
+        body: {
+          code: 'turn_interrupted',
+          ai: base.assignee,
+          reason: 'timeout',
+          task: base.id,
+          detail: 'Turn deadline reached.',
+        },
+      }),
+    ]);
+    expect(threadPreview(group, withSystemLast(1000))).toBe(
+      "Latest: System · Codex's turn timed out. · T-12 · Turn deadline reached.",
+    );
+
+    // Different ts, non-system message with matching ts, or system message in another thread still falls back.
+    group.apply([
+      row('row-msg-text', {
+        id: 'text-same-ts',
+        seq: 11,
+        pos: 11,
+        thread: base.id,
+        ts: 2000,
+        text: 'Not a system row',
+      }),
+      row('row-msg-system', {
+        id: 'sys-other-thread',
+        seq: 12,
+        pos: 12,
+        thread: 'other-task',
+        ts: 2000,
+        body: { code: 'no_secretary' },
+      }),
+    ]);
+    expect(threadPreview(group, withSystemLast(2000))).toBe('Latest: System · Notice');
+
+    // Multiple system messages with matching ts: picks the last one in the thread.
+    group.apply([
+      row('row-msg-system', {
+        id: 'sys-first',
+        seq: 13,
+        pos: 13,
+        thread: base.id,
+        ts: 3000,
+        body: { code: 'no_secretary' },
+      }),
+      row('row-msg-system', {
+        id: 'sys-second',
+        seq: 14,
+        pos: 14,
+        thread: base.id,
+        ts: 3000,
+        body: { code: 'task_done', task: base.id },
+      }),
+      row('row-msg-text', {
+        id: 'text-after-sys',
+        seq: 15,
+        pos: 15,
+        thread: base.id,
+        ts: 3000,
+        text: 'Ignored non-system message',
+      }),
+    ]);
+    expect(threadPreview(group, withSystemLast(3000))).toBe(
+      'Latest: System · T-12 passed review and is done',
+    );
+    prefs.lang = 'zh-CN';
+    expect(threadPreview(group, withSystemLast(3000))).toBe('最新：系统 · T-12 通过评审，已完成');
+    prefs.lang = 'en';
+
+    // Multi-line system text: keeps only the first line.
+    group.apply([
+      row('row-member-human', {
+        id: 'multiline-member',
+        seq: 16,
+        user: 'multiline-user',
+        name: 'Mina\nsecond line',
+      }),
+      row('row-msg-system', {
+        id: 'sys-multiline',
+        seq: 17,
+        pos: 17,
+        thread: base.id,
+        ts: 4000,
+        body: { code: 'member_joined', member: base.assignee, by: 'multiline-member' },
+      }),
+    ]);
+    expect(threadPreview(group, withSystemLast(4000))).toBe(
+      'Latest: System · Codex joined, invited by Mina',
+    );
+
+    // Non-system rows keep exact existing behavior even when matching system messages exist.
+    expect(
+      threadPreview(group, {
+        ...base,
+        thread: {
+          count: 2,
+          rounds: 0,
+          last: { by: base.assignee, kind: 'text', text: 'Custom message', ts: 3000 },
+        },
+      }),
+    ).toBe('Latest: Codex · Custom message');
+    expect(
+      threadPreview(group, {
+        ...base,
+        thread: {
+          count: 2,
+          rounds: 0,
+          last: { by: 'LXCZmuGAXkvO-bSrOkuCfw', kind: 'review', text: '', ts: 3000 },
+        },
+      }),
+    ).toBe('Latest: Claude Code · Review');
+  });
+
+  it('shows the group-paused badge and clears active step marks while keeping queued, final and takeover states', () => {
+    const { group, owner } = makeGroup();
+    const base = row<TaskRow>('row-task');
+    const active: TaskRow = {
+      ...base,
+      state: 'active',
+      step: 'work',
+      wait: null,
+      review: undefined,
+    };
+    const marks = (task: TaskRow, status = taskBadge(group, task).text) =>
+      taskSteps(group, task, status).items.map((item) => item.mark);
+
+    group.apply([row('row-group-paused')]);
+
+    // Active task across work, review, waits, and rejected review.
+    expect(taskBadge(group, active)).toEqual({ text: 'Group paused', dot: 'paused' });
+    expect(marks(active)).toEqual([undefined, undefined, undefined]);
+    expect(taskSteps(group, active, 'Group paused')).toMatchObject({
+      summary: 'Work · 1 / 3',
+      aria: 'Progress: step 1 of 3, Work (Group paused)',
+    });
+
+    const atReview: TaskRow = { ...active, step: 'review' };
+    expect(taskBadge(group, atReview)).toEqual({ text: 'Group paused', dot: 'paused' });
+    expect(marks(atReview)).toEqual(['done', undefined, undefined]);
+
+    const waitViewer: TaskRow = {
+      ...active,
+      wait: { kind: 'approval', who: [owner.user], since: 1 },
+    };
+    expect(taskBadge(group, waitViewer)).toEqual({ text: 'Group paused', dot: 'paused' });
+    expect(marks(waitViewer)).toEqual([undefined, undefined, undefined]);
+
+    const waitOther: TaskRow = {
+      ...active,
+      wait: { kind: 'decision', who: ['mina-user'], since: 1 },
+    };
+    expect(taskBadge(group, waitOther)).toEqual({ text: 'Group paused', dot: 'paused' });
+    expect(marks(waitOther)).toEqual([undefined, undefined, undefined]);
+
+    expect(taskBadge(group, base)).toEqual({ text: 'Group paused', dot: 'paused' });
+    expect(marks(base)).toEqual(['done', undefined, undefined]);
+
+    // Task-paused under a paused group.
+    const taskPaused: TaskRow = { ...base, state: 'paused', step: 'review' };
+    expect(taskBadge(group, taskPaused)).toEqual({ text: 'Group paused', dot: 'paused' });
+    expect(marks(taskPaused)).toEqual(['done', undefined, undefined]);
+
+    // Queued task stays Queued with -, -, -.
+    const queued: TaskRow = { ...active, state: 'queued', step: 'work' };
+    expect(taskBadge(group, queued)).toEqual({ text: 'Queued' });
+    expect(taskSteps(group, queued, 'Queued')).toMatchObject({
+      summary: 'Queued · 0 / 3',
+      items: [
+        expect.objectContaining({ key: 'work', mark: undefined }),
+        expect.objectContaining({ key: 'review', mark: undefined }),
+        expect.objectContaining({ key: 'done', mark: undefined }),
+      ],
+    });
+
+    // Final states keep their final badges and step marks.
+    expect(taskBadge(group, { ...base, state: 'done' })).toEqual({
+      text: 'Done · 86',
+      tone: 'ok',
+    });
+    expect(marks({ ...base, state: 'done' })).toEqual(['done', 'done', 'done']);
+
+    expect(taskBadge(group, { ...base, state: 'cancelled' })).toEqual({ text: 'Cancelled' });
+    expect(marks({ ...base, state: 'cancelled' })).toEqual(['done', undefined, undefined]);
+
+    const failed: TaskRow = { ...base, state: 'failed', step: 'review', failures: 2 };
+    expect(taskBadge(group, failed)).toEqual({
+      text: 'Stopped after 2 failures',
+      tone: 'danger',
+      solid: true,
+    });
+    expect(marks(failed)).toEqual(['done', 'fail', undefined]);
+
+    // Localization in zh-CN.
+    prefs.lang = 'zh-CN';
+    expect(taskBadge(group, active)).toEqual({ text: '群已暂停', dot: 'paused' });
+    expect(taskBadge(group, queued)).toEqual({ text: '排队中' });
+    prefs.lang = 'en';
+
+    // Takeover still wins over group pause and keeps the active step mark.
+    group.apply([row('row-member-ai', { seq: 903, state: 'takeover', task: active.id })]);
+    expect(taskBadge(group, active)).toEqual({ text: "AI's owner is driving", dot: 'takeover' });
+    expect(marks(active)).toEqual(['now', undefined, undefined]);
+    expect(marks(atReview)).toEqual(['done', 'now', undefined]);
+
+    // Resuming the group restores active badge and step mark.
+    group.apply([row('row-member-ai', { seq: 904, state: 'waiting', task: undefined })]);
+    group.apply([row('row-group', { seq: 999 })]);
+    expect(taskBadge(group, active)).toEqual({
+      text: 'In progress',
+      tone: 'sky',
+      dot: 'working',
+    });
+    expect(marks(active)).toEqual(['now', undefined, undefined]);
   });
 });
