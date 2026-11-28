@@ -4,9 +4,11 @@ import { all, closePage, show } from '../../features/page';
 import { Group, Home, homes } from '../lib/groups.svelte';
 import { goldens } from '../lib/mock';
 import type { Net } from '../lib/net.svelte';
+import { fingerprintOf } from '../lib/onboard.svelte';
 import { nodes } from '../lib/nodes.svelte';
 import { prefs } from '../lib/prefs.svelte';
 import * as p from '../lib/proto';
+import { clockOn } from '../lib/when';
 import Nodes from './Nodes.svelte';
 
 beforeEach(() => {
@@ -114,4 +116,37 @@ it('distinguishes expired login from unconfigured account across pushed host.inf
   )!;
   expect(updatedClaude.querySelector('.st')!.textContent!.trim()).toBe('Signed in');
   expect(updatedClaude.querySelector('.note[data-tone="danger"]')).toBeNull();
+});
+
+it("lists the owner's browsers, each with its fingerprint and when it was added", async () => {
+  const [web, phone, node] = [
+    'akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs',
+    'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q',
+    'rZNvy-1jH6Z-BcPqA5U5BQrZNvy-1jH6Z-BcPqA5U5BQ',
+  ];
+  const added = 1763600000000;
+  const net: Net = {
+    source: 'live',
+    homes,
+    path: () => undefined,
+    devices: [
+      { id: web, kind: 'browser', name: 'Browser', by: web, self: true },
+      { id: node, kind: 'node', name: 'workstation', by: web, added, self: false },
+      { id: phone, kind: 'browser', name: 'Phone', by: node, added, self: false },
+    ],
+  };
+  show(Nodes, { net });
+  const prints = [await fingerprintOf(web), await fingerprintOf(phone)];
+  await vi.waitFor(() => expect(all('.browsers code').map((el) => el.textContent)).toEqual(prints));
+  const rows = all('.browsers li').map((row) => row.textContent!.replace(/\s+/g, ' ').trim());
+  expect(rows).toEqual([
+    `Browser This browser Fingerprint ${prints[0]}`,
+    `Phone Fingerprint ${prints[1]} Added ${clockOn(added, Date.now(), 'en')}`,
+  ]);
+  expect(all('.browsers h3').map((el) => el.textContent)).toEqual(['Browsers and phones']);
+});
+
+it('shows no list of browsers before the owner has devices', () => {
+  show(Nodes, { net: { source: 'live', homes, path: () => undefined, devices: [] } });
+  expect(all('.browsers')).toEqual([]);
 });

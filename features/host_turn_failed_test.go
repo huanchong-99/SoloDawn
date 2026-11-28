@@ -4,6 +4,7 @@ package features
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -30,10 +31,9 @@ type loginSnapRecorder struct {
 	snaps []loginChangedSnap
 }
 
-func (r *loginSnapRecorder) record(w *m3World, aiName, groupName string) {
-	h := w.node().Host
-	aiID := w.aiByName[aiName].ID
-	gid := w.groups[groupName]
+// record runs on the host's goroutines, so it is given the ids and reads
+// nothing of the scenario's view, which the steps write.
+func (r *loginSnapRecorder) record(h *host.Host, gid, aiID, cli string) {
 	s, _ := h.Sessions.Get(host.SessionKey{Group: gid, Member: aiID})
 	open := 0
 	for _, sess := range h.Sessions.All() {
@@ -46,7 +46,7 @@ func (r *loginSnapRecorder) record(w *m3World, aiName, groupName string) {
 	loginOK := false
 	if err == nil {
 		for _, a := range agents {
-			if a.Agent == w.aiByName[aiName].CLI {
+			if a.Agent == cli {
 				loginOK = a.LoginOK
 			}
 		}
@@ -86,7 +86,9 @@ func hostTurnFailedSteps(sc *godog.ScenarioContext, f fixtures) {
 
 	sc.Step(`^a group "([^"]+)" with a configured "([^"]+)" member on "([^"]+)" whose failed turn keeps the CLI open$`, w.givenSingleAINode)
 	sc.Step(`^the host records LoginChanged snapshots for "([^"]+)" in "([^"]+)"$`, func(aiName, groupName string) {
-		w.node().Host.LoginChanged = func() { rec.record(w, aiName, groupName) }
+		h, gid, ai := w.node().Host, w.groups[groupName], w.aiByName[aiName]
+		aiID, cli := ai.ID, ai.CLI
+		h.LoginChanged = func() { rec.record(h, gid, aiID, cli) }
 	})
 	sc.Step(`^"([^"]+)" is scripted to fail once with "([^"]+)" and later post "([^"]+)"$`, func(_, detail, reply string) error {
 		return scriptClaudeFailedThenReply(w, detail, reply)
@@ -102,8 +104,13 @@ func hostTurnFailedSteps(sc *godog.ScenarioContext, f fixtures) {
 		return awaitLoginInvalidNotice(w, aiName, detail)
 	})
 	sc.Step(`^"([^"]+)" (?:stays in|enters) state "([^"]+)" in "([^"]+)"$`, w.thenAIHasState)
-	sc.Step(`^LoginChanged fired once with session "([^"]+)", (\d+) open sessions, member state "([^"]+)", and "([^"]+)" login_ok (true|false)$`, func(sessState string, wantOpen int, memState, _ string, wantLogin string) error {
-		return awaitLoginChangedSnapshot(rec, host.State(sessState), wantOpen, memState, wantLogin == "true")
+	sc.Step(`^LoginChanged fired (once|twice) with session "([^"]+)", (\d+) open sessions, member state "([^"]+)", and "([^"]+)" login_ok (true|false)$`, func(times, sessState string, wantOpen int, memState, _ string, wantLogin string) error {
+		return awaitLoginChangedSnapshot(rec, map[string]int{"once": 1, "twice": 2}[times], host.State(sessState), wantOpen, memState, wantLogin == "true")
+	})
+	sc.Step(`^owner device "([^"]+)" sends agent\.recheck for "([^"]*)"$`, func(by, agent string) error {
+		payload := fmt.Sprintf(`{"t":"agent.recheck","n":"STwCAvPRTFkRNCvXYEgsMw","ts":1763600000000,"to":"host-device","agent":%q}`, agent)
+		_, err := host.Surface["agent.recheck"](context.Background(), w.node().Host, nil, by, json.RawMessage(payload))
+		return err
 	})
 	sc.Step(`^"([^"]+)" replies with "([^"]+)" in "([^"]+)"$`, w.thenAIPosts)
 	sc.Step(`^the fake "([^"]+)" log records 1 process for that group conversation$`, w.thenOneProcessLogged)
@@ -153,15 +160,17 @@ func isLoginInvalidMsg(m proto.MsgRow, aiID, wantDetail string) bool {
 	return body.Code == "login_invalid" && body.AI == aiID && *body.Detail == wantDetail
 }
 
-func awaitLoginChangedSnapshot(rec *loginSnapRecorder, wantSess host.State, wantOpen int, wantMem string, wantLogin bool) error {
+// awaitLoginChangedSnapshot waits for the n-th snapshot, which is the last and
+// equals what is wanted.
+func awaitLoginChangedSnapshot(rec *loginSnapRecorder, n int, wantSess host.State, wantOpen int, wantMem string, wantLogin bool) error {
 	want := loginChangedSnap{sessionState: wantSess, open: wantOpen, memberState: wantMem, loginOK: wantLogin}
 	return waitUntil(5*time.Second, "LoginChanged snapshot", func() error {
 		snaps := rec.snapshot()
-		if len(snaps) == 0 {
-			return fmt.Errorf("no LoginChanged snapshot yet")
+		if len(snaps) < n {
+			return fmt.Errorf("%d LoginChanged snapshots yet, want %d", len(snaps), n)
 		}
-		if len(snaps) != 1 || snaps[0] != want {
-			return abort(fmt.Errorf("LoginChanged snapshots = %+v, want [%+v]", snaps, want))
+		if len(snaps) != n || snaps[n-1] != want {
+			return abort(fmt.Errorf("LoginChanged snapshots = %+v, want %d, the last %+v", snaps, n, want))
 		}
 		return nil
 	})

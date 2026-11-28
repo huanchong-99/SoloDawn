@@ -8,14 +8,21 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const darwinServiceLabel = "org.solodawn.node"
+
+const (
+	agentGoneTick = 50 * time.Millisecond
+	agentGoneWait = 10 * time.Second
+)
 
 var (
 	runLaunchctl = execLaunchctl
 	getUID       = os.Getuid
 	launchctlBin = "/bin/launchctl"
+	agentPause   = time.Sleep
 )
 
 func agentPath() (string, error) {
@@ -67,10 +74,31 @@ func execLaunchctl(args ...string) error {
 	return nil
 }
 
+// startAgent loads plist in place of the agent that is loaded. bootout
+// answers while the old node is still stopping, and bootstrap fails with an
+// I/O error until launchd has removed that service (macOS 15 takes
+// bootout --wait as a usage error).
 func startAgent(plist string) error {
 	domain := "gui/" + strconv.Itoa(getUID())
-	_ = runLaunchctl("bootout", domain+"/"+darwinServiceLabel)
+	service := domain + "/" + darwinServiceLabel
+	if runLaunchctl("bootout", service) == nil {
+		if err := awaitRemoval(service); err != nil {
+			return err
+		}
+	}
 	return runLaunchctl("bootstrap", domain, plist)
+}
+
+// awaitRemoval asks launchd every agentGoneTick whether it still has service,
+// for agentGoneWait at most.
+func awaitRemoval(service string) error {
+	for waited := time.Duration(0); runLaunchctl("print", service) == nil; waited += agentGoneTick {
+		if waited >= agentGoneWait {
+			return fmt.Errorf("launchd did not remove %s within %s of bootout", service, agentGoneWait)
+		}
+		agentPause(agentGoneTick)
+	}
+	return nil
 }
 
 // RemoveService removes start-at-login without stopping a running node.

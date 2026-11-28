@@ -11,10 +11,10 @@
   import { find } from '../lib/groups.svelte';
   import type { Net } from '../lib/net.svelte';
   import { nodes, outdated, type Computer } from '../lib/nodes.svelte';
-  import { accountLabel, cliName, type AccountKind } from '../lib/onboard.svelte';
+  import { accountLabel, cliName, fingerprintOf, type AccountKind } from '../lib/onboard.svelte';
   import { prefs, t } from '../lib/prefs.svelte';
   import { href } from '../lib/route.svelte';
-  import { now } from '../lib/when';
+  import { clockOn, now } from '../lib/when';
 
   let { net }: { net: Net } = $props();
   const uid = $props.id();
@@ -23,6 +23,7 @@
 
   const computers = $derived(nodes.list(net));
   const pairable = $derived(computers.filter((comp) => comp.online && comp.info !== undefined));
+  const browsers = $derived((net.devices ?? []).filter((device) => device.kind === 'browser'));
   let pairing = $state(false);
   let choosing = $state<Record<string, boolean>>({});
   let busyAcct = $state<Record<string, boolean>>({});
@@ -380,6 +381,39 @@
       <p>{t('nodes.empty.body')}</p>
     </div>
   {/if}
+
+  {#if browsers.length}
+    <section class="card browsers" aria-labelledby={`${uid}-browsers`}>
+      <header class="row">
+        <span class="node-ico"><Icon name="phone" /></span>
+        <div class="grow">
+          <h3 id={`${uid}-browsers`}>{t('nodes.browsers.title')}</h3>
+          <p class="muted sub">{t('nodes.browsers.lead')}</p>
+        </div>
+      </header>
+      <ul>
+        {#each browsers as device (device.id)}
+          <li class="row">
+            <b>{device.name}</b>
+            {#if device.self}<span class="badge">{t('pairing.browser.card')}</span>{/if}
+            <span class="muted print">
+              {t('pairing.step.fingerprint')}
+              {#await fingerprintOf(device.id) then print}<code>{print}</code>{/await}
+            </span>
+            <span class="grow"></span>
+            {#if device.added}
+              <span class="hint">
+                {t('nodes.browsers.added').replace(
+                  '{time}',
+                  clockOn(device.added, now(), prefs.lang),
+                )}
+              </span>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 </div>
 
 <PairBrowserDialog bind:open={pairing} {net} />
@@ -392,14 +426,27 @@
     border-radius: 8px;
     font-size: var(--fs-sm);
   }
-  /* A computer is a card: its head, what is known of it, and its AIs as a list under hairlines. */
-  .node {
+  /* A computer is a card: its head, what is known of it, and its AIs as a list under hairlines.
+     The owner's browsers are one such card, a browser to a line. */
+  .node,
+  .browsers {
     padding: 0;
     gap: 0;
   }
-  .node > header {
+  :is(.node, .browsers) > header {
     gap: var(--sp-3);
     padding: var(--sp-4);
+  }
+  .browsers li {
+    border-top: 1px solid var(--line);
+    padding: var(--sp-3) var(--sp-4);
+    font-size: var(--fs-sm);
+  }
+  .browsers b {
+    font-weight: 500;
+  }
+  .print {
+    white-space: nowrap;
   }
   .node > header h3 {
     display: flex;

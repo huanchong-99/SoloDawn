@@ -556,6 +556,27 @@ func TestSetTaskCommandErrorsAndPartialSuccess(t *testing.T) {
 	secMustEq(t, len(home.requests), 2)
 }
 
+func TestSecToolDescriptionsSayHowTheyReachPeopleAndAIs(t *testing.T) {
+	secMustEq(t, Tools["set_task"].Description, "Assign a task's roles or pause, resume or cancel it. A new assignee or reviewer is given the task and its brief in the task's own session: do not also mention them about it.")
+	secMustEq(t, Tools["request_decision"].Description, "Raise a decision card for people in the group: a choice, an agreement, an approval, or a step only a person can take. Use it instead of asking in a message.")
+}
+
+func TestSecretaryRaisesADecisionCardInTheMainLine(t *testing.T) {
+	h, home := newSecFixture(t)
+	_, err := Tools["request_decision"].Call(t.Context(), h, secSecretaryCaller(""), json.RawMessage(`{
+		"question": "Swap the assignees of T-12 and T-13?",
+		"options": [{"label": "Swap", "effect": "Codex takes T-12."}, {"label": "Keep", "effect": "Nothing changes."}],
+		"to": ["owner"]
+	}`))
+	secMustEq(t, err, nil)
+	got := secOpenCmd[proto.Post[proto.DecisionBody]](t, h, home.requests[0])
+	secMustEq(t, got.Kind, "decision")
+	secMustEq(t, got.As, proto.ID(secSecID))
+	secMustEq(t, got.Thread == nil && got.Body.Task == nil, true)
+	secMustEq(t, got.Mentions, []proto.ID{secOwnerMID})
+	secMustEq(t, got.Body.To, []string{secOwnerUID})
+}
+
 func TestRequestDecisionInGroupSession(t *testing.T) {
 	h, home := newSecFixture(t)
 	groupCaller := secWorkerCaller(GroupSession, secClaudeID, "")

@@ -306,6 +306,18 @@ behaves as on any other system and reports no permissions.
   a process does to the app that started it, and a node started from a terminal would be allowed
   and asked in the terminal's name. The agent's plist names the app in
   `AssociatedBundleIdentifiers`.
+  - **Its `PATH`** is where the node looks for the CLIs; launchd itself gives an agent only the
+    system's directories. `solodawn pair` and `solodawn service install` write the `PATH` of the
+    shell that runs them. The app opened with no plist yet (section 1) writes the `PATH` of the
+    user's shell, asked as a terminal starts it (`$SHELL -ilc`), because an app opened from the
+    Finder has only the system's directories too. A shell that fails or does not answer within
+    5 seconds leaves the app's own `PATH`, and one log line says so. A plist that exists is kept
+    by the app; `pair` rewrites it when it starts the node.
+  - **Loading it** replaces an agent that is loaded: `launchctl bootout`, then `bootstrap`.
+    `bootout` answers while the old node is still stopping, and launchd refuses `bootstrap` until
+    it has removed that service, so the command asks `launchctl print` every 50 ms until the
+    service is gone. After 10 seconds it gives up with an error that says launchd did not remove
+    the old service.
 - **What is reported** in `host.info` as `permissions` (`contracts/datachannel.md` section 7):
   - `local_network`: the node writes one byte from a UDP socket connected to an unused link-local
     IPv6 address, port 9, on each network interface that is up and broadcast-capable. `false`

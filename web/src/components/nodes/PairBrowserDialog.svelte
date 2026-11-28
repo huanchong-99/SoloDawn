@@ -3,12 +3,14 @@
   import type { Home } from '../../lib/groups.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { nodes, type PairLink } from '../../lib/nodes.svelte';
+  import { fingerprintOf, isLocal } from '../../lib/onboard.svelte';
   import { announcement, prefs, t } from '../../lib/prefs.svelte';
   import { clock, now } from '../../lib/when';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
 
-  /** Dialog that requests a one-time `#pair=<secret>` link from an online owner node. */
+  /** Dialog that requests a one-time `#pair=<secret>` link from an online owner node, and shows
+   *  the browser that joined with it (planning/flows/pairing.md section C). */
   let { open = $bindable(false), net }: { open?: boolean; net: Net } = $props();
   const uid = $props.id();
 
@@ -22,6 +24,14 @@
   let failed = $state('');
   let result = $state.raw<PairLink>();
   let copied = $state(false);
+  // The computer that made the link, and the owner's browsers then: the browser that joined with
+  // the link is one that this computer added since (planning/flows/pairing.md C.4).
+  let maker = '';
+  let known = $state.raw<string[]>([]);
+  const browsers = $derived((net.devices ?? []).filter((device) => device.kind === 'browser'));
+  const joined = $derived(
+    result && browsers.find((device) => device.by === maker && !known.includes(device.id)),
+  );
 
   const listed = () => pairable.find((comp) => comp.home === chosen);
   const pick = () => (chosen = (listed() ?? pairable[0])?.home);
@@ -61,6 +71,8 @@
       failed = answer.err.code;
       return;
     }
+    maker = target.info!.device;
+    known = browsers.map((device) => device.id);
     result = answer;
   }
 
@@ -111,7 +123,9 @@
               <Icon name="copy" sm /><span>{t('nodes.pair.copy')}</span>
             {/if}
           </button>
-          {#if remaining > 0}
+          {#if joined}
+            <span class="hint"><Icon name="check" sm />{t('nodes.pair.used')}</span>
+          {:else if remaining > 0}
             <span class="hint">
               <Icon name="clock" sm />
               {t('nodes.pair.expires')
@@ -122,6 +136,20 @@
             <span class="hint expired">{t('nodes.pair.expired')}</span>
           {/if}
         </div>
+        {#if joined}
+          <p class="note" role="status">
+            <Icon name="info" sm />
+            <span>
+              {t('nodes.pair.joined')}
+              {#await fingerprintOf(joined.id) then print}<code>{print}</code>{/await}
+            </span>
+          </p>
+        {:else if isLocal(result.link)}
+          <p class="note">
+            <Icon name="info" sm />
+            <span>{t('nodes.pair.local')}</span>
+          </p>
+        {/if}
       </div>
     {/if}
 
