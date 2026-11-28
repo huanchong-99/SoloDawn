@@ -15,7 +15,7 @@
   }: { draft: Draft; models: Listed[]; suggest?: boolean; disabled?: boolean } = $props();
   const uid = $props.id();
 
-  const chosen = $derived(models.find((model) => model.model === draft.model));
+  const chosen = $derived(models.find((model) => model.model === (draft.model || 'default')));
   const efforts = $derived(chosen?.efforts ?? []);
   const stray = $derived(draft.effort && !efforts.includes(draft.effort) ? draft.effort : '');
   const why = $derived(chosen ? 'model.effort.none' : draft.model ? '' : 'model.effort.pick');
@@ -41,7 +41,7 @@
         {disabled}
       >
         <option value="">{t('model.default')}</option>
-        {#each models as model (model.model)}
+        {#each models.filter((model) => model.model !== 'default' || model.model === draft.model) as model (model.model)}
           <option value={model.model}>{model.name}</option>
         {/each}
         {#if draft.model && !chosen}

@@ -56,4 +56,37 @@ describe('model helpers', () => {
     });
     expect(modelChanges(member, { ...member, tier: 'light', skills: 'Documentation' })).toEqual({});
   });
+
+  it('keeps a listed default model entry with its metadata', () => {
+    const info = decode(HostInfoPush, goldens['host-info-push']);
+    const models = [
+      {
+        model: 'default',
+        name: 'Default (recommended)',
+        efforts: ['low', 'medium', 'high'],
+        fast: true as const,
+        tier: 'strong',
+      },
+      { model: 'opus', name: 'Opus', efforts: ['low', 'high'], tier: 'strong' },
+    ];
+    nodes.infos.set(home, {
+      ...info,
+      agents: [{ ...info.agents[0], agent: 'claude', models }],
+    });
+    expect(listedModels(home, 'claude')).toEqual(models);
+  });
+
+  it('keeps stored empty model unchanged and sends only effort when selecting an effort on default', () => {
+    const member = { ...ai, model: '', effort: '' };
+    expect(modelChanges(member, { ...member, model: '', effort: '' })).toEqual({});
+    const withEffort = modelChanges(member, { ...member, model: '', effort: 'high' });
+    expect(withEffort).toEqual({ effort: 'high' });
+    expect('model' in withEffort).toBe(false);
+    expect(
+      modelChanges({ ...ai, model: '', effort: 'high' }, { ...ai, model: '', effort: '' }),
+    ).toEqual({ effort: '' });
+    expect(
+      modelChanges({ ...ai, model: 'opus', effort: 'high' }, { ...ai, model: '', effort: 'high' }),
+    ).toEqual({ model: '' });
+  });
 });

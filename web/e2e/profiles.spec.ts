@@ -161,8 +161,19 @@ describe('AI profiles with fake CLIs', () => {
         .getByRole('combobox', { name: 'Model', exact: true })
         .locator('option')
         .allTextContents(),
-    ).toEqual(["The CLI's default", 'Default', 'Haiku']);
-    await dialog.getByRole('combobox', { name: 'Model', exact: true }).selectOption('default');
+    ).toEqual(["The CLI's default", 'Haiku']);
+    await poll(() => dialog.locator('.fast').textContent()).toBe('Fast mode');
+    await poll(() =>
+      dialog
+        .getByRole('combobox', { name: 'Thinking level', exact: true })
+        .locator('option')
+        .allTextContents(),
+    ).toEqual(["The CLI's default", 'low', 'high']);
+    await dialog.getByRole('combobox', { name: 'Model', exact: true }).selectOption('haiku');
+    await poll(() => dialog.locator('input[type="radio"][value="light"]').isChecked()).toBe(true);
+    await poll(() => dialog.locator('.fast').count()).toBe(0);
+    await dialog.getByRole('combobox', { name: 'Model', exact: true }).selectOption('');
+    await poll(() => dialog.locator('.fast').textContent()).toBe('Fast mode');
     await poll(() =>
       dialog
         .getByRole('combobox', { name: 'Thinking level', exact: true })
@@ -212,12 +223,25 @@ describe('AI profiles with fake CLIs', () => {
       .filter({ has: page.getByRole('heading', { name: 'Haiku', exact: true }) });
     await poll(() => haiku.locator('.tier').getAttribute('data-tier')).toBe('light');
 
+    await writeFile(claude, '{"session":"models","exit":1}');
+    await member.getByRole('button', { name: 'Refresh the models', exact: true }).click();
+    await member.getByRole('button', { name: 'Edit profile', exact: true }).click();
+    const modelInput = editor.getByRole('textbox', { name: 'Model', exact: true });
+    await poll(() => modelInput.count()).toBe(1);
+    await poll(() => member.locator('.what .badge').count()).toBe(0);
+    await modelInput.fill('default');
+    await editor.getByRole('button', { name: 'Save', exact: true }).click();
+    await poll(() => editor.count()).toBe(0);
+    await poll(() => member.locator('.what .badge').textContent()).toBe('Not listed');
+
     const gained = original.replace(
       '"supportsEffort":false}',
       '"supportsEffort":false},{"value":"gemini-3-pro","displayName":"Pro"}',
     );
     await writeFile(claude, gained);
     await member.getByRole('button', { name: 'Refresh the models', exact: true }).click();
+    await poll(() => member.locator('.what .name').textContent()).toBe('Default');
+    await poll(() => member.locator('.what .badge').count()).toBe(0);
     await member.getByRole('button', { name: 'Edit profile', exact: true }).click();
     await poll(() =>
       member
@@ -225,6 +249,9 @@ describe('AI profiles with fake CLIs', () => {
         .locator('option')
         .allTextContents(),
     ).toEqual(["The CLI's default", 'Default', 'Haiku', 'Pro']);
+    await poll(() =>
+      member.getByRole('combobox', { name: 'Model', exact: true }).inputValue(),
+    ).toBe('default');
     await member.getByRole('button', { name: 'Cancel', exact: true }).click();
     await poll(() => member.locator('.suggest span').textContent()).toBe('More');
 
