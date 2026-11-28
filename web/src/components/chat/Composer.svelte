@@ -1,7 +1,16 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { complete, fill, matching, mentioned, room, typing, unsent } from '../../lib/compose';
+  import {
+    complete,
+    fill,
+    matching,
+    mentionable,
+    mentioned,
+    room,
+    typing,
+    unsent,
+  } from '../../lib/compose';
   import type { Group, Member } from '../../lib/groups.svelte';
   import { release } from '../../lib/jump';
   import { hasAI } from '../../lib/members';
@@ -35,7 +44,14 @@
   const readonly = $derived(!group.home.ctl);
   const people = $derived(task ? threadMembers(group, task) : group.members);
   const mention = $derived(typing(text, caret));
-  const found = $derived(mention && mention.at !== closed ? matching(people, mention.query) : []);
+  const found = $derived(
+    mention && mention.at !== closed
+      ? matching(
+          mentionable(people, group.me?.id, task ? undefined : group.info?.secretary),
+          mention.query,
+        )
+      : [],
+  );
   // The members a text mentions make its row longer too.
   const mentions = $derived(mentioned(text, group.members));
   const named = $derived(mentions.length);

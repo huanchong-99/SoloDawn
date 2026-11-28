@@ -148,13 +148,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       },
     );
     When('Alex types "@" there', () => write('@'));
-    Then('it offers "Codex", "Claude Code", "Alex" and "Secretary" in this order', () =>
-      expect(texts('.in-thread .mentions .cut')).toEqual([
-        'Codex',
-        'Claude Code',
-        'Alex',
-        'Secretary',
-      ]),
+    Then('it offers "Codex", "Claude Code" and "Secretary" in this order', () =>
+      expect(texts('.in-thread .mentions .cut')).toEqual(['Codex', 'Claude Code', 'Secretary']),
     );
     When('Alex types "Yes, keep it." there', () => {
       expect(note()).toEqual([

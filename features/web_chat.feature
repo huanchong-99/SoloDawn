@@ -17,6 +17,9 @@ Feature: Chat main line of the web client
     And the composer is empty again
 
   Scenario: A mention is completed from the members and named in the post
+    Given the group has "Secretary" as its secretary
+    When the person starts a mention
+    Then the composer offers "Secretary", "Claude Code" and "Codex" without "Alex"
     When the person types "ask @c"
     Then the composer offers "Claude Code" and "Codex"
     When the person moves down once and presses Enter
@@ -94,3 +97,16 @@ Feature: Chat main line of the web client
     When the person writes "hello" and sends it
     Then the composer says "Not sent: the home refused it as too long or malformed."
     And the text stays in the composer
+
+  Scenario: New messages from others mark New messages only when scrolled back, and Back to the latest jumps immediately
+    When "Codex" writes "Checking in" while the reader is at the latest message
+    Then "New messages" is not shown and the main line stays at the latest
+    When the reader scrolls up and "Codex" writes "New update"
+    Then the main line stays scrolled up and shows "New messages"
+    When the reader presses "New messages"
+    Then the main line jumps immediately to the latest, hides the button and takes focus
+
+  Scenario: Sending your own message while scrolled up returns to the latest without stealing focus
+    Given the reader is scrolled up after "Codex" wrote "Earlier update"
+    When the person focuses the composer, writes "On my way" and sends it
+    Then the main line scrolls immediately to the latest, clears the new-messages state and keeps focus in the composer
