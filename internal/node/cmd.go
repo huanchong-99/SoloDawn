@@ -23,10 +23,25 @@ var Subcommands = map[string]Subcommand{}
 type Subcommand func(args []string, stdout, stderr io.Writer) int
 
 var (
-	executablePath = os.Executable
+	rawExecutable  = os.Executable
+	executablePath = Executable
 	spawnNode      = startBackgroundNode
+	detachNode     = startDetached
 	pairStartWait  = 5 * time.Second
 )
+
+// Executable returns the running executable path with symbolic links resolved.
+func Executable() (string, error) {
+	return resolveExecutable(os.Executable)
+}
+
+func resolveExecutable(get func() (string, error)) (string, error) {
+	exe, err := get()
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(exe)
+}
 
 // MCP runs the stdio MCP shim ("solodawn mcp --token <t>" or "--member <id>") against the running
 // node's local socket (local.md 1, 3).
@@ -42,12 +57,12 @@ func dialLocal() (net.Conn, error) {
 	return net.Dial("unix", filepath.Join(dir, "sock"))
 }
 
-func startBackgroundNode() error {
-	exe, err := executablePath()
+func startBackgroundNode(rewrite bool) error {
+	exe, err := rawExecutable()
 	if err != nil {
 		return err
 	}
-	return startDetached(exe, "node")
+	return startBackground(exe, rewrite)
 }
 
 // Command opens a local command connection. Pair always sends the name
@@ -86,12 +101,16 @@ func (c Command) send(dir string, stdout io.Writer) error {
 }
 
 func (c Command) dialOrStart(dir string) (net.Conn, error) {
+	return dialSocket(dir, c.Cmd == "pair", true)
+}
+
+func dialSocket(dir string, autoStart, rewrite bool) (net.Conn, error) {
 	sock := filepath.Join(dir, "sock")
 	conn, err := net.Dial("unix", sock)
-	if err == nil || c.Cmd != "pair" {
+	if err == nil || !autoStart {
 		return conn, err
 	}
-	if err := spawnNode(); err != nil {
+	if err := spawnNode(rewrite); err != nil {
 		return nil, err
 	}
 	return waitSocket(sock, pairStartWait)

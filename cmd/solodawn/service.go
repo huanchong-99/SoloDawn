@@ -7,6 +7,8 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/node"
 )
 
+var serviceExecutable = node.Executable
+
 func init() {
 	node.Subcommands["service"] = service(node.InstallService, node.RemoveService)
 }
@@ -22,7 +24,7 @@ func service(install func(executable, path string) error, remove func() error) n
 		}
 		switch args[0] {
 		case "install":
-			executable, err := os.Executable()
+			executable, err := serviceExecutable()
 			if err == nil {
 				err = install(executable, os.Getenv("PATH"))
 			}

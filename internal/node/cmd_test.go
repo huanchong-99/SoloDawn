@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 // in a session of its own, and can start the next. A test of the start sets
 // spawnNode itself.
 func TestMain(m *testing.M) {
-	spawnNode = func() error { return errors.New("a test started a node in the background") }
+	spawnNode = func(bool) error { return errors.New("a test started a node in the background") }
 	m.Run()
 }
 
@@ -157,11 +158,12 @@ func serveMCPTestEcho(l *Local, opened chan<- string) {
 }
 
 func TestPairAutoStartsNode(t *testing.T) {
-	savedSpawn, savedWait, savedExe := spawnNode, pairStartWait, executablePath
+	savedSpawn, savedWait, savedRaw, savedDetach := spawnNode, pairStartWait, rawExecutable, detachNode
 	t.Cleanup(func() {
 		spawnNode = savedSpawn
 		pairStartWait = savedWait
-		executablePath = savedExe
+		rawExecutable = savedRaw
+		detachNode = savedDetach
 	})
 	dir := nodeTestDir(t)
 	name := "laptop"
@@ -175,16 +177,16 @@ func TestPairAutoStartsNode(t *testing.T) {
 func checkPairSpawnFailures(t *testing.T, dir string, pairCmd Command) {
 	t.Helper()
 	spawns := 0
-	spawnNode = func() error { spawns++; return nil }
+	spawnNode = func(bool) error { spawns++; return nil }
 	if err := (Command{Cmd: "status"}).send(dir, io.Discard); err == nil || spawns != 0 {
 		t.Fatalf("status missing socket: err=%v spawns=%d", err, spawns)
 	}
-	spawnNode = func() error { spawns++; return io.ErrUnexpectedEOF }
+	spawnNode = func(bool) error { spawns++; return io.ErrUnexpectedEOF }
 	if err := pairCmd.send(dir, io.Discard); !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("pair spawn error = %v", err)
 	}
 	pairStartWait = 0
-	spawnNode = func() error { spawns++; return nil }
+	spawnNode = func(bool) error { spawns++; return nil }
 	var dialErr *net.OpError
 	if err := pairCmd.send(dir, io.Discard); !errors.As(err, &dialErr) {
 		t.Fatalf("pair wait timeout = %v", err)
@@ -201,7 +203,10 @@ func checkPairAutoStartSuccess(t *testing.T, dir string, pairCmd Command) {
 		}
 	})
 	spawns := 0
-	spawnNode = func() error {
+	spawnNode = func(rewrite bool) error {
+		if !rewrite {
+			return errors.New("pair must refresh plist")
+		}
 		spawns++
 		go func() {
 			time.Sleep(30 * time.Millisecond)
@@ -237,19 +242,81 @@ func assertPairOutput(t *testing.T, dir string, pairCmd Command, spawns *int, wa
 
 func checkStartBackgroundNode(t *testing.T, dir string) {
 	t.Helper()
-	executablePath = func() (string, error) { return "", io.ErrNoProgress }
-	if err := startBackgroundNode(); !errors.Is(err, io.ErrNoProgress) {
+	rawExecutable = func() (string, error) { return "", io.ErrNoProgress }
+	if err := startBackgroundNode(true); !errors.Is(err, io.ErrNoProgress) {
 		t.Fatalf("startBackgroundNode exe error = %v", err)
 	}
-	executablePath = func() (string, error) { return filepath.Join(dir, "missing-exe"), nil }
-	if err := startBackgroundNode(); err == nil {
+	rawExecutable = func() (string, error) { return filepath.Join(dir, "missing-exe"), nil }
+	if err := startBackgroundNode(true); err == nil {
 		t.Fatal("expected startBackgroundNode error for missing executable")
 	}
+	checkStartBackgroundPreservesRawPath(t)
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := startDetached(self, "-test.run=^$"); err != nil {
 		t.Fatalf("startDetached(self) = %v", err)
+	}
+}
+
+func checkStartBackgroundPreservesRawPath(t *testing.T) {
+	t.Helper()
+	base := t.TempDir()
+	realDir := filepath.Join(base, "real")
+	if err := os.MkdirAll(realDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	realExe := filepath.Join(realDir, "solodawn")
+	if err := os.WriteFile(realExe, []byte("bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	wantRaw := realExe
+	linkDir := filepath.Join(base, "link")
+	if err := os.Symlink(realDir, linkDir); err == nil {
+		wantRaw = filepath.Join(linkDir, "solodawn")
+	} else if runtime.GOOS != "windows" {
+		t.Fatal(err)
+	}
+	var gotExe string
+	var gotArgs []string
+	rawExecutable = func() (string, error) { return wantRaw, nil }
+	detachNode = func(exe string, args ...string) error {
+		gotExe, gotArgs = exe, args
+		return nil
+	}
+	if err := startBackgroundNode(true); err != nil || gotExe != wantRaw || len(gotArgs) != 1 || gotArgs[0] != "node" {
+		t.Fatalf("startBackgroundNode raw: err=%v exe=%q args=%v; want %q [node]", err, gotExe, gotArgs, wantRaw)
+	}
+}
+
+func TestResolveExecutable(t *testing.T) {
+	if exe, err := Executable(); err != nil || exe == "" {
+		t.Fatalf("Executable() = %q, %v", exe, err)
+	}
+	wantErr := errors.New("exe failed")
+	if _, err := resolveExecutable(func() (string, error) { return "", wantErr }); !errors.Is(err, wantErr) {
+		t.Fatalf("resolveExecutable error = %v; want %v", err, wantErr)
+	}
+
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "SoloDawn.app", "Contents", "MacOS", "solodawn")
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "solodawn-link")
+	if err := os.Symlink(target, link); err == nil {
+		got, err := resolveExecutable(func() (string, error) { return link, nil })
+		if err != nil || got != target {
+			t.Fatalf("resolveExecutable(symlink) = %q, %v; want %q", got, err, target)
+		}
+	} else if runtime.GOOS != "windows" {
+		t.Fatal(err)
 	}
 }
