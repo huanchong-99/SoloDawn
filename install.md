@@ -53,7 +53,7 @@ On success the matching line appears. This unpacks `SoloDawn.app` into
 ad-hoc-signed app from running), and links `$HOME/.local/bin/solodawn` to the
 app's executable. Add `$HOME/.local/bin` to your `PATH` if needed.
 
-**What macOS asks.** When `solodawn pair` registers and starts the login agent,
+**What macOS asks.** When the login agent is registered and started,
 macOS shows a "Background Items Added" notice for SoloDawn (nothing to do), and
 then may ask up to two questions: if the Application Firewall is on,
 "Do you want the application "solodawn" to accept incoming network connections?"
@@ -101,32 +101,44 @@ by the project's own rules, so `git` must be installed for that.
 ## Start the node
 
 If you are following an onboarding prompt from a browser page (including an AI
-assistant running setup commands): skip this section and go straight to "Pair
-with the browser". Do not run `solodawn node` in your shell — it runs in the
-foreground and never exits. In the pairing flow, `solodawn pair` starts the
-node in the background by itself when none is running yet.
+assistant that was given that page's pairing prompt): skip this section and go
+straight to "Pair with the browser". Do not run `solodawn node` in your shell —
+it runs in the foreground and never exits. In the pairing flow, `solodawn pair`
+starts the node in the background by itself when none is running yet.
 
-If you are a person setting up on this computer by hand without an existing
-browser page, start the node on Linux or Windows in a terminal and keep that
-terminal open:
+If there is no browser page yet — for example, when installing from the release
+page by hand or with an AI assistant — start the node on Linux or Windows in a
+terminal and keep that terminal open:
 
 ```text
 solodawn node
 ```
 
-On macOS, open **SoloDawn** from `$HOME/Applications` (or run
-`open -a "$HOME/Applications/SoloDawn.app"`) instead of `solodawn node` in a
-terminal, so macOS asks for permissions in SoloDawn's name.
+On macOS, run these two commands in a terminal instead of `solodawn node`:
+
+```text
+solodawn service install
+open -a "$HOME/Applications/SoloDawn.app"
+```
+
+`solodawn service install` writes the login agent with this terminal's `PATH`,
+and `open -a "$HOME/Applications/SoloDawn.app"` starts the node through
+`launchd` (so macOS asks for permissions in SoloDawn's name) and opens
+`http://localhost:47800`. This order matters because opening `SoloDawn.app`
+before any login agent exists writes one with LaunchServices' system-only
+`PATH`, and the node then finds no AI CLI.
 
 The node serves the web client and its built-in `/rv` signalling endpoint at
 `http://localhost:47800` (falling back to another free port if `47800` is in
-use). Open `http://localhost:47800` in your browser to reach the onboarding page
-and copy its pairing prompt, then run `solodawn pair` in another terminal. Keep
-`--rendezvous <url>` when following the page's prompt; when this node is the
-one serving the local page, `solodawn pair <secret> --name "<label>"` also
-works with `--rendezvous` omitted. Do not run `solodawn open` before pairing: it
-is refused until the node has an owner. Run `solodawn --help` or
-`solodawn node --help` for the command list and startup details.
+use). Open `http://localhost:47800` in your browser to reach the onboarding
+page (if an AI assistant started the node, it tells the person to open that
+address). Copy the page's pairing prompt back to the AI — or, when setting up
+by hand, run `solodawn pair` in another terminal. Keep `--rendezvous <url>`
+when following the page's prompt; when this node is the one serving the local
+page, `solodawn pair <secret> --name "<label>"` also works with `--rendezvous`
+omitted. Do not run `solodawn open` before pairing: it is refused until the
+node has an owner. Run `solodawn --help` or `solodawn node --help` for the
+command list and startup details.
 
 ## Pair with the browser
 
