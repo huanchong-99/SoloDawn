@@ -72,6 +72,35 @@ func (r homeBriefReceipts) PutReceipt(signer, nonce string, _ int64, result stor
 func homeBriefSteps(sc *godog.ScenarioContext) {
 	w := &homeBriefWorld{now: time.UnixMilli(1763600000000)}
 	sc.Step(`^a group home with a secretary and three working AIs$`, w.start)
+	sc.Step(`^a group home with a secretary and one working AI$`, func() error {
+		if err := w.start(); err != nil {
+			return err
+		}
+		delete(w.state.AIs, w.members["ai-two"])
+		delete(w.state.AIs, w.members["ai-three"])
+		return nil
+	})
+	sc.Step(`^the secretary posts a brief assigning "([^"]*)" and reviewing with "([^"]*)"$`, func(assignee, reviewer string) error {
+		a := w.members[assignee]
+		if a == "" {
+			a = assignee
+		}
+		r := w.members[reviewer]
+		if r == "" {
+			r = reviewer
+		}
+		return w.post(nil, []proto.BriefTask{{Title: "Report path changes", Assignee: a, Reviewer: r, Depends: []int{}}})
+	})
+	sc.Step(`^the home answers "([^"]*)" with "([^"]*)"$`, func(code, needle string) error {
+		if err := w.answered(1, code); err != nil {
+			return err
+		}
+		last := w.answers[len(w.answers)-1]
+		if !strings.Contains(last.Msg, needle) {
+			return fmt.Errorf("answer message %q missing %q", last.Msg, needle)
+		}
+		return nil
+	})
 	sc.Step(`^the secretary (?:posts|has posted) the brief$`, func() error { return w.post(nil, w.dependentTasks()) })
 	sc.Step(`^the secretary has posted a brief of two tasks for "([^"]*)", reviewed by "([^"]*)"$`, w.postForOne)
 	sc.Step(`^the secretary posts a brief that replaces it$`, func() error {

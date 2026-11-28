@@ -36,6 +36,7 @@ Feature: A host composes session instructions and turn text
       | secretary | Say what you decide, in the turn you decide it.                                                                |
       | secretary | What holds only for now                                                                                        |
       | secretary | look at the tasks you paused (`list_tasks`)                                                                    |
+      | secretary | never invent AI names and do not call `propose_brief`                                                          |
       | secretary | until a person deletes them                                                                                    |
 
   Scenario: The first turn of a brief task session carries goal, criteria, scope and newest notes

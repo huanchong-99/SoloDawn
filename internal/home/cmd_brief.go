@@ -56,27 +56,33 @@ func briefPost(s *State, c Command) (Result, *Refusal) {
 }
 
 func (s *State) briefCheck(p proto.Post[proto.BriefBody]) ([]string, *Refusal) {
-	if refusal := briefWellFormed(p); refusal != nil {
+	if refusal := briefStructure(p); refusal != nil {
 		return nil, refusal
 	}
 	mentions, refusal := s.postMentions(p.Mentions)
 	if refusal != nil {
 		return nil, refusal
 	}
-	return mentions, s.briefMembers(p.Body)
+	if refusal := s.briefMembers(p.Body); refusal != nil {
+		return nil, refusal
+	}
+	return mentions, briefDistinctRoles(p.Body)
 }
 
-// briefWellFormed is what a brief must be whatever the group holds: a
-// main-line message whose body has the shape of messages.md 2.1, and whose
-// every entry has two AIs.
-func briefWellFormed(p proto.Post[proto.BriefBody]) *Refusal {
+// briefStructure is the group-independent shape of a brief post: a main-line
+// message whose body matches messages.md 2.1.
+func briefStructure(p proto.Post[proto.BriefBody]) *Refusal {
 	if p.Thread != nil {
 		return &Refusal{"bad_request", "a brief is a message of the main line"}
 	}
 	if fault := briefShape(p.Body); fault != "" {
 		return &Refusal{"bad_request", fault}
 	}
-	for _, entry := range p.Body.Tasks {
+	return nil
+}
+
+func briefDistinctRoles(b proto.BriefBody) *Refusal {
+	for _, entry := range b.Tasks {
 		if entry.Assignee == entry.Reviewer {
 			return &Refusal{"bad_request", "the assignee of a task of the brief is also its reviewer"}
 		}
@@ -110,19 +116,44 @@ func briefEarlier(depends []int, own int) bool {
 }
 
 // briefMembers is what a brief must be in the group as it is now: its
-// requester a member, and every assignee and reviewer a working AI.
+// requester a member, at least two working AIs besides the secretary, and
+// every assignee and reviewer a working AI.
 func (s *State) briefMembers(b proto.BriefBody) *Refusal {
-	_, person := s.People[b.Requester]
-	_, ai := s.AIs[b.Requester]
-	if !person && !ai {
+	if !s.briefHasMember(b.Requester) {
 		return &Refusal{"conflict", "the requester of the brief is no member of the group"}
 	}
-	for _, entry := range b.Tasks {
-		if !s.briefWorking(entry.Assignee) || !s.briefWorking(entry.Reviewer) {
-			return &Refusal{"conflict", "an assignee or reviewer of the brief is no working AI of the group"}
-		}
+	if s.briefWorkingCount() < 2 {
+		return &Refusal{"conflict", "a group needs at least 2 working AIs besides the secretary so assignee and reviewer are different AIs; add working AIs via Add AI"}
+	}
+	if !s.briefTaskMembersValid(b) {
+		return &Refusal{"conflict", "an assignee or reviewer of the brief is no working AI of the group"}
 	}
 	return nil
+}
+
+func (s *State) briefHasMember(id string) bool {
+	_, person := s.People[id]
+	_, ai := s.AIs[id]
+	return person || ai
+}
+
+func (s *State) briefWorkingCount() int {
+	n := 0
+	for id := range s.AIs {
+		if s.briefWorking(id) {
+			n++
+		}
+	}
+	return n
+}
+
+func (s *State) briefTaskMembersValid(b proto.BriefBody) bool {
+	for _, entry := range b.Tasks {
+		if !s.briefWorking(entry.Assignee) || !s.briefWorking(entry.Reviewer) {
+			return false
+		}
+	}
+	return true
 }
 
 // briefWorking says whether a member is an AI of the group other than its secretary.

@@ -706,3 +706,48 @@ func TestRequestDecisionValidationAndSecretGuard(t *testing.T) {
 	_, err = Tools["request_decision"].Call(t.Context(), h, taskCaller, json.RawMessage(`{"question":"Q?","options":[]}`))
 	seamCode(t, err, "bad_request")
 }
+
+func TestProposeBriefRefusesWithoutTwoWorkingAIs(t *testing.T) {
+	checkActionable := func(t *testing.T, err error) {
+		t.Helper()
+		seamCode(t, err, "conflict")
+		for _, want := range []string{"2 working AIs", "secretary", "do not invent AI names", "Add AI"} {
+			secMustTrue(t, strings.Contains(err.Error(), want), err.Error())
+		}
+	}
+	removeAI := func(h *Host, id string, seq int64) {
+		secPutJSON(h, "member", id, proto.GoneRow{
+			RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: seq},
+			Gone:      true,
+		})
+	}
+
+	t.Run("zero working AIs and invented name refuses locally", func(t *testing.T) {
+		h, home := newSecFixture(t)
+		removeAI(h, secClaudeID, 20)
+		removeAI(h, secCodexID, 21)
+		m := secBaseBriefMap()
+		m["tasks"].([]map[string]any)[0]["assignee"] = "Ghost"
+		raw, _ := json.Marshal(m)
+		_, err := Tools["propose_brief"].Call(t.Context(), h, secSecretaryCaller(""), raw)
+		checkActionable(t, err)
+		secMustEq(t, len(home.requests), 0)
+	})
+
+	t.Run("one working AI refuses locally", func(t *testing.T) {
+		h, home := newSecFixture(t)
+		removeAI(h, secCodexID, 20)
+		raw, _ := json.Marshal(secBaseBriefMap())
+		_, err := Tools["propose_brief"].Call(t.Context(), h, secSecretaryCaller(""), raw)
+		checkActionable(t, err)
+		secMustEq(t, len(home.requests), 0)
+	})
+
+	t.Run("two working AIs beside secretary succeeds", func(t *testing.T) {
+		h, home := newSecFixture(t)
+		raw, _ := json.Marshal(secBaseBriefMap())
+		_, err := Tools["propose_brief"].Call(t.Context(), h, secSecretaryCaller(""), raw)
+		secMustEq(t, err, error(nil))
+		secMustEq(t, len(home.requests), 1)
+	})
+}

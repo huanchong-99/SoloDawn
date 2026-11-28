@@ -30,7 +30,7 @@
   "guide.step.defaults.left": "还差：{list}",
   "guide.step.defaults.done": "默认值已设好",
   "guide.step.group": "建第一个群",
-  "guide.step.group.body": "选一台电脑当群的家，勾上 AI，选一个当秘书。每个 AI 要一个工作文件夹：先在那台电脑上新建一个空文件夹，再把它的完整路径填进来。",
+  "guide.step.group.body": "选一台电脑当群的家，勾上 AI 并选一个当秘书。一个群需要 3 个 AI 才能派活（1 个秘书 + 至少 2 个干活 AI，因为执行者和复核者不能是同一个 AI）；建好群后还可以通过「添加 AI」继续加（同一个 CLI 也可以用不同名字和工作文件夹加两次）。每个 AI 都要一个独立的空工作文件夹：先在那台电脑上新建好，再把完整路径填进来。",
   "guide.step.group.tip": "在 macOS 上，把文件夹拖进终端窗口就能得到完整路径。",
   "guide.step.group.go": "去建群",
   "guide.step.group.done": "已建「{name}」",

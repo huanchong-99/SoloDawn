@@ -14,6 +14,7 @@
   "chat.empty.body": "把需求写下来。秘书会整理成任务说明，等你确认以后再开工。",
   "chat.empty.people": "跟群里的人说点什么吧。要让 AI 干活，先在成员里加一个已接入的 AI。",
   "chat.nosecretary": "这个群还没有秘书：不 @ 任何人的消息，没有 AI 会收到。",
+  "chat.need_working_ais": "派发任务前还需要通过「添加 AI」至少加上 2 个干活 AI（加上秘书共 3 个 AI，执行者和复核者必须是不同的 AI；可混用两个 CLI，或用不同名字和文件夹把同一 CLI 加两次）。",
   "chat.latest": "回到最新",
   "chat.latest.new": "有新消息",
   "chat.compose": "发消息",

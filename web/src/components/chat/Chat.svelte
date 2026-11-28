@@ -5,7 +5,7 @@
   import { withoutInlineReplies } from '../../lib/call';
   import type { Group } from '../../lib/groups.svelte';
   import { release } from '../../lib/jump';
-  import { hasAI } from '../../lib/members';
+  import { aiMembers, hasAI } from '../../lib/members';
   import type { Net } from '../../lib/net.svelte';
   import { card as cardOf, mounts, side } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
@@ -49,6 +49,9 @@
   const line = $derived(days(withoutInlineReplies(group.main, Boolean(cardOf('call')))));
   // A group of people only has nobody to turn a request into a brief.
   const emptyBody = $derived(hasAI(group) ? 'chat.empty.body' : 'chat.empty.people');
+  const workingCount = $derived(
+    aiMembers(group).filter((ai) => !ai.secretary && ai.id !== group.info?.secretary).length,
+  );
   const newest = $derived(group.main.at(-1)?.id);
   // Older messages may exist and cannot be had now: the home refused a page, or is not reachable.
   const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
@@ -184,6 +187,9 @@
       {/each}
       {#if group.info && hasAI(group) && !group.info.secretary}
         <p class="nosec"><Icon name="alert" sm />{t('chat.nosecretary')}</p>
+      {/if}
+      {#if group.info && hasAI(group) && workingCount < 2}
+        <p class="need-ais"><Icon name="alert" sm />{t('chat.need_working_ais')}</p>
       {/if}
     </div>
   </div>
@@ -404,8 +410,9 @@
   .sep + :global(.msg) {
     margin-top: var(--sp-2);
   }
-  /* A quiet word under the line: this group has no secretary. Told by its glyph and its words. */
-  .nosec {
+  /* A quiet word under the line: this group has no secretary, or too few working AIs. Told by its glyph and its words. */
+  .nosec,
+  .need-ais {
     display: flex;
     align-items: flex-start;
     justify-content: center;
@@ -415,7 +422,8 @@
     font-size: var(--fs-sm);
     line-height: 1.5;
   }
-  .nosec :global(.i) {
+  .nosec :global(.i),
+  .need-ais :global(.i) {
     margin-top: 2px;
     color: var(--dawn-text);
   }

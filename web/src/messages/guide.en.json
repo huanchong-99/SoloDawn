@@ -30,7 +30,7 @@
   "guide.step.defaults.left": "Still to set: {list}",
   "guide.step.defaults.done": "Defaults set",
   "guide.step.group": "Create your first group",
-  "guide.step.group.body": "Pick a computer as the group's home, tick the AIs and make one the secretary. Each AI needs a work folder: make an empty folder on that computer, then paste its full path.",
+  "guide.step.group.body": "Pick a computer as the group's home, tick the AIs and make one the secretary. A group needs 3 AIs to assign tasks (1 secretary + at least 2 working AIs, since assignee and reviewer must be different AIs); after creating the group, you can add a second working AI—even the same CLI twice with a different name and folder—via Add AI. Each AI needs its own empty work folder on that computer: paste its full path.",
   "guide.step.group.tip": "On macOS, drag the folder into a Terminal window to get its full path.",
   "guide.step.group.go": "Create a group",
   "guide.step.group.done": "Created \"{name}\"",
