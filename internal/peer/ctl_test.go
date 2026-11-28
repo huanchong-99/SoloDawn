@@ -187,6 +187,21 @@ func TestFinishEndsAfterWhatWasSent(t *testing.T) {
 	eq(t, err, io.EOF)
 }
 
+// Finish ends the connection within A9.4's 1 second also when the peer's
+// close never arrives: here the peer's ICE stops without a word, as Q1's
+// close never reached P1 in CI run 46086770739.
+func TestFinishEndsWithoutThePeersClose(t *testing.T) {
+	f := newPair(t)
+	n := f.open(t, 0)
+	check(t, n.client.pc.SCTP().Transport().ICETransport().Stop())
+	n.server.Finish()
+	select {
+	case <-n.server.Done():
+	case <-time.After(time.Second):
+		t.Fatal("the finished connection is still open after 1 second")
+	}
+}
+
 func waitQueued(t *testing.T, c *Connection, want int) {
 	t.Helper()
 	poll(t, 4*time.Second, fmt.Sprintf("%d queued frames", want), func() string {

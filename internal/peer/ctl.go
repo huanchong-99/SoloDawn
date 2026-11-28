@@ -58,9 +58,18 @@ func (c *Connection) Ready() <-chan struct{} { return c.ready }
 func (c *Connection) Done() <-chan struct{}  { return c.ctx.Done() }
 func (c *Connection) Close() error           { return c.close("closed") }
 
+// finishWait bounds how long a finished connection waits for its peer's
+// close, which may never arrive; a removed member's connections must close
+// within 1 second (A9.4).
+const finishWait = 500 * time.Millisecond
+
 // Finish closes ctl after everything sent on it has arrived; the connection
-// ends when the peer closes its side. Close drops what is still on its way.
-func (c *Connection) Finish() { c.dc.Close() }
+// ends when the peer closes its side, or this side finishWait later. Close
+// drops what is still on its way.
+func (c *Connection) Finish() {
+	c.dc.Close()
+	time.AfterFunc(finishWait, func() { c.Close() })
+}
 
 func (c *Connection) isClosed() bool { return c.ctx.Err() != nil }
 
