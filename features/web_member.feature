@@ -48,15 +48,15 @@ Feature: Member panel and adding an AI to a group
   Scenario: The folder list says which AI of the group has a folder, and a folder of another group cannot be chosen
     Given on "workstation" Claude Code of this group works in "/home/dev/website" and an AI of the group "Docs" in "/home/dev/notes"
     When the owner opens "Add AI" with "Claude Code · workstation" chosen
-    Then the folder shows "No folder chosen" with "Choose" and "Add AI" is disabled
+    Then the folder shows "/home/dev/website" with "Change", "Add AI" is enabled, and the dialog says the folder is shared with Claude Code and takes one task at a time
     When the owner opens its folder list
     Then "/home/dev/website" is pre-highlighted and says "Claude Code works here too", and "/home/dev/notes" cannot be chosen and says "Taken by the group Docs"
     When the owner closes the list without confirming
-    Then the folder still shows "No folder chosen" with "Choose"
+    Then the folder still shows "/home/dev/website" with "Change"
     When the owner reopens its folder list, types "/home/dev/notes" as another folder and takes it
-    Then the list says "This folder belongs to the group Docs. Choose another one." and the folder stays "No folder chosen"
+    Then the list says "This folder belongs to the group Docs. Choose another one." and the folder stays "/home/dev/website"
     When the owner clears the typed folder and presses "Use this folder"
-    Then the folder shows "/home/dev/website" with "Change", "Add AI" is enabled, and the dialog says the folder is shared with Claude Code and takes one task at a time
+    Then the folder list closes and the folder stays "/home/dev/website" with "Change"
 
   Scenario: A group is created with a person and two AIs, each in its folder, the first AI the secretary
     Given "Mina" is in the group "Website" on "workstation", and a second computer "laptop" is connected
@@ -125,7 +125,7 @@ Feature: Member panel and adding an AI to a group
 
   Scenario: A new AI follows the computer's defaults
     Given on "workstation" Claude Code has defaults "Opus", "high", More and "Go backend" and is not in the group yet
-    When the owner opens "Add AI" and chooses "Claude Code · workstation"
+    When the owner opens "Add AI", sees "No folder chosen" on "Claude Code · workstation", and confirms its folder
     Then the switch "Use this computer's defaults" is on, with "Opus · high · Work share More · Go backend" under it
     And no model, level or work share field is shown
     When the owner submits the add-AI dialog
