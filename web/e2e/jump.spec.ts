@@ -170,3 +170,35 @@ test('follows new messages after a jump to one at the end of the line', async ()
     expect(Math.abs(await offset(page))).toBeLessThanOrEqual(1);
   }
 });
+
+test('reaches the latest message when Back to the latest is clicked while an older page arrives', async () => {
+  const page = await open('no-preference', '');
+  await page.locator('.scroller .msg').last().waitFor();
+  await page.evaluate(() => {
+    const scroller = document.querySelector('.scroller')!;
+    scroller.scrollTo({ top: scroller.clientHeight - scroller.scrollHeight, behavior: 'instant' });
+  });
+  await expect.poll(() => atTop(page), { timeout: 8_000 }).toBe(true);
+  await page.locator('.latest').waitFor();
+  await expect.poll(() => page.evaluate(() => window.jumpCast.waiting())).toBe(1);
+  await page.locator('.latest').click();
+  const oldest = await page.evaluate(() => window.jumpCast.release());
+  await page.locator(`#m-${oldest}`).waitFor({ state: 'attached' });
+  await expect.poll(async () => Math.abs(await offset(page))).toBeLessThanOrEqual(1);
+  await expect.poll(() => page.locator('.latest').count()).toBe(0);
+});
+
+test('scrolls back to the latest when own message arrives while scrolled up', async () => {
+  const page = await open('no-preference', '');
+  await page.locator('.scroller .msg').last().waitFor();
+  await page.evaluate(() => {
+    const scroller = document.querySelector('.scroller')!;
+    scroller.scrollTo({ top: -400, behavior: 'instant' });
+  });
+  await expect.poll(() => offset(page)).toBeLessThan(-300);
+  await page.locator('.latest').waitFor();
+  const id = await page.evaluate(() => window.jumpCast.arrive());
+  await page.locator(`#m-${id}`).waitFor({ state: 'attached' });
+  await expect.poll(async () => Math.abs(await offset(page))).toBeLessThanOrEqual(1);
+  await expect.poll(() => page.locator('.latest').count()).toBe(0);
+});

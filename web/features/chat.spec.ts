@@ -121,7 +121,29 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
   Scenario(
     'A mention is completed from the members and named in the post',
-    ({ When, Then, And }) => {
+    ({ Given, When, Then, And }) => {
+      Given('the group has "Secretary" as its secretary', () => {
+        home.write(
+          website,
+          example('row-member-ai', {
+            id: group.info!.secretary!,
+            name: 'Secretary',
+            cli: 'claude',
+            secretary: true,
+          }),
+        );
+        flushSync();
+      });
+      When('the person starts a mention', async () => {
+        one<HTMLButtonElement>('.composer button[aria-label="Mention a person or an AI"]').click();
+        await vi.waitFor(() => {
+          flushSync();
+          expect(all('[role=option]')).toHaveLength(3);
+        });
+      });
+      Then('the composer offers "Secretary", "Claude Code" and "Codex" without "Alex"', () => {
+        expect(texts('[role=option] .cut')).toEqual(['Secretary', 'Claude Code', 'Codex']);
+      });
       When('the person types "ask @c"', () => type('ask @c'));
       Then('the composer offers "Claude Code" and "Codex"', () => {
         expect(texts('[role=option] .cut')).toEqual(['Claude Code', 'Codex']);
@@ -485,6 +507,101 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(field().value).toBe('hello');
         expect(texts('.msg .text')).toEqual([]);
       });
+    },
+  );
+
+  const trackScroll = () => {
+    const scroller = one('.scroller');
+    const calls: ScrollToOptions[] = [];
+    scroller.scrollTo = ((opts?: ScrollToOptions) => {
+      calls.push(opts ?? {});
+      scroller.scrollTop = opts?.top ?? 0;
+      scroller.dispatchEvent(new Event('scroll'));
+    }) as typeof scroller.scrollTo;
+    return { scroller, calls };
+  };
+
+  const scrollUp = (scroller: HTMLElement, top = -400) => {
+    scroller.scrollTop = top;
+    scroller.dispatchEvent(new Event('scroll'));
+    flushSync();
+  };
+
+  Scenario(
+    'New messages from others mark New messages only when scrolled back, and Back to the latest jumps immediately',
+    ({ When, Then }) => {
+      let scroller: HTMLElement;
+      let calls: ScrollToOptions[];
+
+      When('"Codex" writes "Checking in" while the reader is at the latest message', () => {
+        ({ scroller, calls } = trackScroll());
+        home.say(website, 'codex', 'Checking in');
+        flushSync();
+      });
+      Then('"New messages" is not shown and the main line stays at the latest', () => {
+        expect(all('.latest')).toEqual([]);
+        expect(calls).toEqual([]);
+        expect(scroller.scrollTop).toBe(0);
+      });
+      When('the reader scrolls up and "Codex" writes "New update"', () => {
+        scrollUp(scroller);
+        expect(texts('.latest')).toEqual(['Back to the latest']);
+        home.say(website, 'codex', 'New update');
+        flushSync();
+      });
+      Then('the main line stays scrolled up and shows "New messages"', () => {
+        expect(scroller.scrollTop).toBe(-400);
+        expect(calls).toEqual([]);
+        expect(texts('.latest')).toEqual(['New messages']);
+        expect(all('.latest .dot')).toHaveLength(1);
+      });
+      When('the reader presses "New messages"', () => {
+        one<HTMLButtonElement>('.latest').click();
+        flushSync();
+      });
+      Then(
+        'the main line jumps immediately to the latest, hides the button and takes focus',
+        () => {
+          expect(calls).toEqual([{ top: 0, behavior: 'auto' }]);
+          expect(scroller.scrollTop).toBe(0);
+          expect(all('.latest')).toEqual([]);
+          expect(document.activeElement).toBe(scroller);
+        },
+      );
+    },
+  );
+
+  Scenario(
+    'Sending your own message while scrolled up returns to the latest without stealing focus',
+    ({ Given, When, Then }) => {
+      let scroller: HTMLElement;
+      let calls: ScrollToOptions[];
+
+      Given('the reader is scrolled up after "Codex" wrote "Earlier update"', () => {
+        ({ scroller, calls } = trackScroll());
+        scrollUp(scroller);
+        home.say(website, 'codex', 'Earlier update');
+        flushSync();
+        expect(texts('.latest')).toEqual(['New messages']);
+      });
+      When('the person focuses the composer, writes "On my way" and sends it', async () => {
+        field().focus();
+        type('On my way');
+        send();
+        await settled(1);
+      });
+      Then(
+        'the main line scrolls immediately to the latest, clears the new-messages state and keeps focus in the composer',
+        () => {
+          expect(calls).toEqual([{ top: 0, behavior: 'auto' }]);
+          expect(scroller.scrollTop).toBe(0);
+          expect(all('.latest')).toEqual([]);
+          expect(document.activeElement).toBe(field());
+          scrollUp(scroller);
+          expect(texts('.latest')).toEqual(['Back to the latest']);
+          expect(all('.latest .dot')).toEqual([]);
+        },
+      );
     },
   );
 });

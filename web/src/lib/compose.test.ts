@@ -5,6 +5,7 @@ import {
   fill,
   jsonBytes,
   matching,
+  mentionable,
   mentioned,
   nearLimit,
   parts,
@@ -51,6 +52,31 @@ describe('matching', () => {
     expect(matching(members, '')).toEqual(members);
     expect(matching(members, 'ode')).toEqual([]);
     expect(matching(members, 'x')).toEqual([]);
+  });
+});
+
+describe('mentionable', () => {
+  const alex = { id: 'a', name: 'Alex' };
+  const everyone = [alex, claude, claudeCode, codex, secretary];
+
+  it('excludes the writer and puts the secretary first, keeping the rest in order', () => {
+    expect(mentionable(everyone, 'a', 's')).toEqual([secretary, claude, claudeCode, codex]);
+  });
+
+  it('keeps the order of others when there is no writer or no secretary', () => {
+    expect(mentionable(everyone, undefined, 's')).toEqual([
+      secretary,
+      alex,
+      claude,
+      claudeCode,
+      codex,
+    ]);
+    expect(mentionable(everyone, 'a', undefined)).toEqual([claude, claudeCode, codex, secretary]);
+    expect(mentionable(everyone, 'a', 'missing')).toEqual([claude, claudeCode, codex, secretary]);
+  });
+
+  it('still excludes the writer if their id matches the secretary id', () => {
+    expect(mentionable(everyone, 's', 's')).toEqual([alex, claude, claudeCode, codex]);
   });
 });
 

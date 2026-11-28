@@ -1,6 +1,5 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { prefersReducedMotion } from 'svelte/motion';
   import { MediaQuery } from 'svelte/reactivity';
   import { withoutInlineReplies } from '../../lib/call';
   import type { Group } from '../../lib/groups.svelte';
@@ -50,7 +49,8 @@
   // A group of people only has nobody to turn a request into a brief.
   const emptyBody = $derived(hasAI(group) ? 'chat.empty.body' : 'chat.empty.people');
   const workingCount = $derived(workingAis(group).length);
-  const newest = $derived(group.main.at(-1)?.id);
+  const newest = $derived(group.main.at(-1));
+  let lastSeenId = untrack(() => newest?.id);
   // Older messages may exist and cannot be had now: the home refused a page, or is not reachable.
   const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
   let scroller: HTMLElement;
@@ -80,8 +80,12 @@
     if (atEdge && paging.ready && group.home.ctl) untrack(() => void group.older());
   });
   $effect(() => {
-    void newest;
-    if (untrack(() => away)) unseen = true;
+    const msg = newest;
+    if (msg?.id === lastSeenId) return;
+    lastSeenId = msg?.id;
+    if (!msg) return;
+    if (group.me && msg.by === group.me.id) untrack(() => toLatest(false));
+    else if (untrack(() => away)) unseen = true;
   });
   // Opening a group moves keyboard focus to its main line, which then scrolls with the keys.
   $effect(() => scroller.focus({ preventScroll: true }));
@@ -91,10 +95,12 @@
     away = Math.abs(scroller.scrollTop) > 240;
     if (!away) unseen = false;
   }
-  function toLatest() {
+  function toLatest(focus = true) {
     release();
-    scroller.scrollTo({ top: 0, behavior: prefersReducedMotion.current ? 'auto' : 'smooth' });
-    scroller.focus({ preventScroll: true });
+    away = false;
+    unseen = false;
+    scroller.scrollTo({ top: 0, behavior: 'auto' });
+    if (focus) scroller.focus({ preventScroll: true });
   }
 </script>
 
@@ -194,7 +200,7 @@
 
   <div class="dock" inert={covered}>
     {#if away}
-      <button class="btn btn-sm latest" onclick={toLatest}>
+      <button class="btn btn-sm latest" onclick={() => toLatest()}>
         <Icon name="down" sm />{t(unseen ? 'chat.latest.new' : 'chat.latest')}
         {#if unseen}<i class="dot"></i>{/if}
       </button>
