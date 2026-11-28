@@ -2509,3 +2509,33 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: `deliver_test.go:1831: got 2, want 1` (PR #434, run 46074428110, macOS); about 2 in 100 runs locally with `-race`, on `rebuild` before the join-race fix as well.
 - Cause: `seedGroupAndMembers` returns once the attach's sync made the group live (`internal/host/deliver_test.go:416`), but that sync's `afterGroupState` starts on a goroutine after `finishGroupSync` (`internal/host/home_moved.go:83`). When it reached `followDefaults` (`internal/host/deliver.go`, end of `afterGroupState`) after the test had put the stale follower row and set the group live again, it sent one `member set`, and the test's own push sent the second. Two group-state events that each see a stale follower each send one; the test counted the setup's.
 - Status: resolved on branch `fix/join-group-race`: the test settles the setup's background work (`settleDelivery`) before its first step.
+
+### 2026-11-28 · expectation mismatch · After a reassignment the secretary also mentioned the new assignee in the main line, and its group session asked for an owner's confirmation
+
+- Symptom: in the owner's single-machine test of v3.0.0-rc.2 the secretary reassigned a task with `set_task`; the new assignee got the `assign` item with the brief and did the task in its task session. The secretary also posted a main-line message that mentioned the assignee. After the task turn ended, a fresh group session of that AI read the mention and posted that the hand-over needed its owner's confirmation and that it had no brief: to the owner the task looked stuck although it was done.
+- Cause: nothing told the secretary that `set_task` already delivers the task; its "say what you decide" line (`internal/host/instructions/secretary.md:28` before the fix) asks for a post on every reassignment. A mention from an AI is `information` (`mentionInstruct`, `internal/host/turn_info.go:44-52`), and `internal/host/instructions/group.md:10` tells a session to say that such an item needs its owner; a group session was not told that its tasks run in their own sessions.
+- Status: resolved on branch `y2/ai-voice`, by wording only; the authority label is unchanged. `secretary.md:30` and the description of `set_task` (`internal/host/tools_sec.go:29`) say not to mention a new assignee or reviewer about the task; `group.md:20` says a message about a task that is already the AI's is not new work: it asks for no confirmation and does not start the task again. Goldens in `TestSessionInstructionsCoverEveryRole` and `TestSecToolDescriptionsSayHowTheyReachPeopleAndAIs`.
+
+### 2026-11-28 · expectation mismatch · AIs asked a person to decide with plain messages instead of a decision card
+
+- Symptom: same test. A working AI asked in the main line whether the owner agreed to a swap; the secretary asked whether to name a reviewer and which line to add, and asked the owner to edit a note it could not delete: all as chat messages, one of kind `question`, none as a card.
+- Cause: `request_decision` was listed to every session, the secretary's included (`internal/host/tools_sec.go:34`, no `For`), so no tool was missing. The instructions only said "to have a person choose, use `request_decision`", the secretary's did not say it at all, and `secretary.md:17` offered `post` with kind `question` for anything unclear.
+- Status: resolved on branch `y2/ai-voice`. Every role's instructions say that what needs a person's word (a choice, an agreement, an approval, a step only a person can take) goes as a decision card that names that person in `to`, never as a question in a message (`group.md:8`, `task.md:8`, `review.md:8`, `secretary.md:8`, `:19`, `:37`); the tool's description says the same. `TestSecretaryRaisesADecisionCardInTheMainLine` pins the card from the secretary's session.
+
+### 2026-11-28 · expectation mismatch · Messages to people used protocol and state words, and an AI called the secretary the person in charge
+
+- Symptom: same test. Messages to the owner said that a member's "state is busy", that its "state is takeover", and that "the current message is marked information". One AI called the secretary 负责人 (the person in charge), which the owner read as himself; the secretary is 秘书.
+- Cause: the instructions gave the turn's labels and the member states to the AIs and never said these are not words for people, nor what to call the secretary.
+- Status: resolved on branch `y2/ai-voice`: one line in every role's instructions (`group.md:11`, `task.md:11`, `review.md:11`, `secretary.md:11`).
+
+### 2026-11-28 · expectation mismatch · The secretary added an acceptance criterion nobody asked for and voided it after the brief was confirmed
+
+- Symptom: same test. The brief carried a criterion about a signature line in the commit message that the owner had not asked for. After the owner confirmed the brief, the secretary declared that criterion void and told him afterwards.
+- Cause: `internal/host/instructions/secretary.md` did not say whose the criteria are. A brief changes only by a new brief that the person confirms (`planning/contracts/step-2/labels.md` section 4, A9.13).
+- Status: resolved on branch `y2/ai-voice`: `secretary.md:21`.
+
+### 2026-11-28 · expectation mismatch · Completion messages in the main line led with hashes and gave only a shell command to open the result
+
+- Symptom: same test. The messages that told the owner a task was finished listed SHA-256 values, byte counts and how much temporary data was removed, and named the result only inside an `open` command.
+- Cause: the instructions said what a summary reports about the closing step (`secretary.md:31` before the fix) and nothing about who reads it; the report of `submit_task` was not asked for the path a person opens.
+- Status: resolved on branch `y2/ai-voice`: `secretary.md:35` (result first, full path as plain text, proof in the task's thread), `task.md:25-26`.

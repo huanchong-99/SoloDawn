@@ -26,13 +26,13 @@ func init() {
 		Call:        callProposeBrief,
 	})
 	Register(Tools, "set_task", Tool{
-		Description: "Assign a task's roles or pause, resume or cancel it.",
+		Description: "Assign a task's roles or pause, resume or cancel it. A new assignee or reviewer is given the task and its brief in the task's own session: do not also mention them about it.",
 		Schema:      setTaskSchema,
 		For:         onlySecretary,
 		Call:        callSetTask,
 	})
 	Register(Tools, "request_decision", Tool{
-		Description: "Raise a decision card for people in the group to choose.",
+		Description: "Raise a decision card for people in the group: a choice, an agreement, an approval, or a step only a person can take. Use it instead of asking in a message.",
 		Schema:      requestDecisionSchema,
 		Call:        callRequestDecision,
 	})
