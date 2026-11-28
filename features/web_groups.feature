@@ -135,3 +135,12 @@ Feature: Group list and group cache of the web client
     Then each has the switch on
     When the owner turns Codex's switch off and creates the group
     Then Claude Code's host.join carries follow, and Codex's carries its four fields and no follow
+
+  Scenario: Choosing a folder for one AI fills the others on that computer
+    Given the owner's computer "desk" has Claude Code and Codex, and "laptop" has Claude Code
+    When the owner ticks all three in the create-group dialog
+    Then "Create group" is disabled and explains that Claude Code needs a folder
+    When the owner chooses a folder for Claude Code on "desk"
+    Then Codex on "desk" uses that folder too, "laptop" still has no folder, and the reason names the AI on "laptop"
+    When the owner chooses a folder for the AI on "laptop"
+    Then "Create group" is enabled without a hint

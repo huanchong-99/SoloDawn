@@ -1005,4 +1005,107 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       },
     );
   });
+
+  Scenario(
+    'Choosing a folder for one AI fills the others on that computer',
+    ({ Given, When, Then }) => {
+      let deskRig: OwnedNode;
+      let laptopRig: OwnedNode;
+      const aiRows = () => all('dialog > form div.ai');
+      const submit = () => one<HTMLButtonElement>('dialog > form > footer .btn-primary');
+      const why = () => {
+        const id = submit().getAttribute('aria-describedby');
+        return id ? document.getElementById(id)?.textContent?.trim() : undefined;
+      };
+      const chooseFolder = async (row: Element) => {
+        row.querySelector<HTMLButtonElement>('.path-row .change')!.click();
+        flushSync();
+        await vi.waitFor(() =>
+          expect(
+            row.querySelector<HTMLButtonElement>('dialog[open] footer .btn-primary')?.disabled,
+          ).toBe(false),
+        );
+        row.querySelector<HTMLButtonElement>('dialog[open] footer .btn-primary')!.click();
+        flushSync();
+      };
+
+      Given(
+        'the owner\'s computer "desk" has Claude Code and Codex, and "laptop" has Claude Code',
+        async () => {
+          const base = p.decode(p.HostInfo, goldens['host-info-answer']);
+          deskRig = ownedNode('desk', 'desk-device', {
+            homes: [],
+            agents: [
+              {
+                ...base.agents[0],
+                agent: 'claude',
+                account: 'personal',
+                login_ok: true,
+                groups: [],
+              },
+              { ...base.agents[1], agent: 'codex', account: 'api_key', login_ok: true, groups: [] },
+            ],
+          });
+          laptopRig = ownedNode('laptop', 'laptop-device', {
+            homes: [],
+            agents: [
+              {
+                ...base.agents[0],
+                agent: 'claude',
+                account: 'personal',
+                login_ok: true,
+                groups: [],
+              },
+            ],
+          });
+          homes.push(deskRig.store, laptopRig.store);
+          await deskRig.connect();
+          await laptopRig.connect();
+        },
+      );
+
+      When('the owner ticks all three in the create-group dialog', async () => {
+        openPage();
+        one('.head button').click();
+        flushSync();
+        await vi.waitFor(() => expect(aiRows()).toHaveLength(3));
+        for (const row of aiRows()) {
+          row.querySelector<HTMLInputElement>('input[type=checkbox]')!.click();
+        }
+        flushSync();
+      });
+
+      Then('"Create group" is disabled and explains that Claude Code needs a folder', () => {
+        expect(submit().disabled).toBe(true);
+        expect(why()).toBe('Choose a folder for Claude Code first');
+      });
+
+      When('the owner chooses a folder for Claude Code on "desk"', async () => {
+        await chooseFolder(aiRows()[0]);
+      });
+
+      Then(
+        'Codex on "desk" uses that folder too, "laptop" still has no folder, and the reason names the AI on "laptop"',
+        () => {
+          expect(texts('dialog .ai-fields .path-row code')).toEqual([
+            '/home/dev/website',
+            '/home/dev/website',
+            'No folder chosen',
+          ]);
+          expect(submit().disabled).toBe(true);
+          expect(why()).toBe('Choose a folder for Claude Code 2 first');
+        },
+      );
+
+      When('the owner chooses a folder for the AI on "laptop"', async () => {
+        await chooseFolder(aiRows()[2]);
+      });
+
+      Then('"Create group" is enabled without a hint', () => {
+        expect(submit().disabled).toBe(false);
+        expect(submit().hasAttribute('aria-describedby')).toBe(false);
+        expect(why()).toBeUndefined();
+      });
+    },
+  );
 });

@@ -981,6 +981,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   Scenario(
     'The folder list says which AI of the group has a folder, and a folder of another group cannot be chosen',
     ({ Given, When, Then }) => {
+      function expectSharedWebsiteFolder() {
+        const btn = one<HTMLButtonElement>('dialog .path-row .change');
+        expect(read(one('dialog .path-row code'))).toBe('/home/dev/website');
+        expect(read(btn)).toBe('Change');
+        expect(btn.getAttribute('aria-label')).toBe('Change the folder of Claude Code 2');
+        expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(false);
+        expect(texts('dialog .folder .hint')).toEqual([
+          'Shared with Claude Code: the folder takes one task at a time.',
+        ]);
+      }
+
       Given(
         'on "workstation" Claude Code of this group works in "/home/dev/website" and an AI of the group "Docs" in "/home/dev/notes"',
         () => {
@@ -1000,16 +1011,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(2));
         await vi.waitFor(() => {
           flushSync();
-          expect(read(one('dialog .path-row code'))).toBe('No folder chosen');
+          expect(read(one('dialog .path-row code'))).toBe('/home/dev/website');
         });
       });
-      Then('the folder shows "No folder chosen" with "Choose" and "Add AI" is disabled', () => {
-        const btn = one<HTMLButtonElement>('dialog .path-row .change');
-        expect(read(one('dialog .path-row code'))).toBe('No folder chosen');
-        expect(read(btn)).toBe('Choose');
-        expect(btn.getAttribute('aria-label')).toBe('Choose the folder of Claude Code 2');
-        expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(true);
-      });
+      Then(
+        'the folder shows "/home/dev/website" with "Change", "Add AI" is enabled, and the dialog says the folder is shared with Claude Code and takes one task at a time',
+        expectSharedWebsiteFolder,
+      );
       When('the owner opens its folder list', async () => {
         one<HTMLButtonElement>('dialog .path-row .change').click();
         await vi.waitFor(() => {
@@ -1041,11 +1049,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         one<HTMLButtonElement>('dialog dialog footer .btn-ghost').click();
         flushSync();
       });
-      Then('the folder still shows "No folder chosen" with "Choose"', () => {
+      Then('the folder still shows "/home/dev/website" with "Change"', () => {
         expect(all('dialog dialog')).toEqual([]);
-        expect(read(one('dialog .path-row code'))).toBe('No folder chosen');
-        expect(read(one('dialog .path-row .change'))).toBe('Choose');
-        expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(true);
+        expect(read(one('dialog .path-row code'))).toBe('/home/dev/website');
+        expect(read(one('dialog .path-row .change'))).toBe('Change');
+        expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(false);
       });
       When(
         'the owner reopens its folder list, types "/home/dev/notes" as another folder and takes it',
@@ -1062,13 +1070,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the list says "This folder belongs to the group Docs. Choose another one." and the folder stays "No folder chosen"',
+        'the list says "This folder belongs to the group Docs. Choose another one." and the folder stays "/home/dev/website"',
         () => {
           expect(texts('dialog dialog [role=alert]')).toEqual([
             'This folder belongs to the group Docs. Choose another one.',
           ]);
           expect(one<HTMLDialogElement>('dialog dialog').open).toBe(true);
-          expect(read(one('dialog .path-row code'))).toBe('No folder chosen');
+          expect(read(one('dialog .path-row code'))).toBe('/home/dev/website');
         },
       );
       When('the owner clears the typed folder and presses "Use this folder"', () => {
@@ -1077,20 +1085,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         one<HTMLButtonElement>('dialog dialog footer .btn-primary').click();
         flushSync();
       });
-      Then(
-        'the folder shows "/home/dev/website" with "Change", "Add AI" is enabled, and the dialog says the folder is shared with Claude Code and takes one task at a time',
-        () => {
-          expect(all('dialog dialog')).toEqual([]);
-          expect(read(one('dialog .path-row code'))).toBe('/home/dev/website');
-          const btn = one<HTMLButtonElement>('dialog .path-row .change');
-          expect(read(btn)).toBe('Change');
-          expect(btn.getAttribute('aria-label')).toBe('Change the folder of Claude Code 2');
-          expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(false);
-          expect(texts('dialog .folder .hint')).toEqual([
-            'Shared with Claude Code: the folder takes one task at a time.',
-          ]);
-        },
-      );
+      Then('the folder list closes and the folder stays "/home/dev/website" with "Change"', () => {
+        expect(all('dialog dialog')).toEqual([]);
+        expectSharedWebsiteFolder();
+      });
     },
   );
 
@@ -1647,7 +1645,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     };
   }
 
-  async function openAndPickWorkstationClaude() {
+  async function pickWorkstationClaude() {
     one<HTMLButtonElement>('.members .head button').click();
     flushSync();
     await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(2));
@@ -1657,6 +1655,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       claudeChoice.click();
       flushSync();
     }
+  }
+
+  async function openAndPickWorkstationClaude() {
+    await pickWorkstationClaude();
     await confirmFolder();
   }
 
@@ -1671,8 +1673,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       },
     );
-    When('the owner opens "Add AI" and chooses "Claude Code · workstation"', () =>
-      openAndPickWorkstationClaude(),
+    When(
+      'the owner opens "Add AI", sees "No folder chosen" on "Claude Code · workstation", and confirms its folder',
+      () => openAndPickWorkstationClaude(),
     );
     Then(
       'the switch "Use this computer\'s defaults" is on, with "Opus · high · Work share More · Go backend" under it',
@@ -1782,9 +1785,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'on "workstation" Claude Code has defaults "Opus", "high", More and "Go backend" and the group already has a Claude Code member from "workstation"',
         () => setWorkstationClaudeDefaults(),
       );
-      When('the owner opens "Add AI" and chooses "Claude Code · workstation"', () =>
-        openAndPickWorkstationClaude(),
-      );
+      When('the owner opens "Add AI" and chooses "Claude Code · workstation"', async () => {
+        await pickWorkstationClaude();
+        await vi.waitFor(() => {
+          flushSync();
+          expect(read(one('dialog .path-row code'))).toBe('/home/dev/website');
+          expect(read(one('dialog .path-row .change'))).toBe('Change');
+          expect(one('dialog .path-row .change').getAttribute('aria-label')).toBe(
+            'Change the folder of Claude Code 2',
+          );
+        });
+      });
       Then('the switch is off, with the note that a second one usually runs another model', () => {
         const sw = one<HTMLButtonElement>('dialog [role="switch"]');
         expect(sw.getAttribute('aria-checked')).toBe('false');

@@ -4,6 +4,7 @@
   import {
     candidatesOf,
     canMakeSecretary,
+    groupWorkspace,
     hasHostAgent,
     joinError,
     joinGroup,
@@ -58,6 +59,7 @@
   let draft = $state(newDraft());
   let follow = $state(false);
   let workspace = $state('');
+  let customWorkspace = $state(false);
 
   const candidates = $derived(candidatesOf(group, owned, nodes.infos));
   const selectable = $derived(selectableCandidates(candidates));
@@ -70,6 +72,17 @@
       chosen && chosen.agent !== 'external' && hasHostAgent(group, chosen.device, chosen.agent),
     ),
   );
+  const why = $derived.by(() => {
+    if (busy || !chosen) return undefined;
+    const cli = cliName(chosen.agent);
+    const label = name.trim() || cli;
+    if (!workspace) return t('groups.create.why.folder').replace('{ai}', () => label);
+    if (!name.trim()) return t('groups.create.why.name').replace('{ai}', () => cli);
+    if (!follow && tooLong(draft)) {
+      return t('groups.create.why.skills').replace('{ai}', () => label);
+    }
+    return undefined;
+  });
 
   function applyCandidate(candidate: Candidate) {
     chosen = candidate;
@@ -77,6 +90,7 @@
     follow =
       candidate.agent !== 'external' && !hasHostAgent(group, candidate.device, candidate.agent);
     draft = draftOf(defaultsOf(candidate.home, candidate.agent));
+    if (!customWorkspace) workspace = groupWorkspace(group, candidate.home, nodes.infos);
   }
 
   $effect(() => {
@@ -93,6 +107,7 @@
       taken = false;
       follow = false;
       workspace = '';
+      customWorkspace = false;
       draft = newDraft();
       nodes.sync(homes, true);
     });
@@ -111,8 +126,15 @@
     }
   });
 
+  // Fill the group's default folder if `nodes.infos` arrives after opening before the user picks one.
+  $effect(() => {
+    if (!open || !chosen || customWorkspace || workspace) return;
+    const fallback = groupWorkspace(group, chosen.home, nodes.infos);
+    if (fallback) workspace = fallback;
+  });
+
   function pickCandidate(candidate: Candidate) {
-    if (candidate !== chosen) workspace = '';
+    if (candidate.home !== chosen?.home) customWorkspace = false;
     applyCandidate(candidate);
     if (!customName) name = suggestedName(group, candidate.agent, secretary);
   }
@@ -225,7 +247,13 @@
           ai={name.trim() || cliName(chosen.agent)}
           computer={chosen.hostName}
           {group}
-          bind:workspace
+          bind:workspace={
+            () => workspace,
+            (path) => {
+              customWorkspace = true;
+              workspace = path;
+            }
+          }
         />
       </div>
     {/if}
@@ -301,6 +329,7 @@
         <Failure code={failed.code} />
       {/if}
     {/if}
+    {#if why}<p id={`${uid}-why`} class="hint">{why}</p>{/if}
     <footer class="row">
       <span class="grow"></span>
       <button type="button" class="btn btn-ghost" onclick={() => dialog.close()}>
@@ -311,7 +340,9 @@
         disabled={busy ||
           (!chosen && !selectable.length) ||
           !workspace ||
+          !name.trim() ||
           (!follow && tooLong(draft))}
+        aria-describedby={why ? `${uid}-why` : undefined}
       >
         {t('member.join.submit')}
       </button>

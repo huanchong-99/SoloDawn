@@ -44,5 +44,8 @@
   "groups.create.person.error.conflict": "已经在群里，或者这个名字被占用了。",
   "groups.create.submit": "创建",
   "groups.create.cancel": "取消",
+  "groups.create.why.folder": "先给 {ai} 选文件夹",
+  "groups.create.why.name": "先填 {ai} 的名字",
+  "groups.create.why.skills": "先缩短 {ai} 的「擅长什么」",
   "groups.missing": "还没有读到这个群。连上它所在的那台电脑后才能读到。"
 }

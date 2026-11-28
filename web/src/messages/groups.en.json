@@ -44,5 +44,8 @@
   "groups.create.person.error.conflict": "Already in the group, or the name is taken.",
   "groups.create.submit": "Create group",
   "groups.create.cancel": "Cancel",
+  "groups.create.why.folder": "Choose a folder for {ai} first",
+  "groups.create.why.name": "Enter a name for {ai} first",
+  "groups.create.why.skills": "Shorten what {ai} is good at first",
   "groups.missing": "This group has not been read yet. It is read once the computer that is its home can be reached."
 }
