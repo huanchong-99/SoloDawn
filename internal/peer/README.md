@@ -67,7 +67,9 @@ the channel handlers are the caller's.
   candidate, `direct` for any other pair and `""` while none is selected. `PathChanged` signals
   that it may have changed.
 - **Finish.** `Finish` closes `ctl`; the connection ends when the peer closes its side, or this
-  side 500 ms later, since the peer's close may never arrive.
+  side once the peer has acknowledged nothing more of what was sent for 500 ms (checked every
+  50 ms), since the peer's close may never arrive. A peer that still acknowledges keeps the
+  connection, however long the whole takes.
 - **Close.** `Close` waits, under the `Peer` lock, for pion to free the mux, so no callback that
   takes the `Peer` lock may run inside `Close`.
 - **Locks.** The `Peer` lock covers its own decisions only. It is never held while `known`, `paths`,
