@@ -202,6 +202,19 @@ describe('First-run guide overlap auto-collapse E2E', () => {
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await page.locator('.composer .send').waitFor();
+      if (width === 1440) {
+        const pill = page.locator('.guide-pill.over-chat');
+        await pill.waitFor();
+        await poll(() => page.locator('#chat-side .member').count()).toBeGreaterThanOrEqual(3);
+        const padBottom = await page.locator('#chat-side').evaluate((el) => {
+          const bottom = parseFloat(getComputedStyle(el).paddingBottom);
+          el.scrollTo({ top: el.scrollHeight, behavior: 'instant' });
+          return bottom;
+        });
+        expect(padBottom).toBeGreaterThanOrEqual(76);
+        await expectAllDisjoint(pill, page.locator('#chat-side .member').last());
+        await expectAllDisjoint(pill, page.locator('#chat-side > section').last());
+      }
       for (const [chatWidth, chatHeight] of [
         [768, 900],
         [1024, 768],
