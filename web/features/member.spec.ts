@@ -114,7 +114,10 @@ function makeNode(
       }
       async function hostInfo() {
         await new Promise((later) => setTimeout(later));
-        const base = p.decode(p.HostInfo, goldens['host-info-answer']);
+        const { permissions: _permissions, ...base } = p.decode(
+          p.HostInfo,
+          goldens['host-info-answer'],
+        );
         const { device, agents, homes = base.homes } = node;
         return { ...base, re: (seq += 1), device, name, agents, homes };
       }

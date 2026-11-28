@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
   import { offeredAccounts } from '../driver/driver';
+  import Permit from '../permit/Permit.svelte';
   import { accountLabel, cliName, type PairingSession, type Stage } from '../../lib/onboard.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
@@ -146,6 +147,15 @@
     </p>
   {/if}
 </section>
+
+<Permit
+  name={session.node?.name ?? ''}
+  os={session.node?.os ?? ''}
+  relayed={session.path?.kind === 'relay'}
+  permissions={session.permissions}
+  ask={(body) => session.permit(body)}
+  open
+/>
 
 {#each session.agents ?? [] as item (item.agent)}
   {@const label = cliName(item.agent)}

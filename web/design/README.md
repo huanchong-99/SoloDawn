@@ -273,28 +273,32 @@ whose opacity changes. `base.css` holds the one `prefers-reduced-motion: reduce`
 `--ease` is for a change of state, `--ease-out` for an arrival, `--ease-in` for an exit,
 `--spring` for what a person moved and for counts.
 
-| What                                                     | How                                                                                                  |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| A message that arrives while the chat is open            | fade, rise 8 px and scale from 0.98, from its own side                                               |
-| Messages on open and on paging                           | no animation                                                                                         |
-| A card whose state changes in view                       | the new pill lands with the spring (`data-changed`)                                                  |
-| A count                                                  | lands with the spring each time it changes                                                           |
-| The group list reorders                                  | `flip`, 240 ms                                                                                       |
-| A chip of the waiting strip                              | fade and scale from 0.96                                                                             |
-| An AI at work                                            | a dot that breathes, the one motion that loops                                                       |
-| The panel over the chat below 1024 px                    | slides in over a scrim in 320 ms, out in 140 ms                                                      |
-| A dialog; a sheet on a phone                             | fade and scale from 0.97; up from the bottom edge                                                    |
-| A menu, the stop panel, the mention list                 | fade and scale from 0.96 from the trigger's corner, 160 ms                                           |
-| A notice                                                 | down from the top, fades out in 140 ms                                                               |
-| A task stage advances                                    | its segment fills from the left                                                                      |
-| The send button can send                                 | its glyph lands with the spring                                                                      |
-| A disclosure                                             | the chevron turns                                                                                    |
-| A pairing step is done                                   | its tick lands with the spring                                                                       |
-| The welcome horizon, steps and guide dock                | horizon sweeps from left; steps stagger; dock fades and lifts; pill and sheet toggle scale from 0.96 |
-| A guide step finishes or all five complete               | tick scales in with the spring; segment fills from left; finish horizon sweeps from left             |
-| The guide beacon                                         | ring enters from 1.04 scale and pulses out to 1.12 twice, then fades                                 |
-| The closed-guide note                                    | fades and lifts from the dock corner, fades out in 140 ms                                            |
-| Page change, theme and language, press, logo, focus ring | as `web/README.md` (Motion) says                                                                     |
+| What                                                     | How                                                                                                                                                                                      |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A message that arrives while the chat is open            | fade, rise 8 px and scale from 0.98, from its own side                                                                                                                                   |
+| Messages on open and on paging                           | no animation                                                                                                                                                                             |
+| A card whose state changes in view                       | the new pill lands with the spring (`data-changed`)                                                                                                                                      |
+| A count                                                  | lands with the spring each time it changes                                                                                                                                               |
+| The group list reorders                                  | `flip`, 240 ms                                                                                                                                                                           |
+| A chip of the waiting strip                              | fade and scale from 0.96                                                                                                                                                                 |
+| An AI at work                                            | a dot that breathes, the one motion that loops                                                                                                                                           |
+| The panel over the chat below 1024 px                    | slides in over a scrim in 320 ms, out in 140 ms                                                                                                                                          |
+| A dialog; a sheet on a phone                             | fade and scale from 0.97; up from the bottom edge                                                                                                                                        |
+| A menu, the stop panel, the mention list                 | fade and scale from 0.96 from the trigger's corner, 160 ms                                                                                                                               |
+| A notice                                                 | down from the top, fades out in 140 ms                                                                                                                                                   |
+| A task stage advances                                    | its segment fills from the left                                                                                                                                                          |
+| The send button can send                                 | its glyph lands with the spring                                                                                                                                                          |
+| A disclosure                                             | the chevron turns                                                                                                                                                                        |
+| A pairing step is done                                   | its tick lands with the spring                                                                                                                                                           |
+| The welcome horizon, steps and guide dock                | horizon sweeps from left; steps stagger; dock fades and lifts; pill and sheet toggle scale from 0.96                                                                                     |
+| A guide step finishes or all five complete               | tick scales in with the spring; segment fills from left; finish horizon sweeps from left                                                                                                 |
+| The guide beacon                                         | ring enters from 1.04 scale and pulses out to 1.12 twice, then fades                                                                                                                     |
+| The closed-guide note                                    | fades and lifts from the dock corner, fades out in 140 ms                                                                                                                                |
+| A permission is allowed                                  | its tick lands with the spring (scale 0.6 → 1, `--dur-4`, `--spring`); line with `appear`; badge swaps with `.swap`; coach leaves at once                                                |
+| A permission coach opens                                 | `appear` (fade and rise `--rise`, `--dur-2`, `--ease-out`)                                                                                                                               |
+| The alert sketch                                         | a 2 px `--sky` ring around the "Allow" pill pulses twice (scale 1 → 1.25, opacity 0.5 → 0, 900 ms, `--ease-out`, 300 ms after the coach), then stays still                               |
+| The drag sketch                                          | a copy of the app tile rises from the panel into the list (1.4 s, `--ease`), the new list line fades in green; twice, then still. It plays again when the coach is hovered or gets focus |
+| Page change, theme and language, press, logo, focus ring | as `web/README.md` (Motion) says                                                                                                                                                         |
 
 What leaves the page through a Svelte block (a menu, a list, a pill) leaves at once: the test
 DOM never ends an exit transition, so only the notices and the confirm cards over the terminal,

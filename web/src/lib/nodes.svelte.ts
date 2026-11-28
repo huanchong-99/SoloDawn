@@ -229,6 +229,12 @@ export class Nodes {
     return this.#read(home, home.ctl!, true);
   }
 
+  /** Asks the online owner node `home` to probe permissions, open Settings, or check a folder. */
+  permit(home: Home, body: Omit<p.HostPermitRequest, 't' | 'id'> = {}) {
+    const ctl = home.ctl;
+    return ctl ? ctl.request({ t: 'host.permit', ...body }).catch(lost) : Promise.resolve(lost());
+  }
+
   /** Applies a pushed `host.info` frame from `home` when its owner connection is online. */
   receive(home: Home, info: p.HostInfoPush) {
     if (home.owner && home.ctl) this.#apply(home, home.ctl, info);

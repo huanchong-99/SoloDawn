@@ -1,12 +1,15 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import type { Group, Home } from '../../lib/groups.svelte';
+  import { joinError } from '../../lib/members';
   import { nodes, type Folder } from '../../lib/nodes.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { names } from '../../lib/stop';
   import { now, shortWhen } from '../../lib/when';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
+  import FolderGate from '../permit/FolderGate.svelte';
+  import { gate } from '../permit/permit.svelte.ts';
 
   /** The folder an AI works in (contracts/local.md section 7): a row that says which, and a dialog
    *  over the dialog that lists the folders its CLI was used in on its computer, newest first, and
@@ -39,6 +42,9 @@
   let picked = $state('');
   let typed = $state('');
   let refused = $state('');
+  const folderGate = gate();
+
+  $effect(() => () => folderGate.reset());
 
   /** The newest folder that no other group has: the list comes newest first. */
   const newest = (list: Folder[]) => list.find((folder) => !folder.other)?.path ?? '';
@@ -70,32 +76,47 @@
     picked = workspace || newest(folders ?? []);
     typed = folders?.some((folder) => folder.path === workspace) ? '' : workspace;
     refused = '';
+    folderGate.reset();
     choosing = true;
     await tick();
     dialog!.showModal();
   }
 
   function close() {
+    folderGate.reset();
     dialog?.close();
     choosing = false;
   }
 
   /** Takes the folder typed, else the one ticked; a folder of another group is refused here. */
-  function use() {
+  async function use() {
     const path = typed.trim() || picked;
     const other = nodes.holder(home, path, group).other;
-    if (other) refused = t('member.folder.taken').replace('{group}', () => other);
-    else if (path) {
-      workspace = path;
-      close();
+    if (other) {
+      refused = t('member.folder.taken').replace('{group}', () => other);
+      return;
     }
+    if (!path || folderGate.busy) return;
+    refused = '';
+    if (nodes.infos.get(home)?.permissions) {
+      const outcome = await folderGate.check((body) => nodes.permit(home, body), path);
+      if (outcome.kind === 'ok') {
+        workspace = path;
+        close();
+      } else if (outcome.kind === 'error') {
+        refused = joinError(outcome.err) ?? `${t('chat.error.other')} ${outcome.err.code}`;
+      }
+      return;
+    }
+    workspace = path;
+    close();
   }
 
   // Enter in the field takes the folder: the dialog sits in another dialog's form.
   function enter(event: KeyboardEvent) {
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    use();
+    void use();
   }
 
   const named = (name: string) => ({ name });
@@ -133,7 +154,10 @@
     bind:this={dialog}
     class="dlg"
     aria-labelledby={`${uid}-title`}
-    onclose={() => (choosing = false)}
+    onclose={() => {
+      folderGate.reset();
+      choosing = false;
+    }}
   >
     <div class="body">
       <header>
@@ -159,6 +183,10 @@
                 value={folder.path}
                 disabled={Boolean(folder.other)}
                 bind:group={picked}
+                onchange={() => {
+                  refused = '';
+                  folderGate.reset();
+                }}
               />
               <Icon name="folder" sm />
               <span class="grow">
@@ -192,10 +220,25 @@
           autocapitalize="off"
           spellcheck="false"
           onkeydown={enter}
-          oninput={() => (refused = '')}
+          oninput={() => {
+            refused = '';
+            folderGate.reset();
+          }}
         />
       </label>
       {#if refused}<p class="fail" role="alert">{refused}</p>{/if}
+      <FolderGate
+        state={folderGate.value}
+        {computer}
+        onsettings={() => {
+          folderGate.openedSettings();
+          void nodes.permit(home, { open: 'folders' });
+        }}
+        onall={() => {
+          void nodes.permit(home, { open: 'full_disk', lang: prefs.lang });
+        }}
+        onretry={() => void use()}
+      />
       <footer class="row">
         <span class="grow"></span>
         <button type="button" class="btn btn-ghost" onclick={close}>
@@ -204,9 +247,10 @@
         <button
           type="button"
           class="btn btn-primary"
-          disabled={!typed.trim() && !picked}
-          onclick={use}
+          disabled={folderGate.busy || (!typed.trim() && !picked)}
+          onclick={() => void use()}
         >
+          {#if folderGate.busy}<span class="spin" aria-hidden="true"></span>{/if}
           {t('member.folder.use')}
         </button>
       </footer>
@@ -273,5 +317,23 @@
   .fail {
     color: var(--danger);
     font-size: var(--fs-sm);
+  }
+  .spin {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+    border-top-color: currentColor;
+    flex: none;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .spin {
+      animation: gate-spin 1s linear infinite;
+    }
+  }
+  @keyframes gate-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

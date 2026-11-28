@@ -766,4 +766,35 @@ describe('Nodes', () => {
     expect(store.infos.get(owner)).toStrictEqual(push);
     expect(seenHomes).toEqual([]);
   });
+
+  it('sends host.permit with optional fields, returns answers, and turns disconnects/offline into lost', async () => {
+    const store = new Nodes();
+    const home = new Home(me);
+    const { asked, link } = connectHome(home, { owner: true, device: deviceId });
+
+    const bare = store.permit(home);
+    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    expect(asked[0].req).toStrictEqual({ t: 'host.permit' });
+    asked[0].answer({ re: 1, ok: true });
+    expect(await bare).toStrictEqual({ re: 1, ok: true });
+
+    const open = store.permit(home, { open: 'full_disk', lang: 'zh-CN' });
+    await vi.waitFor(() => expect(asked).toHaveLength(2));
+    expect(asked[1].req).toStrictEqual({
+      t: 'host.permit',
+      open: 'full_disk',
+      lang: 'zh-CN',
+    });
+    const refusal = { re: 2, err: { code: 'permission', msg: 'denied' } } as const;
+    asked[1].answer(refusal);
+    expect(await open).toStrictEqual(refusal);
+
+    const dropped = store.permit(home, { path: '/Users/me/site' });
+    await vi.waitFor(() => expect(asked).toHaveLength(3));
+    expect(asked[2].req).toStrictEqual({ t: 'host.permit', path: '/Users/me/site' });
+    asked[2].fail();
+    link.offline();
+    expect(await dropped).toStrictEqual(lost());
+    expect(await store.permit(home)).toStrictEqual(lost());
+  });
 });

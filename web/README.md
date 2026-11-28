@@ -761,125 +761,128 @@ file in `src/routes/`. It edits neither the shell nor another area:
 
 ## Understand the implementation
 
-| Path                          | Role                                                                                |
-| ----------------------------- | ----------------------------------------------------------------------------------- |
-| `index.html`, `src/main.ts`   | entry: styles, then `boot` with the page's crypto, CSS, storage                     |
-| `src/lib/boot.ts`             | browser check, device key; mounts `App` or `Notice`                                 |
-| `src/lib/idbtx.ts`            | IndexedDB open, transaction and close for `solodawn` store `device`                 |
-| `src/lib/identity.ts`         | device key in IndexedDB, base64url, sign, verify, open                              |
-| `src/lib/devlog.ts`           | `DeviceLog`: apply, replay, valid devices, adoption                                 |
-| `src/lib/pairing.ts`          | pairing secret, room id, mac, pair message check                                    |
-| `src/lib/owner.ts`            | owner device log and node signalling URLs in IndexedDB                              |
-| `src/lib/join.ts`             | invitation reader, room pairing, log presentation, `join` and `home.add`            |
-| `src/lib/version.ts`          | hello protocol version 3                                                            |
-| `src/lib/onboard.svelte.ts`   | onboarding pairing session, `#pair=` capture, `agent.set`, CLI and account labels   |
-| `src/lib/payload.ts`          | the payload fields the envelope and log checks read                                 |
-| `src/lib/prefs.svelte.ts`     | theme, language and `preference`, their persistence, `t`                            |
-| `src/lib/guide.svelte.ts`     | five-step guide state, step derivation, and brand-new check                         |
-| `src/components/guide/`       | `Welcome`, `GuideDock` (pill + sheet), `GuideChip`, `GuideCard`, `beacon`, `mounts` |
-| `src/messages/texts.ts`       | the one loader of the texts: checks and merges the files                            |
-| `src/**/*.glob.ts`            | an `import.meta.glob` alone: the areas' texts and mounts                            |
-| `src/lib/route.svelte.ts`     | route table, `parse`, `href`, the page open, the way it went                        |
-| `src/lib/net.svelte.ts`       | where the homes come from: `sourceOf`, `start` (`mock` and `live`), `runTab` lock   |
-| `src/lib/mounts.svelte.ts`    | mounting points, `gather` of the areas' mounts, `card(kind)`                        |
-| `src/lib/motion.ts`           | `spring`, the curve of `--spring`; `shift`, the page cross-fade                     |
-| `src/lib/jump.ts`             | `jumpToMessage`: scroll, focus and hold `#m-<id>` or a task's thread; `release`     |
-| `src/lib/proto.ts`            | wire schemas and types, `decode`, the `Ctl` interface                               |
-| `src/lib/mock.ts`             | wire examples by name, their schemas, `mockCtl`                                     |
-| `src/lib/rendezvous.ts`       | signalling client: sign-in, pacing, the receiver's checks                           |
-| `src/lib/peer.ts`             | signalling paths, connections to nodes, `ctl`, path, reconnect                      |
-| `features/peer-fakes.ts`      | a peer connection and its channels for the tests of `peer.ts`                       |
-| `src/lib/groups.svelte.ts`    | `Home`, `Group`: row caches, cursor, paging, lists, commands                        |
-| `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`, invitation code       |
-| `src/lib/stop.ts`             | emergency stop: pause a group, which computers have their AIs offline               |
-| `src/lib/queue.ts`            | which of the person's messages wait for a busy AI; `jump`                           |
-| `src/lib/groupinfo.svelte.ts` | memory paging; `note`, `note_edit`, `forget`, `group set`                           |
-| `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                       |
-| `src/lib/system.ts`           | the words of a notice of the home, by its code                                      |
-| `src/lib/notify.svelte.ts`    | live in-page notification store, classification, dismissal and jump                 |
-| `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                         |
-| `src/lib/when.ts`             | times in the reader's language; messages by day                                     |
-| `src/lib/task.ts`             | task card derivations: badge, three-step bar, review and thread                     |
-| `src/lib/taskops.ts`          | what a person may do to a task, why it stands still, replies in its thread          |
-| `src/lib/call.ts`             | AI-to-AI call derivations: elapsed time, route, question and inline reply           |
-| `src/lib/terminal.svelte.ts`  | terminal takeover: commands, `pty` channel, `Takeover`, what the page shows         |
-| `src/lib/push.ts`             | Web Push capability, VAPID keys in IndexedDB, `PushManager`, `push` commands        |
-| `src/sw.ts`                   | service worker: `Reminder` push notifications and `notificationclick` card open     |
-| `src/App.svelte`              | shell: navigation, top bar, banners, the page of the route                          |
-| `src/Notice.svelte`           | the upgrade notice and the storage notice                                           |
-| `src/routes/`                 | one component per page; `Groups.svelte` is the list and a chat                      |
-| `src/routes/Join.svelte`      | invitation landing page, using the onboarding header and hero styles                |
-| `src/routes/dev/`             | `States.svelte`: the message examples, for a development server                     |
-| `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`, `Rich` (a text)    |
-| `src/components/groups/`      | the group list, the cards that wait, the create-group dialog                        |
-| `src/components/chat/`        | the chat of a group: main line, message, composer                                   |
-| `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`, with its menu and actions               |
-| `src/components/thread/`      | a task's thread and its composer, scored review block and system notices            |
-| `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line            |
-| `src/components/confirm/`     | `ConfirmCard.svelte`, mounted for kind `confirm`                                    |
-| `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel              |
-| `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                         |
-| `src/components/profile/`     | work share and usage block, owner editor, model-tier suggestion, profile fields     |
-| `src/components/model/`       | model/level fields, display and catalog refresh                                     |
-| `src/components/people/`      | invitation dialog and code card, role/removal actions and join form                 |
-| `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                        |
-| `src/components/groupinfo/`   | home, settings (order 19) and project memory (order 20) at `chat.side`              |
-| `src/components/preset/`      | style preset editor (`chat.side`, `order: 21`) and brief preset reader              |
-| `src/components/kb/`          | knowledge-base list, search and admin deletion (`chat.side`, `order: 22`)           |
-| `src/components/move/`        | owner's local export/import guidance (`chat.side`, `order: 30`)                     |
-| `src/components/terminal/`    | terminal session sidebar                                                            |
-| `src/components/watch/`       | receive-only watch channel, standalone request action and watcher stop controls     |
-| `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                        |
-| `src/components/stop/`        | "Stop AIs" and its panel, the paused notice, the offline banner and card strip      |
-| `src/components/queue/`       | `Waits.svelte`: a message waits for a busy AI, and can go first                     |
-| `src/components/notify/`      | live in-page notifications mounted at `layer`                                       |
-| `src/components/driver/`      | account types and terminal action offered by an AI's `driver`                       |
-| `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                             |
-| `src/components/reminder/`    | settings notifications card with iOS hint (`ReminderCard`), `ReminderSync` mount    |
-| `src/components/status/`      | other-tab notice mounted at `banner`                                                |
-| `src/styles/`                 | `tokens.css`, `base.css` and `onboarding.css` (shared pairing and join layout)      |
-| `public/`                     | manifest, icon and `fonts/`, copied as they are                                     |
-| `features/web.spec.ts`        | steps of `../features/web.feature`                                                  |
-| `features/shell.spec.ts`      | steps of `../features/web_shell.feature`; `fixtures/` stand-ins                     |
-| `features/groups.spec.ts`     | steps of `../features/web_groups.feature`                                           |
-| `features/chat.spec.ts`       | steps of `../features/web_chat.feature`                                             |
-| `features/status.spec.ts`     | steps of `../features/web_status.feature`                                           |
-| `features/task.spec.ts`       | steps of `../features/web_task.feature`                                             |
-| `features/taskops.spec.ts`    | steps of `../features/web_taskops.feature`                                          |
-| `features/profile.spec.ts`    | steps of `../features/web_profile.feature`                                          |
-| `features/model.spec.ts`      | steps of `../features/web_model.feature`                                            |
-| `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                           |
-| `features/call.spec.ts`       | steps of `../features/web_call.feature`                                             |
-| `features/confirm.spec.ts`    | steps of `../features/web_confirm.feature`                                          |
-| `features/member.spec.ts`     | steps of `../features/web_member.feature`                                           |
-| `features/people.spec.ts`     | steps of `../features/web_people.feature`                                           |
-| `features/people.test.ts`     | focused tests for member actions and the join page                                  |
-| `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                        |
-| `features/preset.spec.ts`     | steps of `../features/web_preset.feature`                                           |
-| `features/kb.spec.ts`         | steps of `../features/web_kb.feature`                                               |
-| `features/move.spec.ts`       | steps of `../features/web_move.feature`                                             |
-| `features/trust.spec.ts`      | steps of `../features/web_trust.feature`                                            |
-| `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                         |
-| `features/watch.spec.ts`      | steps of `../features/web_watch.feature`                                            |
-| `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                            |
-| `features/stop.spec.ts`       | steps of `../features/web_stop.feature`                                             |
-| `features/queue.spec.ts`      | steps of `../features/web_queue.feature`                                            |
-| `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                           |
-| `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                       |
-| `features/driver.spec.ts`     | steps of `../features/web_driver.feature`                                           |
-| `features/reminder.spec.ts`   | steps of `../features/web_reminder.feature` (A8.3 browser half)                     |
-| `features/guide.spec.ts`      | steps of `../features/web_guide.feature` (first-run guide scenarios G.1–G.8)        |
-| `features/a11y.spec.ts`       | steps of `../features/web_a11y.feature`                                             |
-| `features/home.ts`            | a home and an owned computer in memory for the steps; `page.ts` drives the page     |
-| `features/s2_cast.ts`         | the step 2 cast in a page, as `window.s2`                                           |
-| `features/demo.ts`            | groups with a morning of talk, for a development page                               |
-| `features/sim/`               | the world of `?demo`: computers, people, AIs and their scripts                      |
-| `features/watch.svelte.ts`    | an effect outside a component, for tests of what is reactive                        |
-| `features/shots.ts`           | screenshots of the pages from that demo, four widths                                |
-| `e2e/config.ts`               | end-to-end projects per engine, `launch`, the build of a run                        |
-| `e2e/nodes.ts`                | `startNet`: rendezvous and nodes per test, stop, teardown sweep                     |
-| `e2e/s2.spec.ts`              | the In the browser sentences of step 2, one page per person                         |
-| `features/e2e.ts`             | steps of `../features/web_e2e.feature`, run by `e2e/config.ts`                      |
+| Path                           | Role                                                                                |
+| ------------------------------ | ----------------------------------------------------------------------------------- |
+| `index.html`, `src/main.ts`    | entry: styles, then `boot` with the page's crypto, CSS, storage                     |
+| `src/lib/boot.ts`              | browser check, device key; mounts `App` or `Notice`                                 |
+| `src/lib/idbtx.ts`             | IndexedDB open, transaction and close for `solodawn` store `device`                 |
+| `src/lib/identity.ts`          | device key in IndexedDB, base64url, sign, verify, open                              |
+| `src/lib/devlog.ts`            | `DeviceLog`: apply, replay, valid devices, adoption                                 |
+| `src/lib/pairing.ts`           | pairing secret, room id, mac, pair message check                                    |
+| `src/lib/owner.ts`             | owner device log and node signalling URLs in IndexedDB                              |
+| `src/lib/join.ts`              | invitation reader, room pairing, log presentation, `join` and `home.add`            |
+| `src/lib/version.ts`           | hello protocol version 3                                                            |
+| `src/lib/onboard.svelte.ts`    | onboarding pairing session, `#pair=` capture, `agent.set`, CLI and account labels   |
+| `src/lib/payload.ts`           | the payload fields the envelope and log checks read                                 |
+| `src/lib/prefs.svelte.ts`      | theme, language and `preference`, their persistence, `t`                            |
+| `src/lib/guide.svelte.ts`      | five-step guide state, step derivation, and brand-new check                         |
+| `src/components/guide/`        | `Welcome`, `GuideDock` (pill + sheet), `GuideChip`, `GuideCard`, `beacon`, `mounts` |
+| `src/messages/texts.ts`        | the one loader of the texts: checks and merges the files                            |
+| `src/**/*.glob.ts`             | an `import.meta.glob` alone: the areas' texts and mounts                            |
+| `src/lib/route.svelte.ts`      | route table, `parse`, `href`, the page open, the way it went                        |
+| `src/lib/net.svelte.ts`        | where the homes come from: `sourceOf`, `start` (`mock` and `live`), `runTab` lock   |
+| `src/lib/mounts.svelte.ts`     | mounting points, `gather` of the areas' mounts, `card(kind)`                        |
+| `src/lib/motion.ts`            | `spring`, the curve of `--spring`; `shift`, the page cross-fade                     |
+| `src/lib/jump.ts`              | `jumpToMessage`: scroll, focus and hold `#m-<id>` or a task's thread; `release`     |
+| `src/lib/proto.ts`             | wire schemas and types, `decode`, the `Ctl` interface                               |
+| `src/lib/mock.ts`              | wire examples by name, their schemas, `mockCtl`                                     |
+| `src/lib/rendezvous.ts`        | signalling client: sign-in, pacing, the receiver's checks                           |
+| `src/lib/peer.ts`              | signalling paths, connections to nodes, `ctl`, path, reconnect                      |
+| `features/peer-fakes.ts`       | a peer connection and its channels for the tests of `peer.ts`                       |
+| `src/lib/groups.svelte.ts`     | `Home`, `Group`: row caches, cursor, paging, lists, commands                        |
+| `src/lib/members.ts`           | AI card status, path, candidate list, free name, `host.join`, invitation code       |
+| `src/lib/stop.ts`              | emergency stop: pause a group, which computers have their AIs offline               |
+| `src/lib/queue.ts`             | which of the person's messages wait for a busy AI; `jump`                           |
+| `src/lib/groupinfo.svelte.ts`  | memory paging; `note`, `note_edit`, `forget`, `group set`                           |
+| `src/lib/nodes.svelte.ts`      | connection indicator, `host.info` cache, `agent.set`, pairing                       |
+| `src/lib/system.ts`            | the words of a notice of the home, by its code                                      |
+| `src/lib/notify.svelte.ts`     | live in-page notification store, classification, dismissal and jump                 |
+| `src/lib/compose.ts`           | mention being typed, mentions and parts of a text, row size                         |
+| `src/lib/when.ts`              | times in the reader's language; messages by day                                     |
+| `src/lib/task.ts`              | task card derivations: badge, three-step bar, review and thread                     |
+| `src/lib/taskops.ts`           | what a person may do to a task, why it stands still, replies in its thread          |
+| `src/lib/call.ts`              | AI-to-AI call derivations: elapsed time, route, question and inline reply           |
+| `src/lib/terminal.svelte.ts`   | terminal takeover: commands, `pty` channel, `Takeover`, what the page shows         |
+| `src/lib/push.ts`              | Web Push capability, VAPID keys in IndexedDB, `PushManager`, `push` commands        |
+| `src/sw.ts`                    | service worker: `Reminder` push notifications and `notificationclick` card open     |
+| `src/App.svelte`               | shell: navigation, top bar, banners, the page of the route                          |
+| `src/Notice.svelte`            | the upgrade notice and the storage notice                                           |
+| `src/routes/`                  | one component per page; `Groups.svelte` is the list and a chat                      |
+| `src/routes/Join.svelte`       | invitation landing page, using the onboarding header and hero styles                |
+| `src/routes/dev/`              | `States.svelte`: the message examples, for a development server                     |
+| `src/components/`              | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`, `Rich` (a text)    |
+| `src/components/groups/`       | the group list, the cards that wait, the create-group dialog                        |
+| `src/components/chat/`         | the chat of a group: main line, message, composer                                   |
+| `src/components/task/`         | `TaskCard.svelte`, mounted for kind `task`, with its menu and actions               |
+| `src/components/thread/`       | a task's thread and its composer, scored review block and system notices            |
+| `src/components/call/`         | `CallBlock.svelte`, mounted for kind `call` in threads and the main line            |
+| `src/components/confirm/`      | `ConfirmCard.svelte`, mounted for kind `confirm`                                    |
+| `src/components/allow/`        | `AllowEditor.svelte`, lists and editor for each AI in the member panel              |
+| `src/components/member/`       | the chat's member panel (`chat.side`) and the add-AI dialog                         |
+| `src/components/profile/`      | work share and usage block, owner editor, model-tier suggestion, profile fields     |
+| `src/components/model/`        | model/level fields, display and catalog refresh                                     |
+| `src/components/people/`       | invitation dialog and code card, role/removal actions and join form                 |
+| `src/messages/people.*`        | English and Chinese invitation, member-action and join texts                        |
+| `src/components/groupinfo/`    | home, settings (order 19) and project memory (order 20) at `chat.side`              |
+| `src/components/preset/`       | style preset editor (`chat.side`, `order: 21`) and brief preset reader              |
+| `src/components/kb/`           | knowledge-base list, search and admin deletion (`chat.side`, `order: 22`)           |
+| `src/components/move/`         | owner's local export/import guidance (`chat.side`, `order: 30`)                     |
+| `src/components/terminal/`     | terminal session sidebar                                                            |
+| `src/components/watch/`        | receive-only watch channel, standalone request action and watcher stop controls     |
+| `src/components/nodes/`        | top-bar and phone-chat indicator, add-browser pairing dialog                        |
+| `src/components/stop/`         | "Stop AIs" and its panel, the paused notice, the offline banner and card strip      |
+| `src/components/queue/`        | `Waits.svelte`: a message waits for a busy AI, and can go first                     |
+| `src/components/notify/`       | live in-page notifications mounted at `layer`                                       |
+| `src/components/driver/`       | account types and terminal action offered by an AI's `driver`                       |
+| `src/components/pairing/`      | onboarding status and CLI account cards, `#pair=` mount                             |
+| `src/components/permit/`       | macOS permissions guide card, sketches, onboarding OS note and folder dialog gate   |
+| `src/messages/permit.*`        | English and Chinese permission guide and folder gate texts                          |
+| `src/components/reminder/`     | settings notifications card with iOS hint (`ReminderCard`), `ReminderSync` mount    |
+| `src/components/status/`       | other-tab notice mounted at `banner`                                                |
+| `src/styles/`                  | `tokens.css`, `base.css` and `onboarding.css` (shared pairing and join layout)      |
+| `public/`                      | manifest, icon and `fonts/`, copied as they are                                     |
+| `features/web.spec.ts`         | steps of `../features/web.feature`                                                  |
+| `features/shell.spec.ts`       | steps of `../features/web_shell.feature`; `fixtures/` stand-ins                     |
+| `features/groups.spec.ts`      | steps of `../features/web_groups.feature`                                           |
+| `features/chat.spec.ts`        | steps of `../features/web_chat.feature`                                             |
+| `features/status.spec.ts`      | steps of `../features/web_status.feature`                                           |
+| `features/task.spec.ts`        | steps of `../features/web_task.feature`                                             |
+| `features/taskops.spec.ts`     | steps of `../features/web_taskops.feature`                                          |
+| `features/profile.spec.ts`     | steps of `../features/web_profile.feature`                                          |
+| `features/model.spec.ts`       | steps of `../features/web_model.feature`                                            |
+| `features/thread.spec.ts`      | steps of `../features/web_thread.feature`                                           |
+| `features/call.spec.ts`        | steps of `../features/web_call.feature`                                             |
+| `features/confirm.spec.ts`     | steps of `../features/web_confirm.feature`                                          |
+| `features/member.spec.ts`      | steps of `../features/web_member.feature`                                           |
+| `features/people.spec.ts`      | steps of `../features/web_people.feature`                                           |
+| `features/people.test.ts`      | focused tests for member actions and the join page                                  |
+| `features/groupinfo.spec.ts`   | steps of `../features/web_groupinfo.feature`                                        |
+| `features/preset.spec.ts`      | steps of `../features/web_preset.feature`                                           |
+| `features/kb.spec.ts`          | steps of `../features/web_kb.feature`                                               |
+| `features/move.spec.ts`        | steps of `../features/web_move.feature`                                             |
+| `features/trust.spec.ts`       | steps of `../features/web_trust.feature`                                            |
+| `features/terminal.spec.ts`    | steps of `../features/web_terminal.feature`                                         |
+| `features/watch.spec.ts`       | steps of `../features/web_watch.feature`                                            |
+| `features/nodes.spec.ts`       | steps of `../features/web_nodes.feature`                                            |
+| `features/stop.spec.ts`        | steps of `../features/web_stop.feature`                                             |
+| `features/queue.spec.ts`       | steps of `../features/web_queue.feature`                                            |
+| `features/notify.spec.ts`      | steps of `../features/web_notify.feature`                                           |
+| `features/onboarding.spec.ts`  | steps of `../features/web_onboarding.feature`                                       |
+| `features/permissions.spec.ts` | steps of `../features/web_permissions.feature` (WP.1–WP.9)                          |
+| `features/driver.spec.ts`      | steps of `../features/web_driver.feature`                                           |
+| `features/reminder.spec.ts`    | steps of `../features/web_reminder.feature` (A8.3 browser half)                     |
+| `features/guide.spec.ts`       | steps of `../features/web_guide.feature` (first-run guide scenarios G.1–G.8)        |
+| `features/a11y.spec.ts`        | steps of `../features/web_a11y.feature`                                             |
+| `features/home.ts`             | a home and an owned computer in memory for the steps; `page.ts` drives the page     |
+| `features/s2_cast.ts`          | the step 2 cast in a page, as `window.s2`                                           |
+| `features/demo.ts`             | groups with a morning of talk, for a development page                               |
+| `features/sim/`                | the world of `?demo`: computers, people, AIs and their scripts                      |
+| `features/watch.svelte.ts`     | an effect outside a component, for tests of what is reactive                        |
+| `features/shots.ts`            | screenshots of the pages from that demo, four widths                                |
+| `e2e/config.ts`                | end-to-end projects per engine, `launch`, the build of a run                        |
+| `e2e/nodes.ts`                 | `startNet`: rendezvous and nodes per test, stop, teardown sweep                     |
+| `e2e/s2.spec.ts`               | the In the browser sentences of step 2, one page per person                         |
+| `features/e2e.ts`              | steps of `../features/web_e2e.feature`, run by `e2e/config.ts`                      |
 
 Below 768 px the navigation is the bottom bar and the theme and language buttons of the top bar
 are hidden; both choices are on the settings page at every width.

@@ -3,7 +3,7 @@
 // stops them in an after-hook, which runs when the test fails or times out too.
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { createConnection, createServer, type AddressInfo } from 'node:net';
 import { delimiter, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -53,7 +53,7 @@ export async function setup(project: TestProject) {
   if (process.platform === 'win32') throw new Error('the harness stops processes by process group');
   // Short: on macOS a node's socket is <HOME>/Library/Application Support/solodawn/sock, and a
   // Unix socket path has at most 103 bytes. The system's temporary directory is too long there.
-  const root = await mkdtemp('/tmp/sd-');
+  const root = await realpath(await mkdtemp('/tmp/sd-'));
   const bin = await build(root).catch(async (error: unknown) => {
     await rm(root, { recursive: true, force: true });
     throw error;

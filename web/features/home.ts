@@ -360,8 +360,9 @@ export function ownedNode(
   const commands: p.Envelope[] = [];
   let drop = () => {};
 
+  const { permissions: _permissions, ...base } = p.decode(p.HostInfo, goldens['host-info-answer']);
   const info: p.HostInfo = {
-    ...p.decode(p.HostInfo, goldens['host-info-answer']),
+    ...base,
     device,
     name,
     ...overrides,
