@@ -283,7 +283,7 @@ func extPrepare(h *Host, ep *extPart, d *delivery, key aiGroupKey, ai aiInfo, ta
 		d.prependHeld(key, batch)
 		return proto.Handout{}, false, err
 	}
-	if gone := missingFolder(session); gone != "" {
+	if gone := missingFolder(h, session); gone != "" {
 		extFailStart(h, d, key, session, batch, gone)
 		return proto.Handout{}, false, nil
 	}

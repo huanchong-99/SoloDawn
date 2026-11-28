@@ -50,6 +50,7 @@ var (
 	ifaceAddrs        = net.InterfaceAddrs
 	installService    = InstallService
 	openURL           = openBrowserURL
+	openPermitOps     = newPermitOps
 	foregroundContext = func() (context.Context, context.CancelFunc) {
 		return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	}
@@ -154,6 +155,7 @@ type nodeRuntime struct {
 	host      *host.Host
 	saved     []host.Session
 	sessions  *Sessions
+	permit    *permitManager
 	pairer    *Pairer
 	socks     *peer.Sockets
 	peer      *peer.Peer
@@ -271,9 +273,19 @@ func (n *nodeRuntime) wireServices() {
 		Home: n.loop, Host: n.host, Name: nameFn, Addrs: n.addrs, OnAdopt: n.onAdopt,
 		Spawn: func(fn func()) { n.spawn("host_cmd", fn) }, Known: n.knownPeer,
 	})
-	surface := NewSurface(SurfaceConfig{
+	var surface *Surface
+	var permitState func() *proto.Permissions
+	var permitHandle func(context.Context, proto.HostPermit) error
+	if ops := openPermitOps(n.exe); ops != nil {
+		n.permit = newPermitManager(n.ctx, ops, func() { surface.pushHostInfo(n.ctx, false) }, n.spawn)
+		n.host.Access = n.permit.CheckFolderTimeout
+		permitState = n.permit.State
+		permitHandle = n.permit.Handle
+	}
+	surface = NewSurface(SurfaceConfig{
 		ID: n.key.ID(), Version: Version, Exe: n.exe, Store: n.db,
 		Sessions: n.sessions, Host: n.host, Name: nameFn, Agents: n.host.Agents,
+		Permissions: permitState, Permit: permitHandle,
 	})
 	pushHostInfo := func() {
 		n.spawn("host_info", func() { surface.pushHostInfo(n.ctx, false) })

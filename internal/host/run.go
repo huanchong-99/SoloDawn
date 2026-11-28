@@ -426,7 +426,7 @@ func unclaimWaitingProc(h *Host, rt *runtimePart, lp *liveProc) {
 // startFromDormant starts the CLI of a dormant session, or of one handed back
 // from takeover, for a turn. Nothing starts in a folder that is gone.
 func startFromDormant(h *Host, rt *runtimePart, s Session, cfg launchConfig, text string, turn Turn) error {
-	if gone := missingFolder(s); gone != "" {
+	if gone := missingFolder(h, s); gone != "" {
 		rt.releaseStarting(s.SessionKey)
 		return failStart(h, rt, s, gone)
 	}
@@ -455,13 +455,26 @@ func reportLaunchFailure(h *Host, rt *runtimePart, s Session, err error) {
 	reportOrQueueCrash(context.Background(), h, rt, pendingCrash{session: s, detail: eventDetail(err.Error())})
 }
 
-// missingFolder is empty while the session's folder exists, and otherwise
-// says that it does not (contracts/local.md section 7).
-func missingFolder(s Session) string {
-	if isFolder(s.Folder) {
-		return ""
+// missingFolder is empty while the session's folder exists and is accessible,
+// and otherwise explains why it cannot be used (contracts/local.md section 7).
+func missingFolder(h *Host, s Session) string {
+	if !isFolder(s.Folder) {
+		return "the folder " + s.Folder + " does not exist"
 	}
-	return "the folder " + s.Folder + " does not exist"
+	if h.Access != nil {
+		if err := h.Access(s.Folder); err != nil {
+			return accessMessage(err)
+		}
+	}
+	return ""
+}
+
+func accessMessage(err error) string {
+	var wireErr *Error
+	if errors.As(err, &wireErr) {
+		return wireErr.Message
+	}
+	return err.Error()
 }
 
 // failStart reports a start in a folder that is gone as a crash: the session

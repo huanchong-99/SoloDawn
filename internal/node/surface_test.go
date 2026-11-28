@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,6 +132,13 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	if _, err := s.Replays["takeover.start"](t.Context(), nil, ownerKey.ID(), json.RawMessage(replay)); err == nil || err.(*host.Error).Code != "conflict" {
 		t.Fatalf("takeover.start replay without a terminal = %v, want conflict", err)
 	}
+
+	// Outside a macOS app bundle, permissions is absent and host.permit returns bad_request.
+	if strings.Contains(string(rawInfo), `"permissions"`) {
+		t.Fatalf("unexpected permissions in bare host.info: %s", rawInfo)
+	}
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 43}})
+	expectErr(t, fc.next(t), 43, "bad_request")
 }
 
 func mustSurfaceSession(t *testing.T, h *host.Host, home string, key host.SessionKey, kind host.Kind, agent string) {
@@ -241,6 +250,119 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	hookErr = errors.New("probe failed")
 	if _, err := sf.HostState(t.Context()); !errors.Is(err, hookErr) {
 		t.Fatalf("expected hookErr, got %v", err)
+	}
+}
+
+func TestSurfaceHostPermitA111ToA114(t *testing.T) {
+	db := sesOpenStore(t)
+	nodeKey, ownerKey := sesKey("perm-node"), sesKey("perm-owner")
+	logs := seedOwnedLogs(t, db, nodeKey, ownerKey)
+	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, time.UnixMilli(1763600000000), nil)
+	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h})
+
+	rig := newPermitRig(t, t.Context())
+	var sf *Surface
+	rig.mgr.push = func() { sf.pushHostInfo(t.Context(), false) }
+	sf = NewSurface(SurfaceConfig{
+		ID: nodeKey.ID(), Store: db, Sessions: s, Host: h,
+		Agents:      func(context.Context, bool) ([]proto.HostAgent, error) { return []proto.HostAgent{}, nil },
+		Permissions: rig.mgr.State, Permit: rig.mgr.Handle,
+	})
+
+	fc := serveConn(t, s, ownerKey.ID(), false)
+	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 3, Kind: "browser", Name: "b", Addrs: []string{}})
+	fc.next(t) // welcome
+	fc.next(t) // devlog
+
+	// A11.1: host.info includes permissions with three booleans.
+	fc.push(proto.Request{Type: "host.info", ID: 2})
+	var info proto.HostInfo
+	if err := proto.Decode(fc.next(t), &info); err != nil || info.Permissions == nil {
+		t.Fatalf("host.info permissions = %+v (%v)", info.Permissions, err)
+	}
+
+	// Bad JSON and unknown open -> bad_request.
+	fc.pushRaw(`{"t":"host.permit","id":3,"open":123}`)
+	expectErr(t, fc.next(t), 3, "bad_request")
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 4}, Open: "screen"})
+	expectErr(t, fc.next(t), 4, "bad_request")
+
+	// A11.2: host.permit pushes host.info before ok when changed.
+	rig.mu.Lock()
+	rig.perms.LocalNetwork = true
+	rig.mu.Unlock()
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 5}})
+	var pushed proto.HostInfoPush
+	if err := proto.Decode(fc.next(t), &pushed); err != nil || pushed.Type != "host.info" || !pushed.Permissions.LocalNetwork {
+		t.Fatalf("expected host.info push before ok, got %+v (%v)", pushed, err)
+	}
+	var ok proto.Success
+	if err := proto.Decode(fc.next(t), &ok); err != nil || ok.Re != 5 || !ok.OK {
+		t.Fatalf("expected ok re=5, got %+v (%v)", ok, err)
+	}
+
+	// A11.3: open error returns internal.
+	rig.openErr = errors.New("settings failed")
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 6}, Open: "folders"})
+	expectErr(t, fc.next(t), 6, "internal")
+	rig.openErr = nil
+
+	// A11.4: path validation and async probe (non-blocking).
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 7}, Path: "relative"})
+	expectErr(t, fc.next(t), 7, "bad_request")
+	missing := filepath.Join(t.TempDir(), "absent")
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 8}, Path: missing})
+	expectErr(t, fc.next(t), 8, "not_found")
+
+	realFolder, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan string, 1)
+	release := make(chan error, 1)
+	canceled := make(chan error, 1)
+	rig.probeFn = func(ctx context.Context, f string) error {
+		entered <- f
+		select {
+		case err := <-release:
+			return err
+		case <-ctx.Done():
+			canceled <- ctx.Err()
+			return ctx.Err()
+		}
+	}
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 9}, Path: realFolder})
+	if got := <-entered; got != realFolder {
+		t.Fatalf("probe path = %q; want %q", got, realFolder)
+	}
+	// While path probe is waiting, another host.info request still completes.
+	fc.push(proto.Request{Type: "host.info", ID: 10})
+	var midInfo proto.HostInfo
+	if err := proto.Decode(fc.next(t), &midInfo); err != nil || midInfo.Re != 10 {
+		t.Fatalf("midInfo = %+v (%v)", midInfo, err)
+	}
+	release <- nil
+	if err := proto.Decode(fc.next(t), &ok); err != nil || ok.Re != 9 || !ok.OK {
+		t.Fatalf("path ok = %+v (%v)", ok, err)
+	}
+
+	// Refusal -> permission; unexpected error -> internal.
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 11}, Path: realFolder})
+	<-entered
+	release <- &host.Error{Code: "permission", Message: "macOS does not allow SoloDawn to use " + realFolder}
+	expectErr(t, fc.next(t), 11, "permission")
+
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 12}, Path: realFolder})
+	<-entered
+	release <- errors.New("probe crashed")
+	expectErr(t, fc.next(t), 12, "internal")
+
+	// Closing the connection cancels a waiting path probe.
+	fc.push(proto.HostPermit{Request: proto.Request{Type: "host.permit", ID: 13}, Path: realFolder})
+	<-entered
+	fc.Close()
+	if err := <-canceled; !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled probe err = %v; want context.Canceled", err)
 	}
 }
 

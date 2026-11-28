@@ -471,6 +471,31 @@ func TestHostJoinResolvesTheWorkspace(t *testing.T) {
 	joinAssertEqual(t, "session folder", s.Folder, real)
 }
 
+func TestHostJoinChecksAccessCallback(t *testing.T) {
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	fh := rig.addHome("home-1")
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website"))
+	real := rig.folder("website")
+
+	gotResolved, err := ResolveWorkspace(filepath.Join(real, "..", "website"))
+	if err != nil || gotResolved != real {
+		t.Fatalf("ResolveWorkspace = %q, %v; want %q", gotResolved, err, real)
+	}
+
+	rig.h.Access = func(folder string) error {
+		return &Error{Code: "permission", Message: "macOS does not allow SoloDawn to use " + folder}
+	}
+	err = rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude", Workspace: real})
+	seamCode(t, err, "permission")
+	joinAssertEqual(t, "permission message", strings.Contains(err.Error(), real), true)
+	joinAssertEqual(t, "refused access dials", rig.dialCount("home-1"), 0)
+	joinAssertEqual(t, "refused access sessions", len(rig.h.Sessions.All()), 0)
+
+	rig.h.Access = func(string) error { return nil }
+	joinAssertEqual(t, "allowed access join", rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude", Workspace: real}), nil)
+}
+
 // A folder is the workspace of AIs of one group only: host.join answers
 // conflict, naming the group, for the folder of an AI of another group on
 // this node, whichever home that group has. Inside a group the folder is

@@ -889,7 +889,7 @@ func jumpRunningTurn(h *Host, d *delivery, key aiGroupKey, ai aiInfo, running Se
 
 func canPrepare(h *Host, ai aiInfo, target routedTarget, v verifiedItem) bool {
 	s, err := prepareTargetSession(h, ai, target, v.home)
-	return err == nil && missingFolder(s) == ""
+	return err == nil && missingFolder(h, s) == ""
 }
 
 // firstJump returns the first jump item that at most a running turn holds. An

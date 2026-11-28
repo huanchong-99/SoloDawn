@@ -180,7 +180,7 @@ func openSession(ctx context.Context, h *Host, p *takeovers, ai aiInfo, target r
 // cannot start a session in a terminal (flows/takeover.md A). The terminal
 // opens once that turn has ended.
 func readyForTerminal(ctx context.Context, h *Host, s Session, resumeOnly bool) error {
-	if gone := missingFolder(s); gone != "" {
+	if gone := missingFolder(h, s); gone != "" {
 		return &Error{"cli", gone}
 	}
 	if !resumeOnly || s.CLISession != "" {

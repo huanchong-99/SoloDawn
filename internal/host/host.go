@@ -96,6 +96,9 @@ type Host struct {
 	// token (contracts/local.md section 1). node sets it, so that the CLIs of
 	// two nodes in one process reach each their own node.
 	Shim []string
+	// Access reports whether macOS allows the node to use folder
+	// (contracts/local.md section 11). Nil outside a macOS app bundle.
+	Access func(folder string) error
 
 	mu      sync.Mutex
 	homes   map[string]Home
