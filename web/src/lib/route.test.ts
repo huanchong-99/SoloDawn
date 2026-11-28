@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { href, pages, parse, routes, tabs } from './route.svelte';
+import { href, pages, parse, routes, tabHref, tabs } from './route.svelte';
 
 describe('the table', () => {
   it('has the design pages and invitation entry point', () => {
@@ -92,5 +92,17 @@ describe('href', () => {
       const address = href(page as 'terminal', params);
       expect(parse(address).page).toBe(page);
     }
+  });
+});
+
+describe('tabHref', () => {
+  it('reopens the remembered group only on wide screens while it still exists', () => {
+    expect(tabHref('groups', true, (g) => g === 'g1', 'g1')).toBe('#/groups/g1');
+    expect(tabHref('groups', true, () => true, 'a/b c?')).toBe('#/groups/a%2Fb%20c%3F');
+    expect(tabHref('groups', true, () => false, 'g1')).toBe('#/groups');
+    expect(tabHref('groups', false, () => true, 'g1')).toBe('#/groups');
+    expect(tabHref('groups', true, () => true, undefined)).toBe('#/groups');
+    expect(tabHref('nodes', true, () => true, 'g1')).toBe('#/nodes');
+    expect(tabHref('settings', true, () => true, 'g1')).toBe('#/settings');
   });
 });

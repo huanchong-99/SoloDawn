@@ -93,14 +93,18 @@
 {:else}
   <div class="empty blank">
     <span class="blank-mark"><Icon name="chat" /></span>
-    <h3>{t('groups.empty.title')}</h3>
-    <p>{t(canCreate ? 'groups.empty.body' : 'groups.empty.offline')}</p>
-    {#if canCreate}
-      <button class="btn btn-primary" onclick={oncreate}>
-        <Icon name="plus" sm /><span>{t('groups.new')}</span>
-      </button>
+    {#if net.otherTab}
+      <p>{t('app.otherTab')}</p>
     {:else}
-      <a class="btn" href="#/nodes">{t('groups.empty.nodes')}</a>
+      <h3>{t('groups.empty.title')}</h3>
+      <p>{t(canCreate ? 'groups.empty.body' : 'groups.empty.offline')}</p>
+      {#if canCreate}
+        <button class="btn btn-primary" onclick={oncreate}>
+          <Icon name="plus" sm /><span>{t('groups.new')}</span>
+        </button>
+      {:else}
+        <a class="btn" href="#/nodes">{t('groups.empty.nodes')}</a>
+      {/if}
     {/if}
   </div>
 {/if}

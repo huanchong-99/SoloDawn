@@ -129,9 +129,25 @@ export const route = $state({
   dir: 1,
 });
 
+/** The group last opened in chat during this session, if any. */
+export const lastChat = $state({ g: first.page === 'chat' ? first.params.g : undefined });
+
+/** Where a navigation tab leads: on wide screens, Chats reopens the last group if still known. */
+export function tabHref(
+  entry: Tab,
+  wide: boolean,
+  hasGroup: (g: string) => boolean,
+  g: string | undefined = lastChat.g,
+) {
+  return entry === 'groups' && wide && g !== undefined && hasGroup(g)
+    ? href('chat', { g })
+    : href(entry);
+}
+
 addEventListener('hashchange', (event) => {
   const { page, params } = parse(new URL(event.newURL).hash);
   route.dir = Math.sign(place(page) - place(route.page));
   route.page = page;
   route.params = params;
+  if (page === 'chat') lastChat.g = params.g;
 });

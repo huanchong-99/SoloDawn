@@ -228,9 +228,10 @@ kbd,
 /* 3 shell: side navigation and top bar; on phones, top bar and bottom navigation. Both stand on
    the page colour, so that they recede and the content leads. */
 .app {
+  position: relative;
   display: grid;
   height: 100dvh;
-  overflow: hidden;
+  overflow: clip;
   grid-template:
     'rail bar' var(--bar-h)
     'rail ban' auto

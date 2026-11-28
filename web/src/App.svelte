@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onDestroy, untrack, type Component } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
   import Icon, { type IconName } from './components/Icon.svelte';
   import Mount from './components/Mount.svelte';
   import { provideNet } from './components/net';
+  import { find } from './lib/groups.svelte';
   import { sourceOf, start, type Net } from './lib/net.svelte';
   import { nodes } from './lib/nodes.svelte';
   import {
@@ -15,7 +17,7 @@
     toggleLang,
     toggleTheme,
   } from './lib/prefs.svelte';
-  import { href, route, routes, tabs, type Tab } from './lib/route.svelte';
+  import { href, route, routes, tabHref, tabs, type Tab } from './lib/route.svelte';
   import { watches } from './lib/terminal.svelte';
 
   type View = Component<{ params: Record<string, string | undefined>; net: Net }>;
@@ -38,6 +40,7 @@
   $effect(() => nodes.tell(net.homes));
 
   const icons: Record<Tab, IconName> = { groups: 'chat', nodes: 'pc', settings: 'sliders' };
+  const wide = new MediaQuery('min-width: 768px');
   const at = $derived(routes[route.page]);
   const file = $derived(`./routes/${at.view}.svelte`);
   const View: View | undefined = $derived(views[file] ?? loaded[file]);
@@ -74,7 +77,10 @@
     </a>
     <div class="tabs" style:--at={tab ? tabs.indexOf(tab) : 0}>
       {#each tabs as entry (entry)}
-        <a href={href(entry)} aria-current={entry === tab ? 'page' : undefined}>
+        <a
+          href={tabHref(entry, wide.current, (g) => Boolean(find(g)))}
+          aria-current={entry === tab ? 'page' : undefined}
+        >
           <Icon name={icons[entry]} /><span>{t(`nav.${entry}`)}</span>
         </a>
       {/each}
